@@ -63,6 +63,12 @@ export function projectToAgent(view: Readonly<CombatView>): string {
     lines.push(`  | FP: ${fp} |`);
   }
 
+  // 阶段4：当前地景（战斗主持人需要知道环境）
+  if (view.landscape) {
+    const words = view.landscape.词条.length > 0 ? view.landscape.词条.join('/') : '—';
+    lines.push(`  | 地景: ${view.landscape.name}（${view.landscape.cardTier} | ${words}） |`);
+  }
+
   lines.push('</action_info>');
   return lines.join('\n');
 }

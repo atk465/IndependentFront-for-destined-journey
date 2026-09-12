@@ -568,6 +568,23 @@ export interface FrozenSlot {
  * 所有战斗变化（HP/MP/SP/状态/槽位/先攻）只存在于这一个对象内；终局一次落库。
  * revision 单调递增（架构 §三 3.2）；applyPending 是唯一写入函数（state.ts）。
  */
+/**
+ * 地景事实（阶段4 地景卡）。cardTier 用 string：v3 类型零 import 父级
+ * （不引 field-enums 的 CardTier），品质在内核只是展示面数据。
+ */
+export interface LandscapeFacts {
+  /** 地景卡名（逻辑键=名字） */
+  name: string;
+  /** 卡牌品质（展示面，白铁…星辉） */
+  cardTier: string;
+  /** 词条（含「地景」形态词条与元素/复合词条） */
+  词条: readonly string[];
+  /** 铺开者单位 id */
+  setByUnitId: string;
+  /** 铺开回合（1-based，取自 state.round，零时钟） */
+  setInRound: number;
+}
+
 export interface CombatState {
   /** 战斗 id */
   combatId: string;
@@ -595,6 +612,14 @@ export interface CombatState {
    * 大多数战斗/既有 state 无冻结，缺省 undefined（不破坏既有构造）。
    */
   frozenSlots?: readonly FrozenSlot[];
+  /**
+   * 当前地景（阶段4 地景卡：山川河流封入卡牌）。可选字段——不开地景的战斗
+   * 缺省 undefined（不破坏既有构造与回放；夹具只存 bundle/commands，逐字节不变）。
+   * 至多一份：再铺替换旧的（LandscapeSet.replaced 记录被替换者）。
+   * 🔴 这是**事实**不是效果：地景的数值面走卡牌自带 automata DSL（既有 18 窗口），
+   *    内核零硬编码内容数（世界观数值归世界书/卡牌，Code 只管结算）。
+   */
+  landscape?: LandscapeFacts;
   /** 中断续跑帧（ResolveChoice / BeginOutput 用） */
   resolution?: ResolutionFrame;
   /** 只追加变更日志（架构 §三 3.4） */
@@ -624,6 +649,8 @@ export interface CombatView {
   currentTurnIndex: number;
   units: Readonly<Record<string, CombatUnitView>>;
   resourceSnapshots: { FP: number };
+  /** 当前地景（阶段4；不开地景的战斗缺席） */
+  landscape?: { name: string; cardTier: string; 词条: readonly string[] };
   terminal?: { reason: TerminalReason; winner?: string };
 }
 
@@ -673,6 +700,8 @@ export type PendingChangeSet = {
   turnOpenSlots?: { actorId: string; attacks: number; actions: number }[];
   /** 槽位冻结补丁（A4-3 action.freezeSlot）：applyPending 合并进 state.frozenSlots（max_rounds） */
   freezeSlotPatches?: FrozenSlot[];
+  /** 地景补丁（阶段4）：applyPending 替换进 state.landscape（同 Command 末尾一次原子提交） */
+  landscapePatch?: LandscapeFacts;
   /** 终局触发（checkTerminal 在 phases/terminal.ts 内应用） */
   terminal?: { reason: TerminalReason; winner?: string };
 };
@@ -926,7 +955,22 @@ export type CombatCommand =
       kind: 'DeclareAction';
       actorId: string;
       cost: 'action';
-      payload: { actionType: 'item' | 'move' | 'focus' | 'defend'; description?: string };
+      payload: {
+        actionType: 'item' | 'move' | 'focus' | 'defend';
+        description?: string;
+        /**
+         * 阶段4 地景卡：actionType='item' 时可携带（其他 actionType 携带则忽略）。
+         * 🔴 正规来源是**会话层**从制卡师背包解析出的真实 CardItem（与
+         *    SupplyUnit.definition 同一信任模型：内核信任调用方的结构化数据）；
+         *    automata 是卡牌自带的 DSL，铺开时注册进 activeEffects 走既有窗口。
+         */
+        landscape?: {
+          name: string;
+          cardTier: string;
+          词条: readonly string[];
+          automata?: readonly EffectAutomaton[];
+        };
+      };
     }
   | {
       commandId: string;
@@ -1258,6 +1302,13 @@ export type DomainEvent =
       unitId: string;
       /** 'fled'（Bug C 修复，2026-08-12）：逃跑成功离场，与召唤物到期同走移除语义 */
       reason?: 'expired' | 'active' | 'summoner_down' | 'fled';
+    }
+  | {
+      kind: 'LandscapeSet';
+      unitId: string;
+      name: string;
+      /** 被替换的旧地景名；首铺为 null */
+      replaced: string | null;
     }
   | { kind: 'DamagePrevented'; unitId: string; amount: number; keptHp: number }
   | {

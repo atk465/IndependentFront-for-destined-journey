@@ -354,8 +354,16 @@ src/sillytavern/                    ← 核心引擎
   │       ├── summon-pool.ts                        ← [M3.5] 预生成召唤物池：**目前是空池 + 幂等查找 + key 归一化**
   │       │                                            （key = `种族-层级-定位`），未命中走实时 char_gen。
   │       │                                            池内容要靠离线脚本填，不在 plan 范围内
-  │       ├── types.ts                              ← v3 内部类型（1816 行；DiceChannel/CombatState/EffectIntent/
-  │       │                                            WindowKey/DomainEvent 等全在这里）
+  │       ├── types.ts                              ← v3 内部类型（DiceChannel/CombatState/EffectIntent/
+  │       │                                            WindowKey/DomainEvent 等全在这里）。
+  │       │                                            🆕 阶段4 地景卡：`CombatState.landscape?`（至多一份、
+  │       │                                            可选字段沿 frozenSlots 先例）——`DeclareAction(item)`
+  │       │                                            载荷携带 landscape → action.ts 落
+  │       │                                            `changes.landscapePatch` + compileEffectProgram/
+  │       │                                            updateIndex 注册卡牌 automata（数值全在卡牌 DSL，
+  │       │                                            内核零硬编码内容数）；卡牌侧识别判据在
+  │       │                                            card-workshop/landscape.ts；设计：
+  │       │                                            docs/planning/2026-09-13-card-workshop-phase4-landscape-design.md
   │       ├── test-utils.ts                         ← 测试共享构造（最小 2 单位 bundle + 命令）
   │       ├── projection-ui.ts / projection-agent.ts← 双投影（UI 事件 + Agent 文本面板）
   │       ├── replay.ts / contract/ / fixtures/     ← contract harness + 7 场 fixture（JSON 在 fixtures/，

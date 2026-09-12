@@ -287,6 +287,15 @@ function mapEvent(evt: DomainEvent): CombatEvent {
       return { type: 'v3_effect_rejected', code: evt.code, detail: evt.detail };
     case 'DiceEpochBegan':
       return { type: 'v3_dice_epoch', outputId: evt.outputId };
+    case 'LandscapeSet':
+      // 阶段4：地景更迭走叙事事件（当前地景的常驻展示在 view.landscape，面板消费）
+      return {
+        type: 'v3_narrative',
+        text: evt.replaced
+          ? `地景更迭：【${evt.replaced}】退去，【${evt.name}】铺开`
+          : `地景【${evt.name}】铺开`,
+        round: 0,
+      };
 
     default: {
       // 穷尽兜底（R6 / A2-6）：新增 DomainEvent 未接映射必须编译报错。

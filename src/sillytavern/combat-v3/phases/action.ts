@@ -23,6 +23,8 @@
 import { draw } from '../dice-tape';
 import { runWindow, makeWindowRuntimeCtx } from '../windows';
 import { validateBatch, applyIntents } from '../intents';
+import { compileEffectProgram } from '../automata/compile';
+import { updateIndex } from '../automata/index-active';
 import type {
   CombatCommand,
   CombatDefinitionBundle,
@@ -73,12 +75,77 @@ export function handleAction(
   // 收集 spawn 意图 + 已验证的非 spawn 费用意图（A3-7 / A35-1）
   const { spawns, nonSpawn } = collectSpawnAndFees(declaredIntents);
 
+  // 阶段4 补的缺口：action.declared 的**非 spawn** 意图在正常路径此前被计算后
+  // 直接丢弃（只有 spawn 分支把同窗口费用冻进 frame 延迟提交）——召唤以外的
+  // automaton 意图（叙事 / 资源 / 状态）照 A3-7 同款语义落地。地景卡的效果
+  // 通道正依赖这一条：铺设后的每次行动，环境 automaton 在此发声。
+  // 🔴 spawn 在场时**保持原语义**（费用随冻结 frame 与 SupplyUnit 同批原子提交），
+  //    这里落地一次、spawn 分支再冻一次就是 case-06 的双倍扣 FP。
+  if (spawns.length === 0 && nonSpawn.length > 0) {
+    const applyCtx: Parameters<typeof applyIntents>[0] = {
+      state,
+      automatonOwner: command.actorId,
+      present: (id) => Object.prototype.hasOwnProperty.call(state.units, id),
+      resolveNumber: () => 0,
+    };
+    const res = applyIntents(applyCtx, nonSpawn, out.changes);
+    for (const n of res.narrative) out.events.push({ kind: 'NarrativeCue', text: n });
+  }
+
   if (spawns.length > 0) {
     return handleSpawnIntents(out, state, bundle, command, spawns, nonSpawn);
   }
 
   const actionType: TacticalActionType = command.payload.actionType;
   const actor = state.units[command.actorId];
+  const payloadLandscape = command.payload.landscape;
+
+  // 阶段4 地景卡：item 行动携带 landscape → 铺开/替换地景 + 注册卡牌 automata。
+  // 数值面全部来自卡牌自带 DSL（既有窗口结算），内核零硬编码内容数。
+  if (payloadLandscape && actionType === 'item') {
+    out.changes.landscapePatch = {
+      name: payloadLandscape.name,
+      cardTier: payloadLandscape.cardTier,
+      词条: [...payloadLandscape.词条],
+      setByUnitId: command.actorId,
+      setInRound: state.round,
+    };
+    if (payloadLandscape.automata && payloadLandscape.automata.length > 0) {
+      // 与召唤同款（A35-3）：compile → updateIndex 纯函数增量，不就地突变
+      const compiled = compileEffectProgram({
+        owner: command.actorId,
+        source: payloadLandscape.name,
+        idPrefix: `landscape-${command.actorId}-${state.round}`,
+        divinity: actor?.ability?.divinity ?? 0,
+        automata: payloadLandscape.automata,
+      });
+      if (compiled.automata.length > 0) {
+        out.activeEffects = updateIndex(state.activeEffects, { add: compiled.automata });
+      }
+    }
+    const replaced = state.landscape?.name ?? null;
+    out.events.push({
+      kind: 'LandscapeSet',
+      unitId: command.actorId,
+      name: payloadLandscape.name,
+      replaced,
+    });
+    out.events.push({
+      kind: 'NarrativeCue',
+      text: replaced
+        ? `${actor?.name ?? command.actorId} 收起【${replaced}】，铺开地景【${payloadLandscape.name}】`
+        : `${actor?.name ?? command.actorId} 铺开地景【${payloadLandscape.name}】`,
+    });
+    return out;
+  }
+  if (payloadLandscape && actionType !== 'item') {
+    // 明确拒绝语义进叙事：地景卡只能以「使用道具」铺开，静默忽略会变成看不见的丢牌
+    out.events.push({
+      kind: 'NarrativeCue',
+      text: `地景卡【${payloadLandscape.name}】只能以使用道具的方式铺开`,
+    });
+  }
+
   const actionName =
     actionType === 'item'
       ? '使用道具'

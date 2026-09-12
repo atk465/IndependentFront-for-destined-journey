@@ -41,6 +41,7 @@ import type {
   CompiledAutomaton,
   DamageRecomputeCtx,
   FrozenSlot,
+  LandscapeFacts,
   PendingChangeSet,
   RequiredInput,
   ResolutionFrame,
@@ -337,12 +338,19 @@ export function applyPending(state: CombatState, changes: PendingChangeSet): Com
     frozenSlots = prior;
   }
 
+  // 阶段4：地景替换（至多一份，整份 patch 语义——新值覆盖旧值；不开地景保持缺席）
+  let landscape: LandscapeFacts | undefined = state.landscape;
+  if (changes.landscapePatch) {
+    landscape = { ...changes.landscapePatch, 词条: [...changes.landscapePatch.词条] };
+  }
+
   return {
     ...state,
     revision: state.revision + 1,
     units,
     resourceSnapshots,
     ...(frozenSlots ? { frozenSlots } : { frozenSlots: undefined }),
+    ...(landscape ? { landscape } : { landscape: undefined }),
     ...(changes.terminal ? { terminal: changes.terminal } : {}),
   };
 }
@@ -446,6 +454,15 @@ export function toView(state: CombatState): Readonly<CombatView> {
     currentTurnIndex: state.currentTurnIndex,
     units,
     resourceSnapshots: { FP: state.resourceSnapshots.FP },
+    ...(state.landscape
+      ? {
+          landscape: {
+            name: state.landscape.name,
+            cardTier: state.landscape.cardTier,
+            词条: [...state.landscape.词条],
+          },
+        }
+      : {}),
     terminal: state.terminal
       ? { reason: state.terminal.reason, winner: state.terminal.winner }
       : undefined,
