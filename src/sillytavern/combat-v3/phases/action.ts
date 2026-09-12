@@ -50,7 +50,7 @@ import {
   UNSEAL_SLOT_COST,
   REBOUND_DAMAGE,
 } from '../../card-workshop/unsealing';
-import { LANDSCAPE_ENTRY } from '../../card-workshop/landscape';
+import { cardKindOf } from '../../card-workshop/card-kind';
 import { CARD_TIERS, type CardTier } from '../../field-enums';
 import { emptyChanges, type PhaseOutcome } from './outcome';
 
@@ -250,9 +250,9 @@ function playCardPrelude(
     }
   }
 
-  // 4. 地景卡落位（词条含「地景」：设战场环境；替换语义与事件同阶段4。
+  // 4. 地景卡落位（类型判据走 card-kind 唯一真源：领域卡=「地景」形态词条；
   //    刻意先于 automata 切分——两者独立，且带 automata 的地景卡两条都要走）
-  const isLandscape = card.词条.includes(LANDSCAPE_ENTRY);
+  const isLandscape = cardKindOf(card.词条) === '领域';
   if (isLandscape) {
     out.changes.landscapePatch = {
       name: card.name,
