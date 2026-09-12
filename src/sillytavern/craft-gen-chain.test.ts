@@ -266,3 +266,75 @@ describe('buildCraftPatches', () => {
     expect(ops(patches, 'delta_variable')).toHaveLength(0);
   });
 });
+
+// ========== 阶段3b 制卡桥：cardProduct 主产物（card-workshop/craft-card 组装） ==========
+
+describe('buildCraftPatches × cardProduct（industry=制卡）', () => {
+  /** 与 makeCraftOutput 同形，industry=制卡 */
+  function makeCardOutput(overrides: Partial<CraftGenOutput> = {}): CraftGenOutput {
+    return makeCraftOutput({
+      productName: '燎原符卡',
+      craftParams: {
+        industry: '制卡',
+        targetQuality: '稀有',
+        stage: '成品',
+        quantity: 1,
+        materials: '火晶、疾风羽',
+        expGained: 30,
+        fpGained: 1,
+      },
+      ...overrides,
+    });
+  }
+
+  const card = {
+    name: '燎原符卡',
+    description: '一团被驯服的野火',
+    quantity: 1,
+    type: '卡牌',
+    rarity: '稀有',
+    cardTier: '青铜',
+    词条: ['火', '风', '燎原'],
+    recipe: {
+      mainMaterial: '火晶',
+      subMaterials: ['疾风羽'],
+      tier: '青铜',
+      fusionKind: '相生',
+      cost: 48,
+      rating: '精益求精',
+    },
+    sealed: false,
+  } as any;
+
+  it('主产物 add_item 用的是 CardItem（type=卡牌，确定性字段随卡）', () => {
+    const patches = buildCraftPatches(makeCardOutput(), null, '艾拉', card);
+    const addItems = ops(patches, 'add_item');
+    expect(addItems).toHaveLength(1);
+    expect(addItems[0].value).toBe(card); // 原样落库，不重组
+  });
+
+  it('失败时不落卡牌主产物（失败品仍走 item_gen 残料链）', () => {
+    const patches = buildCraftPatches(makeCardOutput({ success: false }), null, '艾拉', card);
+    expect(ops(patches, 'add_item')).toHaveLength(0);
+  });
+
+  it('item_gen 与卡同名的 equipment/inventory 条目被跳过，防双份', () => {
+    const itemOutput: ItemGenOutput = {
+      skills: [],
+      equipment: [
+        {
+          slot: '武器',
+          name: '燎原符卡', // 与卡同名 — item_gen 想把它细化成装备，必须让位
+          description: '误入装备槽的卡',
+          stats: { 攻击: 5 },
+          quality: '稀有',
+        },
+      ],
+      inventory: [{ name: '燎原符卡', quantity: 1, description: '重复的卡', type: '材料' } as any],
+    };
+    const patches = buildCraftPatches(makeCardOutput(), itemOutput, '艾拉', card);
+    const addItems = ops(patches, 'add_item');
+    expect(addItems).toHaveLength(1); // 只剩卡牌本体
+    expect((addItems[0].value as any).type).toBe('卡牌');
+  });
+});
