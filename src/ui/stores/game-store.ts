@@ -7,6 +7,7 @@ import type {
   MemoryRecord,
   PlotEvent,
   PlotOutline,
+  CardAlbumState,
   CombatState,
   CombatSummaryResult,
   SaveProfile,
@@ -1392,6 +1393,25 @@ export const useGameStore = defineStore('game', () => {
   }
 
   /**
+   * 卡册唯一写入口（卡牌工坊 MVP）：整份 CardAlbumState 经 update_character 落库。
+   * 规则校验（同名≤2 / 容量）在引擎 card-workshop/album.ts，UI 先过纯函数再交这里；
+   * 这里不做规则判断，只负责「提交 → 回读」。
+   */
+  async function updateCardAlbum(album: CardAlbumState): Promise<{ ok: boolean; error?: string }> {
+    if (!activeSaveId.value) return { ok: false, error: '无活跃存档' };
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState([
+      {
+        op: 'update_character',
+        target: `characters.${player.value?.name ?? ''}`,
+        value: { cardAlbum: album },
+      },
+    ]);
+    if (result.success) await refreshFromDb();
+    return result.success ? { ok: true } : { ok: false, error: result.errors.join('; ') };
+  }
+
+  /**
    * 单条目重铸（2026-08-24）：把某角色的一条技能/装备/物品交给 item_gen 重写。
    *
    * 🔴 实现走注入缝（GamePipeline.rewriteLoadoutItem），store 不直接碰引擎装配；
@@ -1573,6 +1593,7 @@ export const useGameStore = defineStore('game', () => {
     restoreToSnapshot,
     removeItem,
     removeSkill,
+    updateCardAlbum,
     removeCharacter,
     setPlayerLocation,
     rewriteLoadoutItem,

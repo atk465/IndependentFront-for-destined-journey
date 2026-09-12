@@ -8,11 +8,14 @@ import {
   RARITY_LEVELS,
   QUEST_STATUSES,
   STATUS_CATEGORIES,
+  CARD_TIERS,
+  CRAFT_INDUSTRIES,
   normalizeSlot,
   normalizeItemType,
   normalizeRarity,
   normalizeQuestStatus,
   normalizeStatusCategory,
+  normalizeCraftIndustry,
 } from './field-enums';
 
 /**
@@ -36,8 +39,14 @@ describe('枚举常量', () => {
   it('quest status 为 4 态', () => {
     expect(QUEST_STATUSES).toEqual(['进行中', '已完成', '失败', '搁置']);
   });
-  it('item type 为 5 类', () => {
-    expect(ITEM_TYPES).toEqual(['装备', '消耗品', '材料', '任务物品', '特殊']);
+  it('item type 为 6 类（2026-09-12 加「卡牌」，卡牌工坊 MVP）', () => {
+    expect(ITEM_TYPES).toEqual(['装备', '消耗品', '材料', '任务物品', '特殊', '卡牌']);
+  });
+  it('card tier 为卡兰大陆 5 级', () => {
+    expect(CARD_TIERS).toEqual(['白铁', '青铜', '白银', '鎏金', '星辉']);
+  });
+  it('craft industry 为 4 行业 + 制卡', () => {
+    expect(CRAFT_INDUSTRIES).toEqual(['锻造', '炼金', '烹饪', '裁缝', '制卡']);
   });
   it('status category 为 3 类', () => {
     expect(STATUS_CATEGORIES).toEqual(['增益', '减益', '特殊']);
@@ -146,6 +155,21 @@ describe('normalizeStatusCategory', () => {
   });
   it('无法识别兜底为特殊', () => {
     expect(normalizeStatusCategory('未知')).toBe('特殊');
+  });
+});
+
+describe('normalizeCraftIndustry', () => {
+  it('标准值直通（含制卡）', () => {
+    expect(normalizeCraftIndustry('锻造')).toBe('锻造');
+    expect(normalizeCraftIndustry('制卡')).toBe('制卡');
+  });
+  it('无法识别返回 undefined（调用方按约定兜底锻造）', () => {
+    expect(normalizeCraftIndustry('炼丹')).toBeUndefined();
+    expect(normalizeCraftIndustry('')).toBeUndefined();
+  });
+  it('原型键返回 undefined', () => {
+    expect(normalizeCraftIndustry('constructor')).toBeUndefined();
+    expect(normalizeCraftIndustry('toString')).toBeUndefined();
   });
 });
 

@@ -33,7 +33,7 @@ import type {
 } from './types';
 import { buildAgentMessagesAsync } from './agent-templates';
 import { getToolsForAgent, executeToolCall } from './agent-tools';
-import { normalizeSlot, normalizeItemType } from './field-enums';
+import { normalizeSlot, normalizeItemType, normalizeCraftIndustry } from './field-enums';
 import type { ToolExecutionContext } from './types';
 // Q-05：XML / JSON 解析的唯一工具面（参数顺序一律 (source, tag)）
 import { tagInner, tagBlock, parseAttrsStr } from './agent-xml';
@@ -395,7 +395,7 @@ export function parseCraftResultXML(xml: string): CraftGenOutput {
         itemRequests: parseItemRequestsJSON(parsed),
         narrative: parsed.narrative ?? '',
         craftParams: {
-          industry: (parsed.industry ?? '锻造') as CraftIndustry,
+          industry: normalizeCraftIndustry(parsed.industry ?? '') ?? '锻造',
           targetQuality: (parsed.target_quality ?? parsed.targetQuality ?? '普通') as QualityLevel,
           stage: parsed.stage ?? '成品',
           quantity: parsed.quantity ?? 1,
@@ -654,7 +654,7 @@ function parseItemRequestsJSON(parsed: any): ItemRequest[] {
  */
 function parseCraftParams(xml: string): CraftGenOutput['craftParams'] {
   return {
-    industry: (tagInner(xml, 'industry')?.trim() ?? '锻造') as CraftIndustry,
+    industry: normalizeCraftIndustry(tagInner(xml, 'industry') ?? '') ?? '锻造',
     targetQuality: (tagInner(xml, 'target_quality')?.trim() ?? '普通') as QualityLevel,
     stage: tagInner(xml, 'stage')?.trim() ?? '成品',
     quantity: parseInt(tagInner(xml, 'quantity')?.trim() ?? '1', 10) || 1,

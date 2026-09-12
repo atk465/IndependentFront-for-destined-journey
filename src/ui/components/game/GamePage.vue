@@ -30,6 +30,8 @@ import SnapshotPanel from './SnapshotPanel.vue';
 import CgGalleryPanel from './CgGalleryPanel.vue';
 import MapPanel from './MapPanel.vue';
 import DebugPanel from './DebugPanel.vue';
+import CardAlbumPanel from './cards/CardAlbumPanel.vue';
+import CraftBench from './cards/CraftBench.vue';
 import MiniPlayer from './MiniPlayer.vue';
 import CombatPanel from './combat/CombatPanel.vue';
 
@@ -443,6 +445,26 @@ function onModalOpenChange(v: boolean) {
       @update:open="onModalOpenChange"
     >
       <DebugPanel />
+    </AppModal>
+    <AppModal
+      title="卡册 · 卡兰大陆"
+      :open="game.activeModal === 'cardAlbum'"
+      size="xl"
+      closable
+      @close="game.closeModal()"
+      @update:open="onModalOpenChange"
+    >
+      <CardAlbumPanel />
+    </AppModal>
+    <AppModal
+      title="制卡工作台"
+      :open="game.activeModal === 'craftBench'"
+      size="xl"
+      closable
+      @close="game.closeModal()"
+      @update:open="onModalOpenChange"
+    >
+      <CraftBench />
     </AppModal>
 
     <!-- 调试面板 (Alt+Shift+D) -->

@@ -283,6 +283,8 @@ const UPDATE_CHAR_WHITELIST = new Set<string>([
   'thoughts',
   // 扩展字段
   'customFields',
+  // 卡册（卡牌工坊 MVP）：整份 CardAlbumState 替换；读写规则唯一集中在 card-workshop/album.ts
+  'cardAlbum',
 ]);
 
 /** 禁止的数组实体字段 → 必须走各自专用 op（杀 #21 假字段污染） */

@@ -69,13 +69,15 @@ describe('computeTier', () => {
 
 describe('computeCost', () => {
   it('叠加造价 = 售价和 × 系数', () => {
-    const r = fuse(火草, []);
-    expect(r.cost).toBe(Math.round((28 + 0) * CARD_TIER_COEFFICIENT['青铜']));
+    const tier = computeTier(火草, [], '叠加');
+    expect(computeCost(火草, [], tier, '叠加')).toBe(
+      Math.round((28 + 0) * CARD_TIER_COEFFICIENT[tier]),
+    );
   });
   it('相克造价 ×0.7 折扣', () => {
-    const 全 = fuse(火草, [寒泉]); // 相克
-    const 无折 = Math.round((28 + 26) * CARD_TIER_COEFFICIENT['青铜']);
-    expect(全.cost).toBe(Math.round(无折 * CLASH_DISCOUNT));
+    const tier = computeTier(火草, [寒泉], '相克'); // 相克
+    const 无折 = Math.round((28 + 26) * CARD_TIER_COEFFICIENT[tier]);
+    expect(computeCost(火草, [寒泉], tier, '相克')).toBe(Math.round(无折 * CLASH_DISCOUNT));
   });
   it('副素材超过 2 只取前 2', () => {
     const r = fuse(火草, [风羽, 寒泉, 玄铁]);

@@ -7,7 +7,7 @@
 // Q-11：本文件唯一的**运行时** import。field-enums 自己零 import（叶子模块），
 // 所以这条边不成环。品质集合是铁律 5 指定的中文枚举 SSOT，`QualityLevel` /
 // `QUALITY_RANK` / `QUALITY_BY_RANK` 一律从它派生，不再手抄第二份。
-import { RARITY_LEVELS, type Rarity, type CardTier } from './field-enums';
+import { RARITY_LEVELS, type Rarity, type CardTier, type CraftIndustry } from './field-enums';
 
 import type { GameTime } from './time-system';
 // type-only 循环安全：effect-types 反向 import 本文件的 AttributeName/DivinityLevel/DamageType 也是 type-only
@@ -2747,17 +2747,9 @@ export const QUALITY_BY_RANK: QualityLevel[] = [...RARITY_LEVELS];
 
 // ========== Craft Industry & Stage ==========
 
-/** 制作行业类型 (对齐世界书: 4 种) */
-export type CraftIndustry = '锻造' | '炼金' | '烹饪' | '裁缝' | '制卡';
-
-/** 行业→核心属性映射 */
-export const CRAFT_INDUSTRY_ATTRIBUTE: Record<CraftIndustry, string> = {
-  锻造: '力量',
-  炼金: '智力',
-  烹饪: '精神',
-  裁缝: '敏捷',
-  制卡: '灵感',
-};
+/** 制作行业类型 — 定义已收口到 field-enums.ts（铁律5），此处 re-export 保住既有 import 面 */
+export type { CraftIndustry } from './field-enums';
+export { CRAFT_INDUSTRY_ATTRIBUTE } from './field-enums';
 
 /** 制作阶段 (对齐世界书: 3 级加工) */
 export type CraftStage = '基础加工' | '半成品' | '成品';
