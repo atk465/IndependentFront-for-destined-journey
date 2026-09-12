@@ -8,19 +8,19 @@
 
 ## 0. 30 秒速览
 
-| 项 | 值 |
-|---|---|
-| 项目 | 命定之诗前端（`package.json` 的 name 是 `narrative-engine`） |
-| 本地路径 | `C:\Users\admin\WorkBuddy\2026-08-31-05-19-25\IndependentFront-for-destined-journey` |
-| 你的 fork | `https://github.com/atk465/IndependentFront-for-destined-journey` |
-| 上游 | `https://github.com/The-poem-of-destiny/IndependentFront-for-destined-journey` |
-| 工作分支 | `card-workshop-mvp`（**无斜杠**，原因见 §3.1） |
-| 分支基点 | `0cad0b9`（`feat: improve opening narration and add persona editing (#127)`） |
-| 最新**代码**提交 | `f18e747`（Phase 1 代码），其父 `fecd35f`（规划文档） |
-| 分支 HEAD | 在 `f18e747` 之上还有文档提交（含本档案本身），以 `git log` 实测为准 |
-| 进度 | **Phase 1 部分完成**（数据模型 + 确定性融合内核 + 单测已过）；UI 未做；未跑全量闸门 |
-| 技术栈 | Vue 3 + Pinia + Vite + TypeScript + Dexie(IndexedDB)；Node `^20.19 \|\| ^22.13 \|\| >=24` |
-| 跑起来 | `npm run dev` → `http://localhost:5173`（**必须配 LLM API 才能跑剧情**） |
+| 项               | 值                                                                                        |
+| ---------------- | ----------------------------------------------------------------------------------------- |
+| 项目             | 命定之诗前端（`package.json` 的 name 是 `narrative-engine`）                              |
+| 本地路径         | `C:\Users\admin\WorkBuddy\2026-08-31-05-19-25\IndependentFront-for-destined-journey`      |
+| 你的 fork        | `https://github.com/atk465/IndependentFront-for-destined-journey`                         |
+| 上游             | `https://github.com/The-poem-of-destiny/IndependentFront-for-destined-journey`            |
+| 工作分支         | `card-workshop-mvp`（**无斜杠**，原因见 §3.1）                                            |
+| 分支基点         | `0cad0b9`（`feat: improve opening narration and add persona editing (#127)`）             |
+| 最新**代码**提交 | `f18e747`（Phase 1 代码），其父 `fecd35f`（规划文档）                                     |
+| 分支 HEAD        | 在 `f18e747` 之上还有文档提交（含本档案本身），以 `git log` 实测为准                      |
+| 进度             | **Phase 1 部分完成**（数据模型 + 确定性融合内核 + 单测已过）；UI 未做；未跑全量闸门       |
+| 技术栈           | Vue 3 + Pinia + Vite + TypeScript + Dexie(IndexedDB)；Node `^20.19 \|\| ^22.13 \|\| >=24` |
+| 跑起来           | `npm run dev` → `http://localhost:5173`（**必须配 LLM API 才能跑剧情**）                  |
 
 ---
 
@@ -34,10 +34,10 @@
 
 有**两条并行路线**，注意区分，别混做：
 
-| 路线 | 形态 | 状态 | 产物位置 |
-|---|---|---|---|
-| **A. 世界书/提示词玩法** | AI 扮演游戏系统，数值靠 LLM 文本维持 | ✅ **已交付可用** | `D:\BaiduNetdiskDownload\yue\卡牌工坊-冒险公会\` |
-| **B. 引擎级真系统** | 改 TS 源码，真数值/真随机/真 UI | 🚧 **进行中**（本档案主题） | 本仓库 `card-workshop-mvp` 分支 |
+| 路线                     | 形态                                 | 状态                        | 产物位置                                         |
+| ------------------------ | ------------------------------------ | --------------------------- | ------------------------------------------------ |
+| **A. 世界书/提示词玩法** | AI 扮演游戏系统，数值靠 LLM 文本维持 | ✅ **已交付可用**           | `D:\BaiduNetdiskDownload\yue\卡牌工坊-冒险公会\` |
+| **B. 引擎级真系统**      | 改 TS 源码，真数值/真随机/真 UI      | 🚧 **进行中**（本档案主题） | 本仓库 `card-workshop-mvp` 分支                  |
 
 路线 A 是"能用但不精确"，路线 B 是"精确但要写码"。两者独立，互不干扰。
 
@@ -124,15 +124,15 @@ NODE="C:/Users/admin/.workbuddy/binaries/node/versions/22.22.2-2/node.exe"
 
 ### 4.1 提交清单（`git diff --stat master..HEAD`，7 文件 +558/-3）
 
-| 文件 | 变更 | 说明 |
-|---|---|---|
-| `src/sillytavern/field-enums.ts` | +11/-1 | `ITEM_TYPES` 加 `'卡牌'`；新增 `CARD_TIERS`(5级)、`CARD_ENTRY_TYPES`(四类) |
-| `src/sillytavern/types.ts` | +52/-2 | `CraftIndustry` 加 `'制卡'`(属性=灵感)；`CardItem`/`FusionRecipe`/`CardAlbumState`；`CharacterState.cardAlbum?` |
-| `src/sillytavern/craft-quality.ts` | +16 | `keywords` 表补 `'制卡'`（否则 `Record<CraftIndustry, string[]>` 不完整 → 编译失败） |
-| `src/sillytavern/card-workshop/card-fusion.ts` | +190 | **确定性融合内核**（纯函数，零 AI 参与） |
-| `src/sillytavern/card-workshop/card-fusion.test.ts` | +140 | 23 个单测 |
-| `docs/planning/2026-09-12-card-workshop-mvp-design.md` | +118 | 设计文档 |
-| `docs/planning/2026-09-12-card-workshop-mvp-adr.md` | +34 | 路线决策 ADR |
+| 文件                                                   | 变更   | 说明                                                                                                            |
+| ------------------------------------------------------ | ------ | --------------------------------------------------------------------------------------------------------------- |
+| `src/sillytavern/field-enums.ts`                       | +11/-1 | `ITEM_TYPES` 加 `'卡牌'`；新增 `CARD_TIERS`(5级)、`CARD_ENTRY_TYPES`(四类)                                      |
+| `src/sillytavern/types.ts`                             | +52/-2 | `CraftIndustry` 加 `'制卡'`(属性=灵感)；`CardItem`/`FusionRecipe`/`CardAlbumState`；`CharacterState.cardAlbum?` |
+| `src/sillytavern/craft-quality.ts`                     | +16    | `keywords` 表补 `'制卡'`（否则 `Record<CraftIndustry, string[]>` 不完整 → 编译失败）                            |
+| `src/sillytavern/card-workshop/card-fusion.ts`         | +190   | **确定性融合内核**（纯函数，零 AI 参与）                                                                        |
+| `src/sillytavern/card-workshop/card-fusion.test.ts`    | +140   | 23 个单测                                                                                                       |
+| `docs/planning/2026-09-12-card-workshop-mvp-design.md` | +118   | 设计文档                                                                                                        |
+| `docs/planning/2026-09-12-card-workshop-mvp-adr.md`    | +34    | 路线决策 ADR                                                                                                    |
 
 ### 4.2 数据模型（关键：**卡牌不是新实体，是 `InventoryItem` 子类型**）
 
@@ -173,14 +173,14 @@ cardAlbum?: CardAlbumState;
 
 ### 4.4 验证状态（**诚实声明**）
 
-| 项 | 状态 |
-|---|---|
-| `card-fusion.test.ts` 23 个单测 | ✅ 全过 |
-| `tsc --noEmit`（类型检查） | ✅ exit 0 |
-| `npm run gates`（八道闸门全量） | ❌ **未跑** |
+| 项                                                      | 状态        |
+| ------------------------------------------------------- | ----------- |
+| `card-fusion.test.ts` 23 个单测                         | ✅ 全过     |
+| `tsc --noEmit`（类型检查）                              | ✅ exit 0   |
+| `npm run gates`（八道闸门全量）                         | ❌ **未跑** |
 | Vue 类型检查（`vue-tsc`）/ ESLint / knip / `vite build` | ❌ **未跑** |
-| 7400+ 全量测试 | ❌ **未跑** |
-| 浏览器实机运行验证 | ❌ **未做** |
+| 7400+ 全量测试                                          | ❌ **未跑** |
+| 浏览器实机运行验证                                      | ❌ **未做** |
 
 **接手第一件事建议**：在真机跑 `npm run gates`，确认基线 + 新代码都绿。
 
@@ -194,12 +194,12 @@ cardAlbum?: CardAlbumState;
 
 **决策依据是源码勘察，不是偏好**——世界观四条设定往引擎通道上映射：
 
-| 世界观原句 | 引擎现有通道 | 改动量 |
-|---|---|---|
-| 巨兽化为伙伴 | `SpawnOrDespawnIntent` → 冻结 spawn frame → `CharGenRequest` → `SupplyUnit` → 插进 `state.units` | **零** |
-| 禁忌卡颠覆法则 | `Adjudicate` + `requestedRuleOverride` | **零** |
-| 万物皆可成素材 | `craft-gen-chain` → `item-gen-chain` → `buildCraftPatches` | **零** |
-| 山川河流封入卡牌 | 引擎**无地形/环境概念**（关键词 grep 零命中） | **需新增** |
+| 世界观原句       | 引擎现有通道                                                                                     | 改动量     |
+| ---------------- | ------------------------------------------------------------------------------------------------ | ---------- |
+| 巨兽化为伙伴     | `SpawnOrDespawnIntent` → 冻结 spawn frame → `CharGenRequest` → `SupplyUnit` → 插进 `state.units` | **零**     |
+| 禁忌卡颠覆法则   | `Adjudicate` + `requestedRuleOverride`                                                           | **零**     |
+| 万物皆可成素材   | `craft-gen-chain` → `item-gen-chain` → `buildCraftPatches`                                       | **零**     |
+| 山川河流封入卡牌 | 引擎**无地形/环境概念**（关键词 grep 零命中）                                                    | **需新增** |
 
 四条里**三条的通道现成**，且质量很高（引擎把召唤做成了「AI 生成 + 内核接管」：参战时机由 AI 判，先攻/扣血/到期移除/槽位记账由确定性内核管）。
 
@@ -227,19 +227,19 @@ cardAlbum?: CardAlbumState;
 
 写新功能时直接改这些地方，不用再满仓库找：
 
-| 模块 | 位置 | 用途 |
-|---|---|---|
-| 制作链路 | `src/sillytavern/craft-gen-chain.ts` → `item-gen-chain.ts` → `buildCraftPatches` → `add_item` patches | 制卡应复用此链，**不要新造** |
-| Marker 协议 | `<craft_request>` 被引擎拦截结算 | 卡牌请求走同一协议 |
-| 制作枚举 | `types.ts` 的 `CraftIndustry`/`CraftRating`/`CRAFT_RATING_VALUE_RANGE` | 已有确定性数值区间 |
-| 确定性骰带 | `combat-v3/dice-tape.ts` | 启封判定接入点 |
-| 召唤池 | `combat-v3/summon-pool.ts` + `SummonedUnitDefinition` | 巨兽参战 |
-| 规则覆写 | `combat-v3/adjudication.ts` 的 `requestedRuleOverride` | 禁忌卡 |
-| 行动槽位 | `combat-v3/phases/unit-turn.ts:165` `consumeSlot` | 启封槽位 |
-| 行动类型 | `combat-v3/phases/action.ts` `TacticalActionType = 'item'\|'move'\|'focus'\|'defend'` | 卡牌"启封"可挂 `item` |
-| 已有卡 UI | `src/ui/components/game/cards/` | 布局参考，**别重复造** |
-| 数据库版本 | `DB_VERSION = 24` | 加表/迁移要动这里 |
-| 物品模型 | `types.ts:936` `InventoryItem` | 卡牌基类 |
+| 模块        | 位置                                                                                                  | 用途                         |
+| ----------- | ----------------------------------------------------------------------------------------------------- | ---------------------------- |
+| 制作链路    | `src/sillytavern/craft-gen-chain.ts` → `item-gen-chain.ts` → `buildCraftPatches` → `add_item` patches | 制卡应复用此链，**不要新造** |
+| Marker 协议 | `<craft_request>` 被引擎拦截结算                                                                      | 卡牌请求走同一协议           |
+| 制作枚举    | `types.ts` 的 `CraftIndustry`/`CraftRating`/`CRAFT_RATING_VALUE_RANGE`                                | 已有确定性数值区间           |
+| 确定性骰带  | `combat-v3/dice-tape.ts`                                                                              | 启封判定接入点               |
+| 召唤池      | `combat-v3/summon-pool.ts` + `SummonedUnitDefinition`                                                 | 巨兽参战                     |
+| 规则覆写    | `combat-v3/adjudication.ts` 的 `requestedRuleOverride`                                                | 禁忌卡                       |
+| 行动槽位    | `combat-v3/phases/unit-turn.ts:165` `consumeSlot`                                                     | 启封槽位                     |
+| 行动类型    | `combat-v3/phases/action.ts` `TacticalActionType = 'item'\|'move'\|'focus'\|'defend'`                 | 卡牌"启封"可挂 `item`        |
+| 已有卡 UI   | `src/ui/components/game/cards/`                                                                       | 布局参考，**别重复造**       |
+| 数据库版本  | `DB_VERSION = 24`                                                                                     | 加表/迁移要动这里            |
+| 物品模型    | `types.ts:936` `InventoryItem`                                                                        | 卡牌基类                     |
 
 ---
 
@@ -275,29 +275,39 @@ cardAlbum?: CardAlbumState;
    - ③ AI 填叙事字段，Code 补账务字段
    - ④ 每类数据**唯一真源**
    - ⑤ 枚举**中文集中定义**在 `field-enums.ts`
-   
+
    > 既有偏差：`CraftIndustry` 当前定义在 `types.ts` 而非 `field-enums.ts`，违反铁律⑤。计划中已安排顺手收口。
 
 ---
 
 ## 9. 下一步待办（按优先级）
 
-### Phase 1 收尾（未完成部分）
+### Phase 1 收尾
 
-- [ ] **卡册读写辅助**：`canAddToDeck()`（同名 ≤ 2 约束）、增删卡、容量校验。建议放 `card-workshop/album.ts` + `.test.ts`。
-- [ ] **最小 UI 面板**：
-  - `src/ui/components/game/cards/CardAlbumPanel.vue`（卡包/卡组，复用 `game/cards/` 现有布局）
-  - `src/ui/components/game/cards/CraftBench.vue`（制台**实时预览**——选素材时即时算出融合结果与造价）
-- [ ] **把 `CraftIndustry` 收口到 `field-enums.ts`**（修铁律⑤违规）
+> 📌 **2026-09-12 已完成**（同日第二会话）：
+>
+> - [x] **卡册读写辅助**：`card-workshop/album.ts` + `.test.ts`（`canAddToDeck()` 同名≤2、
+>       增删卡、容量校验，全纯函数）+ `card-workshop/material.ts`（库存物品 → MaterialSpec
+>       的唯一映射：品质→tier、data.price 优先估价、元素字面推导）。
+> - [x] **最小 UI 面板**：`src/ui/components/game/cards/CardAlbumPanel.vue`（卡组/卡包/详情
+>       三栏；落库走 `game.updateCardAlbum` → `update_character.cardAlbum`）+
+>       `CraftBench.vue`（制台**只做确定性实时预览**，实际炼制仍走 `<craft_request>` 叙事流程）。
+>       入口：游戏页侧栏「卡册 / 制台」两个工具按钮（`activeModal` 新增
+>       `cardAlbum` / `craftBench` 两取值）。
+> - [x] **`CraftIndustry` 收口到 `field-enums.ts`**（`CRAFT_INDUSTRIES` + 属性映射 +
+>       `normalizeCraftIndustry()`；`types.ts` re-export 保住既有 import 面，三处
+>       `as CraftIndustry` 强转点已改走归一化）。
+> - 配套：`state-manager.ts` 的 `update_character` 白名单加 `cardAlbum`（整份替换，
+>   沿 `customFields` 先例）；`src/ui/AGENTS.md` GamePage 条目已同步。
 
 ### 后续阶段（MVP 之后）
 
-| 阶段 | 内容 | 风险 |
-|---|---|---|
-| 2 | 启封判定接入 `dice-tape.ts` 确定性骰带 | 低 |
-| 3 | 卡组战力 + 委托系统（复用 `<craft_request>` marker 协议） | 中 |
-| 4 | **地景卡** `CombatState.landscape` | **高——唯一必须碰战斗内核的项** |
-| 5 | 召唤接入 `summon-pool.ts` + 规则覆写 `requestedRuleOverride` | 中 |
+| 阶段 | 内容                                                         | 风险                           |
+| ---- | ------------------------------------------------------------ | ------------------------------ |
+| 2    | 启封判定接入 `dice-tape.ts` 确定性骰带                       | 低                             |
+| 3    | 卡组战力 + 委托系统（复用 `<craft_request>` marker 协议）    | 中                             |
+| 4    | **地景卡** `CombatState.landscape`                           | **高——唯一必须碰战斗内核的项** |
+| 5    | 召唤接入 `summon-pool.ts` + 规则覆写 `requestedRuleOverride` | 中                             |
 
 **⚠️ 阶段 4 必须独立开发、独立提交**：`combat-v3/coordinator.test.ts` 有 3387 行，replay 确定性闸门很严，混做会分不清回归来源。
 
@@ -312,19 +322,20 @@ cardAlbum?: CardAlbumState;
 
 位置：`D:\BaiduNetdiskDownload\yue\卡牌工坊-冒险公会\`
 
-| 文件 | 说明 |
-|---|---|
-| `README_使用说明.md` | 两平台装载步骤 + 兼容性表 |
-| `核心协议_全文.md` | 协议正文约 4900 字，可直接粘进预设主提示词 |
-| `世界书_命定之诗版.json` | 命定之诗前端导入用（15 条目） |
-| `世界书_酒馆ST版.json` | SillyTavern 导入用（15 条目：11 常驻 + 4 关键词） |
-| `build_worldbook.py` | **单一真源**，改内容后重跑即可重新生成上面三份 |
-| `引擎大改计划.md` | 7 阶段改造计划（11~18 天估时） |
-| `战斗路线决策.md` | 路线 A++ 的完整论证 |
+| 文件                     | 说明                                              |
+| ------------------------ | ------------------------------------------------- |
+| `README_使用说明.md`     | 两平台装载步骤 + 兼容性表                         |
+| `核心协议_全文.md`       | 协议正文约 4900 字，可直接粘进预设主提示词        |
+| `世界书_命定之诗版.json` | 命定之诗前端导入用（15 条目）                     |
+| `世界书_酒馆ST版.json`   | SillyTavern 导入用（15 条目：11 常驻 + 4 关键词） |
+| `build_worldbook.py`     | **单一真源**，改内容后重跑即可重新生成上面三份    |
+| `引擎大改计划.md`        | 7 阶段改造计划（11~18 天估时）                    |
+| `战斗路线决策.md`        | 路线 A++ 的完整论证                               |
 
 另有世界书源文件（内置 15 本的 `.txt/.yaml`）：`D:\BaiduNetdiskDownload\yue\命定之诗世界书\`
 
 > **路线 A 的两个已知技术坑**（写档案时保留，避免回头踩）：
+>
 > 1. 命定之诗前端导入器写的是 `Array.isArray(raw.entries)` —— 喂标准 ST 世界书（`entries` 为**对象**）会**静默导入 0 条目**。所以必须两份 JSON，不能合并。
 > 2. 前端的关键词激活**失效**：`worldbook-loader.ts` 的 `filterActiveEntries` 只 `filter(e => e.enabled)`，`key` 不参与判定。所以命定之诗版把 15 条全设为常驻。
 

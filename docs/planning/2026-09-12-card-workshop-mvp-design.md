@@ -20,12 +20,12 @@ AI 驱动文字 RPG 引擎。我们希望在其上承载一套**真正的卡牌�
 
 经源码勘察，路线定为**技术形态 = 路线 A（不动 reducer/phases 主干），表现力 ≈ 路线 B**。
 
-| 世界观原句 | 引擎现有通道 | 改动量 |
-|---|---|---|
-| 巨兽化为伙伴 | `SpawnOrDespawnIntent` → 冻结 spawn frame → `CharGenRequest` → `SupplyUnit` → 插进 `state.units` | 零 |
-| 禁忌卡颠覆法则 | `Adjudicate` + `requestedRuleOverride` | 零 |
-| 万物皆可成素材 | `craft-gen-chain` → `item-gen-chain` → `buildCraftPatches` | 零 |
-| 山川河流封入卡牌 | 引擎**无地形/环境概念**（grep 零命中） | **需新增** |
+| 世界观原句       | 引擎现有通道                                                                                     | 改动量     |
+| ---------------- | ------------------------------------------------------------------------------------------------ | ---------- |
+| 巨兽化为伙伴     | `SpawnOrDespawnIntent` → 冻结 spawn frame → `CharGenRequest` → `SupplyUnit` → 插进 `state.units` | 零         |
+| 禁忌卡颠覆法则   | `Adjudicate` + `requestedRuleOverride`                                                           | 零         |
+| 万物皆可成素材   | `craft-gen-chain` → `item-gen-chain` → `buildCraftPatches`                                       | 零         |
+| 山川河流封入卡牌 | 引擎**无地形/环境概念**（grep 零命中）                                                           | **需新增** |
 
 **不做真抽牌**：制卡师亲手炼卡，与卡册间不存在信息不对称，「抽牌」前提不成立。
 **随机性改放「启封判定」**：高阶卡封印物会抗拒，意志对抗失败 → 抗命（哑火/暴走/反噬），
@@ -39,10 +39,10 @@ AI 驱动文字 RPG 引擎。我们希望在其上承载一套**真正的卡牌�
 勘察发现引擎已有完整制作系统骨架，故「制卡」无需新造链路：
 
 ```typescript
-CraftIndustry = '锻造' | '炼金' | '烹饪' | '裁缝'   // 产业 + 核心属性映射
-CraftRating   = '大失败' | '失败' | '成功' | '精益求精'  // 评级
-CRAFT_RATING_VALUE_RANGE                            // 产出数值区间（已是确定性 Code）
-QualityLevel  = Rarity                               // 品质 7 级
+CraftIndustry = '锻造' | '炼金' | '烹饪' | '裁缝'; // 产业 + 核心属性映射
+CraftRating = '大失败' | '失败' | '成功' | '精益求精'; // 评级
+CRAFT_RATING_VALUE_RANGE; // 产出数值区间（已是确定性 Code）
+QualityLevel = Rarity; // 品质 7 级
 ```
 
 MVP 五件事：
@@ -64,20 +64,21 @@ MVP 五件事：
 export interface CardItem extends InventoryItem {
   type: '卡牌';
   // 由 card-fusion 确定性产出，绝不来自 AI 自由文本
-  cardTier: CardTier;           // 白铁|青铜|白银|鎏金|星辉 (5 级)
- 词条: string[];                // 元素/形态/效果/稀有 四类
-  recipe: FusionRecipe;         // 主+副素材名（逻辑键）
-  sealed: boolean;              // 是否未启封（高阶卡封印物）
+  cardTier: CardTier; // 白铁|青铜|白银|鎏金|星辉 (5 级)
+  词条: string[]; // 元素/形态/效果/稀有 四类
+  recipe: FusionRecipe; // 主+副素材名（逻辑键）
+  sealed: boolean; // 是否未启封（高阶卡封印物）
 }
 
 export interface CardAlbumState {
-  owned: string[];              // 卡牌名（逻辑键，遵循铁律①）
-  deck: string[];              // 当前卡组（同名≤2，遵循铁律）
+  owned: string[]; // 卡牌名（逻辑键，遵循铁律①）
+  deck: string[]; // 当前卡组（同名≤2，遵循铁律）
   capacity: number;
 }
 ```
 
 融合规则（确定性，写入 `card-fusion.ts`）：
+
 - 同类叠加升级：火 + 火 = 烈焰
 - 相生复合：火 + 风 = 燎原
 - 相克标记不稳定：造价 ×0.7，启封抗命率 +15%

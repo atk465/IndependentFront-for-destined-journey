@@ -97,7 +97,11 @@ export function classifyFusion(main: MaterialSpec, subs: MaterialSpec[]): '叠�
 }
 
 /** 计算产出品质 */
-export function computeTier(main: MaterialSpec, subs: MaterialSpec[], kind: '叠加' | '相生' | '相克'): CardTier {
+export function computeTier(
+  main: MaterialSpec,
+  subs: MaterialSpec[],
+  kind: '叠加' | '相生' | '相克',
+): CardTier {
   const base = materialTierToCardTier(main.tier);
   if (kind === '相生') {
     const i = Math.min(TIER_ORDER.length - 1, tierIndex(base) + 1);
@@ -134,7 +138,11 @@ export function expectedRating(kind: '叠加' | '相生' | '相克'): CraftRatin
 }
 
 /** 推导词条（元素 + 复合产物） */
-export function deriveEntries(main: MaterialSpec, subs: MaterialSpec[], kind: '叠加' | '相生' | '相克'): string[] {
+export function deriveEntries(
+  main: MaterialSpec,
+  subs: MaterialSpec[],
+  kind: '叠加' | '相生' | '相克',
+): string[] {
   const set = new Set<string>();
   for (const e of main.elements) set.add(e);
   for (const s of subs) for (const e of s.elements) set.add(e);
