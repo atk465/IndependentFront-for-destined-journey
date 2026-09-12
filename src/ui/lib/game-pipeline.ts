@@ -18,6 +18,7 @@ import type {
   ApiEndpoint,
   AgentResult,
   AgentPreset,
+  CardItem,
   CombatTriggerMarker,
   CombatSummaryResult,
   RecentCombatInfo,
@@ -32,6 +33,8 @@ import type {
   SystemEvent,
   DebugAgentEntry,
 } from '@engine/types';
+import { isPlayableCard } from '@engine/card-workshop/card-kind';
+import type { DeckCardData } from '@engine/combat-v3';
 import type {
   ImageGenFailure,
   ImagePromptOutput,
@@ -99,6 +102,26 @@ export type StoryChunkCallback = (chunk: string, isComplete: boolean) => void;
  */
 function isAbortError(err: unknown): boolean {
   return (err as { name?: string } | null | undefined)?.name === 'AbortError';
+}
+
+/**
+ * 阶段5-闭环（1.2 编组制）：玩家卡组快照 = cardAlbum.deck ∩ 背包实物卡牌（按名），
+ * 素材卡排除（不可战斗打出）。开战时调用一次、战斗期间固定。
+ * 双通道共用：bundle.deckCards（AI 通道按名解析）+ store 快照（玩家文本确定性快路）。
+ */
+function buildDeckCardSnapshot(player: CharacterState): DeckCardData[] {
+  return (player.cardAlbum?.deck ?? [])
+    .map((name) => player.inventory.find((i) => i.name === name && i.type === '卡牌'))
+    .filter((i): i is CardItem => !!i)
+    .filter((card) => isPlayableCard(card))
+    .map((card) => ({
+      name: card.name,
+      cardTier: card.cardTier,
+      词条: card.词条 ?? [],
+      fusionKind: card.recipe?.fusionKind,
+      sealed: card.sealed ?? false,
+      automata: card.automata,
+    }));
 }
 
 interface DebugEntryInput {
@@ -2145,19 +2168,25 @@ export class GamePipeline {
           return inRoster(c);
         })
         .map((c) => characterToCombatParticipant(c, sideOf(c)));
+      if (participants.length === 0 || !playerC) {
+        this.game.exitCombat();
+        this.game.clearAgentStatus('combat_v3');
+        return null;
+      }
       const fpSnapshot = this.game.fp ?? 0;
+      // 阶段5-闭环（1.2 编组制）：玩家卡组快照 = deck ∩ 背包实物（素材卡排除），
+      // 开战定死、战斗期间不变。双通道共用：bundle（AI 通道按名解析）+ store 快照
+      //（玩家自由文本的确定性快路）。
+      const deckCards = buildDeckCardSnapshot(playerC);
       const bundle = {
         combatId: `v3-${Date.now()}-${this.saveId}`,
         combatType: (marker.combatType ?? '标准') as '标准',
         participants,
         rulesetRevision: 'v3-2026-07-31',
         resourceSnapshots: { FP: fpSnapshot },
+        ...(deckCards.length > 0 ? { deckCards } : {}),
       };
-      if (participants.length === 0 || !playerC) {
-        this.game.exitCombat();
-        this.game.clearAgentStatus('combat_v3');
-        return null;
-      }
+      this.game.setCombatDeckSnapshot(deckCards);
 
       // T16 §3.5：_lastCombatMarker 已由就绪版 handleCombatTriggerV3 存档
       //（重开战斗 restart 回调与二次开始都复用它），这里不再重复赋值。

@@ -17,7 +17,8 @@ import type {
   DebugTurnRecord,
 } from '@engine/types';
 export type { DebugAgentEntry, DebugTurnRecord } from '@engine/types';
-import type { CombatView, CombatCommand } from '@engine/combat-v3';
+import type { CombatView, CombatCommand, DeckCardData } from '@engine/combat-v3';
+import { tryParsePlayCard } from '@engine/combat-v3';
 import {
   getSave,
   getSaves,
@@ -162,6 +163,13 @@ export const useGameStore = defineStore('game', () => {
   } | null>(null);
   /** 当前行动者 characterId（turn_started 事件更新，单位卡片高亮用） */
   const combatCurrentUnitId = ref<string | null>(null);
+  /** 阶段5-闭环：玩家卡组编组快照（1.2 编组制，开战定死；game-pipeline 开战时灌入）。
+   *  双消费：submitCombatIntent 的确定性玩卡快路 + 战斗卡组条四态显示 */
+  const combatDeckSnapshot = ref<DeckCardData[]>([]);
+  /** 编组快照唯一写入口（game-pipeline startCombatV3 开战时调用） */
+  function setCombatDeckSnapshot(cards: DeckCardData[]) {
+    combatDeckSnapshot.value = cards;
+  }
   /** 🆕 v3：Coordinator 句柄（submitCommand / abandon / 重开），供前端 Command 路由与放弃（C4）
    *  T16 §3.5：+preSnapshotId（pre-combat 快照，重开战斗 restoreSnapshot 用）与
    *  +restart（重开战斗回调 —— pipeline 持有 combat marker，重触发归它）。
@@ -328,6 +336,22 @@ export const useGameStore = defineStore('game', () => {
    */
   async function submitCombatIntent(text: string): Promise<void> {
     const coordinator = combatCoordinator.value;
+    // 阶段5-闭环（1.1 解析器优先）：玩卡意图走确定性快路——玩卡动词 + 卡组快照内
+    // 卡名命中 → 直接产 Command（零 LLM、零延迟、编组闸门内建）。其余意图照旧交
+    // 主持人 AI 理解（叙事演绎不缺位）。
+    const awaiting = combatAwaitingInput.value;
+    if (awaiting && combatDeckSnapshot.value.length > 0) {
+      const card = tryParsePlayCard(text, combatDeckSnapshot.value);
+      if (card) {
+        await submitCombatCommand({
+          kind: 'DeclareAction',
+          actorId: awaiting.unitId,
+          cost: 'action',
+          payload: { actionType: 'item', card },
+        });
+        return;
+      }
+    }
     if (!coordinator?.submitPlayerIntent) {
       // 无意图桥（旧 coordinator / 测试）→ 静默忽略（与 submitCombatCommand 无 Coordinator 同口径）
       return;
@@ -341,6 +365,7 @@ export const useGameStore = defineStore('game', () => {
     combatLog.value = [];
     combatAwaitingInput.value = null;
     combatCurrentUnitId.value = null;
+    combatDeckSnapshot.value = [];
     combatReady.value = null;
     const c = combatCoordinator.value;
     if (c?.abandon) c.abandon();
@@ -1521,6 +1546,7 @@ export const useGameStore = defineStore('game', () => {
     setCombatCoordinator,
     submitCombatCommand,
     submitCombatIntent,
+    setCombatDeckSnapshot,
     abandonCombat,
     skipCombat,
     startCombat,

@@ -1766,6 +1766,7 @@ describe('T16 combat_v3 玩家输入桥时序 + pre-combat 快照', () => {
     const gameStore = makeGameStore({
       characters: [playerCharStub()],
       enterCombat: vi.fn(),
+      setCombatDeckSnapshot: vi.fn(),
       exitCombat: vi.fn(),
       applyCombatEvent: vi.fn(),
       updateAgentStatus: vi.fn(),
@@ -1843,6 +1844,7 @@ describe('T16 combat_v3 玩家输入桥时序 + pre-combat 快照', () => {
     const gameStore = makeGameStore({
       characters: [playerCharStub()],
       enterCombat: vi.fn(),
+      setCombatDeckSnapshot: vi.fn(),
       exitCombat: vi.fn(),
       applyCombatEvent: vi.fn(),
       updateAgentStatus: vi.fn(),
@@ -1892,6 +1894,7 @@ describe('T16 combat_v3 玩家输入桥时序 + pre-combat 快照', () => {
     const gameStore = makeGameStore({
       characters: [playerCharStub()],
       enterCombat: vi.fn(),
+      setCombatDeckSnapshot: vi.fn(),
       exitCombat: vi.fn(),
       applyCombatEvent: vi.fn(),
       updateAgentStatus: vi.fn(),
@@ -1975,6 +1978,7 @@ describe('T16 combat_v3 玩家输入桥时序 + pre-combat 快照', () => {
     const gameStore = makeGameStore({
       characters: [playerCharStub()],
       enterCombat: vi.fn(),
+      setCombatDeckSnapshot: vi.fn(),
       exitCombat: vi.fn(),
       applyCombatEvent: vi.fn(),
       updateAgentStatus: vi.fn(),
@@ -2037,6 +2041,7 @@ describe('T2 combat_v3 模板系统上下文传参', () => {
     return makeGameStore({
       characters: [playerCharStub()],
       enterCombat: vi.fn(),
+      setCombatDeckSnapshot: vi.fn(),
       exitCombat: vi.fn(),
       applyCombatEvent: vi.fn(),
       updateAgentStatus: vi.fn(),

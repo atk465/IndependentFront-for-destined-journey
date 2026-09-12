@@ -967,16 +967,7 @@ export type CombatCommand =
          *    其余卡 → action.declared 订阅者打出即发动，其余窗口持久注册（光环）。
          *    sealed=true 先过启封判定（intentCheck 通道抽骰，judgeUnseal）。
          */
-        card?: {
-          name: string;
-          cardTier: string;
-          词条: readonly string[];
-          /** 融合类型（相克 DC+3，phase2 unsealing 表） */
-          fusionKind?: '叠加' | '相生' | '相克';
-          /** 未启封 → 先过意志对抗（高阶卡封印物抗拒） */
-          sealed?: boolean;
-          automata?: readonly EffectAutomaton[];
-        };
+        card?: DeckCardData;
       };
     }
   | {
@@ -1137,6 +1128,8 @@ export interface CombatSession {
   snapshot(): Readonly<CombatView>;
   readonly history: readonly CombatTransition[];
   readonly completed: boolean;
+  /** 阶段5-闭环：玩家卡组编组快照（AI 通道按名解析 declare_action 载荷用；未编组缺席） */
+  readonly deckCards?: readonly DeckCardData[];
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1162,6 +1155,26 @@ export interface CombatDefinitionBundle {
   rulesetRevision: string;
   /** 战斗开始时的 FP 快照（架构 §十二 12.2） */
   resourceSnapshots: { FP: number };
+  /**
+   * 阶段5-闭环：玩家卡组编组快照（1.2 编组制：deck ∩ 背包实物，开战定死）。
+   * 会话层（game-pipeline）从 CharacterState 组装；双通道共用：
+   * - AI 通道：coordinator 按名解析 declare_action 载荷（AI 只提名，Code 装配）
+   * - 玩家通道：player-input 解析器的玩卡分支数据源
+   */
+  deckCards?: readonly DeckCardData[];
+}
+
+/**
+ * 玩卡载荷/编组快照的统一形状（阶段5-闭环）。
+ * 正规来源是会话层从背包解析的真实 CardItem（信任模型同 SupplyUnit.definition）。
+ */
+export interface DeckCardData {
+  name: string;
+  cardTier: string;
+  词条: readonly string[];
+  fusionKind?: '叠加' | '相生' | '相克';
+  sealed?: boolean;
+  automata?: readonly EffectAutomaton[];
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
