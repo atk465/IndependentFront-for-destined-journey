@@ -76,6 +76,9 @@ const SYNERGY_TABLE: Record<string, string> = {
   '暗+火': '焚影',
 };
 
+/** 相生产物词条集（deck-power 等消费方用；由表派生，不许手抄第二份） */
+export const SYNERGY_PRODUCTS: ReadonlySet<string> = new Set(Object.values(SYNERGY_TABLE));
+
 /** 相克表：冲突元素（key 按 UTF-16 code point 升序，与 pairKey 一致） */
 const CLASH_TABLE = new Set<string>(['水+火', '暗+光', '土+风']);
 

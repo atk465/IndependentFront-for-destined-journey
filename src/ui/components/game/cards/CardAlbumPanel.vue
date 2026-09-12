@@ -19,6 +19,7 @@ import {
   ensureCardAlbum,
   removeFromDeck,
 } from '@engine/card-workshop/album';
+import { deckPower } from '@engine/card-workshop/deck-power';
 import { UNSEAL_SLOT_COST, unsealDC, willModifierOf } from '@engine/card-workshop/unsealing';
 import AppButton from '../../shared/AppButton.vue';
 
@@ -85,6 +86,11 @@ function selectCard(name: string) {
 
 /** 启封者的意志修正（精神），用于详情区预览实际对抗难度 */
 const willMod = computed(() => willModifierOf(player.value?.attributes));
+
+/** 卡组战力（阶段 3a）：委托难度档的对照值，公式在 deck-power.ts */
+const power = computed(() =>
+  deckPower(album.value.deck, (n) => cardItems.value.find((c) => c.name === n)),
+);
 </script>
 
 <template>
@@ -93,6 +99,8 @@ const willMod = computed(() => willModifierOf(player.value?.attributes));
       <span>卡册 {{ album.owned.length }}/{{ album.capacity || DEFAULT_ALBUM_CAPACITY }} 种</span>
       <span class="dot">·</span>
       <span>卡组 {{ album.deck.length }}/{{ DEFAULT_DECK_SIZE }} 张</span>
+      <span class="dot">·</span>
+      <span>战力 {{ power }}</span>
       <span v-if="opMessage" class="op-message" role="status">{{ opMessage }}</span>
     </div>
 

@@ -102,10 +102,18 @@ describe('撤出', () => {
     mockGame.player!.inventory = [card('燎原')];
     mockGame.player!.cardAlbum = { owned: ['燎原'], deck: ['燎原', '甲卡', '燎原'], capacity: 60 };
     const w = mount(CardAlbumPanel);
+    // 战力 = 青铜(2) ×2 张（甲卡无实物按 0 跳过）= 4，摘要行可见（阶段 3a 接线）
+    expect(w.text()).toContain('战力 4');
     const deckBtn = w.findAll('button').find((b) => b.text() === '撤出')!;
     await deckBtn.trigger('click');
     await nextTick();
     const submitted = mockGame.updateCardAlbum.mock.calls[0][0] as CardAlbumState;
     expect(submitted.deck).toEqual(['燎原', '甲卡']);
+  });
+  it('启封详情：sealed 卡显示封印 DC 与意志修正（阶段 2 接线）', async () => {
+    mockGame.player!.inventory = [card('燎原', { sealed: true })];
+    const w = mount(CardAlbumPanel);
+    expect(w.text()).toContain('封印 DC');
+    expect(w.text()).toContain('启封槽位');
   });
 });
