@@ -19,6 +19,7 @@ import {
   ensureCardAlbum,
   removeFromDeck,
 } from '@engine/card-workshop/album';
+import { UNSEAL_SLOT_COST, unsealDC, willModifierOf } from '@engine/card-workshop/unsealing';
 import AppButton from '../../shared/AppButton.vue';
 
 const game = useGameStore();
@@ -81,6 +82,9 @@ async function withdraw(name: string) {
 function selectCard(name: string) {
   selectedName.value = name;
 }
+
+/** 启封者的意志修正（精神），用于详情区预览实际对抗难度 */
+const willMod = computed(() => willModifierOf(player.value?.attributes));
 </script>
 
 <template>
@@ -185,6 +189,23 @@ function selectCard(name: string) {
                 <span class="v">{{ selectedCard.recipe.cost }} GC</span>
               </div>
             </div>
+          </div>
+          <div v-if="selectedCard.sealed" class="detail-section">
+            <h5 class="d-label">封印</h5>
+            <div class="kv-grid">
+              <div class="kv-row">
+                <span class="k">封印 DC</span>
+                <span class="v"
+                  >{{ unsealDC(selectedCard) }}（你的意志修正 {{ willMod >= 0 ? '+' : ''
+                  }}{{ willMod }}）</span
+                >
+              </div>
+              <div class="kv-row">
+                <span class="k">启封槽位</span>
+                <span class="v">{{ UNSEAL_SLOT_COST[selectedCard.cardTier] }} 动作槽</span>
+              </div>
+            </div>
+            <p class="seal-note">启封即使用：意志对抗失败将遭抗命——哑火、暴走，或反噬。</p>
           </div>
         </div>
       </section>
@@ -400,6 +421,12 @@ function selectCard(name: string) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.seal-note {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--theme-text-muted);
+  font-style: italic;
 }
 .empty-tab {
   padding: 32px 0;
