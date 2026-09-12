@@ -36,6 +36,19 @@ export const UNSEAL_SLOT_COST: Record<CardTier, number> = {
   星辉: 2,
 };
 
+/**
+ * 反噬伤害（HP）—— 封印物反扑启封者的确定性账本（阶段 5 收口阶段 2 的开口：
+ * 「反噬伤害由 AI 演绎、内核记账」——本表就是那本账）。单调、非致死档，
+ * applyPending 的 HP clamp 兜底。设计：phase5 设计文档 §4。
+ */
+export const REBOUND_DAMAGE: Record<CardTier, number> = {
+  白铁: 5,
+  青铜: 8,
+  白银: 12,
+  鎏金: 16,
+  星辉: 20,
+};
+
 /** 启封判定入参（卡牌侧只取判定相关两字段） */
 export interface UnsealCardSpec {
   cardTier: CardTier;

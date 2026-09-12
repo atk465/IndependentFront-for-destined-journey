@@ -5,6 +5,12 @@
 - 承接：交接档案 §9 阶段 4（高风险，唯一必须碰战斗内核的项，独立开发独立提交）
 - 世界观：**山川河流可被封入卡牌** —— 地景卡改变整个战场环境
 
+> 📌 **2026-09-13 阶段 5 更正**：本文的 `DeclareAction.payload.landscape` 已更名为
+> **`payload.card`** 并扩形（+fusionKind/sealed）——地景只是卡的一种，召唤/禁忌卡
+> 走同一条玩卡通道，两个平行字段会造成第二套玩卡语义。`state.landscape` /
+> `LandscapeSet` 事件 / 替换语义**逐字段不变**。详见
+> `2026-09-13-card-workshop-phase5-combat-wiring-design.md` §2。
+
 ## 1. 勘察结论（为什么这样改）
 
 对 combat-v3 内核的勘察确认了四个可直接复用的机制，地景卡全部走既有形状：

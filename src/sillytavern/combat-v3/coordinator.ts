@@ -1839,8 +1839,8 @@ function toolCallToCommandSync(
         payload: {
           actionType: mapActionType(t),
           description: undefined,
-          // 阶段4 地景卡：工具载荷按形状收敛透传（非法形状静默丢弃 = 无地景）
-          landscape: coerceLandscapePayload(args.payload),
+          // 阶段5 玩卡通道：工具载荷按形状收敛透传（非法形状静默丢弃 = 无卡效果）
+          card: coerceCardPayload(args.payload),
         },
       };
     }
@@ -1943,31 +1943,36 @@ function mapActionType(t: string): 'item' | 'move' | 'focus' | 'defend' {
 }
 
 /**
- * 阶段4：declare_action 工具载荷 → 地景 payload（形状收敛，永不抛）。
- * 正规来源是会话层从制卡师背包解析出的真实 CardItem（设计文档 §4 信任模型）；
- * 这里只做形状校验：name 非串 / 词条非数组 → 整体丢弃（= 无地景，不炸命令）。
+ * 阶段5：declare_action 工具载荷 → 玩卡 payload（形状收敛，永不抛）。
+ * 正规来源是会话层从制卡师背包解析出的真实 CardItem（phase5 设计 §2 信任模型）；
+ * 这里只做形状校验：name 非串 / 词条非数组 → 整体丢弃（= 无卡效果，不炸命令）。
  */
-function coerceLandscapePayload(raw: unknown):
+function coerceCardPayload(raw: unknown):
   | {
       name: string;
       cardTier: string;
       词条: readonly string[];
+      fusionKind?: '叠加' | '相生' | '相克';
+      sealed?: boolean;
       automata?: readonly EffectAutomaton[];
     }
   | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
-  const landscape = (raw as Record<string, unknown>)['landscape'];
-  if (!landscape || typeof landscape !== 'object') return undefined;
-  const l = landscape as Record<string, unknown>;
-  if (typeof l['name'] !== 'string' || l['name'].length === 0) return undefined;
-  if (!Array.isArray(l['词条'])) return undefined;
-  const words = l['词条'].filter((w): w is string => typeof w === 'string');
+  const card = (raw as Record<string, unknown>)['card'];
+  if (!card || typeof card !== 'object') return undefined;
+  const c = card as Record<string, unknown>;
+  if (typeof c['name'] !== 'string' || c['name'].length === 0) return undefined;
+  if (!Array.isArray(c['词条'])) return undefined;
+  const words = c['词条'].filter((w): w is string => typeof w === 'string');
+  const fusion = c['fusionKind'];
   return {
-    name: l['name'],
-    cardTier: typeof l['cardTier'] === 'string' ? l['cardTier'] : '白铁',
+    name: c['name'],
+    cardTier: typeof c['cardTier'] === 'string' ? c['cardTier'] : '白铁',
     词条: words,
-    automata: Array.isArray(l['automata'])
-      ? (l['automata'] as readonly EffectAutomaton[])
+    fusionKind: fusion === '叠加' || fusion === '相生' || fusion === '相克' ? fusion : undefined,
+    sealed: typeof c['sealed'] === 'boolean' ? c['sealed'] : undefined,
+    automata: Array.isArray(c['automata'])
+      ? (c['automata'] as readonly EffectAutomaton[])
       : undefined,
   };
 }

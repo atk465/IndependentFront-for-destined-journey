@@ -959,15 +959,22 @@ export type CombatCommand =
         actionType: 'item' | 'move' | 'focus' | 'defend';
         description?: string;
         /**
-         * 阶段4 地景卡：actionType='item' 时可携带（其他 actionType 携带则忽略）。
+         * 阶段5 玩卡通道（阶段4 的 payload.landscape 更名扩形，设计 phase5 §2）：
+         * actionType='item' 时可携带（其他 actionType 携带则忽略）。
          * 🔴 正规来源是**会话层**从制卡师背包解析出的真实 CardItem（与
-         *    SupplyUnit.definition 同一信任模型：内核信任调用方的结构化数据）；
-         *    automata 是卡牌自带的 DSL，铺开时注册进 activeEffects 走既有窗口。
+         *    SupplyUnit.definition 同一信任模型：内核信任调用方的结构化数据）。
+         *    词条含「地景」→ 设 state.landscape + automata 全部持久注册（环境常驻）；
+         *    其余卡 → action.declared 订阅者打出即发动，其余窗口持久注册（光环）。
+         *    sealed=true 先过启封判定（intentCheck 通道抽骰，judgeUnseal）。
          */
-        landscape?: {
+        card?: {
           name: string;
           cardTier: string;
           词条: readonly string[];
+          /** 融合类型（相克 DC+3，phase2 unsealing 表） */
+          fusionKind?: '叠加' | '相生' | '相克';
+          /** 未启封 → 先过意志对抗（高阶卡封印物抗拒） */
+          sealed?: boolean;
           automata?: readonly EffectAutomaton[];
         };
       };
@@ -1309,6 +1316,16 @@ export type DomainEvent =
       name: string;
       /** 被替换的旧地景名；首铺为 null */
       replaced: string | null;
+    }
+  | {
+      /** 阶段5：启封判定结果（意志对抗，骰值来自 intentCheck 通道 → 可回放） */
+      kind: 'UnsealJudged';
+      unitId: string;
+      name: string;
+      outcome: '启封' | '哑火' | '暴走' | '反噬';
+      roll: number;
+      dc: number;
+      margin: number;
     }
   | { kind: 'DamagePrevented'; unitId: string; amount: number; keptHp: number }
   | {

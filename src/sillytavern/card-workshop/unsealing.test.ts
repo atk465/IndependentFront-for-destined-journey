@@ -7,6 +7,7 @@ import { describe, it, expect } from 'vitest';
 import {
   UNSEAL_DC,
   UNSEAL_SLOT_COST,
+  REBOUND_DAMAGE,
   CLASH_DC_BONUS,
   sealBreaks,
   willModifierOf,
@@ -26,6 +27,9 @@ describe('数值表（单一真源）', () => {
   });
   it('启封槽位成本：鎏金/星辉要 2 个动作槽', () => {
     expect(UNSEAL_SLOT_COST).toEqual({ 白铁: 1, 青铜: 1, 白银: 1, 鎏金: 2, 星辉: 2 });
+  });
+  it('反噬伤害表：单调上升、非致死档（阶段5 收口）', () => {
+    expect(REBOUND_DAMAGE).toEqual({ 白铁: 5, 青铜: 8, 白银: 12, 鎏金: 16, 星辉: 20 });
   });
   it('相克 DC +3', () => {
     expect(unsealDC(卡('白银'))).toBe(14);

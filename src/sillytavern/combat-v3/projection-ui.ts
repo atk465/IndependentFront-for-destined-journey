@@ -296,6 +296,20 @@ function mapEvent(evt: DomainEvent): CombatEvent {
           : `地景【${evt.name}】铺开`,
         round: 0,
       };
+    case 'UnsealJudged': {
+      // 阶段5：启封判定结果（数值细节在事件里，面板文案只报档）
+      const flavor: Record<string, string> = {
+        启封: '封印受控破裂',
+        哑火: '封印扛住了这次启封',
+        暴走: '封印脱控，力量逸出',
+        反噬: '封印物反扑启封者',
+      };
+      return {
+        type: 'v3_narrative',
+        text: `启封【${evt.name}】：d20=${evt.roll} vs DC${evt.dc} —— ${flavor[evt.outcome] ?? evt.outcome}`,
+        round: 0,
+      };
+    }
 
     default: {
       // 穷尽兜底（R6 / A2-6）：新增 DomainEvent 未接映射必须编译报错。
