@@ -16,7 +16,8 @@
 | 上游 | `https://github.com/The-poem-of-destiny/IndependentFront-for-destined-journey` |
 | 工作分支 | `card-workshop-mvp`（**无斜杠**，原因见 §3.1） |
 | 分支基点 | `0cad0b9`（`feat: improve opening narration and add persona editing (#127)`） |
-| 最新提交 | `f18e747`（Phase 1 代码）；前一条 `fecd35f`（规划文档） |
+| 最新**代码**提交 | `f18e747`（Phase 1 代码），其父 `fecd35f`（规划文档） |
+| 分支 HEAD | 在 `f18e747` 之上还有文档提交（含本档案本身），以 `git log` 实测为准 |
 | 进度 | **Phase 1 部分完成**（数据模型 + 确定性融合内核 + 单测已过）；UI 未做；未跑全量闸门 |
 | 技术栈 | Vue 3 + Pinia + Vite + TypeScript + Dexie(IndexedDB)；Node `^20.19 \|\| ^22.13 \|\| >=24` |
 | 跑起来 | `npm run dev` → `http://localhost:5173`（**必须配 LLM API 才能跑剧情**） |
@@ -52,9 +53,10 @@ upstream  → The-poem-of-destiny/IndependentFront-for-destined-journey  (上游
 **提交链**（`card-workshop-mvp` 分支）：
 
 ```
-f18e747  feat(card-workshop): Phase1 数据模型 + 确定性融合内核     ← 远端最新，已推送
-fecd35f  docs(planning): 卡牌工坊 MVP 设计与战斗路线 ADR
-0cad0b9  feat: improve opening narration and add persona editing (#127)   ← 分支基点
+HEAD      docs(planning): 新增跨工具交接档案（+ 本文件所在提交）
+f18e747   feat(card-workshop): Phase1 数据模型 + 确定性融合内核     ← 最新代码提交
+fecd35f   docs(planning): 卡牌工坊 MVP 设计与战斗路线 ADR
+0cad0b9   feat: improve opening narration and add persona editing (#127)   ← 分支基点
 ```
 
 **⚠️ 已知状态偏差（接手请先处理）**：
@@ -352,7 +354,7 @@ cd "C:/Users/admin/WorkBuddy/2026-08-31-05-19-25/IndependentFront-for-destined-j
 
 # 2. 确认分支与提交
 git branch                    # 应在 card-workshop-mvp
-git log --oneline -3          # 应见 f18e747 / fecd35f / 0cad0b9
+git log --oneline -4          # 应见 f18e747（Phase 1 代码）与 0cad0b9（分支基点）
 
 # 3. 同步远端（本地 master 落后）
 git fetch --all
