@@ -22,8 +22,16 @@ export const EQUIP_SLOTS = [
 export type EquipSlot = (typeof EQUIP_SLOTS)[number];
 
 /** 物品类型 */
-export const ITEM_TYPES = ['装备', '消耗品', '材料', '任务物品', '特殊'] as const;
+export const ITEM_TYPES = ['装备', '消耗品', '材料', '任务物品', '特殊', '卡牌'] as const;
 export type ItemType = (typeof ITEM_TYPES)[number];
+
+/** 卡牌品质（制卡系统 5 级，独立于 7 级装备品质；卡兰大陆世界观） */
+export const CARD_TIERS = ['白铁', '青铜', '白银', '鎏金', '星辉'] as const;
+export type CardTier = (typeof CARD_TIERS)[number];
+
+/** 卡牌词条四类 */
+export const CARD_ENTRY_TYPES = ['元素', '形态', '效果', '稀有'] as const;
+export type CardEntryType = (typeof CARD_ENTRY_TYPES)[number];
 
 /** 7 级品质（世界书 #417617 品质体系） */
 export const RARITY_LEVELS = ['普通', '优良', '稀有', '史诗', '传说', '神话', '唯一'] as const;
@@ -79,6 +87,7 @@ const ITEM_TYPE_ALIASES = Object.assign(Object.create(null) as Record<string, It
   quest: '任务物品',
   special: '特殊',
   道具: '特殊',
+  card: '卡牌',
 } satisfies Record<string, ItemType>);
 
 /** 归一化物品类型。无法识别返回 undefined（type 为可选字段） */

@@ -7,7 +7,7 @@
 // Q-11：本文件唯一的**运行时** import。field-enums 自己零 import（叶子模块），
 // 所以这条边不成环。品质集合是铁律 5 指定的中文枚举 SSOT，`QualityLevel` /
 // `QUALITY_RANK` / `QUALITY_BY_RANK` 一律从它派生，不再手抄第二份。
-import { RARITY_LEVELS, type Rarity } from './field-enums';
+import { RARITY_LEVELS, type Rarity, type CardTier } from './field-enums';
 
 import type { GameTime } from './time-system';
 // type-only 循环安全：effect-types 反向 import 本文件的 AttributeName/DivinityLevel/DamageType 也是 type-only
@@ -966,6 +966,49 @@ export interface InventoryItem {
   automata?: EffectAutomaton[];
 }
 
+/**
+ * 卡牌 = InventoryItem 子类型（type:'卡牌'）。复用 material/effects/automata/modifiers/rarity。
+ * 卡牌数值由 card-workshop/card-fusion.ts 确定性产出，AI 不自由生成数字（数据字段规范铁律3）。
+ * 逻辑键=name（铁律1）；卡册只存名字，不存 id。
+ */
+export interface CardItem extends InventoryItem {
+  type: '卡牌';
+  /** 卡牌品质（5 级，独立于 7 级装备品质） */
+  cardTier: CardTier;
+  /** 词条名列表（元素/形态/效果/稀有 四类，由 card-fusion 确定性推导，非 AI 自由文本） */
+  词条: string[];
+  /** 融合配方（确定性内核 card-fusion.ts 的输入/输出快照） */
+  recipe: FusionRecipe;
+  /** 是否未启封（高阶卡封印物；启封判定见后续阶段，复用 dice-tape 确定性骰带） */
+  sealed: boolean;
+}
+
+/** 融合配方（确定性内核 card-fusion.ts 的输入/输出） */
+export interface FusionRecipe {
+  /** 主素材名（逻辑键=名字） */
+  mainMaterial: string;
+  /** 副素材名（0~2，逻辑键=名字） */
+  subMaterials: string[];
+  /** 产出品质 */
+  tier: CardTier;
+  /** 融合类型：叠加（同类升级）/ 相生（复合）/ 相克（不稳定，造价×0.7） */
+  fusionKind: '叠加' | '相生' | '相克';
+  /** 造价（GC）= Σ素材售价 × 稀有度系数 × 相克折扣 */
+  cost: number;
+  /** 制作评级（可能失败；最终成败由引擎骰带在 rollCraftRating 中裁定） */
+  rating: CraftRating;
+}
+
+/** 卡册状态（CharacterState 内嵌，遵循「物品无 id、逻辑键=名字」铁律） */
+export interface CardAlbumState {
+  /** 已拥有卡牌名（逻辑键） */
+  owned: string[];
+  /** 当前卡组（同名≤2，遵循铁律） */
+  deck: string[];
+  /** 卡册容量 */
+  capacity: number;
+}
+
 /** 状态效果 */
 export interface StatusEffect {
   /** @deprecated 逻辑键=name（规范铁律1）。M2 起引擎不再读写，M3 后翻译层不再生成，仅为旧存档数据兼容保留字段位 */
@@ -1096,6 +1139,10 @@ export interface CharacterState {
   skills: Skill[];
   inventory: InventoryItem[];
   statusEffects: StatusEffect[];
+
+  // ===== 卡牌工坊（卡兰大陆世界观 MVP） =====
+  /** 卡册状态：owned=已拥有卡牌名，deck=当前卡组，capacity=容量。逻辑键=名字，无 id */
+  cardAlbum?: CardAlbumState;
 
   // ===== 经济 =====
   money: number; // G
@@ -2701,7 +2748,7 @@ export const QUALITY_BY_RANK: QualityLevel[] = [...RARITY_LEVELS];
 // ========== Craft Industry & Stage ==========
 
 /** 制作行业类型 (对齐世界书: 4 种) */
-export type CraftIndustry = '锻造' | '炼金' | '烹饪' | '裁缝';
+export type CraftIndustry = '锻造' | '炼金' | '烹饪' | '裁缝' | '制卡';
 
 /** 行业→核心属性映射 */
 export const CRAFT_INDUSTRY_ATTRIBUTE: Record<CraftIndustry, string> = {
@@ -2709,6 +2756,7 @@ export const CRAFT_INDUSTRY_ATTRIBUTE: Record<CraftIndustry, string> = {
   炼金: '智力',
   烹饪: '精神',
   裁缝: '敏捷',
+  制卡: '灵感',
 };
 
 /** 制作阶段 (对齐世界书: 3 级加工) */
