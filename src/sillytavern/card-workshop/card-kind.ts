@@ -51,6 +51,11 @@ export function isConsumable(kind: CardKind): boolean {
   return CONSUMABLE_KINDS.has(kind);
 }
 
+/** 消耗性（string 宽接口）——跨模块投影边界用（CombatEvent 里的 kind 是 string） */
+export function isConsumableKind(kind: string): boolean {
+  return (CONSUMABLE_KINDS as ReadonlySet<string>).has(kind);
+}
+
 /** 不可战斗打出的类型（素材 = 材料载体，炼制/修复/交易用） */
 const UNPLAYABLE_KINDS: ReadonlySet<CardKind> = new Set<CardKind>(['素材']);
 

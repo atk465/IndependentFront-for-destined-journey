@@ -1079,7 +1079,12 @@ export type CombatCommand =
 export interface CommandRejection {
   /** 拒绝码 */
   code:
-    'INVALID_PHASE' | 'STALE_REVISION' | 'TARGET_NOT_PRESENT' | 'SLOT_EXHAUSTED' | 'UNKNOWN_KIND';
+    | 'INVALID_PHASE'
+    | 'STALE_REVISION'
+    | 'TARGET_NOT_PRESENT'
+    | 'SLOT_EXHAUSTED'
+    | 'UNKNOWN_KIND'
+    | 'CARD_ALREADY_ACTIVE';
   /** 人类可读原因 */
   message: string;
 }
@@ -1329,6 +1334,16 @@ export type DomainEvent =
       name: string;
       /** 被替换的旧地景名；首铺为 null */
       replaced: string | null;
+    }
+  | {
+      /** 阶段5-闭环：一次确定生效的玩卡（拒绝/哑火/反噬路径不产此事件）。
+       *  消耗结算与会话临时账的单一事实来源。 */
+      kind: 'CardPlayed';
+      unitId: string;
+      name: string;
+      /** 形态词条类型（card-workshop/card-kind 八类）——不叫 kind：与事件判别符撞名 */
+      cardKind: string;
+      sealed: boolean;
     }
   | {
       /** 阶段5：启封判定结果（意志对抗，骰值来自 intentCheck 通道 → 可回放） */

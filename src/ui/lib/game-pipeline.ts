@@ -2332,6 +2332,22 @@ export class GamePipeline {
       });
 
       this.game.clearAgentStatus('combat_v3');
+      // 阶段5-闭环（1.3 消耗制）：本局封印破裂的消耗卡随战斗结果同窗结算（remove_item）。
+      // 哑火不耗（未进消耗账）、放弃不耗（abandon 清账）；同名多张按打出次数逐张扣。
+      const consumedCards = this.game.takeConsumedCards();
+      if (consumedCards.length > 0 && this.ownsActiveSave) {
+        const sm = createStateManager(this.saveId);
+        const result = await sm.commitChatState(
+          consumedCards.map((name) => ({
+            op: 'remove_item' as const,
+            target: `characters.${playerC.name}`,
+            value: { name, quantity: 1 },
+          })),
+        );
+        if (result.errors.length > 0) {
+          console.warn('[GamePipeline] 消耗卡结算部分失败:', result.errors);
+        }
+      }
       // 🔴 2026-08-13 真机 debug：战斗终局的 commitChatState 只写 Dexie，而本条链路
       //（store.startCombat → coordinator.start → startCombatV3）不经过 run() 的
       // finally —— store 从不回读，HUD 一直是开战前的血量/经验（满血假象）。

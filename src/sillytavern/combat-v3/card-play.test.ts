@@ -432,6 +432,91 @@ describe('禁忌卡（OverrideIntent 规则覆写）', () => {
   });
 });
 
+// ═══ 在场绑定与 CardPlayed（1.3b 重打拒绝 / 1.3 消耗事实来源）═══
+
+describe('在场绑定与 CardPlayed', () => {
+  /** 装备卡：damage.after 持久光环（非 action.declared） */
+  function 装备卡(): PlayedCard {
+    return {
+      name: '苍穹之翼',
+      cardTier: '白银',
+      词条: ['风', '装备'],
+      automata: [
+        {
+          id: 'card.苍穹之翼.光翼',
+          name: '光翼',
+          source: '苍穹之翼',
+          owner: '甲',
+          subscribe: 'damage.after',
+          trigger: 'true',
+          priority: 0,
+          divinity: 0,
+          intents: [{ kind: 'Heal', targetId: '甲', amount: 'ctx.damage.final * 0.2' }],
+        },
+      ],
+    };
+  }
+
+  it('装备卡首次打出生效：CardPlayed + 持久注册', () => {
+    const s = atSlotConsume();
+    const out = handleAction(mkBundle(), s, playCard('e1', s, 装备卡()));
+    expect(out.rejection).toBeUndefined();
+    expect(out.activeEffects).toBeDefined();
+    expect(ev(out, 'CardPlayed')).toMatchObject({ name: '苍穹之翼', cardKind: '装备' });
+  });
+
+  it('同卡再打 → CARD_ALREADY_ACTIVE 拒绝（applyOutcome 恒等，零消费）', () => {
+    let s = atSlotConsume();
+    s = applyOutcome(s, handleAction(mkBundle(), s, playCard('e1', s, 装备卡())));
+    const again = handleAction(mkBundle(), s, playCard('e2', s, 装备卡()));
+    expect(again.rejection?.code).toBe('CARD_ALREADY_ACTIVE');
+    expect(again.events.find((e) => e.kind === 'CardPlayed')).toBeUndefined();
+    expect(applyOutcome(s, again)).toBe(s);
+  });
+
+  it('召唤卡伙伴在场 → 拒绝（spawn 意图 unitId 对场上有名单位）', () => {
+    const s = atSlotConsume();
+    // 乙在场 → spawn 意图 unitId='乙' 视为伙伴已在场（机制验证用最小夹具）
+    const card: PlayedCard = {
+      name: '远古巨兽·岩爪',
+      cardTier: '鎏金',
+      词条: ['土', '召唤'],
+      automata: [
+        {
+          id: 'card.岩爪.降临',
+          name: '降临',
+          source: '远古巨兽·岩爪',
+          owner: '甲',
+          subscribe: 'action.declared',
+          trigger: 'true',
+          priority: 0,
+          divinity: 0,
+          intents: [
+            {
+              kind: 'SpawnOrDespawnIntent',
+              op: 'spawn',
+              unitId: '乙',
+              joinTiming: 'this_round_tail',
+            },
+          ],
+        },
+      ],
+    };
+    const out = handleAction(mkBundle(), s, playCard('s2', s, card));
+    expect(out.rejection?.code).toBe('CARD_ALREADY_ACTIVE');
+    expect(out.rejection?.message).toContain('已在场');
+  });
+
+  it('哑火/反噬不产 CardPlayed（消耗账单一事实来源：没事件 = 没消耗）', () => {
+    // 白银 DC14，d20=12 → 哑火；d20=2 → 反噬（margin -12）
+    for (const roll of [12, 2]) {
+      const s = atSlotConsume(1, { dice: tapeWithIntentRoll(roll) });
+      const out = handleAction(mkBundle(), s, playCard('u', s, 灼热盆地({ sealed: true })));
+      expect(out.events.find((e) => e.kind === 'CardPlayed')).toBeUndefined();
+    }
+  });
+});
+
 // ═══ 类型自检（CardItem 与玩卡载荷的形状对齐由会话层装配保证，这里锁常量）═══
 
 describe('数值表引用一致', () => {

@@ -189,6 +189,24 @@ function playCardPrelude(
 ): CardPreludeResult {
   const card = normalizePlayedCard(rawCard);
   const actor = state.units[command.actorId];
+  const kind = cardKindOf(card.词条);
+
+  // 0. 在场绑定（1.3b：永久卡不可重打的内核裁定，AI 通道同样受约束）：
+  //    装备光环已生效 / 伙伴（召唤意图的 unitId）已在场 → 明确拒绝
+  if (kind === '装备' && hasAuraSource(state.activeEffects, card.name)) {
+    out.rejection = {
+      code: 'CARD_ALREADY_ACTIVE',
+      message: `【${card.name}】的光环已生效`,
+    };
+    return { stop: true };
+  }
+  if ((kind === '召唤' || kind === '军团') && companionPresent(state, card)) {
+    out.rejection = {
+      code: 'CARD_ALREADY_ACTIVE',
+      message: `【${card.name}】的伙伴已在场`,
+    };
+    return { stop: true };
+  }
 
   // 1. 槽位：封印卡按 UNSEAL_SLOT_COST（consumeSlot 已扣 1；此处校验总量，不足整命令拒绝，
   //    足够则补扣第二槽 —— 槽位账与效果同一次原子提交）
@@ -250,9 +268,19 @@ function playCardPrelude(
     }
   }
 
+  // 3.5 CardPlayed：本 play 确定生效（在场绑定/槽位/哑火/反噬路径已提前返回）——
+  // 消耗结算（1.3 消耗制）与会话临时账（1.3b 在场绑定）的单一事实来源。
+  out.events.push({
+    kind: 'CardPlayed',
+    unitId: command.actorId,
+    name: card.name,
+    cardKind: kind,
+    sealed: card.sealed,
+  });
+
   // 4. 地景卡落位（类型判据走 card-kind 唯一真源：领域卡=「地景」形态词条；
   //    刻意先于 automata 切分——两者独立，且带 automata 的地景卡两条都要走）
-  const isLandscape = cardKindOf(card.词条) === '领域';
+  const isLandscape = kind === '领域';
   if (isLandscape) {
     out.changes.landscapePatch = {
       name: card.name,
@@ -323,6 +351,24 @@ function normalizePlayedCard(
     sealed: raw.sealed ?? false,
     automata: raw.automata,
   };
+}
+
+/** 该卡名的光环 automaton 是否已持久注册（1.3b 装备卡重打拒绝判据） */
+function hasAuraSource(index: CombatState['activeEffects'], sourceName: string): boolean {
+  for (const list of Object.values(index.byWindow)) {
+    if (list.some((a) => a.source === sourceName)) return true;
+  }
+  return false;
+}
+
+/** 卡的召唤对象是否已在场（1.3b 召唤/军团卡重打拒绝判据）：spawn 意图的 unitId 对场上有名单位 */
+function companionPresent(state: CombatState, card: PlayedCard): boolean {
+  const spawnUnitIds = (card.automata ?? [])
+    .flatMap((a) => a.intents)
+    .filter((i): i is SpawnOrDespawnIntent => i.kind === 'SpawnOrDespawnIntent' && i.op === 'spawn')
+    .map((i) => i.unitId);
+  if (spawnUnitIds.length === 0) return false;
+  return Object.values(state.units).some((u) => spawnUnitIds.includes(u.name));
 }
 
 /**

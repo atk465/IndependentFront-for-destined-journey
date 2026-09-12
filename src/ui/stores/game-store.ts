@@ -19,6 +19,7 @@ import type {
 export type { DebugAgentEntry, DebugTurnRecord } from '@engine/types';
 import type { CombatView, CombatCommand, DeckCardData } from '@engine/combat-v3';
 import { tryParsePlayCard } from '@engine/combat-v3';
+import { isConsumableKind } from '@engine/card-workshop/card-kind';
 import {
   getSave,
   getSaves,
@@ -170,6 +171,9 @@ export const useGameStore = defineStore('game', () => {
   function setCombatDeckSnapshot(cards: DeckCardData[]) {
     combatDeckSnapshot.value = cards;
   }
+  /** 阶段5-闭环（1.3 消耗制）：本局消耗账——consumed = 封印破裂待结算；pending = 封印卡已打出等启封结果 */
+  const combatConsumedCards = ref<string[]>([]);
+  const combatPendingConsume = ref<string[]>([]);
   /** 🆕 v3：Coordinator 句柄（submitCommand / abandon / 重开），供前端 Command 路由与放弃（C4）
    *  T16 §3.5：+preSnapshotId（pre-combat 快照，重开战斗 restoreSnapshot 用）与
    *  +restart（重开战斗回调 —— pipeline 持有 combat marker，重触发归它）。
@@ -305,7 +309,32 @@ export const useGameStore = defineStore('game', () => {
           v3ActiveCombat.value = { ...v3ActiveCombat.value, phase: 'SettlementCommitted' };
         }
         break;
+      // 阶段5-闭环（1.3 消耗制）：玩卡确定生效 → 消耗卡入待定账（sealed 先挂起等启封结果）
+      case 'v3_card_played':
+        if (isConsumableKind(evt.kind)) {
+          if (evt.sealed) combatPendingConsume.value.push(evt.name);
+          else combatConsumedCards.value.push(evt.name);
+        }
+        break;
+      // 启封结果定案：哑火 = 封印扛住（卡完好，退出待定账）；破裂 = 落消耗账
+      case 'v3_unseal_judged': {
+        const pending = combatPendingConsume.value;
+        const idx = pending.indexOf(evt.name);
+        if (idx !== -1) {
+          pending.splice(idx, 1);
+          if (evt.outcome !== '哑火') combatConsumedCards.value.push(evt.name);
+        }
+        break;
+      }
     }
+  }
+
+  /** 阶段5-闭环（1.3）：本局消耗账结算出口——取走并清空（settlement 时由 game-pipeline 调用） */
+  function takeConsumedCards(): string[] {
+    const consumed = [...combatConsumedCards.value];
+    combatConsumedCards.value = [];
+    combatPendingConsume.value = [];
+    return consumed;
   }
 
   /** v3：controller 挂 Coordinator 句柄（game-pipeline 在 coordinator 启动时挂） */
@@ -366,6 +395,8 @@ export const useGameStore = defineStore('game', () => {
     combatAwaitingInput.value = null;
     combatCurrentUnitId.value = null;
     combatDeckSnapshot.value = [];
+    combatConsumedCards.value = [];
+    combatPendingConsume.value = [];
     combatReady.value = null;
     const c = combatCoordinator.value;
     if (c?.abandon) c.abandon();
@@ -1547,6 +1578,7 @@ export const useGameStore = defineStore('game', () => {
     submitCombatCommand,
     submitCombatIntent,
     setCombatDeckSnapshot,
+    takeConsumedCards,
     abandonCombat,
     skipCombat,
     startCombat,
