@@ -25,6 +25,7 @@ import { tryParsePlayCard } from '@engine/combat-v3';
 import { cardKindOf, isConsumableKind } from '@engine/card-workshop/card-kind';
 import { planRepair } from '@engine/card-workshop/repair';
 import { downedSummonCards } from '@engine/card-workshop/contract';
+import { buildDemoCardsPatches, buildDemoDeckPatches } from '@engine/card-workshop/demo';
 import { createDefaultCharacterState } from '@engine/types';
 import {
   getSave,
@@ -443,6 +444,22 @@ export const useGameStore = defineStore('game', () => {
         changes: { data: { ...(card?.data ?? {}), damaged: true } },
       };
     });
+  }
+
+  /**
+   * 演示卡注入（仅 dev 模式可调——生产构建会因 import.meta.env.DEV=false 而保留
+   * 函数本身但调用入口在 UI 守卫，生产 bundle 不渲染按钮）。给玩家背包塞 4 张
+   * 各类型演示卡 + 3 份常用素材，并重置卡组为演示卡全集——主人进战斗即可看
+   * 玩卡链路（卡组条 → 单击出牌 → 启封判定 → 召唤/地景/装备/技能效果）。
+   */
+  async function seedDemoCards(): Promise<{ ok: boolean; reason?: string }> {
+    if (!activeSaveId.value || !player.value) return { ok: false, reason: '无活跃存档' };
+    const playerName = player.value.name;
+    const sm = createStateManager(activeSaveId.value);
+    const patches = [...buildDemoCardsPatches(playerName), ...buildDemoDeckPatches(playerName)];
+    const result = await sm.commitChatState(patches);
+    if (result.success) await refreshFromDb();
+    return result.success ? { ok: true } : { ok: false, reason: result.errors.join('; ') };
   }
 
   /**
@@ -1758,6 +1775,7 @@ export const useGameStore = defineStore('game', () => {
     takeConsumedCards,
     repairCard,
     collectDamagedSummonCards,
+    seedDemoCards,
     combatDeckStripStates,
     abandonCombat,
     skipCombat,
