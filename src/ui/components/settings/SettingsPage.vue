@@ -244,7 +244,7 @@ onMounted(() => {
             <DataSection v-if="activeSection === 'data'" />
 
             <!-- ========== 开发者模式 ========== -->
-            <DeveloperSection v-if="activeSection === 'developer'" />
+            <DeveloperSection v-if="activeSection === 'developer'" :dev-mode="import.meta.env.DEV" />
 
             <!-- ========== 关于 ========== -->
             <AboutSection v-if="activeSection === 'about'" />
