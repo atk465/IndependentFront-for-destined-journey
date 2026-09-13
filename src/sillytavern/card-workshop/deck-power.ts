@@ -23,12 +23,17 @@ export const TIER_POWER: Record<CardTier, number> = {
 
 /** 单卡战力。
  * 🔴 2026-09-13 真机：词条/品质都可能缺失（存档数据）——缺词条按无复合词条算、
- * 缺品质按白铁兜底，**绝不抛**（一次抛出会打断整个卡册面板渲染）。 */
-export function cardPower(card: Pick<CardItem, 'cardTier' | '词条'>): number {
+ * 缺品质按白铁兜底，**绝不抛**（一次抛出会打断整个卡册面板渲染）。
+ * 交锋拍制：卡牌经验满管转化的 cardPowerBonus 逐点累加（旧存档缺字段按 0）。 */
+export function cardPower(card: Pick<CardItem, 'cardTier' | '词条' | 'cardPowerBonus'>): number {
   const words = Array.isArray(card.词条) ? card.词条 : [];
   const synergy = words.filter((w) => SYNERGY_PRODUCTS.has(w)).length;
   const tier = TIER_POWER[card.cardTier] ?? TIER_POWER['白铁'];
-  return tier + 2 * synergy;
+  const bonus =
+    typeof card.cardPowerBonus === 'number' && Number.isFinite(card.cardPowerBonus)
+      ? Math.max(0, Math.round(card.cardPowerBonus))
+      : 0;
+  return tier + 2 * synergy + bonus;
 }
 
 /** 卡组战力：按编入顺序逐张累加；查不到实物的名字跳过 */

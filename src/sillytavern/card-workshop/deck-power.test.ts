@@ -40,6 +40,10 @@ describe('cardPower', () => {
   it('无词条卡也有底权重', () => {
     expect(cardPower(卡('白铁'))).toBe(1);
   });
+  it('卡牌经验满管转化的 cardPowerBonus 逐点累加（交锋拍制）', () => {
+    expect(cardPower({ ...卡('白铁'), cardPowerBonus: 3 })).toBe(1 + 3);
+    expect(cardPower({ ...卡('星辉', ['燎原']), cardPowerBonus: 2 })).toBe(5 + 2 + 2);
+  });
 });
 
 describe('存档数据缺字段的健壮性（2026-09-13 真机：deckPower 曾被 null 词条打崩）', () => {

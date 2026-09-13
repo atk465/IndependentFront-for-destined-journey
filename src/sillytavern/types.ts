@@ -1015,6 +1015,10 @@ export interface CardItem extends InventoryItem {
   recipe: FusionRecipe;
   /** 是否未启封（高阶卡封印物；启封判定见后续阶段，复用 dice-tape 确定性骰带） */
   sealed: boolean;
+  /** 卡牌经验（交锋拍制：参战卡分得玩家战斗经验 50%，见 card-workshop/skirmish.ts）。旧存档可缺 */
+  cardExp?: number;
+  /** 战斗成长累计的卡面战力加成（cardExp 每攒满一管 +1 清空重攒；缺省 0）。旧存档可缺 */
+  cardPowerBonus?: number;
 }
 
 /** 融合配方（确定性内核 card-fusion.ts 的输入/输出） */
