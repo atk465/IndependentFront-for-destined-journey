@@ -36,10 +36,15 @@ export const KIND_ENTRY: Readonly<Record<CardKind, string>> = {
 /** 多形态词条时的判定优先级（缺省技能不参与循环） */
 const KIND_PRIORITY: readonly CardKind[] = ['召唤', '军团', '装备', '领域', '场景', '物资', '素材'];
 
-/** 类型判定（纯函数；词条含形态词即该类型，皆无 = 技能卡） */
-export function cardKindOf(词条: readonly string[]): CardKind {
+/** 类型判定（纯函数；词条含形态词即该类型，皆无 = 技能卡）。
+ * 🔴 2026-09-13 真机：词条来自存档数据，**可能缺失或不是数组**（老档/AI 产物品/
+ * 手工写入）——此前直接 .includes 会抛 TypeError 打断整个面板渲染。统一在此
+ * 兜底成空数组（= 技能卡缺省），下游（deck-power/repair/commission/contract）
+ * 全部经这里判定，一处兜底全链受益。 */
+export function cardKindOf(词条: readonly string[] | null | undefined): CardKind {
+  const words = Array.isArray(词条) ? 词条 : [];
   for (const kind of KIND_PRIORITY) {
-    if (词条.includes(KIND_ENTRY[kind])) return kind;
+    if (words.includes(KIND_ENTRY[kind])) return kind;
   }
   return DEFAULT_CARD_KIND;
 }

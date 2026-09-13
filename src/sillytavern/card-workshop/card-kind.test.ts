@@ -75,6 +75,18 @@ describe('可打出性', () => {
   });
 });
 
+describe('存档数据缺字段的健壮性（2026-09-13 真机：卡册面板曾被 null 词条打崩）', () => {
+  it('词条缺失 / null / 非数组 → 不抛，按技能卡缺省', () => {
+    expect(cardKindOf(undefined)).toBe(DEFAULT_CARD_KIND);
+    expect(cardKindOf(null)).toBe(DEFAULT_CARD_KIND);
+    expect(cardKindOf('火' as unknown as string[])).toBe(DEFAULT_CARD_KIND);
+    expect(cardKind({} as { 词条: string[] })).toBe(DEFAULT_CARD_KIND);
+  });
+  it('isPlayableCard 同样不抛（素材判定缺词条 = 可打出）', () => {
+    expect(isPlayableCard({} as { 词条: string[] })).toBe(true);
+  });
+});
+
 describe('便捷判定', () => {
   it('cardKind / isPlayableCard 直接吃卡', () => {
     expect(cardKind({ 词条: ['地景'] })).toBe('领域');

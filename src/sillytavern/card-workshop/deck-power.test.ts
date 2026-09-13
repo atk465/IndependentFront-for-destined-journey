@@ -42,6 +42,16 @@ describe('cardPower', () => {
   });
 });
 
+describe('存档数据缺字段的健壮性（2026-09-13 真机：deckPower 曾被 null 词条打崩）', () => {
+  it('词条缺失 → 无复合加成，不抛', () => {
+    expect(cardPower({ cardTier: '白银' } as never)).toBe(3);
+    expect(cardPower({ cardTier: '白银', 词条: null } as never)).toBe(3);
+  });
+  it('品质缺失 → 白铁兜底，不抛', () => {
+    expect(cardPower({ 词条: ['火'] } as never)).toBe(1);
+  });
+});
+
 describe('deckPower', () => {
   const cardOf = (name: string): CardItem | undefined =>
     name === '燎原之卡' ? 卡('青铜', ['燎原']) : name === '白铁之卡' ? 卡('白铁') : undefined;

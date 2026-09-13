@@ -168,12 +168,14 @@ const power = computed(() =>
           <p v-if="selectedCard.description" class="detail-desc">{{ selectedCard.description }}</p>
           <div class="detail-section">
             <h5 class="d-label">词条</h5>
-            <div v-if="selectedCard.词条?.length" class="chip-row">
-              <span v-for="w in selectedCard.词条" :key="w" class="chip">{{ w }}</span>
+            <div v-if="(selectedCard.词条 ?? []).length" class="chip-row">
+              <span v-for="w in selectedCard.词条 ?? []" :key="w" class="chip">{{ w }}</span>
             </div>
             <div v-else class="empty-tab small">无词条</div>
           </div>
-          <div class="detail-section">
+          <!-- 🔴 2026-09-13 真机：recipe 是可选字段（老档/AI 产卡可能没有）——
+               原先裸读 .mainMaterial 会抛错打断整个面板。缺配方就不显示这一节。 -->
+          <div v-if="selectedCard.recipe" class="detail-section">
             <h5 class="d-label">配方</h5>
             <div class="kv-grid">
               <div class="kv-row">
@@ -183,7 +185,7 @@ const power = computed(() =>
               <div class="kv-row">
                 <span class="k">副素材</span>
                 <span class="v">{{
-                  selectedCard.recipe.subMaterials.length
+                  (selectedCard.recipe.subMaterials ?? []).length
                     ? selectedCard.recipe.subMaterials.join('、')
                     : '无'
                 }}</span>
