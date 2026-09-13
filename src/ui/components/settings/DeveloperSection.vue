@@ -20,6 +20,11 @@ async function seedDemo() {
     ? { kind: 'ok', msg: '演示卡已注入背包并编入卡组，可进战斗验证玩卡链路' }
     : { kind: 'err', msg: r.reason ?? '注入失败' };
 }
+
+/** 交锋拍试打：直接发起遭遇战（busy 守卫在 store 入口） */
+function onSkirmishTrial() {
+  void game.startSkirmish();
+}
 </script>
 
 <template>
@@ -108,6 +113,26 @@ async function seedDemo() {
         >
           {{ devFeedback.msg }}
         </p>
+      </div>
+    </AppCard>
+
+    <!-- 交锋拍试打（仅 dev 模式可见）——不依赖 dispatcher 触发，直接开一场遭遇战 -->
+    <AppCard v-if="devMode" padding="md">
+      <h4>交锋拍试打（dev）</h4>
+      <p class="card-desc">
+        跳过 combat_trigger，直接发起一场遭遇战（敌情评估一次 AI 调用 → 交锋拍 → 终局结算落库 →
+        终局演绎一次 AI 调用）。战报审计行走正文流，状态栏与反制 按钮在游戏页的「战斗模式 ·
+        交锋拍」面板。需要 skirmish_eval / skirmish_epilogue 两个 Agent 可解析到 API 池。
+      </p>
+      <div class="developer-toggle-row">
+        <button
+          type="button"
+          class="app-btn btn-primary btn-md"
+          :disabled="devSeeding || !s.developerMode || game.skirmishBusy"
+          @click="onSkirmishTrial"
+        >
+          {{ game.skirmishBusy ? '交锋进行中…' : '发起遭遇战' }}
+        </button>
       </div>
     </AppCard>
   </section>

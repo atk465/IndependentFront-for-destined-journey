@@ -35,6 +35,7 @@ import CardAlbumPanel from './cards/CardAlbumPanel.vue';
 import CraftBench from './cards/CraftBench.vue';
 import MiniPlayer from './MiniPlayer.vue';
 import CombatPanel from './combat/CombatPanel.vue';
+import SkirmishPanel from './combat/SkirmishPanel.vue';
 
 const game = useGameStore();
 const ui = useUIStore();
@@ -398,6 +399,9 @@ function onModalOpenChange(v: boolean) {
 
     <!-- M5 战斗面板（isInCombat 驱动，覆盖层） -->
     <CombatPanel />
+
+    <!-- 交锋拍制战斗面板（设计共识 §8；session 驱动，战报审计行走正文流） -->
+    <SkirmishPanel />
 
     <AppModal
       title="背包 / 装备 / 技能"
