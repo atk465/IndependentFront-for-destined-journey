@@ -58,25 +58,29 @@ function onFlee() {
 
     <div class="hp-row">
       <div class="hp-block">
-        <span class="hp-name">{{ session.enemyName }}</span>
-        <span class="hp-level">Lv.{{ session.enemyLevel }}</span>
+        <div class="hp-head">
+          <span class="hp-name">{{ session.enemyName }}</span>
+          <span class="hp-level">Lv.{{ session.enemyLevel }}</span>
+          <span class="hp-text">{{ session.enemyHp }}/{{ session.enemyMaxHp }}</span>
+        </div>
         <div class="hp-bar foe">
           <div
             class="hp-fill"
             :style="{ width: `${(session.enemyHp / Math.max(1, session.enemyMaxHp)) * 100}%` }"
           />
         </div>
-        <span class="hp-text">{{ session.enemyHp }}/{{ session.enemyMaxHp }}</span>
       </div>
       <div class="hp-block">
-        <span class="hp-name">你</span>
+        <div class="hp-head">
+          <span class="hp-name">你</span>
+          <span class="hp-text">{{ session.playerHp }}/{{ session.playerMaxHp }}</span>
+        </div>
         <div class="hp-bar mine">
           <div
             class="hp-fill"
             :style="{ width: `${(session.playerHp / Math.max(1, session.playerMaxHp)) * 100}%` }"
           />
         </div>
-        <span class="hp-text">{{ session.playerHp }}/{{ session.playerMaxHp }}</span>
       </div>
     </div>
 
@@ -131,61 +135,80 @@ function onFlee() {
 .skirmish-panel {
   display: flex;
   flex-direction: column;
-  gap: var(--theme-spacing-sm, 8px);
-  margin: var(--theme-spacing-sm, 8px) 0;
-  padding: var(--theme-spacing-sm, 8px) var(--theme-spacing-md, 12px);
-  border: 1px solid var(--theme-border, #ccc);
-  border-radius: 10px;
-  background: var(--theme-surface, #fafafa);
+  gap: 8px;
+  margin: 8px 0;
+  padding: 10px 14px;
+  border: 1px solid var(--theme-card-border, #72502d);
+  border-radius: var(--theme-radius-md, 6px);
+  background: var(--theme-card-bg, #211810);
+  color: var(--theme-text-primary, #eadcc5);
 }
 .skirmish-head {
   display: flex;
   align-items: center;
-  gap: var(--theme-spacing-sm, 8px);
+  gap: 8px;
 }
 .skirmish-head h3 {
   margin: 0;
   font-size: 0.9375rem;
+  color: var(--theme-text-primary, #eadcc5);
 }
 .beat-badge,
 .finish-badge {
   font-size: 0.75rem;
   padding: 2px 8px;
   border-radius: 999px;
-  background: var(--theme-surface-alt, #eee);
+  background: var(--theme-primary-bg, rgba(196, 140, 75, 0.15));
+  color: var(--theme-accent, #d2a25f);
 }
 .finish-badge.胜利,
 .finish-badge.碾压 {
-  background: rgba(48, 164, 108, 0.18);
+  background: rgba(120, 185, 109, 0.18);
+  color: var(--theme-success, #78b96d);
 }
 .finish-badge.撤退 {
-  background: rgba(120, 120, 120, 0.2);
+  background: var(--theme-surface-muted, #1a130d);
+  color: var(--theme-text-muted, #967756);
 }
 .finish-badge.败北 {
-  background: rgba(196, 74, 64, 0.2);
+  background: rgba(204, 89, 75, 0.2);
+  color: var(--theme-error, #cc594b);
 }
 .hp-row {
   display: flex;
-  gap: var(--theme-spacing-md, 12px);
+  gap: 12px;
 }
 .hp-block {
   flex: 1;
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: var(--theme-spacing-xs, 6px);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.hp-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
 }
 .hp-name {
   font-weight: 600;
+  color: var(--theme-text-primary, #eadcc5);
 }
 .hp-level {
   font-size: 0.75rem;
-  opacity: 0.7;
+  color: var(--theme-text-muted, #967756);
+}
+.hp-text {
+  margin-left: auto;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--theme-text-secondary, #c7a77e);
 }
 .hp-bar {
   height: 8px;
   border-radius: 4px;
-  background: var(--theme-surface-alt, #eee);
+  background: var(--theme-surface-muted, #1a130d);
+  border: 1px solid var(--theme-card-border, #72502d);
   overflow: hidden;
 }
 .hp-fill {
@@ -193,31 +216,32 @@ function onFlee() {
   transition: width 0.3s ease;
 }
 .hp-bar.foe .hp-fill {
-  background: #c44a40;
+  background: var(--theme-hp, #b94636);
 }
 .hp-bar.mine .hp-fill {
-  background: #30a46c;
-}
-.hp-text {
-  font-size: 0.75rem;
-  font-variant-numeric: tabular-nums;
+  background: var(--theme-success, #78b96d);
 }
 .intent-line {
   margin: 0;
   font-size: 0.875rem;
-  color: var(--theme-text-soft, #666);
+  color: var(--theme-text-secondary, #c7a77e);
 }
 .counter-row {
   display: flex;
-  gap: var(--theme-spacing-xs, 6px);
+  gap: 6px;
   flex-wrap: wrap;
 }
 .counter-btn {
   padding: 4px 14px;
-  border-radius: 8px;
-  border: 1px solid var(--theme-border, #ccc);
-  background: var(--theme-surface, #fff);
+  border-radius: var(--theme-radius-sm, 4px);
+  border: 1px solid var(--theme-card-border, #72502d);
+  background: var(--theme-surface-muted, #1a130d);
+  color: var(--theme-text-primary, #eadcc5);
   cursor: pointer;
+}
+.counter-btn:hover:not(:disabled) {
+  background: var(--theme-primary-bg, rgba(196, 140, 75, 0.15));
+  border-color: var(--theme-primary, #c48c4b);
 }
 .counter-btn:disabled {
   opacity: 0.5;
@@ -230,11 +254,11 @@ function onFlee() {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: var(--theme-spacing-xs, 6px);
+  gap: 6px;
 }
 .strip-label {
   font-size: 0.6875rem;
-  opacity: 0.7;
+  color: var(--theme-text-muted, #967756);
 }
 .strip-card {
   display: inline-flex;
@@ -242,10 +266,15 @@ function onFlee() {
   gap: 4px;
   padding: 3px 10px;
   border-radius: 999px;
-  border: 1px solid var(--theme-border, #ccc);
-  background: var(--theme-surface, #fff);
+  border: 1px solid var(--theme-card-border, #72502d);
+  background: var(--theme-surface-muted, #1a130d);
+  color: var(--theme-text-primary, #eadcc5);
   cursor: pointer;
   font-size: 0.8125rem;
+}
+.strip-card:hover:not(:disabled) {
+  background: var(--theme-primary-bg, rgba(196, 140, 75, 0.15));
+  border-color: var(--theme-primary, #c48c4b);
 }
 .strip-card:disabled {
   opacity: 0.5;
@@ -258,6 +287,6 @@ function onFlee() {
 }
 .tag-hint {
   font-size: 0.6875rem;
-  opacity: 0.65;
+  color: var(--theme-text-muted, #967756);
 }
 </style>
