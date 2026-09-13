@@ -21,6 +21,7 @@ import type {
   CreatePreset,
   PlotSettings,
   PlotOutline,
+  SaveSlot,
   ApiEndpoint,
   AgentConfig,
   ExperienceMode,
@@ -34,6 +35,7 @@ import { getBloodlineList, getBloodlineSet, type BloodlineSet } from '@engine/bl
 import { AgentClient } from '@engine/agent-client';
 import {
   tryParseOutline,
+  outlineToEvents,
   createOutlineFromAgent,
   type ParsedOutlineOutput,
 } from '@engine/plot-outline';
@@ -67,6 +69,8 @@ import { loadWorldBooksWithFallback } from '@engine/builtin-worldbooks';
 import { useWorldBookStore } from './worldbook-store';
 import { useWorkshopStore } from './workshop-store';
 import { getAgentSettings } from './agent-settings';
+// 🆕 F10（2026-09-04）：plot_outline 端点解析与 game-pipeline 走同一个 fail-closed 解析器
+import { resolveAgentEndpoint } from '../lib/endpoint-resolver';
 import { filterBooksByEnabledEntries } from '@engine/worldbook-loader';
 import type { WorldBook, WorldBookEntry } from '@engine/types';
 import {
@@ -852,7 +856,7 @@ export const useCreateStore = defineStore('create', () => {
 
   /** 流式生成实时统计（捏人页统计条用；null = 非生成中） */
   const plotStreamStats = ref<{
-    phase: 'connecting' | 'streaming';
+    phase: 'connecting' | 'thinking' | 'streaming';
     round: number;
     chars: number;
     reasoningChars: number;
@@ -865,19 +869,24 @@ export const useCreateStore = defineStore('create', () => {
   let plotAbortController: AbortController | null = null;
 
   /**
-   * 预计大纲总字数 —— 三档：上轮 raw 实际长度最准 → 历史版 content 膨胀 → 公式兜底。
-   * 公式：章节数 × 每章事件数 × 每事件 220 字 × XML 膨胀 1.8 + 固定开销 1800；
-   * 思维链 ≈ 正文 × 0.5（deepseek 类推理模型经验值）。
+   * 预计大纲总字数 —— 三档：上轮实际（正文 + 思维链）最准 → 历史版 content 膨胀 → 公式兜底。
+   * 🔴 分子/分母同口径：实时统计的「已生成字数」= 正文 + 思维链，故这里也必须含思维链，
+   *    否则首次/再次生成的「预计剩余」都会偏小（只算正文时思维链被丢）。
+   * 公式（首次生成无历史可用）：每子态势按新提示词产出规模估算
+   * （desc 200~400 + trigger/complete/fail + XML 标签开销 ≈ 520），再乘思维链系数 ≈ 0.5。
    */
   function estimateOutlineChars(): number {
-    const lastRaw = lastPlotGenerationMeta.value?.rawResponse?.length;
-    if (lastRaw && lastRaw > 0) return lastRaw;
+    const lastMeta = lastPlotGenerationMeta.value;
+    if (lastMeta) {
+      const total = (lastMeta.rawResponse?.length ?? 0) + (lastMeta.reasoning?.length ?? 0);
+      if (total > 0) return total;
+    }
     const hist = outlineHistory.value[outlineHistory.value.length - 1];
     if (hist?.content?.length) return Math.round(hist.content.length * 1.6);
     const ps = plotSettings.value;
-    const chapters = ps.main?.chapterCount || 3;
-    const eventsPerCh = ps.main?.eventsPerChapter || 3;
-    const body = chapters * eventsPerCh * 220 * 1.8 + 1800;
+    const chapters = ps.main?.chapterCount || ps.side?.chapterCount || 3;
+    const eventsPerCh = ps.main?.eventsPerChapter || ps.side?.eventsPerChapter || 3;
+    const body = chapters * eventsPerCh * 520 + 1800;
     return Math.round(body + body * 0.5);
   }
 
@@ -968,8 +977,15 @@ export const useCreateStore = defineStore('create', () => {
   // 剧情大纲生成 — 捏人页走模板系统 (buildAgentMessagesAsync)
   // ═══════════════════════════════════════════════════════
 
-  /** 端点解析（对齐 game-pipeline.buildEndpoints: 每个 Agent 的 `model` 存 API 池 id，ApiEntry.model → defaultModel） */
-  function resolvePlotOutlineEndpoint(): ApiEndpoint | null {
+  /**
+   * 端点解析（对齐 game-pipeline.buildEndpoints + resolveAgentEndpoint）。
+   * 🔴 F10：`plot_outline` 的 `model` 键存 **API 池 id**（历史命名不改），显式绑定失效时
+   *    绝不回落 `pool[0]`（那会把大纲偷偷送去另一家 provider）——返回带原因的失败，
+   *    调用方（runOutlineGeneration）把原因翻译成用户可见文案。
+   */
+  function resolvePlotOutlineEndpoint():
+    | { ok: true; endpoint: ApiEndpoint }
+    | { ok: false; reason: 'missing-pool' | 'stale-binding'; requestedPoolId?: string } {
     try {
       const store = useSettingsStore();
       const s = store.settings;
@@ -989,9 +1005,14 @@ export const useCreateStore = defineStore('create', () => {
         'plot_outline',
         store.projectAgentDefaults?.agents ?? {},
       ).model;
-      return pool.find((ep) => ep.id === poolId) || pool[0] || null;
+      const resolution = resolveAgentEndpoint({ boundPoolId: poolId, apiPool: pool });
+      if (resolution.status === 'resolved') return { ok: true, endpoint: resolution.endpoint };
+      if (resolution.status === 'stale-binding') {
+        return { ok: false, reason: 'stale-binding', requestedPoolId: resolution.requestedId };
+      }
+      return { ok: false, reason: 'missing-pool' };
     } catch {
-      return null;
+      return { ok: false, reason: 'missing-pool' };
     }
   }
 
@@ -1173,7 +1194,8 @@ export const useCreateStore = defineStore('create', () => {
         estimatedRemainingSec: null,
         elapsedSec: 0,
       };
-      // 速率滑动窗口（近 10s 平均；开头数据少不估算）
+      // 速率滑动窗口（近 10s 平均；开头数据少不估算）。分子记**正文 + 思维链**总字数：
+      // 推理模型先流一大段思维链，只按正文算会让速率与剩余长时间停在 0 / 无。
       const window_: Array<{ ts: number; chars: number }> = [];
 
       const finishStats = () => {
@@ -1183,38 +1205,46 @@ export const useCreateStore = defineStore('create', () => {
         plotStreamStats.value.elapsedSec = Math.round((Date.now() - startedAt) / 1000);
       };
 
+      // 正文与思维链的每个增量都走这里 —— 任意流数据到达都算「已连上」。
+      // 只认正文（旧实现）会让推理模型在整段思考期卡在 connecting（正文 0 字 → 永不翻态）。
+      const updateStats = (phase: 'thinking' | 'streaming') => {
+        const st = plotStreamStats.value;
+        if (!st) return;
+        const now = Date.now();
+        const totalChars = fullText.length + fullReasoning.length;
+        window_.push({ ts: now, chars: totalChars });
+        const cutoff = now - 10000;
+        while (window_.length > 0 && window_[0].ts < cutoff) window_.shift();
+        const first = window_[0];
+        const last = window_[window_.length - 1];
+        const span = last.ts - first.ts;
+        const delta = last.chars - first.chars;
+        const cps = span > 0 ? (delta * 1000) / span : 0;
+        st.phase = phase;
+        st.chars = fullText.length;
+        st.reasoningChars = fullReasoning.length;
+        st.charsPerSec = Math.round(cps);
+        st.elapsedSec = Math.round((now - startedAt) / 1000);
+        // 数据足够（≥200 字）才给剩余估算；宁偏大不偏小（×1.15 缓冲）
+        if (totalChars >= 200 && cps > 0) {
+          const remaining = Math.max(0, st.estimatedTotal - totalChars);
+          st.estimatedRemainingSec = Math.round((remaining / cps) * 1.15);
+        } else {
+          st.estimatedRemainingSec = null;
+        }
+      };
+
       void client.chatStream(
         request,
         {
           onChunk(text, _isComplete) {
             fullText += text;
-            const now = Date.now();
-            window_.push({ ts: now, chars: fullText.length });
-            const cutoff = now - 10000;
-            while (window_.length > 0 && window_[0].ts < cutoff) window_.shift();
-            const first = window_[0];
-            const last = window_[window_.length - 1];
-            const span = last.ts - first.ts;
-            const delta = last.chars - first.chars;
-            const cps = span > 0 ? (delta * 1000) / span : 0;
-            const st = plotStreamStats.value;
-            if (!st) return;
-            st.phase = 'streaming';
-            st.chars = fullText.length;
-            st.charsPerSec = Math.round(cps);
-            st.elapsedSec = Math.round((now - startedAt) / 1000);
-            // 数据足够（≥500 字）才给剩余估算；宁偏大不偏小（×1.15 缓冲）
-            if (fullText.length >= 500 && cps > 0) {
-              const remaining = Math.max(0, st.estimatedTotal - fullText.length);
-              st.estimatedRemainingSec = Math.round((remaining / cps) * 1.15);
-            } else {
-              st.estimatedRemainingSec = null;
-            }
+            updateStats('streaming');
           },
           onReasoning(text) {
             fullReasoning += text;
-            const st = plotStreamStats.value;
-            if (st) st.reasoningChars = fullReasoning.length;
+            // 正文尚未开始 = 思考阶段；正文已开始（思考与正文交错）保持 streaming
+            updateStats(fullText.length > 0 ? 'streaming' : 'thinking');
           },
           onComplete(result) {
             fullText = result.fullText;
@@ -1246,8 +1276,18 @@ export const useCreateStore = defineStore('create', () => {
   async function runOutlineGeneration(initialUserMessage: string): Promise<boolean> {
     plotGenerationError.value = null;
     await useSettingsStore().initApiSecrets();
-    const endpoint = resolvePlotOutlineEndpoint();
-    if (!endpoint || !endpoint.defaultModel) {
+    // 🔴 F10：端点解析失败时区分「还没配」与「绑定了但已失效」——
+    //    前者让人去配置，后者是设置页里那个池被删了，指引到 Agent 配置重选。
+    const resolved = resolvePlotOutlineEndpoint();
+    if (!resolved.ok) {
+      plotGenerationError.value =
+        resolved.reason === 'stale-binding'
+          ? `「大纲生成」Agent 绑定的 API 池已失效（原 id: ${resolved.requestedPoolId ?? ''}），请在设置 → Agent 配置重新选择`
+          : '未配置 API 端点或模型，请在设置页为「大纲生成」Agent 配置 API';
+      return false;
+    }
+    const endpoint = resolved.endpoint;
+    if (!endpoint.defaultModel) {
       plotGenerationError.value = '未配置 API 端点或模型，请在设置页为「大纲生成」Agent 配置 API';
       return false;
     }
@@ -1751,11 +1791,13 @@ export const useCreateStore = defineStore('create', () => {
       );
     }
 
-    // 收尾只做世界内的叙事交接，不再写「请复述 / 不要解释」一类元指令。命定核心不在这里
-    // 点名或规定演出，完全服从单独注入的世界书条目。
+    // 收尾：约束首轮叙事流程 —— 先以开局背景为舞台重新演绎（既定事实不变），再自然续写。
+    // 🔴 这一句同时是 `{{SKILL_STATE}}` 从开场消息里截取初始技能声明的结束边界
+    //    （placeholder-registry 的 isNaturalOpeningSkillEnd），改措辞要同步改那里。
+    // 命定核心不在这里点名或规定演出，完全服从单独注入的世界书条目。
     lines.push('');
     lines.push(
-      `故事便从这个瞬间继续。周遭的景象、人物的目光与声音渐次鲜明，而接下来发生的一切，都将从${charName}此刻的处境自然延伸。`,
+      `以上是${charName}的角色设定与开局剧情。首轮叙事请以「开局剧情」描写的时间地点为舞台：先将这段开场以你的笔触重新演绎（可扩写细节与氛围，不可改变既定事实），再自然续写后续发展。`,
     );
 
     return lines.join('\n');
@@ -1765,7 +1807,20 @@ export const useCreateStore = defineStore('create', () => {
   // 提交: 写入 DB + 跳转
   // ═══════════════════════════════════════════════════════
 
-  async function startJourney(): Promise<string> {
+  const isCreating = ref(false);
+  let creationPromise: Promise<string> | null = null;
+
+  function startJourney(): Promise<string> {
+    if (creationPromise) return creationPromise;
+    isCreating.value = true;
+    creationPromise = persistJourney().finally(() => {
+      creationPromise = null;
+      isCreating.value = false;
+    });
+    return creationPromise;
+  }
+
+  async function persistJourney(): Promise<string> {
     // 最终持久化边界必须重验；角色预设可以在任一步加载，不能只依赖曾经通过过 Step 1。
     if (!attributesFullyAllocated.value) {
       currentStep.value = 1;
@@ -1778,16 +1833,12 @@ export const useCreateStore = defineStore('create', () => {
     console.log('[create-store] startJourney — openingPrompt:', openingPrompt.slice(0, 200));
     console.log('[create-store] startJourney — openingPrompt length:', openingPrompt.length);
 
-    const { saveCharacter, saveSaveSlot } = await import('@engine/database');
-
-    await saveCharacter(charState);
-
     // 存档名：主角名 + 层级 + 日期
     const now = new Date();
     const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     const saveName = `${charState.name} · ${charState.tierName} · ${dateStr}`;
 
-    await saveSaveSlot({
+    const save: SaveSlot = {
       id: saveId,
       name: saveName,
       slot: 0, // TODO: 自动分配空闲槽位（多槽位属产品功能非字段规范）
@@ -1804,42 +1855,30 @@ export const useCreateStore = defineStore('create', () => {
         openingPromptConsumed: false, // 🆕
         plotSettings: JSON.parse(JSON.stringify(plotSettings.value)), // §5.2: 本档剧情配置随档落库（含雷点）
       } as any,
-    });
+    };
 
-    // 真机修(2026-07-23): 开局兑换的命运点 → 初始化到存档级 SaveProfile.fp
-    // ADR-22: FP 是存档级元货币，独立于 CharacterState。此前 destinyPoints 只写进
-    // customFields.destinyPoints，游戏内 FP(SaveProfile.fp) 从未拿到这笔，开局兑换的 FP 丢失。
-    const { getProfile, addFP, updateProfile } = await import('@engine/save-profile');
-    // 🔴 era 必须透传（T12 的 D9 线程化）：SaveProfile 是惰性创建的，这里是生产上
-    //    唯一的创建点。不传就等于让新档的纪元名落成空串，而存档一旦盖章就永不重读内容包。
-    const profile = await getProfile(saveId, era.value);
-    // 经验档位与命运点兑换彼此独立：零兑换也必须把用户选择盖章进新存档。
-    profile.experienceMode = experienceMode.value === 'easy' ? 'easy' : 'normal';
-    if (destinyPoints.value > 0) {
-      // addFP 会持久化 profile，正数分支不重复 updateProfile。
-      await addFP(profile, destinyPoints.value, '开局兑换的命运点', 'other');
-    } else {
-      await updateProfile(profile);
-    }
-
-    // §5.2: 主线/支线已生成大纲 → 落库确认版 + 结构化事件树（全部 hidden）；历史版本不落库
-    if ((plotMode.value === 'main' || plotMode.value === 'side') && plotOutline.value) {
-      const { savePlotOutline, savePlotEvents } = await import('@engine/database');
-      const { outlineToEvents } = await import('@engine/plot-outline');
-      const confirmed: PlotOutline = {
-        ...JSON.parse(JSON.stringify(plotOutline.value)),
-        saveId,
-        confirmed: true,
-      };
-      await savePlotOutline(confirmed);
-      const events = outlineToEvents(JSON.parse(JSON.stringify(plotOutlineChapters.value)), saveId);
-      if (events.length > 0) await savePlotEvents(events);
-    } else if (plotOutline.value) {
-      const { savePlotOutline } = await import('@engine/database');
-      await savePlotOutline({ ...JSON.parse(JSON.stringify(plotOutline.value)), saveId });
-    }
-
-    return saveId;
+    const confirmed =
+      (plotMode.value === 'main' || plotMode.value === 'side') && !!plotOutline.value;
+    const outline = plotOutline.value
+      ? ({
+          ...JSON.parse(JSON.stringify(plotOutline.value)),
+          saveId,
+          ...(confirmed ? { confirmed: true } : {}),
+        } as PlotOutline)
+      : undefined;
+    const input = {
+      character: charState,
+      save,
+      era: era.value,
+      experienceMode: experienceMode.value === 'easy' ? ('easy' as const) : ('normal' as const),
+      destinyPoints: destinyPoints.value,
+      outline,
+      events: confirmed
+        ? outlineToEvents(JSON.parse(JSON.stringify(plotOutlineChapters.value)), saveId)
+        : [],
+    };
+    const { createJourney } = await import('@engine/create-journey');
+    return createJourney(input);
   }
 
   /** 成功开局后清除草稿 */
@@ -1951,6 +1990,11 @@ export const useCreateStore = defineStore('create', () => {
       physics: physics.value,
       backstory: backstory.value,
       extra: extra.value,
+      // 剧情大纲本体（含解析出的章节）——此前只存 plotSettings，读回预设时大纲丢失
+      plotOutline: plotOutline.value
+        ? (JSON.parse(JSON.stringify(plotOutline.value)) as PlotOutline)
+        : null,
+      plotOutlineChapters: JSON.parse(JSON.stringify(plotOutlineChapters.value)),
     };
   }
 
@@ -2009,6 +2053,20 @@ export const useCreateStore = defineStore('create', () => {
         if (data.plotSettings.side.eventsPerChapter)
           plotEventsPerChapter.value = data.plotSettings.side.eventsPerChapter;
       }
+    }
+
+    // 剧情大纲本体：新预设带此字段（可能为 null = 存的时候就没大纲）；旧预设两字段都缺 →
+    // 保持当前大纲不动（A 口径，避免「加载旧预设反而清掉刚生成的大纲」）。恢复后清历史并刷新草稿。
+    if (data.plotOutline !== undefined || data.plotOutlineChapters !== undefined) {
+      plotOutline.value = data.plotOutline
+        ? (JSON.parse(JSON.stringify(data.plotOutline)) as PlotOutline)
+        : null;
+      plotOutlineChapters.value = data.plotOutlineChapters
+        ? (JSON.parse(JSON.stringify(data.plotOutlineChapters)) as typeof plotOutlineChapters.value)
+        : [];
+      outlineHistory.value = [];
+      chaptersHistory.value = [];
+      autoSaveDraft();
     }
 
     // 预设入口在全部步骤都可用；晚加载的旧预设若没有完整分配属性，立即返回基础信息页。
@@ -2224,6 +2282,7 @@ export const useCreateStore = defineStore('create', () => {
     buildCharacterState,
     buildOpeningPrompt,
     startJourney: startJourneyAndClearDraft,
+    isCreating,
     // 模板
     substituteUser,
     // localStorage 草稿

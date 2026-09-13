@@ -9,6 +9,217 @@
 
 ## 进行中 / 近期交付（按交付时间倒序）
 
+### 2026-09-12 设置页返回误入游戏修复｜已实施（首页路径真机验证通过）
+
+- **现象**：会话里曾进入过存档时，从首页打开设置再点击返回会错误进入游戏；若对应存档已删除，
+  随后还会提示 `Save <id> not found after timeline restore`。
+- **根因**：设置页返回按钮用仍保留的 `ui.activeSaveId` 猜测来路，而该字段只表达最近的存档导航目标，
+  离开游戏回到首页后不会自动清空，不能代表设置页的真实来源。
+- **修复**：返回按钮改用 `ui.back('home')` 弹出 `viewHistory`，按真实页面来路返回；历史栈为空时才
+  回落首页。新增源码级回归测试，禁止重新引入按 `activeSaveId` 猜来源的分支。
+
+验证：2026-09-12 实测“首页 → 设置 → 返回”正确回到首页且控制台无存档加载错误；`npm run gates`
+全绿（385 个测试文件、9,514 项通过、8 项跳过），中文编码三判据通过。
+
+### 2026-09-11 剧情编剧化 + 角色在场判定｜已实施（真机未验）
+
+两个真机诊断（`fated-poem-debug-b9e71606-*`）驱动的引擎改动：
+
+**A. 剧情预检从「触发检查员」升为「编剧」（ADR-35 修订）**
+
+- 诊断：`worldFlags.plotThreads` 恒 null、十轮 `threadDeclarations` 全空。根因两条：闸门
+  `activeEventCount>0 || insideWindow → blank_period` 把细化层整月关死；提示词只让它判触发、
+  明令禁具体情节 → 没人设计剧情，正文只能即兴（真相/回收无人规划）。
+- **闸门只留硬保险**（`plot-threads.ts`）：非主线模式 / 无大纲锚 / 战斗进行中三因关门，其余一律
+  放行；窗口距离仅作调试展示。删掉概率分带 / 回合冷却 / `roll_failed` / `blank_period`。
+- **账本加 3 栏**：`PlotThreadNode`/`PlotThreadDeclaration` 补 `truth`（谜底）、`payoffPlan`
+  （回收计划）、`revealLevel`（`seed/partial/full` = 埋/半揭/全揭），reducer 透传、老档兼容
+  （可选字段）。
+- **pre/post 富块加宽**（`agent-templates.formatPlotThreadsBlock`）：`<主线事件线>` 每条补
+  谜底 / 回收计划，状态行缀揭晓程度。🔴 不动 delta 的轻量 `plot` scope（那面与其他 Agent
+  共享，加 motive/truth 会漏给 story）。
+- **提示词改写**（`public/data/defaults/agent-config.json` + 私有内容包同名文件）：角色改「编剧」；
+  新增**第 0 步场合判断**（`sceneMode`/`suitableForPlot`/`sceneNote`：关系亲密/日常/自主行动/
+  主线推进/战斗/过渡）；新增硬规则（埋必配收 · 不许只埋不收 · 一轮最多埋 1 收 2 · 埋收隔开 ·
+  贴窗口收 · 真相不外泄）；`directive` 放宽为「给落点但不给真相」；输出 schema 补字段。
+
+**B. 角色离场/入场判定（present）**
+
+- 诊断：玩家从港口街走到城北浅林（跨场景），秋尔/诺恩/摊主仍 `present=true`；调度器看不到
+  present，且 present=false 的角色被**整批滤出** npc zone → 名册不完整（回来的老角色会被当
+  新人重生成）。
+- **快照结构**（`context-visibility.ts`）：npc zone 改收**全量**角色；过滤下移到**场景面**
+  （NARRATIVE/SUMMARY 仍按 present 过滤，保留 2026-08-08 语义）；**名册面**（KEYS 表）加
+  `Present` 列（在场/离场/—），FULL 面随之收全量。
+- **调度器提示词**：在场判定从「正文出现的人物」改为**遍历全表**，位置与主角不同场景者
+  （哪怕本轮没出场）标 `present=false`。
+
+验证：`npm run gates` 全绿（387 文件 / **9,534 通过 / 8 跳过**）。编码三判据（U+FFFD 0 / ctrl 0 /
+JSON 可解析）两仓 agent-config 均过。
+
+延后：`char_gen` 新角色 `present` 仍默认 true（需动召唤链 marker）；post_check「计划该收未收 →
+顺延」；时间线显示揭晓程度 / 回收计划。
+
+### 2026-09-11 剧情时间线视图｜已实施（真机走查未做）
+
+把「剧情」面板从纯竖向列表升级出一张**可按天缩放的连线图**（主人要求）：**横轴 = 游戏时间（天）**。
+
+- **x = 游戏时间**：`x = startX + (day - minDay) * pxPerDay`，每天占 `pxPerDay` 像素；大纲关键事件
+  取 `timeWindow.start` 年-月 → 该月首日，事件线节点取 `seededAt`。🔴 depth 0 章节容器不落节点。
+  无 `timeWindow` 的节点进最左「未定时间」竖条。
+- **顶部章节跨度条**：章节按其关键事件的时间跨度横跨一段、**章节名居中**；重叠的章节自动分多行。
+- **ComfyUI 式连线**：章节条 → 关键事件（从条底扇出）、父事件 → 子事件、事件线伏笔/回收
+  （`foreshadows`/`payoffs`），全部贝塞尔曲线。🔴 首轮真机走查修正：初版把 depth-0 章节当
+  普通节点（它没有 `timeWindow`）而炸成一团，且错砍了结构连线 —— 现章节只作跨度条、连线保留。
+- **时间缩放标尺**：控件（− / 滑块 / ＋）横向放大缩小时间跨度，刻度密度随缩放自动选（日 / 月 / 年）。
+- **定位到现在**：一键把「现在」游标滚到视口中央（进面板自动定位一次）。
+- **防剧透**：蒙版节点零字段进 DOM、隐藏端点的边整条不画；剧透模式逐条点击揭示（会话内存态）。
+- **节点卡面**：事件名 + **一行摘要**（大纲 = `description`、事件线 = `gist`）+ 状态徽章；
+  节点放大到 `220×76`、字号提一档；章节条改成**低调的下划线规则**（不再实心大条压顶）；
+  画布给 `min-height` 撑满面板。悬停 tooltip 显示摘要全文。
+- **落地**：纯布局函数 `src/ui/components/game/plot-timeline.ts`；组件 `PlotTimeline.vue`；
+  `PlotPanel` 加「时间线 / 列表」切换（**默认时间线，旧章节手风琴 + 事件线竖向列表保留**）；
+  剧情弹窗 `size` `lg → xxl`（`min(94vw, 1600px)`）。**零新依赖**（纯 SVG + CSS）。
+  设计注记已回写 `docs/planning/2026-09-07-mainline-refinement-layer-design.md` §4.2。
+
+验证：`npm run gates` 全绿（**387 个测试文件、9,537 项通过 / 8 项跳过**）；`build:engine` 含声明产物通过。
+
+### 2026-09-11 修复批②｜技能品质链路 / `<buffs>` 描述泄漏（真机 debug）
+
+真机导出（`fated-poem-debug-655aa8ec-*`）三个问题：
+
+- **`<buffs>` 块整块丢失 + JSON 泄漏进 description**：item_gen 输出
+  `<buffs>{...状态效果 JSON...}</buffs>`，但 `stripKnownChildBlocks` 只剥
+  `effect/script/modifiers/automaton`、**没剥 `<buffs>`**；且三处
+  `validateAndCollectCombatEffects(x, mods, undefined)` 的 buffs 参数永远 `undefined` —— 于是
+  `Skill.buffs` / `InventoryItem.buffs` 恒空，JSON 正文再经 `stripInnerTags` 落进 `description`
+  （灼热射线 / 钢锋长剑 描述尾部粘着 `{"name":"灼烧",…}`）。修：剥离补 `<buffs>`/`<buff>`；
+  新增 `parseBuffsXML` 按行解析（交 `validateItemOutput` 校验，坏 buff 丢弃不中断）+ 三处调用点接入。
+- **技能品质一律显示「史诗」**：`ItemsPanel.qualityOf` 对技能硬编码 `return '史诗'`（注释自述是为消除
+  「列表灰点 / 详情史诗」的不一致 —— 把两边都改成了错的）。真根因是品质在整条链上无处可存：
+  捏人预设的自定义技能有 `rarity`（开局提示渲染成「优良 / 稀有 / 普通」），但开局 `skills: []`
+  按设计不落库、交 item_gen 生成，而 `<skill>` 格式没有 quality 字段、`Skill` 类型也没有 rarity。
+  修：`Skill.rarity` + `<skill quality="…">`（parser 读 + JSON 兜底收）+ `assembleCharacterState`
+  经 `normalizeRarity` 归一透传 + UI 改读 `skill.rarity`（缺省回落「普通」，不再编造）；
+  两份 agent-config（公开占位 + 私有包）的 item_gen `<skill>` 格式补 `quality`，并指示开局初始技能
+  照 dispatcher 请求里标明的品质原样填。
+  > ⚠️ 首轮真机验收发现**两处漏网（与 2026-08-12 skillPower 完全同款）**：开局初始技能走的是
+  > **item_gen 独立链**、不经 `assembleCharacterState` —— `buildItemGenPatches` 的 `add_skill` patch
+  > 与 `state-manager.applyAddSkill` 的新技能字段白名单**都没收 `rarity`**，于是 AI 明明输出了
+  > `quality="优良/稀有/普通"` 却落库即丢、技能全变「普通」。两处已补齐（归一化在 `applyAddSkill`，
+  > 同 `applyAddItem` 的 `rarity`）。
+- **火球术伤害核对**：`关联属性×10×层级系数 + 技能威力 + 武器攻击力`，火球术 = `8×10×2.8 + 400 + 75 = 699`
+  （减免前）—— 数字本身正确；但技能的 on-hit 效果（法力燃烧 / 灼烧 DOT）战斗中不生效、且 `资源`
+  modifier 编译方向反，**另记 [`docs/known-issue.md`](known-issue.md)**（涉战斗语义设计，暂不修）。
+
+验证：受影响测试全绿；两处 `agent-config.json` 编码三判据（U+FFFD 0 / 控制字符 0 / JSON 可解析）通过。
+
+### 2026-09-11 修复批｜开局注入 / 预设条目与大纲 / 端点悬空回落
+
+- **item_gen 重铸占位符泄漏**：独立链 `itemLocalParams` 未提供 `{{REWRITE_TARGET}}`/`{{REWRITE_REASON}}`，
+  模板占位符被解析器**原样保留**、字面量泄漏进提示词（模型被迫自问「这是不是重铸模式」）。
+  补空串修复（模板注释写明「空 = 普通新增模式」）+ 回归测试。
+- **捏人预设条目 CRUD**：`PresetManager` 新增条目增 / 删 / 改序（↑↓）/ 复制（副本插正下方）。
+  纯逻辑剥到 `src/ui/lib/preset-entries.ts`（按 `injection_order` 取生效顺序、每次改动后按位置
+  重编号，保证「界面顺序 = 生效顺序」）+ 单测；删除走二次确认。
+- **开局收尾**：`buildOpeningPrompt` 结尾改回复述 + 续写指令
+  （「首轮叙事请以『开局剧情』…先将这段开场重新演绎…再自然续写」）；`isNaturalOpeningSkillEnd`
+  同步新增边界（旧自然语言边界保留，兼容旧档）。
+- **捏人预设保存剧情大纲**：`CreatePreset` 新增 `plotOutline` / `plotOutlineChapters`，
+  预设保存 / 读取往返（旧预设缺这两字段 → 保持当前大纲不动）；`CreateStepPlot` 在无大纲时
+  也显示「导入大纲」（隐藏 file input 移出条件分支，否则无大纲时点不到）。
+- **F10 端点悬空回落**：`getEndpointForAgent` 按绑定**来源**分档 —— 用户覆写层的悬空 id 维持
+  fail-closed；**内容包默认层**塞的设备本地 pool id 换机必然悬空，改为回落默认端点 + 可见 warn
+  （真机：item_gen 默认层绑了坏 id，dispatcher 发出的 8 条 `<item_gen_request>` 一条都没落库）。
+  新增 `hasExplicitAgentModel`；私有内容仓 `agentDefaults.item_gen`/`plot_outline.model` 改空串。
+
+验证：`npm run gates` 全绿（**385 个测试文件、9,513 项通过 / 8 项跳过**）。
+
+### 主线细化层 v1（ADR-35）｜已实施（2026-09-09，真机待验证）
+
+在剧情事件窗口之间的空白期，`plot_pre_check` 按 Code 节奏闸门现编「主线细化节点」，把宏观主线
+落地为带动机的 NPC 行动；节点带 `foreshadows`/`payoffs` 伏笔引用自动连成事件线，
+`plot_post_check` 在正文落定后结算（resolved/dissolved）并单向置揭示。设计与收口参数见
+[设计文档](planning/2026-09-07-mainline-refinement-layer-design.md) §11；
+实施方案与逐项验收记录见[实施计划](planning/2026-09-07-mainline-refinement-layer-implementation-plan.md) §6。
+
+- **领域逻辑**：新增 `src/sillytavern/plot-threads.ts`（纯函数：闸门 `evaluatePlotThreadGate`、
+  declarations/updates/revealed 三 reducer、边推导、快照与表层投影、char_gen 实体化投影 A/B）。
+  确定性随机经 `createEjsRng` 专用 salt，同一未完成回合重试不重掷；`Math.random`/时钟/DB 全禁。
+- **存储**：`worldFlags.plotThreads`（照 ADR-32/33 事实态先例：零新 Dexie 表、按节点名寻址、
+  永不随 packStamp 清空、随档/备份/快照往返）。写入口 `commitPlotThreadTurn`（per-save 锁内
+  重读窄写 + `lastCommittedTurn` 幂等），成功回合在 `advanceTurn` 之前收口。
+- **管线**：`plot-engine` 解析可选新字段（旧 JSON 兼容）；game-pipeline 求闸门 → 接受声明 →
+  导演块（只给可演绎行动与场景融合要求）→ post 暂存 → 成功收口；char_gen 请求按
+  §3.4 时点分流注入（未出现角色给全量行为化 / 已出现只给表层，motive 不进档案）。
+- **上下文**：plot 投影并入节点快照并**显式清空**；新增 ephemeral 占位符
+  `PLOT_THREAD_TURN`（pre/post 的闸门与同轮声明）与 `PLOT_THREAD_SURFACE`
+  （dispatcher 表层投影）；pre/post 富块追加事件线快照。
+- **内容**：公开占位集与私有内容仓的 plot_pre/post systemPrompt + 模板同步
+  （编码三判据通过），私有仓 pack **2.7.0** 构建成功；`agent流程测试/要求.md` 追加细化测试要求。
+  ⚠ 真实 LLM 回合验证留待真机。
+- **UI**：`PlotThreadsPanel.vue`（剧情面板内带文字入口、按主线锚分组、轻量方向连线）+
+  防剧透判定 `plot-thread-view.ts`（蒙版/组名/边/引用行四重遮蔽）+ 调试区块
+  `plot-thread-debug.ts`（闸门预览直接调生产函数）。组件测试抓出并修复一处真实防剧透漏洞
+  （已揭示节点详情里的「埋向/回收」引用隐藏端点）。⚠ 真机浏览器走查未做。
+
+验证：`npm run gates` 全绿（**383 个测试文件、9,484 项通过、8 项跳过**）；新增 focused 覆盖：
+领域逻辑 28 条、写入口并发/幂等 4 条、解析/投影/assembler 12 条、UI 组件 17 条、
+单档往返 1 条、快照恢复 2 条。未调用付费 provider，真机游玩与 provider usage 数据留待验证。
+
+### 剩余四项可靠性修复｜已实施（2026-09-05）
+
+- EFFECT-01：效果订阅按权威角色集合对账，删除失效 owner、刷新脚本，离页/切档/删档拆线。
+- STATE-01：保留 AI best-effort 语义，新增领域命令事务入口；制作、战斗、生成/重铸整批提交，失败不显示成功结果。FP 结算复用真实账务入口并与命令同事务。
+- A11Y-01：共享弹窗补齐语义、焦点陷阱与归还，支持嵌套；通知可被读屏宣布，难度/背景/存档选择有键盘入口。
+- DEV-01：删除双平台按端口强杀循环；端口冲突安全退出。Windows 实测两个占用端口的测试监听均保留。
+
+PR #130 复核补修：制作工具暂存消耗与奖励，和产物一次提交；EXP 使用角色真源且奖励不重复，保留普通对话回退结算；焦点环排除隐藏祖先下的控件。
+
+验收与独立 PR 复核记录见 [剩余四项可靠性修复](reviews/2026-09-05-remaining-reliability.md)。
+
+### 首轮游玩可靠性｜已实施（2026-09-05，本机闸门通过，首次运行界面已走查）
+
+- ONB-01：创角前检查内容目录、对话 API / 模型 / Agent 绑定并提供设置入口；沿用默认端点解析，保留演示内容、可选能力与免密钥本地服务，不自动发请求。
+- DATA-01：并发创角共用一次提交；新增引擎 `createJourney`，五张旅程表同一事务落库，失败不留半档，界面显示错误并允许重试。
+- LIFE-01：存档全量读取后按世代提交，过期加载与回读不覆盖新会话；离页使加载失效，游戏页及图像/外貌投影拒绝过期结果。
+- LIFE-02：Stop 后等后台写入与回读完整收尾再解锁输入，管线入口拒绝重叠运行；已销毁管线不再更新后来页面。
+
+`npm run gates` 通过；2026-09-05 实测 370 个测试文件，9,398 项通过、8 项跳过。首次运行缺 API 阻断与设置跳转已在浏览器验证，新界面默认视口与 480×800 走查通过；未调用付费 provider，未做长时间游玩验收。范围与回归证据见 [首轮可靠性验收](reviews/2026-09-05-first-session-reliability.md)。
+
+2026-09-05 独立 Astra PR 复核补修：开场认领按原存档事务归还，保留已落库正文；延迟记忆写回校验会话归属；同档重挂载等待跨管线收尾屏障。三条独立复现已通过，复核无新增问题；完整闸门重跑 370 个测试文件、9,403 项通过、8 项跳过。
+
+### 综合代码审查修复批 C 组 + 安全小组｜已实施（2026-09-05，`npm run gates` 全绿）
+
+按 2026-09-04 风险聚焦代码审查（baseline `0cad0b9`）与 `Coding_Agent_Fix_References`
+修复简报推进 7 条修复，合并为一批合入：
+
+- **F07** 状态效果时间分区不变式：小时型效果每次推进直接 `Math.floor(minutes/60)`，
+  两段 30 分钟永远凑不成 1 小时 → 引入 `StatusEffect.carryMinutes` 整数累积，满整小时才扣
+  `remainingTime`；刷新拉长时长时余量归零（新窗口起点）；旧档缺省按 0 处理不凭空延长。
+  回归钉死 60 / 30+30 / 10×6 分区不变式与中间态。
+- **F08** 地图收益可恢复（known-issue 第 2 条闭环）：`incomeDue` 折叠成持久借据
+  （`worldFlags.mapIncome`，零新 Dexie 表、随 FullBackup），与地图事实态同一次 profile 落库；
+  `settlePendingMapIncome()` 以「给钱 + 标记 applied」同一 IDB 事务原子消费，崩溃重放恰一次。
+  历史损失不回溯补偿，如实记入 known-issue。
+- **F09** 嵌入向量溯源与安全召回：新增 `EmbeddingMetadata`（端点身份+模型+维度+预处理版本
+  归一化指纹，不含凭据）随向量存储；召回四桶分类，只对兼容向量算余弦，坏行跳过不毒化整库；
+  无指纹 legacy 记录走重要性/recency 兜底。存量向量停止语义排名直到显式重嵌入。
+- **F10** 显式 API 端点绑定 fail-closed：新增纯解析器 `endpoint-resolver.ts` 统一主 DAG
+  / 侧链 / 标题大纲路径，区分「未设置走默认」与「显式绑定失效报错」，杜绝 `find || apiPool[0]`
+  静默改道；主 Agent 失效停轮 + toast，可选侧链按既有策略跳过（绝不换 provider）。
+- **F11** 代理目的地策略：IPv6 字面量归一化后比对 SSRF 黑名单（补 IPv4-mapped 条目）；
+  `redirect:'manual'` + 3xx 显式拒绝，不跟随绕过策略。
+- **F13** 内容写原子性：边读边限 10 MiB（413）、JSON 校验（400）、临时文件 + 原子 rename，
+  失败保留旧版本。
+- **F15** 美化规则同 ID 用户优先：`mergeRules` / `useBeautify` 改为原位整条替换
+  （保槽位顺序），locked 受保护不可替，重复 ID 后到覆盖，输入不被就地修改。
+
+验证：新增回归覆盖以上各条（state-manager.map-income / endpoint-resolver 独立测试文件 +
+各模块扩展）。完整 `npm run gates` 通过：**367 个测试文件、9,380 项通过与 8 项跳过**，
+typecheck（引擎/Vue/工具）×3 + build + format + lint + knip 棘轮（140 基线无新增）全绿；
+F08 并发审查（锁序/事务重放/陈档覆写）确认无死锁与丢更新。
+
 ### 游玩中玩家人设编辑｜已实施（2026-08-30，UI 真机走查通过）
 
 主角状态栏新增“编辑人设”入口，仅编辑当前存档角色表中的 `personality`、

@@ -1,3 +1,4 @@
+import type { StatePatch } from '@engine/types';
 /**
  * GamePipeline — 前端 ↔ AgentOrchestrator 桥接层
  *
@@ -32,6 +33,7 @@ import type {
   ChatMessage,
   SystemEvent,
   DebugAgentEntry,
+  PlotEvent,
 } from '@engine/types';
 import { isPlayableCard } from '@engine/card-workshop/card-kind';
 import { isDamaged } from '@engine/card-workshop/repair';
@@ -63,6 +65,21 @@ import { buildRandomEventRollContext } from '@engine/random-event-snapshot';
 import { getRandomEventPack } from '@engine/random-event-runtime';
 import { getEngineSettings } from '@engine/engine-settings';
 import { toEpochMinutes } from '@engine/time-system';
+// 🧵 主线细化层（2026-09-09 接线）：闸门/快照/投影响应都在 game-pipeline 供值（buildContext 铁律）
+import { getPlotThreadFlags, commitPlotThreadTurn } from '@engine/save-profile';
+import {
+  evaluatePlotThreadGate,
+  parseThreadDeclarations,
+  buildCharGenProjectionA,
+  buildCharGenProjectionB,
+} from '@engine/plot-threads';
+import type {
+  PlotThreadGateResult,
+  PlotThreadTurnContext,
+  PlotThreadDeclaration,
+  PlotThreadUpdate,
+} from '@engine/plot-threads';
+import { countAcceptableTriggers } from '@engine/plot-engine';
 // 🆕 Delta 会话（T4）：存档切换/销毁时清理该存档的 prompt session（string 入参 = 清整个 saveId）
 import { invalidatePromptSession } from '@engine/prompt-session-assembler';
 import { resolveSceneWeather } from './scene-image-seams';
@@ -82,8 +99,10 @@ import { useWorldBookStore } from '../stores/worldbook-store';
 import { useUIStore } from '../stores/ui-store';
 import type { CombatCommand } from '@engine/combat-v3';
 import { rollDice } from '@engine/dice';
-import { getAgentSettings } from '../stores/agent-settings';
+import { getAgentSettings, hasExplicitAgentModel } from '../stores/agent-settings';
 import type { EmbeddingRequestTrace } from '@engine/memory-store';
+// 🆕 F10（2026-09-04）：Agent API 池绑定的 fail-closed 解析（pool id → ApiEndpoint 唯一纯实现）
+import { buildApiEndpoints, resolveAgentEndpoint } from './endpoint-resolver';
 
 export interface GamePipelineDeps {
   gameStore: ReturnType<typeof useGameStore>;
@@ -124,6 +143,42 @@ function buildDeckCardSnapshot(player: CharacterState): DeckCardData[] {
       automata: card.automata,
     }));
 }
+
+/**
+ * 🔴 F10（2026-09-04）：Agent 显式绑定的 API 池解析失败时抛出 —— 主协调者的 fail-stop。
+ *
+ * 语义与 `resolveAgentEndpoint` 对齐：**只有「显式绑定但解析不到」才抛**。
+ * 「从未设置 + 空池」（missing-pool）不抛 —— 那是首次配置还没走完，老路是
+ * `apiEndpointId=''` 交给编排器按 `.not found` 淡失败，行为保持不变。
+ *
+ * 抛错目的是在 provider dispatch **之前**停掉整轮：story/dispatcher/vars_update 这些
+ * 主 DAG agent 失效时绝不能用池里另一家 provider 顶替（改了模型行为、成本甚至隐私偏好）。
+ */
+export class EndpointBindingError extends Error {
+  constructor(
+    public readonly agentId: string,
+    public readonly requestedPoolId: string,
+  ) {
+    super(
+      `Agent「${agentId}」绑定的 API 池已失效（原 id: ${requestedPoolId}）。` +
+        '本轮已停止发送请求（fail-closed，不会换用别的 provider）——请到设置 → Agent 配置重新选择 API 池。',
+    );
+    this.name = 'EndpointBindingError';
+  }
+}
+
+/**
+ * 🔴 F10：侧链 Agent 名单。这些 agent 不在主 DAG 里（各自被 marker / 按钮唤起），
+ * 端点失效不能拖垮整轮叙事 —— 装配置时跳过（不装配端点），真被调用时由
+ * `getEndpointForAgent` 再判一次并按既有 optional 策略跳过。
+ */
+const SIDE_CHAIN_AGENT_IDS = new Set([
+  'craft_gen',
+  'char_gen',
+  'item_gen',
+  'image_prompt',
+  'combat_v3',
+]);
 
 interface DebugEntryInput {
   invocationId: string;
@@ -253,7 +308,36 @@ export function withImagePromptSystem(
   return [...configs, { agentId: 'image_prompt', systemPrompt: override } as AgentConfig];
 }
 
+const saveWork = new Map<
+  string,
+  { owner: GamePipeline; depth: number; idle: Promise<void>; resolve: () => void }
+>();
+
+/** A remounted page must read its save only after the previous pipeline drains. */
+export async function waitForGameSaveIdle(saveId: string): Promise<void> {
+  while (saveWork.has(saveId)) await saveWork.get(saveId)!.idle;
+}
+
 export class GamePipeline {
+  private acquireSaveWork(): (() => void) | null {
+    let work = saveWork.get(this.saveId);
+    if (work && work.owner !== this) return null;
+    if (!work) {
+      let resolve!: () => void;
+      const idle = new Promise<void>((done) => {
+        resolve = done;
+      });
+      work = { owner: this, depth: 0, idle, resolve };
+      saveWork.set(this.saveId, work);
+    }
+    work.depth++;
+    return () => {
+      if (--work.depth === 0) {
+        saveWork.delete(this.saveId);
+        work.resolve();
+      }
+    };
+  }
   private game: ReturnType<typeof useGameStore>;
   private settings: ReturnType<typeof useSettingsStore>;
   private saveId: string;
@@ -261,18 +345,9 @@ export class GamePipeline {
   private abortController: AbortController | null = null;
   /** 当前 run 的所有权标识；abort 后直到 finally 收尾前都保持，防止旧 run 清掉新 run。 */
   private activeRunId: string | null = null;
-  /**
-   * 本管线跑到第几轮（run() 每次进入自增）。
-   *
-   * 🔴 用来判「我的 finally 还是不是当前这一轮的 finally」（2026-08-10）。
-   * `abort()` 会**立刻**把 isGenerating 清成 false，输入框随之解锁，于是玩家可以在上一轮
-   * 收尾之前就发下一轮。此时旧 run 的 finally 会做两件破坏性的事：
-   *   ① `isGenerating = false` —— 在新一轮飞行途中解锁输入；
-   *   ② `abortController = null` —— 把**新一轮**的控制器抹掉，从此「停止生成」变成
-   *      一个静默的 no-op（`this.abortController?.abort()` 里的 `?.` 会吃掉它）。
-   * 两件都只在「我还是当前那一轮」时才做。
-   */
+  /** Reject overlapping runs until cancellation, background writes and refresh have drained. */
   private runSeq = 0;
+  private disposed = false;
   /** 当前回合内按 Agent 递增，生成不会因同名 Agent 而覆盖的调试调用 ID。 */
   private debugInvocationCounts = new Map<string, number>();
   private mainInvocationIds = new Map<string, string>();
@@ -281,6 +356,10 @@ export class GamePipeline {
     agentConfigs: AgentConfig[];
     worldBooks: WorldBook[];
     presets: AgentPreset[];
+    // 🆕 F10: 默认层也挂在这里 —— 侧链 getEndpointForAgent 与主 DAG buildAgentConfigs
+    //    走**同一个** boundPoolId 解析（覆写 ?? 默认），否则两侧对同一个 agent 会给出
+    //    不同的解析结果（一侧吃默认层 model、另一侧裸读覆写）。
+    agentDefaults: Record<string, Record<string, unknown>>;
   } | null = null;
   /** 步5: 本轮共享 context 引用 — pre_check 剧情导演区块注入 / post_check 年度大纲检测需要 */
   private currentContext: AgentContext | null = null;
@@ -331,6 +410,17 @@ export class GamePipeline {
    * 自带 hp=0/死亡状态可判。放弃的战斗不记录（没发生过）。
    */
   private _recentCombat: RecentCombatInfo | null = null;
+  /**
+   * 🧵 主线细化层（2026-09-09）：本轮闸门结果（pre 开始前求值一次）与同轮临时工作集。
+   * 工作集 = pre 接受的声明 + post 暂存结算/揭示；**成功回合收口**才由 commitPlotThreadTurn
+   * 落库，失败/取消整体丢弃、不消费冷却（实施计划 §3.5）。
+   */
+  private plotThreadGate: PlotThreadGateResult | null = null;
+  private plotThreadTurn: PlotThreadTurnContext | null = null;
+  private plotThreadSettlement: { updates: PlotThreadUpdate[]; revealedNames: string[] } = {
+    updates: [],
+    revealedNames: [],
+  };
 
   /**
    * 取 EJS `ui.log` 调试日志快照（能力面 §3.11）。
@@ -360,12 +450,27 @@ export class GamePipeline {
 
   /** 发送开场 Prompt（首次加载存档时调用），作为首条用户消息注入管线 */
   async sendOpeningPrompt(onStoryChunk?: StoryChunkCallback): Promise<void> {
+    if (!this.ownsActiveSave) return;
+    const release = this.acquireSaveWork();
+    if (!release) return;
+    try {
+      await this.executeOpeningPrompt(onStoryChunk);
+    } finally {
+      release();
+    }
+  }
+
+  private async executeOpeningPrompt(onStoryChunk?: StoryChunkCallback): Promise<void> {
     const prompt = this.game.openingPrompt;
     if (!prompt) return;
     // Claim before starting the long pipeline. A page remount can create a second
     // GamePipeline while the first one is still running.
     const claimed = await this.game.markOpeningPromptConsumed();
     if (!claimed) return;
+    if (!this.ownsActiveSave) {
+      await this.game.releaseOpeningPromptClaim(this.saveId);
+      return;
+    }
 
     // run() 会先落库用户消息，所以重试前得知道这条已经在了 —— 否则归还认领等于放行重复。
     const promptAlreadyRendered = this.game.messages.some(
@@ -375,23 +480,10 @@ export class GamePipeline {
     const ok = await this.run(prompt, onStoryChunk, /* isUserMessage */ !promptAlreadyRendered);
     if (ok) return;
 
-    // 🔴 COR-02：存档已切走就到此为止。下面两行读的是 `this.game.messages`（此刻已是新存档的）、
-    // 写的是 `releaseOpeningPromptClaim` → `patchSaveMetadata` → **activeSave**（也是新存档）。
-    // 失败场景：新建存档 A 开场生成中 → 回首页 → 打开同样刚开场的存档 B（B 自己的开场还在飞、
-    // 尚无 assistant 正文）→ A 这一路判定「什么都没产出」，把 **B 的** openingPromptConsumed
-    // 归还成 false → B 下次挂载重放开场，同一段叙事写两遍。
-    if (!this.ownsActiveSave) {
-      console.warn('[GamePipeline] 存档已切换，不归还开场认领（那会写到别的存档上）', {
-        pipelineSaveId: this.saveId,
-        activeSaveId: this.game.activeSaveId,
-      });
-      return;
+    // The store verifies persisted narrative against the original save before releasing.
+    if (!this.ownsActiveSave || !this.game.messages.some((msg) => msg.role === 'assistant')) {
+      await this.game.releaseOpeningPromptClaim(this.saveId);
     }
-
-    // 只有「一句叙事都没产出」才归还认领：API 抽风不该把开场永久烧掉。
-    // 已经有 assistant 正文时保持已消费，重跑会把那段叙事再写一遍。
-    const producedNarrative = this.game.messages.some((msg) => msg.role === 'assistant');
-    if (!producedNarrative) await this.game.releaseOpeningPromptClaim();
   }
 
   /** 核心: 将用户输入送入 Agent 管线。返回 true 表示管线成功完成。 */
@@ -401,6 +493,22 @@ export class GamePipeline {
     isUserMessage = true,
     sourceMessageId?: string,
   ): Promise<boolean> {
+    const release = this.acquireSaveWork();
+    if (!release) return false;
+    try {
+      return await this.executeRun(userInput, onStoryChunk, isUserMessage, sourceMessageId);
+    } finally {
+      release();
+    }
+  }
+
+  private async executeRun(
+    userInput: string,
+    onStoryChunk?: StoryChunkCallback,
+    isUserMessage = true,
+    sourceMessageId?: string,
+  ): Promise<boolean> {
+    if (this.abortController || !this.ownsActiveSave) return false;
     console.log(
       '[GamePipeline] run() called — userInput length:',
       userInput.length,
@@ -445,6 +553,8 @@ export class GamePipeline {
       this.pendingAudioMarker = null;
       this.lastStoryMessage = null;
       await this.loadPlotData(context);
+      // 🧵 主线细化层：pre 开始前先求本轮闸门（on 时供值；失败静默 over）
+      this.preparePlotThreadGate(context);
 
       // 2.5 加载预设和世界书（自 fetch agent-config.json，不依赖 store 异步初始化）
       const { presets, agentDefaults } = await this.loadPresets();
@@ -461,13 +571,13 @@ export class GamePipeline {
       // 真机修(2026-07-17): 侧链 (char/item/craft) 调用 buildAgentMessages 时需要
       // configs/worldBooks/presets 才能拿到完整 systemPrompt + 世界书上下文，
       // 把这三个值挂实例传给事件回调（回调通过闭包捕获 run() 局部变量）。
-      this.chainData = { agentConfigs, worldBooks, presets };
+      this.chainData = { agentConfigs, worldBooks, presets, agentDefaults };
 
       // Q-07：战斗外效果系统接线 —— 对当前存档已装备物品执行 init + 注册
       // （幂等；存档切换时由 unwireEffectSystem 拆除后重建）
       try {
         const { wireEffectSystem } = await import('@engine/effect-wiring');
-        wireEffectSystem(this.saveId, this.game.characters);
+        if (this.ownsActiveSave) wireEffectSystem(this.saveId, this.game.characters);
       } catch (err) {
         console.warn('[GamePipeline] 效果系统接线失败（不阻塞本轮）:', err);
       }
@@ -513,6 +623,14 @@ export class GamePipeline {
         this.pendingPlotTasks = [];
       }
 
+      // 4.6 🧵 主线细化层收口：成功回合在 advanceTurn **之前**提交（幂等；
+      //     失败只警示不阻塞本轮 —— 退出通道是既有诊断日志，不追加自动 LLM 重试）。
+      try {
+        await this.commitPlotThreadTurnIfAny();
+      } catch (err) {
+        console.warn('[GamePipeline] 主线细化收口失败（本回合细化未保存）:', err);
+      }
+
       // 5. 回合推进（M5 每轮一拍）: totalTurns +1 + 打 reason='turn' 快照。
       //    放在 finally 的 refreshFromDb 之前，Pinia 能立即读到新 totalTurns/activeSnapshotId。
       try {
@@ -529,6 +647,19 @@ export class GamePipeline {
         console.log('[GamePipeline] 管线已中止');
         activityOutcome = 'cancelled';
         activityMessage = '本回合已停下，可以再次尝试。';
+        return false;
+      }
+      // 🔴 F10：显式端点绑定失效 = fail-stop。此时**任何 provider 都尚未收到请求**，
+      // 本轮直接放弃（用户输入已入消息流、回合不推进，可修设置后重发）。
+      if (err instanceof EndpointBindingError) {
+        console.error('[GamePipeline] 端点绑定失效，本轮停发（fail-closed）:', err.message);
+        activityOutcome = 'failed';
+        activityMessage = err.message;
+        try {
+          useUIStore().toast(err.message, 'error', 6000);
+        } catch {
+          /* toast 失败不影响本轮失败判定 */
+        }
         return false;
       }
       console.error('[GamePipeline] 管线运行失败:', err);
@@ -550,14 +681,14 @@ export class GamePipeline {
       // DebugPanel 导出和右侧状态栏才能拿到最新数据。abort/报错时部分 patch 可能已提交，同样需要回读。
       // 🔴 COR-02：存档已切走时**不回读** —— refreshFromDb 读的是 store 里那个（新的）
       // activeSaveId，孤儿回合替新存档跑一次回读没有意义，还会跟新存档自己的加载打架。
-      if (this.ownsActiveSave) await this.game.refreshFromDb();
+      if (this.ownsActiveSave) await this.game.refreshFromDb(this.saveId);
       // 🎵 配乐放在**回读之后**才触发。
       //
       // story 在 Stage 1 就写下了标记，但那时 player.location / character.present
       // 还是上一轮的值 —— 它们要等 Stage 2 的 request_dispatcher / vars_update 落库、
       // 再经这里的 refreshFromDb 才更新。而**转场恰恰是唯一真正该换歌的时刻**：
       // 在 Stage 1 播，正文已经进了熔火裂谷，BGM 还在放上一座城的曲子。
-      this.flushPendingAudio();
+      if (this.ownsActiveSave) this.flushPendingAudio();
       if (activityRunId) {
         this.game.finishAgentActivityRun(activityRunId, activityOutcome, activityMessage);
         this.game.finishAgentLogTurn(activityRunId, activityOutcome);
@@ -575,7 +706,7 @@ export class GamePipeline {
       // 🔴 只有「我还是当前那一轮」才收拾这两样 —— 否则会解锁新一轮的输入框，
       // 并且把新一轮的控制器抹成 null（「停止生成」从此静默失效）。见 runSeq 的注释。
       if (this.runSeq === mySeq) {
-        this.game.isGenerating = false;
+        if (this.ownsActiveSave) this.game.isGenerating = false;
         this.abortController = null;
       }
     }
@@ -658,11 +789,16 @@ export class GamePipeline {
     }
   }
 
+  dispose(): void {
+    this.disposed = true;
+    this.abort();
+    this.invalidatePromptSessions();
+  }
+
   /** 中止当前管线运行 */
   abort(): void {
     if (this.activeRunId) this.game.markAgentActivityStopping(this.activeRunId);
     this.abortController?.abort();
-    this.game.isGenerating = false;
   }
 
   /**
@@ -707,7 +843,7 @@ export class GamePipeline {
    * 生成中途切到别的存档，孤儿回合的正文会以那个存档的 saveId 落库。
    */
   private get ownsActiveSave(): boolean {
-    return this.game.activeSaveId === this.saveId;
+    return !this.disposed && this.game.activeSaveId === this.saveId;
   }
 
   /**
@@ -780,12 +916,38 @@ export class GamePipeline {
     // 复用 buildEndpoints() 的映射结果（ApiEntry.model → ApiEndpoint.defaultModel）
     const apiPool = this.buildEndpoints();
 
-    // 每个 Agent 的 `model` 存的是 **API 池 id** → 匹配对应端点
-    // 🔴 D44 修正 1：传默认层（agentDefaults）——model 也是 12 键之一，删 boot 播种后
-    //    用户没覆写时唯一来源就是默认层。agentDefaults 在本方法参数里、闭包可直接用。
+    // 🔴 F10（2026-09-04）：pool id → 端点的解析统一切到 `resolveAgentEndpoint`。
+    //   Agent 设置层的 `model` 键（存 API 池 id，历史命名不改）经
+    //   `getAgentSettings(覆写 ?? 默认层)` 得到「有效绑定」。语义拆分为：
+    //     · 未设置（空串）          → 走默认端点（池首项）—— 首次配置体验不回归；
+    //     · 显式绑定 + 池里有       → 精确命中；
+    //     · 显式绑定 + 池里没有     → **fail-closed**：
+    //         主 DAG agent（story/dispatcher/vars_update 等）= 抛 EndpointBindingError，
+    //         run() 在 dispatch 之前停轮（绝不拿 apiPool[0] 顶替用户显式选过的 provider）；
+    //         侧链 agent（craft/char/item/image_prompt/combat_v3）= warn + 不装配端点，
+    //         真被调用时由 getEndpointForAgent 再判并按 optional 策略跳过。
+    //   · 空池 + 未设置             → 与旧行为一致：endpoint undefined →
+    //       apiEndpointId='' → 编排器按 `Endpoint "" not found` 淡失败（不抛新错）。
+    //   D44 修正 1 保留：传默认层（agentDefaults）——model 也是 12 键之一，删 boot 播种后
+    //   用户没覆写时唯一来源就是默认层。agentDefaults 在本方法参数里、闭包可直接用。
     const getEndpoint = (agentId: string): ApiEndpoint | undefined => {
       const poolId = getAgentSettings(s, agentId, agentDefaults).model;
-      return apiPool.find((ep) => ep.id === poolId) || apiPool[0];
+      const resolution = resolveAgentEndpoint({ boundPoolId: poolId, apiPool });
+      if (resolution.status === 'resolved') return resolution.endpoint;
+      if (SIDE_CHAIN_AGENT_IDS.has(agentId)) {
+        console.warn(
+          resolution.status === 'stale-binding'
+            ? `[GamePipeline] 侧链 Agent "${agentId}" 显式绑定的 API 池已不存在（原 id: ${resolution.requestedId}），本轮不装配端点（fail-closed，不会换 provider）`
+            : `[GamePipeline] 侧链 Agent "${agentId}" 解析不到端点（API 池为空），本轮不装配端点`,
+        );
+        return undefined;
+      }
+      // 主 DAG：显式绑定失效 = 停轮（run() 捕获 EndpointBindingError → 放弃本轮，不发请求）
+      if (resolution.status === 'stale-binding') {
+        throw new EndpointBindingError(agentId, resolution.requestedId);
+      }
+      // missing-pool（空池 + 未设置）：老路淡失败，交给编排器报 not found
+      return undefined;
     };
 
     return agentIds.map((agentId) => {
@@ -913,31 +1075,7 @@ export class GamePipeline {
   }
 
   private buildEndpoints(): ApiEndpoint[] {
-    const s = this.settings.settings;
-    // 前后端 model 结构不同:
-    //   localStorage: ApiEntry    { model: string, models: string[], apiType: string }
-    //   引擎:         ApiEndpoint { defaultModel: string, models: string[], provider: string }
-    // 映射补齐，避免下游读错字段（defaultModel → 空串 → API 请求缺 model）
-    return ((s.apiPool ?? []) as any[]).map((entry: any) => ({
-      id: entry.id || '',
-      name: entry.name || '',
-      provider: entry.provider || entry.apiType || 'custom',
-      baseUrl: entry.baseUrl || '',
-      apiKey: entry.apiKey || '',
-      defaultModel: entry.defaultModel || entry.model || '', // ← 关键：ApiEntry.model → ApiEndpoint.defaultModel
-      models: entry.models || [],
-      timeout: entry.timeout ?? 60000,
-      enableThinking: entry.enableThinking ?? false, // API 池思考链开关
-      // 🆕 T4（设计 §8.3 / §9）：contextWindowTokens 透传，但只认正整数 ——
-      //    localStorage 是用户可编辑的，坏值（0/负数/浮点/字符串）一律 undefined
-      //    （不做主动预算判断），与 api-key-migration 的 readEntries 同一口径。
-      contextWindowTokens:
-        typeof entry.contextWindowTokens === 'number' &&
-        Number.isSafeInteger(entry.contextWindowTokens) &&
-        entry.contextWindowTokens > 0
-          ? entry.contextWindowTokens
-          : undefined,
-    })) as ApiEndpoint[];
+    return buildApiEndpoints(this.settings.settings.apiPool ?? []);
   }
 
   /**
@@ -1217,21 +1355,47 @@ export class GamePipeline {
     }
   }
 
-  /** 获取当前默认 API endpoint */
-  private getDefaultEndpoint(): ApiEndpoint {
-    return this.buildEndpoints()[0];
-  }
-
-  /** 按 agentId 解析 endpoint —— 尊重设置页为各 Agent 选的 API 池；
-   *  未配置或映射失效时回退到默认 endpoint（与 createAgentClients 一致）。
-   *  修复(2026-07-30): 此前 char_gen/item_gen/craft_gen/combat 等侧链一律走
-   *  getDefaultEndpoint()（API 池第一项），无视用户在设置页为各 Agent 选的 API 池，
-   *  导致"全部设了 glm5.2，侧链却用 d4f"。 */
-  private getEndpointForAgent(agentId: string): ApiEndpoint {
+  /**
+   * 按 agentId 解析侧链 endpoint —— 尊重设置页为各 Agent 选的 API 池。
+   * 🔴 F10（2026-09-04）：解析语义已与主 DAG 统一到 `resolveAgentEndpoint`。
+   *    · 未设置              → 默认端点（池首项）；
+   *    · 显式绑定 + 池里有   → 精确命中；
+   *    · 显式绑定失效        → console.error（带 agent 名 + 失效 id，肉眼可见）
+   *        + 返回 undefined → 调用方的 `if (!endpoint)` 守卫按既有 optional 策略跳过，
+   *        **绝不换用池里别的 provider**；
+   *    · 空池 + 未设置       → undefined（老路淡失败）。
+   *   与 buildAgentConfigs 同一 boundPoolId 口径：也过默认层（chainData.agentDefaults），
+   *   否则两侧对同一个 agent 可能解析出不同的池。（createAgentClients 已在 2026-07-30
+   *   退役；此前它拿 getDefaultEndpoint() 池首项无视用户选择的历史错误不再可能复现。）
+   */
+  private getEndpointForAgent(agentId: string): ApiEndpoint | undefined {
     const s = this.settings.settings;
     const apiPool = this.buildEndpoints();
-    const poolId = getAgentSettings(s, agentId).model;
-    return apiPool.find((ep) => ep.id === poolId) || apiPool[0];
+    const poolId = getAgentSettings(s, agentId, this.chainData?.agentDefaults ?? {}).model;
+    const resolution = resolveAgentEndpoint({ boundPoolId: poolId, apiPool });
+    if (resolution.status === 'resolved') return resolution.endpoint;
+    if (resolution.status === 'stale-binding') {
+      // 🔴 悬空 id 按来源分（2026-09 真机）：用户覆写层 = 用户显式选择 → fail-closed；
+      //    默认层（内容包 `agentDefaults`）= 内容包塞的设备本地 pool id → 不是用户的选择，
+      //    更不该因为一个坏字段把整条链静默掐掉（真机：item_gen 默认层绑了个坏 id，
+      //    dispatcher 发的 8 条 `<item_gen_request>` 一条都没落库）。回落默认端点 + 可见 warn。
+      if (!hasExplicitAgentModel(s, agentId)) {
+        console.warn(
+          `[GamePipeline] 侧链 Agent "${agentId}" 的内容包默认 API 池已不存在（id: ${resolution.requestedId}）` +
+            ' —— 不是用户显式选择，回落默认端点（内容包应把 agentDefaults.model 留空）',
+        );
+        const fallback = resolveAgentEndpoint({ boundPoolId: undefined, apiPool });
+        return fallback.status === 'resolved' ? fallback.endpoint : undefined;
+      }
+      // 用户显式选择的池没了 → 跳过即可，但跳过必须是**可见**的，不是静默换 provider
+      console.error(
+        `[GamePipeline] 侧链 Agent "${agentId}" 显式绑定的 API 池已不存在（原 id: ${resolution.requestedId}）。` +
+          '按 fail-closed 策略跳过该侧链（绝不换用别的 provider），请到设置 → Agent 配置重新选择 API 池',
+      );
+      return undefined;
+    }
+    console.warn(`[GamePipeline] 侧链 Agent "${agentId}" 解析不到端点（API 池为空），跳过`);
+    return undefined;
   }
 
   private nextDebugInvocation(agentId: string, runId = this.activeRunId ?? 'detached') {
@@ -1478,8 +1642,9 @@ export class GamePipeline {
     const sm = createStateManager(this.saveId);
     return sm
       ? {
+          commitDomainCommand: (patches: StatePatch[]) => sm.commitDomainCommand(patches),
           commitChatState: async (patches: any[]) => {
-            const result = await sm.commitChatState(patches);
+            const result = await sm.commitAiPatches(patches);
             if (result.errors.length > 0) {
               console.error(
                 `[GamePipeline] 状态提交失败 ${result.errors.length}/${patches.length} 条:`,
@@ -1821,10 +1986,175 @@ export class GamePipeline {
   }
 
   /**
+   * 🧵 主线细化层 —— pre 开始前（loadPlotData 之后）求本轮闸门。
+   *
+   * 判据全部来自生产纯函数（plot-threads.evaluatePlotThreadGate），调试面板直接消费
+   * `context.plotThreadGate` 的同一次求值结果（照 random-event-debug 的「不装第二份判据」口径）。
+   * 供值必须在这里 —— resolver 自己去读 Dexie 会把引擎依赖方向反过来（同 mapFlags 铁律）。
+   */
+  private preparePlotThreadGate(context: AgentContext): void {
+    this.plotThreadGate = null;
+    this.plotThreadTurn = null;
+    this.plotThreadSettlement = { updates: [], revealedNames: [] };
+    try {
+      const profile = this.game.saveProfile;
+      if (!profile) return;
+      const events: PlotEvent[] = context.plotEvents ?? [];
+      const outline = context.plotOutline ?? null;
+      const flags = getPlotThreadFlags(profile);
+      const gate = evaluatePlotThreadGate({
+        saveId: this.saveId,
+        turnNo: (this.game.activeSave?.metadata?.totalTurns ?? 0) + 1,
+        currentTime: profile.gameTime,
+        combatActive: this.game.isInCombat,
+        mode: context.plotSettings?.mode ?? 'off',
+        outlineTitle: outline?.title,
+        chapterTitles: (outline?.chapters ?? []).map((c) => c.title),
+        chapterEventTitles: events
+          .map((e) => e.chapterTitle)
+          .filter((t): t is string => typeof t === 'string' && t.trim() !== ''),
+        pendingEvents: events,
+        activeEventCount: events.filter((e) => e.status === 'active').length,
+        flags,
+      });
+      this.plotThreadGate = gate;
+      context.plotThreadGate = gate;
+      context.plotThreadFlags = flags;
+    } catch (err) {
+      console.warn('[GamePipeline] 主线细化闸门求值失败（本轮不推进细化）:', err);
+    }
+  }
+
+  /**
+   * 🧵 接受 pre 声明 → 导演段（可演绎行动 + 场景融合要求）。
+   *
+   * 规则（实施计划 §3.1/§3.3）：
+   * - 闸门未放行 → 不入工作集、不产块（AI 越权声明不保存）。
+   * - 同轮大纲触发优先：`triggeredEvents` 里有**实际可接受**（pending + 精确标题）时，
+   *   丢弃本轮细化推进声明（不能按无效标题误关闸）。
+   * - 声明归一化只此一处（parseThreadDeclarations）；坏条目在解析层已独立丢弃。
+   * - 导演块放 gist/动机（本轮呈现内容）与行为化要求；**不放**节点账务、未揭示终局、
+   *   连线意向、全量事件线 JSON 标题。
+   * - 同轮声明是临时工作集（post 可见），不是持久真源。
+   */
+  private acceptPlotThreadDeclarations(parsed: Record<string, unknown>): string | undefined {
+    const gate = this.plotThreadGate;
+    const context = this.currentContext;
+    if (!gate?.allowed || !context) return undefined;
+
+    const declarations = parseThreadDeclarations(parsed['threadDeclarations']);
+    if (declarations.length === 0) return undefined;
+
+    const triggerTitles = (
+      Array.isArray(parsed['triggeredEvents']) ? parsed['triggeredEvents'] : []
+    )
+      .map((e) =>
+        e && typeof e === 'object' ? (e as Record<string, unknown>)['title'] : undefined,
+      )
+      .filter((t): t is string => typeof t === 'string' && t.trim() !== '');
+
+    if (countAcceptableTriggers(context.plotEvents ?? [], triggerTitles) > 0) {
+      console.log('[GamePipeline] 同轮大纲触发优先，丢弃本轮主线细化声明（闸门不算被消耗）');
+      return undefined;
+    }
+
+    this.plotThreadTurn = {
+      turnNo: (this.game.activeSave?.metadata?.totalTurns ?? 0) + 1,
+      acceptedDeclarations: declarations,
+      acceptedUpdates: [],
+      revealedNames: [],
+      gate,
+    };
+    context.plotThreadTurnContext = this.plotThreadTurn;
+    return GamePipeline.formatPlotThreadDirectorBlock(declarations);
+  }
+
+  /**
+   * 成功回合收口：本轮有声明/结算/揭示任一 → `commitPlotThreadTurn`（锁内窄写，幂等）。
+   * 失败只走既有诊断日志；不追加自动 LLM 重试（实施计划 §3.5）。
+   */
+  private async commitPlotThreadTurnIfAny(): Promise<void> {
+    const turn = this.plotThreadTurn;
+    const settlement = this.plotThreadSettlement;
+    const hasDeclarations = !!turn && turn.acceptedDeclarations.length > 0;
+    const hasSettlement = settlement.updates.length > 0 || settlement.revealedNames.length > 0;
+    if (!hasDeclarations && !hasSettlement) return;
+    const profile = this.game.saveProfile;
+    if (!profile) return;
+    const turnNo = (this.game.activeSave?.metadata?.totalTurns ?? 0) + 1;
+    const result = await commitPlotThreadTurn(this.saveId, {
+      turnNo,
+      declarations: turn?.acceptedDeclarations ?? [],
+      updates: settlement.updates,
+      revealedNames: settlement.revealedNames,
+      seededAtEpochMinutes: toEpochMinutes(profile.gameTime),
+    });
+    if (result.committed) {
+      console.log(
+        `[GamePipeline] 主线细化收口成功: 节点=${result.nodeCount} 结算=${result.settledCount} 揭示=${result.revealedCount}`,
+      );
+    }
+  }
+
+  /** 导演段：通过闸门的可演绎行动 + 场景融合要求（§3.3：不含账务/连线/终局/窗口标题） */
+  private static formatPlotThreadDirectorBlock(declarations: PlotThreadDeclaration[]): string {
+    const lines = declarations.map((d) => {
+      const actors = d.involvedNpcs.length > 0 ? `（人物：${d.involvedNpcs.join('、')}）` : '';
+      return `- ${d.name} —— ${d.gist}${actors}\n  动机与行为：${d.motive}`;
+    });
+    return (
+      `**主线明线（世界在主线方向上自然运转的一角）:**\n${lines.join('\n')}\n\n` +
+      `**要求:** 以上内容只作背景片段融入正文，不点破其与主线的关联、不预告后续、` +
+      `不用它质问/引导玩家；玩家可遇见也可不遇见，不改变玩家手头正在做的事。`
+    );
+  }
+
+  /**
+   * 🧵 侧链角色实体化投影（实施计划 §3.4 时点分流；Code 背书，不依赖 AI 自觉）。
+   *
+   * marker 的 characterName 命中某节点 `involvedNpcs` 时：
+   * - **场景 A**（角色尚未在角色库/正文出现）：节点全量（含 motive 行为化改写）——
+   *   玩家未见该角色另一面，无剧透风险；
+   * - **场景 B**（角色已存在）：正文证据 + 表层投影（name/gist/involvedNpcs/thread），
+   *   motive 与连线意向必须藏；拿不准走 B。
+   * - 未命中：不加戏（返回 undefined）。
+   * 注入的是**请求描述**（进 char_gen prompt 的 CHAR_DETECT 槽），motive 本体一律
+   * **不进角色档案**。
+   */
+  private buildCharGenPlotInjection(marker: CharGenRequestMarker): string | undefined {
+    const name = marker.attributes?.characterName;
+    if (!name) return undefined;
+    const flags = this.currentContext?.plotThreadFlags;
+    if (!flags) return undefined;
+
+    // 时点分流：角色已在角色库 → 场景 B（表层投影）；否则场景 A（全量行为化）。
+    // 拿不准走 B —— B 只赔信息量，A 可能剧透。投影内容全部来自 plot-threads 的纯函数
+    // （§11.4 裁定 1-4：motive 不进档案、连线意向不外泄）。
+    const existing = this.game.characters.some((c) => c.name === name);
+    if (existing) {
+      const surface = buildCharGenProjectionB(flags, name);
+      if (!surface) return undefined;
+      return [
+        `该角色与主线明线相关（仅作背景，其本人可对此一无所知，不应主动知情）：`,
+        `涉及事件：${surface.gist}（隶属「${surface.thread}」）。`,
+      ].join('\n');
+    }
+    const full = buildCharGenProjectionA(flags, name);
+    if (!full) return undefined;
+    return [
+      `该角色承担主线角色（内部信息；行为可体现、身份不得披露）：`,
+      `事件轮廓：${full.gist}（隶属「${full.thread}」）。`,
+      `行为约束：请将下列动机转译成其言谈举止的隐性倾向，不点破因果——${full.motive}`,
+    ].join('\n');
+  }
+
+  /**
    * 步5: pre_check 完成 →
    * 1. 同步解析 directive/relevantBackground 并注入剧情导演区块到 context.agentOutputs
    *    （story 在 Stage 1 经 {{AGENT.PLOT_PRE_CHECK}} 占位符读取，必须在 story 启动前同步写入）
-   * 2. 异步 preCheckPlot() 落库事件激活（pending→active + visibility→revealed）
+   * 2. 🧵 主线细化层：闸门通过且同轮无实际可接受大纲触发时，接受声明进临时工作集，
+   *    并追加「主线明线」导演段（可演绎行动 + 场景融合要求；不放节点账务/连线/窗口标题）。
+   * 3. 异步 preCheckPlot() 落库事件激活（pending→active + visibility→revealed）
    */
   private handlePlotPreCheck(result: AgentResult) {
     const raw = result.rawResponse || '';
@@ -1838,6 +2168,11 @@ export class GamePipeline {
       const blocks: string[] = [];
       if (background) blocks.push(`**剧情背景（须自然编织进正文）:**\n${background}`);
       if (directive) blocks.push(`**本轮推进建议:**\n${directive}`);
+
+      // 🧵 主线细化：只接受「通过闸门 + 无实际可接受大纲触发」的声明
+      const directorBlock = this.acceptPlotThreadDeclarations(parsed as Record<string, unknown>);
+      if (directorBlock) blocks.push(directorBlock);
+
       if (blocks.length > 0) {
         this.currentContext?.agentOutputs.set(
           'plot_pre_check',
@@ -1873,9 +2208,20 @@ export class GamePipeline {
     const raw = result.rawResponse || '';
     if (!raw) return;
     try {
-      const { postCheckPlot, eventToMemory } = await import('@engine/plot-engine');
+      const { postCheckPlot, parsePostCheckOutput, eventToMemory } =
+        await import('@engine/plot-engine');
       const jsonStr = GamePipeline.extractJsonBlock(raw);
       const outcome = await postCheckPlot(this.saveId, jsonStr);
+
+      // 🧵 主线细化：post 暂存结算/揭示（闸门只约束新建/推进；有正文证据的结算任何轮都可发生）。
+      // 成功回合收口见 commitPlotThreadTurnIfAny —— 不读后台旧 pre 落库寻找节点。
+      const parsedPost = parsePostCheckOutput(jsonStr);
+      if (parsedPost) {
+        if (parsedPost.threadUpdates.length > 0 || parsedPost.revealedNames.length > 0) {
+          this.plotThreadSettlement.updates.push(...parsedPost.threadUpdates);
+          this.plotThreadSettlement.revealedNames.push(...parsedPost.revealedNames);
+        }
+      }
 
       // 完成/失败事件 → 高重要度记忆
       const terminal = outcome.eventsUpdated.filter(
@@ -1937,7 +2283,7 @@ export class GamePipeline {
       });
 
       // 更新本地 recentMemories 供下一轮召回
-      if (memory) {
+      if (memory && this.ownsActiveSave) {
         this.game.recentMemories = [...(this.game.recentMemories || []), memory];
         console.log(
           `[GamePipeline] memory_summary 落库成功: ${memory.id} importance=${memory.importance} keywords=${memory.keywords.join(',')}`,
@@ -2369,7 +2715,7 @@ export class GamePipeline {
       //（store.startCombat → coordinator.start → startCombatV3）不经过 run() 的
       // finally —— store 从不回读，HUD 一直是开战前的血量/经验（满血假象）。
       // 终局落库后回读一次（含 COR-02 存档切走守卫）。
-      if (this.ownsActiveSave) await this.game.refreshFromDb();
+      if (this.ownsActiveSave) await this.game.refreshFromDb(this.saveId);
       // 同一真机 debug：记录「最近已结算战斗」供下一轮 dispatcher 上下文（{{RECENT_COMBAT}}）
       // —— 没有它 dispatcher 不知道正文里的战斗描写是已结算战斗的战后延续，会再发
       // combat_trigger 把打完的战斗重演一遍。内存级（与 _lastCombatMarker 同口径）；
@@ -2507,6 +2853,8 @@ export class GamePipeline {
           configs: this.chainData?.agentConfigs,
           worldBooks: this.chainData?.worldBooks,
           presets: this.chainData?.presets,
+          // 🧵 时点分流投影（命中 involvedNpcs 才注入；未命中不加戏）
+          plotThreadInjection: this.buildCharGenPlotInjection(marker),
         } as any;
         const result = await runCharGenChain(charGenRequest, {
           clientFactory,
@@ -2698,6 +3046,7 @@ export class GamePipeline {
     agentConfigs: AgentConfig[];
     worldBooks: WorldBook[];
     presets: AgentPreset[];
+    agentDefaults: Record<string, Record<string, unknown>>;
   }> {
     if (this.chainData) return this.chainData;
     const { presets, agentDefaults } = await this.loadPresets();
@@ -2708,7 +3057,7 @@ export class GamePipeline {
       undefined,
       systemCoreWorkshopBookIds,
     );
-    this.chainData = { agentConfigs, worldBooks, presets };
+    this.chainData = { agentConfigs, worldBooks, presets, agentDefaults };
     return this.chainData;
   }
 

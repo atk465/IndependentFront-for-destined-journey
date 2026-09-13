@@ -215,6 +215,13 @@
 | cost {type:'HP'\|'MP'\|'SP', amount} | 可选                  | AI   |
 | cooldown / maxCooldown / level       | number                | 可选 | AI+Code      |
 | effects / scripts                    | Record<string,string> | 可选 | AI           |
+| rarity                               | 7级品质（普通~唯一）  | 可选 | AI           |
+
+> 📌 **2026-09-11 新增 `rarity`**（技能品质，与物品 `rarity` 同名同义）：来源是 item_gen 的
+> `<skill quality="...">`（对齐 `<equip quality>`），落库前经 `normalizeRarity` 归一（英文码也认）。
+> 缺省 = 未定，**UI 不得编造** —— `ItemsPanel.qualityOf` 曾对技能硬编码返回「史诗」，导致开局写着
+> 「优良/稀有/普通」的技能一律显示史诗。开局初始技能照 `request_dispatcher` 的 `<item_gen_request>`
+> 正文里标明的品质原样填。
 
 **StatePatch**: `add_skill` value=`{name,...}`（同名 = 覆盖升级，Code 不再要求 id，修 #4）；`update_skill` value=`{name, changes}`；`remove_skill` 🆕 value=`{name}`（替代 `{removeSkill:...}` 假字段，修 #21）。
 
@@ -281,6 +288,18 @@
 | variables                | Record<string,any>       | 🆕 **变量的新家**（见第 12 章；从快照寄生迁出，修 #1/#33）                                                                                                                                                                     |
 | worldFlags               | Record<string,any>       | 保留（mapMarkers 等）。与 variables 分工: worldFlags=Code 写的引擎标志，variables=AI 写的叙事变量                                                                                                                              |
 | focusQuest               | string                   | UI 修改必须回写（修 #14）                                                                                                                                                                                                      |
+
+**📌 2026-09-09 补注（主线细化层 / ADR-35）**: `worldFlags.plotThreads` = `{ nodes: Record<节点名,
+PlotThreadNode>, lastAdvancedTurn?, lastCommittedTurn? }`。照 `randomEvents` / `mapFacts` 事实态
+先例：零新 Dexie 表、按**节点名**寻址（AI 永不产 id 的继续）、永不随 packStamp 清空、随
+saveProfiles 进 FullBackup / 单档互传 / 快照恢复。写入口 = `save-profile.commitPlotThreadTurn`
+（锁内重读窄写 + lastCommittedTurn 幂等），节点形状与 reducer 见 `plot-threads.ts`。
+
+**🔴 铁律 5（中文枚举集中定义）的明确例外**: `PlotThreadNode.status` 存**英文四值**
+（`active/dormant/resolved/dissolved`）、`visibility` 存 `hidden/revealed` —— 这是设计
+（2026-09-07 主线细化层）的显式选择：状态由 Code reducer 判据消费、AI 输出契约也按英文设计。
+中文显示映射**集中定义一次**在 `plot-threads.ts` 的 `PLOT_THREAD_STATUS_LABELS` /
+`plotThreadStatusLabel()`，UI 与模板层引用它，禁止任何写入口各自翻译。
 
 ---
 
@@ -361,6 +380,7 @@ interface Snapshot {
 | 对话                                  | `messages` 表                                                                                                            | chats v3 表、快照内对话副本（从未有，明令禁止）                                                                         |
 | 快照                                  | `snapshots` 表                                                                                                           | SaveSlot.snapshots 内嵌数组                                                                                             |
 | 记忆 / 剧情                           | `memories` / `plotEvents` / `plotOutlines` 表                                                                            | —                                                                                                                       |
+| 主线细化事件线（2026-09-09）          | `SaveProfile.worldFlags.plotThreads`（按节点名寻址；零新表）                                                             | 不混入 `plotEvents`（title 寻址契约）/ 不建边表（边由 foreshadows/payoffs 推导）/ 不占记忆                              |
 | 全局配置                              | `settings` / `lorebooks` / `presets` / `apiEndpoints`                                                                    | —                                                                                                                       |
 | 音频资源                              | `audioTracks`（元数据）/ `audioBlobs`（`source='blob'` 的字节）/ `audioPlaylists` / `audioHandles`（音乐文件夹目录句柄） | 音量等混音设置归 `settings`，不重复存在音轨上；`source='file'` 的字节唯一真源是用户磁盘上的文件夹，库里只存目录不存拷贝 |
 

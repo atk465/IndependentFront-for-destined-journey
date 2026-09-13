@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   collectSelectedSystemCoreWorkshopBookIds,
+  EndpointBindingError,
   extractStoryOptions,
   GamePipeline,
   withImagePromptSystem,
@@ -20,6 +21,16 @@ vi.mock('@engine/plot-engine', () => ({
     outlineUpdated: false,
     worldLineChanged: false,
     changeLevel: 'none',
+  })),
+  // 🧵 主线细化（2026-09-09）：post 结算/揭示的解析面
+  parsePostCheckOutput: vi.fn(() => ({
+    worldLineChanged: false,
+    changeLevel: 'none',
+    outlineChanges: { action: 'none', changes: '' },
+    eventUpdates: [],
+    newChildEvents: [],
+    threadUpdates: [],
+    revealedNames: [],
   })),
   eventToMemory: vi.fn(() => ({
     content: 'mem',
@@ -245,6 +256,31 @@ describe('侧链 Agent 调试调用身份', () => {
 });
 
 describe('sendOpeningPrompt', () => {
+  it('Stop keeps input locked until pending work drains and rejects an overlapping run', async () => {
+    const game = makeGameStore();
+    const pipeline = new GamePipeline({
+      gameStore: game,
+      settingsStore: makeSettingsStore(),
+      saveId: 'save-test',
+    });
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.spyOn(pipeline as any, 'buildContext').mockImplementation(() => {
+      (pipeline as any).pendingPlotTasks.push(pending);
+      throw new Error('early failure with pending work');
+    });
+    const running = pipeline.run('first');
+    pipeline.abort();
+    const locked = game.isGenerating;
+    const overlapping = pipeline.run('second');
+    release();
+    await Promise.all([running, overlapping]);
+    expect(locked).toBe(true);
+    expect((pipeline as any).buildContext).toHaveBeenCalledTimes(1);
+    expect(game.isGenerating).toBe(false);
+  });
   it('two pipeline instances sharing one save generate the opening only once', async () => {
     let consumed = false;
     const gameStore = makeGameStore({
@@ -268,7 +304,7 @@ describe('sendOpeningPrompt', () => {
     await Promise.all([first.sendOpeningPrompt(), second.sendOpeningPrompt()]);
 
     expect(firstRun.mock.calls.length + secondRun.mock.calls.length).toBe(1);
-    expect(gameStore.markOpeningPromptConsumed).toHaveBeenCalledTimes(2);
+    expect(gameStore.markOpeningPromptConsumed).toHaveBeenCalledTimes(1);
   });
 
   it('releases the claim when the run produced no narrative at all', async () => {
@@ -2319,4 +2355,260 @@ describe('T2 combat_v3 模板系统上下文传参', () => {
     // 期望数组按 .sort() 的 UTF-16 码点序（乙 U+4E59 在 甲 U+7532 前），与 received 同口径
     expect(names).toEqual(['理查德', '路人乙', '路人甲']);
   });
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// F10（2026-09-04）：显式 API 绑定失效必须 fail-closed，绝不把请求换到别的 provider
+// ══════════════════════════════════════════════════════════════════════════
+describe('F10 端点绑定 fail-closed（buildAgentConfigs）', () => {
+  it('🔴 主 DAG（story）显式绑定的池已删除 → 抛 EndpointBindingError（fail-stop）', () => {
+    const pipeline = makePipeline({}, { apiPool: [{ id: 'B', name: 'B', model: 'm-b' }] });
+    patchAgentSettings((pipeline as any).settings.settings, 'story', { model: 'A' });
+
+    expect(() => (pipeline as any).buildAgentConfigs({})).toThrow(EndpointBindingError);
+  });
+
+  it('🔴 错误携带 agentId 与失效 id（用户可见的修整指引）', () => {
+    const pipeline = makePipeline({}, { apiPool: [{ id: 'B', name: 'B', model: 'm-b' }] });
+    patchAgentSettings((pipeline as any).settings.settings, 'story', { model: 'DELETED' });
+
+    try {
+      (pipeline as any).buildAgentConfigs({});
+      expect.unreachable('应当抛错');
+    } catch (err) {
+      expect(err).toBeInstanceOf(EndpointBindingError);
+      expect((err as EndpointBindingError).agentId).toBe('story');
+      expect((err as EndpointBindingError).requestedPoolId).toBe('DELETED');
+    }
+  });
+
+  it('🔴 侧链（item_gen）显式绑定失效 → 不抛（本轮不拖垮主 DAG），但端点不装配', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const pipeline = makePipeline({}, { apiPool: [{ id: 'B', name: 'B', model: 'm-b' }] });
+    patchAgentSettings((pipeline as any).settings.settings, 'item_gen', { model: 'A' });
+
+    const configs = (pipeline as any).buildAgentConfigs({});
+    const story = configs.find((c: { agentId: string }) => c.agentId === 'story');
+    const itemGen = configs.find((c: { agentId: string }) => c.agentId === 'item_gen');
+
+    // 主 DAG 照常（走默认 B），侧链端点悬空（apiEndpointId='' → 调用点再判跳过）
+    expect(story.apiEndpointId).toBe('B');
+    expect(itemGen.apiEndpointId).toBe('');
+    // 跳过是可见的：console.warn 带 agent 名与失效 id
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('item_gen'));
+    expect(warn.mock.calls.join('\n')).toContain('fail-closed');
+    warn.mockRestore();
+  });
+
+  it('未设置 + 空池 → 不抛（首次配置淡失败走老路，apiEndpointId 为空）', () => {
+    const pipeline = makePipeline(); // 默认 apiPool: []
+    const configs = (pipeline as any).buildAgentConfigs({});
+    const story = configs.find((c: { agentId: string }) => c.agentId === 'story');
+    expect(story).toBeDefined();
+    expect(story.apiEndpointId).toBe('');
+  });
+
+  it('未设置 + 非空池 → 默认端点（池首项）—— 首次配置体验不回归', () => {
+    const pipeline = makePipeline(
+      {},
+      {
+        apiPool: [
+          { id: 'B', name: 'B', model: 'm-b' },
+          { id: 'C', name: 'C', model: 'm-c' },
+        ],
+      },
+    );
+    const configs = (pipeline as any).buildAgentConfigs({});
+    const story = configs.find((c: { agentId: string }) => c.agentId === 'story');
+    expect(story.apiEndpointId).toBe('B');
+    expect(story.model).toBe('m-b');
+  });
+
+  it('重排池不改变既有显式绑定（绑定语义与池顺序无关）', () => {
+    const pipeline = makePipeline(
+      {},
+      {
+        apiPool: [
+          { id: 'C', name: 'C', model: 'm-c' },
+          { id: 'B', name: 'B', model: 'm-b' },
+        ],
+      },
+    );
+    patchAgentSettings((pipeline as any).settings.settings, 'story', { model: 'B' });
+    const configs = (pipeline as any).buildAgentConfigs({});
+    const story = configs.find((c: { agentId: string }) => c.agentId === 'story');
+    expect(story.apiEndpointId).toBe('B');
+    expect(story.model).toBe('m-b');
+  });
+});
+
+describe('F10 端点绑定 fail-closed（getEndpointForAgent 侧链热路径）', () => {
+  it('🔴 显式绑定失效 → undefined + console.error（绝不换用池里别的 provider）', () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const pipeline = makePipeline({}, { apiPool: [{ id: 'B', name: 'B', model: 'm-b' }] });
+    patchAgentSettings((pipeline as any).settings.settings, 'combat_v3', { model: 'A' });
+
+    const endpoint = (pipeline as any).getEndpointForAgent('combat_v3');
+    expect(endpoint).toBeUndefined();
+    expect(error.mock.calls[0][0]).toContain('combat_v3');
+    expect(error.mock.calls[0][0]).toContain('fail-closed');
+    expect(error.mock.calls[0][0]).toContain('A');
+    error.mockRestore();
+    vi.restoreAllMocks();
+  });
+
+  it('未设置 + 非空池 → 默认端点（侧链老路也不回归）', () => {
+    const pipeline = makePipeline({}, { apiPool: [{ id: 'B', name: 'B', model: 'm-b' }] });
+    const endpoint = (pipeline as any).getEndpointForAgent('item_gen');
+    expect(endpoint?.id).toBe('B');
+  });
+
+  it('🔴 默认层悬空绑定（内容包硬编码坏 id）→ 回落默认端点，不静默掐链', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const pipeline = makePipeline({}, { apiPool: [{ id: 'B', name: 'B', model: 'm-b' }] });
+    // 内容包 agentDefaults 塞了设备本地 pool id；用户覆写层没有 item_gen
+    (pipeline as any).chainData = { agentDefaults: { item_gen: { model: '42f7ea15-stale' } } };
+
+    const endpoint = (pipeline as any).getEndpointForAgent('item_gen');
+    expect(endpoint?.id).toBe('B');
+    expect(error).not.toHaveBeenCalled();
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('item_gen'))).toBe(true);
+    vi.restoreAllMocks();
+  });
+
+  it('🔴 默认层悬空，但用户覆写层也显式绑了同一个坏 id → 仍 fail-closed', () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const pipeline = makePipeline({}, { apiPool: [{ id: 'B', name: 'B', model: 'm-b' }] });
+    (pipeline as any).chainData = { agentDefaults: { item_gen: { model: '42f7ea15-stale' } } };
+    patchAgentSettings((pipeline as any).settings.settings, 'item_gen', {
+      model: '42f7ea15-stale',
+    });
+
+    const endpoint = (pipeline as any).getEndpointForAgent('item_gen');
+    expect(endpoint).toBeUndefined();
+    expect(error.mock.calls[0][0]).toContain('item_gen');
+    vi.restoreAllMocks();
+  });
+});
+
+describe('F10 🔴 集成：选中 A 删掉 A，provider B 一个字节都收不到', () => {
+  it('run() 在 dispatch 之前停轮：story 绑定失效 → fetch 零调用 + 可见报错', async () => {
+    // 池里只剩 B；story 显式绑定的 A 已被删除 —— 旧实现会静默把请求发给 B
+    const settings = makeSettingsStore({
+      apiPool: [
+        {
+          id: 'B',
+          name: 'B',
+          provider: 'provider-b',
+          baseUrl: 'https://b.example.test/v1',
+          apiKey: 'k',
+          model: 'm-b',
+        },
+      ],
+    });
+    patchAgentSettings(settings.settings, 'story', { model: 'A' });
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      json: async () => ({}),
+      text: async () => '',
+    } as Response);
+
+    const pipeline = new GamePipeline({
+      gameStore: makeGameStore(),
+      settingsStore: settings,
+      saveId: 'save-test',
+    });
+
+    const ok = await pipeline.run('向 B 发起一次不该发生的请求');
+
+    expect(ok).toBe(false);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    // 用户可见：toastSpy（ui-store mock）与 activityMessage 都带着修整指引
+    expect(toastSpy).toHaveBeenCalledWith(expect.stringContaining('story'), 'error', 6000);
+
+    globalThis.fetch = originalFetch;
+  });
+});
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+
+describe('independent review ownership repros', () => {
+  it('disposed memory task cannot publish into another save', async () => {
+    const gate = deferred<any>();
+    summarizeAndSaveMock.mockReturnValueOnce(gate.promise);
+    const game = makeGameStore();
+    const pipeline = new GamePipeline({
+      gameStore: game,
+      settingsStore: makeSettingsStore(),
+      saveId: 'save-test',
+    });
+    const task = (pipeline as any).persistMemorySummary(makeResult('memory_summary', 'summary'));
+    await vi.waitFor(() => expect(summarizeAndSaveMock).toHaveBeenCalled());
+    pipeline.dispose();
+    game.activeSaveId = 'save-b';
+    game.recentMemories = [];
+    gate.resolve({ id: 'memory-a', saveId: 'save-test', importance: 5, keywords: [] });
+    await task;
+    expect(game.recentMemories).toEqual([]);
+  });
+
+  it('leaving during the opening claim does not permanently consume an empty opening', async () => {
+    const gate = deferred<boolean>();
+    const game = makeGameStore({
+      openingPrompt: 'Opening',
+      markOpeningPromptConsumed: vi.fn(() => gate.promise),
+    });
+    const pipeline = new GamePipeline({
+      gameStore: game,
+      settingsStore: makeSettingsStore(),
+      saveId: 'save-test',
+    });
+    const task = pipeline.sendOpeningPrompt();
+    expect(game.markOpeningPromptConsumed).toHaveBeenCalled();
+    pipeline.dispose();
+    gate.resolve(true);
+    await task;
+    expect(game.addMessage).not.toHaveBeenCalled();
+    expect(game.releaseOpeningPromptClaim).toHaveBeenCalled();
+  });
+});
+it('Stop then same-save remount cannot start a run before old cleanup drains', async () => {
+  const game = makeGameStore();
+  const settings = makeSettingsStore();
+  const first = new GamePipeline({ gameStore: game, settingsStore: settings, saveId: 'save-test' });
+  const gate = deferred<void>();
+  vi.spyOn(first as any, 'buildContext').mockImplementation(() => {
+    (first as any).pendingPlotTasks.push(gate.promise);
+    throw new Error('controlled failure while a background task is pending');
+  });
+  const running = first.run('first');
+  first.abort();
+  first.dispose();
+  game.isGenerating = false; // GamePage.onBeforeUnmount and loadSave.clearActive both do this.
+  const second = new GamePipeline({
+    gameStore: game,
+    settingsStore: settings,
+    saveId: 'save-test',
+  });
+  const buildSecond = vi.spyOn(second as any, 'buildContext').mockImplementation(() => {
+    throw new Error('new run entered while previous cleanup remained pending');
+  });
+  const next = second.run('second');
+  const admittedBeforeCleanup = buildSecond.mock.calls.length;
+  gate.resolve();
+  await Promise.all([running, next]);
+  expect(admittedBeforeCleanup).toBe(0);
 });

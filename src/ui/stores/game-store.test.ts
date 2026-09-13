@@ -61,6 +61,76 @@ vi.mock('@engine/prompt-session-assembler', () => ({
 
 const SAVE_ID = 'save-refresh-test';
 
+describe('save loading ownership', () => {
+  beforeEach(async () => {
+    setActivePinia(createPinia());
+    await initializeDatabase();
+    await clearAllData();
+    await saveSaveSlot(makeSaveSlot());
+    await saveSaveSlot(makeSaveSlot({ id: 'save-b', name: 'B' }));
+  });
+
+  it('a slow earlier load cannot overwrite the latest requested save', async () => {
+    const game = useGameStore();
+    const original = database.getSave;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const spy = vi.spyOn(database, 'getSave').mockImplementation(async (id) => {
+      if (id === SAVE_ID) await gate;
+      return original(id);
+    });
+    try {
+      const first = game.loadSave(SAVE_ID);
+      await game.loadSave('save-b');
+      release();
+      await first;
+      expect(game.activeSaveId).toBe('save-b');
+      expect(game.activeSave?.name).toBe('B');
+    } finally {
+      release();
+      spy.mockRestore();
+    }
+  });
+
+  it('leaving while loading does not reactivate the save', async () => {
+    const game = useGameStore();
+    const loading = game.loadSave(SAVE_ID);
+    game.clearActive();
+    await loading;
+    expect(game.activeSaveId).toBeNull();
+    expect(game.characters).toEqual([]);
+  });
+
+  it('a pending refresh cannot apply the previous save profile after switching', async () => {
+    const game = useGameStore();
+    await saveSaveProfile(makeProfile({ fp: 99 }));
+    await saveSaveProfile(makeProfile({ saveId: 'save-b', fp: 7 }));
+    await game.loadSave(SAVE_ID);
+    const original = database.getSaveProfile;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const spy = vi.spyOn(database, 'getSaveProfile').mockImplementation(async (id) => {
+      if (id === SAVE_ID) await gate;
+      return original(id);
+    });
+    try {
+      const pending = game.refreshFromDb(SAVE_ID);
+      await game.loadSave('save-b');
+      release();
+      await pending;
+      expect(game.saveProfile?.saveId).toBe('save-b');
+      expect(game.fp).toBe(7);
+    } finally {
+      release();
+      spy.mockRestore();
+    }
+  });
+});
+
 function makeSaveSlot(overrides: Partial<SaveSlot> = {}): SaveSlot {
   return {
     id: SAVE_ID,
@@ -1201,7 +1271,7 @@ describe('M2 v3 战斗接线', () => {
             chat: async () => ({ output: null, rawResponse: '' }),
           }) as never,
         endpoint: { id: 'ep' } as never,
-        stateManager: { commitChatState: async () => {} },
+        stateManager: { commitDomainCommand: async () => {} },
         characters: [],
         context: {} as never,
         submitCommand: async () => {}, // 等待态由 v3_awaiting_player_input 事件驱动 store
@@ -1339,7 +1409,7 @@ describe('M2 v3 战斗接线', () => {
             chat: async () => ({ output: null, rawResponse: '' }),
           }) as never,
         endpoint: { id: 'ep' } as never,
-        stateManager: { commitChatState: async () => {} },
+        stateManager: { commitDomainCommand: async () => {} },
         characters: [],
         context: {} as never,
         submitCommand: async () => {},
@@ -1456,7 +1526,7 @@ describe('T15 v3 事件链路（真实 runCombatV3 → store）', () => {
       deps: {
         clientFactory: () => fakeEnemyClient([]),
         endpoint: { id: 'ep' } as never,
-        stateManager: { commitChatState: commit },
+        stateManager: { commitDomainCommand: commit },
         characters: [],
         context: {} as never,
         submitCommand: async () => {},
@@ -1731,6 +1801,38 @@ describe('markOpeningPromptConsumed', () => {
     expect(results).toEqual([true, false]);
     expect(store.hasOpeningPromptConsumed).toBe(true);
     expect((await getSave(SAVE_ID))?.metadata.openingPromptConsumed).toBe(true);
+  });
+
+  it('releases only the original save after switching, and preserves completed openings', async () => {
+    const base = makeSaveSlot();
+    await saveSaveSlot(
+      makeSaveSlot({ metadata: { ...base.metadata, openingPromptConsumed: true } }),
+    );
+    await saveSaveSlot(
+      makeSaveSlot({
+        id: 'save-b',
+        slot: 2,
+        metadata: { ...base.metadata, openingPromptConsumed: true },
+      }),
+    );
+    const store = makeStore();
+    await store.loadSave('save-b');
+    expect(await store.releaseOpeningPromptClaim(SAVE_ID)).toBe(true);
+    expect((await getSave(SAVE_ID))?.metadata.openingPromptConsumed).toBe(false);
+    expect((await getSave('save-b'))?.metadata.openingPromptConsumed).toBe(true);
+    expect(store.activeSaveId).toBe('save-b');
+    expect(store.hasOpeningPromptConsumed).toBe(true);
+
+    await saveMessage({
+      id: 'opening-b',
+      saveId: 'save-b',
+      role: 'assistant',
+      content: 'Opening narrative',
+      timestamp: 1,
+      turn: 1,
+    });
+    expect(await store.releaseOpeningPromptClaim('save-b')).toBe(false);
+    expect((await getSave('save-b'))?.metadata.openingPromptConsumed).toBe(true);
   });
 
   it('releases a claim back to disk so a failed opening can be retried', async () => {

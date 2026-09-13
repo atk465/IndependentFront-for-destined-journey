@@ -595,6 +595,37 @@ export interface PlotOutline {
   updatedAt: number;
 }
 
+/**
+ * 大纲章节里的单个关键事件（plot_outline Agent 输出的结构化形状）。
+ * 与 {@link PlotOutline.chapters} 的简版（仅 title/summary/status）不同 —— 这个带
+ * 触发/完成/失败条件与时间窗口，供 `outlineToEvents` 在开局时生成事件树。
+ */
+export interface PlotKeyEventOutput {
+  title: string;
+  description: string;
+  triggerHint?: string;
+  /** 事件时间窗口（年-月粒度，如 "512-03" 到 "512-05"） */
+  timeWindow?: { start: string; end: string };
+  /** 完成条件提示 */
+  completeHint?: string;
+  /** 失败条件提示 */
+  failHint?: string;
+}
+
+/**
+ * 剧情大纲章节（AI 输出的结构化形状）—— `ParsedOutlineOutput.chapters` 与捏人预设共用，
+ * 定义只此一份（避免 plot-outline 与 types 各写一套导致漂移）。
+ */
+export interface PlotChapterOutput {
+  title: string;
+  summary: string;
+  /** 此大事件涉及的关键 NPC 议程（去中心化行动线索；主要 depth 0 大事件用） */
+  npcAgendas?: string;
+  /** 主角不介入时，该态势的世界默认演化（反事实基线；主要 depth 0 大事件用） */
+  ifAbsent?: string;
+  keyEvents: PlotKeyEventOutput[];
+}
+
 export interface AppSettings {
   key?: string;
   api: ApiSettings;
@@ -902,6 +933,9 @@ export interface Skill {
   name: string;
   description: string;
   type: 'active' | 'passive';
+  /** 🆕 2026-09-11: 技能品质（普通~唯一）。item_gen `<skill quality="...">` 产出，与物品 `rarity` 同名同义。
+   *  缺省 = 未定（UI 不再编造「史诗」，回落 `inferQuality` / 中性色） */
+  rarity?: QualityLevel;
   cost?: { type: 'HP' | 'MP' | 'SP'; amount: number };
   cooldown?: number; // 剩余冷却时间
   maxCooldown?: number;
@@ -1022,6 +1056,11 @@ export interface StatusEffect {
   /** 🆕 是否可叠加层数, 默认 true. false=永远1层 */
   stackable?: boolean;
   remainingTime: number | null; // 剩余时间, null=永久
+  /** 🆕 F07: 已流逝但不足一个时间单位的小数余量。当前仅供 timeUnit='小时' 使用——
+   *   `applyTimeAdvance` 把本次推进的分钟累进这里，每满整小时才扣 remainingTime，
+   *   避免「30 分钟×2 次两次 floor(30/60)=0、一小时效果永不到期」的分区依赖。
+   *   缺省 undefined = 0；旧存档缺失即按无余量处理（迁移只认当时表示的整值，不回溯）。 */
+  carryMinutes?: number;
   timeUnit: '回合' | '分钟' | '小时'; // 时间单位（战斗中=回合，脱战=分钟/小时）
   source: string; // 来源 [分类]-[施加者]; [解除方式]
   effects: Record<string, number>; // 效果数值化 (保留, 简单数值效果)
@@ -1269,6 +1308,33 @@ export interface CharacterCard {
 
 // ========== 记忆系统 (Memory System) ==========
 
+/**
+ * Embedding 空间元数据（F09 — 向量溯源指纹）
+ *
+ * 描述「这条向量是在哪个 embedding 空间里算出来的」。召回时只有 `spaceId` 相同的
+ * 向量参与余弦排名；无此元数据的存量记录视为 legacy，**不假定兼容**（维度相同也
+ * 不能证明同一空间），走 importance/recency 兜底直到显式重嵌入。
+ *
+ * 🔴 `spaceId` 只由非机密语义输入派生（归一化 endpoint 身份 + 模型 + 维度 +
+ * 预处理版本）—— **绝不含 API Key / URL userinfo / query / hash**；key 轮换不改变
+ * 空间身份。模型别名背后换了真模型而没改别名时本指纹无法察觉，需显式的空间版本
+ * bump（空间指纹含预处理版本，bump 版本即换空间），不宣称做不到的兼容检测。
+ */
+export interface EmbeddingMetadata {
+  /** 空间指纹：归一化 endpoint 身份 + 模型 + 维度 + 预处理版本的派生串 */
+  spaceId: string;
+  /** 产生这条向量时实际使用的模型别名 */
+  model: string;
+  /** 向量维度 */
+  dimensions: number;
+  /** 文本预处理版本（输入拼接规则集的标识；变更会推导进新空间） */
+  preprocessingVersion: string;
+  /** 被嵌入文本的确定性指纹（重嵌入时校验「要嵌的文本没变」用） */
+  contentRevision: string;
+  /** provider 报告的模型版本（OpenAI 兼容端点通常不可得；缺席即诚实不宣称） */
+  modelRevision?: string;
+}
+
 /** 记忆记录 — MEM00XXX 编号 */
 export interface MemoryRecord {
   id: string; // 'MEM000001'
@@ -1292,6 +1358,8 @@ export interface MemoryRecord {
   importance: number;
   /** Embedding 向量（Phase 4 — 用于语义召回，维度取决于 embedding 模型） */
   embedding?: number[];
+  /** Embedding 空间元数据（F09 — 缺失 = legacy 记录，召回走重要性兜底） */
+  embeddingMeta?: EmbeddingMetadata;
 }
 
 // ========== 剧情系统 (Plot System) ==========
@@ -1513,6 +1581,12 @@ export interface CreatePreset {
   physics?: string;
   backstory?: string;
   extra?: string;
+  /**
+   * 剧情大纲本体 + 结构化章节。此前只存 `plotSettings`（参数），读回预设时生成的大纲丢失。
+   * 旧预设没有这两个字段 → `applyPresetData` 保持当前大纲不动（不误清）。
+   */
+  plotOutline?: PlotOutline | null;
+  plotOutlineChapters?: PlotChapterOutput[];
 }
 
 // ========== Agent 编排引擎 (Agent Orchestration) ==========
@@ -1575,6 +1649,8 @@ export interface ToolExecutionContext {
    * `takeCraftTape` 用到时才建。
    */
   craftDice?: Record<string, CraftDiceTape>;
+  /** Defer settlement until the craft chain can commit its product in the same command. */
+  stageCraftSettlement?: (patches: StatePatch[]) => void;
 }
 
 /** Agent 定义 */
@@ -1860,6 +1936,26 @@ export interface AgentContext {
       fallbackEntries: Array<{ uid: number; error: string }>;
     };
   };
+
+  // --- 主线细化层（事件线，2026-09-09 接通；设计 docs/planning/2026-09-07-*-design.md） ---
+  /**
+   * 事件线**持久节点袋**（`SaveProfile.worldFlags.plotThreads`，由 game-pipeline 经
+   * `getPlotThreadFlags()` 取出）。
+   *
+   * 🔴 这里只供 pre/post 的快照构建（`buildPlotThreadSnapshot` 与其数据源）；
+   *    未揭示 motive 与连线意向**不得**随任何投影流出到 Story / dispatcher / char_gen ——
+   *    那是 `projectPlotThreadSurface` 的职责，本袋永远不是渲染入口。
+   * 🔴 缺席 = 从未推进细化 / 旧档：`{{PLOT_THREADS}}` 整段不出（零 token，与
+   *    `mapFlags` / `randomEvents` 同一句「供值必须在这里」的铁律）。
+   */
+  plotThreadFlags?: import('./plot-threads').PlotThreadFlags;
+  /** 本轮细化闸门结果（pre 开始时由 Code 求值一次；调试面板直接消费同一函数产出的对象） */
+  plotThreadGate?: import('./plot-threads').PlotThreadGateResult;
+  /**
+   * 同轮临时工作集（pre 接受声明 + post 暂存结算；post 可见，**不是持久真源**）。
+   * 成功回合收口由 `commitPlotThreadTurn` 落库；失败/取消整体丢弃。
+   */
+  plotThreadTurnContext?: import('./plot-threads').PlotThreadTurnContext;
 }
 
 /** 单个 Agent 的运行结果 */
@@ -3786,6 +3882,8 @@ export interface CharGenOutput {
     cooldown?: number;
     effects?: Record<string, string>;
     scripts?: Record<string, string>;
+    /** 🆕 2026-09-11: 技能品质（对齐 ItemGenOutput.skills.quality） */
+    quality?: string;
     /** 🆕 战斗 v2 (M4 5.5b): 战斗管线修正声明（6 大类 modifier） */
     modifiers?: Modifier[];
     /** 🆕 战斗 v2 (M4 5.5b): 该技能附带的 buff 定义 */
@@ -3857,6 +3955,8 @@ export interface ItemGenOutput {
     };
     /** 冷却回合数 (可选) */
     cooldown?: number;
+    /** 🆕 2026-09-11: 技能品质（来自 `<skill quality="...">`，对齐 `<equip quality>`） */
+    quality?: string;
     /** 🆕 Phase 8.5: 词条效果 <effect name="...">...</effect> */
     effects?: Record<string, string>;
     /** 🆕 Phase 8.5: 脚本 <script name="init|cast|tick|cleanup">code</script> */

@@ -103,6 +103,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │                                          由 `eslint.config.js` 的 `no-restricted-imports` +
 │                                          `tests/layering-gate.test.ts` 两道闸守着。**前端往引擎的方向
 │                                          不受限**，所以本目录是「值得收口的东西的家」，不是必经之路
+│   ├── journey-readiness.ts         ← 创角前本机配置检查；复用 endpoint-resolver 与主 DAG 名册，不发网络请求
 │   ├── game-pipeline.ts             ← GamePipeline（AgentConfig 组装/上下文/编排器/回调）
 │   │                                   [图像 v1] +onSceneImage（照 onPlayAudio 的形状）
 │   │                                   🔴 **自动档绝不追溯开火**（D15）：这个回调只在编排器**刚产出**
@@ -112,6 +113,13 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                   🔴 checkQuota 在 image_prompt 侧链**之前**（D32）；限额拒绝时
 │   │                                      **绝不丢弃标记** —— 什么都不做，让它落到「无记录」格渲染成
 │   │                                      手动按钮（D21）。off 档标记照扫（否则会漏成文本）但不建记录
+│   ├── endpoint-resolver.ts          ← [F10] Agent API 池绑定的 fail-closed 纯解析器（pool id → ApiEndpoint）：
+│   │                                   「未设置（可走默认）」与「显式绑定但解析不到（stale，**绝不 reroute**）」
+│   │                                   语义拆分的**唯一实现**（game-pipeline buildAgentConfigs / 侧链
+│   │                                   getEndpointForAgent / create-store plot_outline 共用）。纯函数、
+│   │                                   不持 UI 通知与网络 I/O；消费方自主处置 missing-pool / stale-binding。
+│   │                                   🔴 Agent 设置里那个叫 `model` 的键实际存 **API 池 id**（历史命名，
+│   │                                      不改名），传 `boundPoolId` 进解析器即可
 │   ├── audio-singleton.ts           ← AudioManager 应用级单例（setBlobResolver 注入缝）
 │   ├── audio-folder.ts              ← [Audio] 本地音乐文件夹（File System Access 唯一接触点，仅 Chromium）
 │   ├── asset-zip.ts                 ← [素材] 一键 zip 读写（流式 + SHA-256 + 体积上限）
@@ -246,11 +254,14 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │      ui-store 的 `viewHistory` 负责页面级多层返回（例如设置 → 扩展管理 → 工坊），
 │   │      `previousView` 只作兼容投影；`back()` 直接弹栈，不能再经 `navigate()` 把当前页
 │   │      压回去。同视图重复 navigate 不入栈，否则返回目标会变成自己
+│   │      create-store 的 startJourney 合并并发提交；isCreating 贯穿持久化与错误恢复。
 │   ├── game-store.ts                ← 时间线恢复唯一 UI 编排边界：rollbackOneTurn /
 │   │                                   restoreToSnapshot / restartCombat 共用私有 restoreTimeline；
 │   │                                   三态结果区分恢复前拒绝、完整恢复、权威已恢复但投影失败。
 │   │                                   成功后全量重建存档投影、失效 prompt session、重接效果系统；
 │   │                                   projection-failed 必须清空当前会话并回首页重新进入存档
+│   │                                   loadSave 先读完整投影再按世代提交；离页使在途加载失效。
+│   │                                   ui.activeSaveId 只表达导航目标，活跃投影由 game-store 持有。
 │   ├── settings-store.ts            ← 全应用最热的状态；deep watch 自动落 localStorage
 │   │                                   API RPM 策略例外：住 Dexie v23，经 `saveRpmPolicies` 整表替换并
 │   │                                   热更新全局 limiter；端点凭据编辑时迁移其既有限制
@@ -823,6 +834,16 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               🔴 SnapshotPanel 自**快照拆表 v22**（2026-08-17）起只读
 │   │   │                                  `SnapshotMeta.preview`（玩家台词 / 游戏时间），**不再拉整份
 │   │   │                                  快照体** —— 列表渲染碰 body 会把拆表白拆
+│   │   ├── PlotThreadsPanel.vue     ← 🆕 [主线细化 ADR-35 / 2026-09-09] 事件线面板（挂在 PlotPanel 内、
+│   │   │                               有节点才渲染）：按主线锚分组节点卡 + 轻量方向连线（`A → B` 按钮）。
+│   │   │                               🔴 防剧透三件套全在 `plot-thread-view.ts`：蒙版判定（reveal + peek，
+│   │   │                                  剧透模式只**允许** peek 不直接解除）、组名整组蒙版、边任一端隐藏
+│   │   │                                  整条遮蔽；**引用行（埋向/回收）同样过滤可见端点** —— 组件测试
+│   │   │                                  抓过一处「已揭示节点详情引用隐藏节点名」的真实泄漏
+│   │   │                               🔴 只从 `game.saveProfile.worldFlags.plotThreads` 派生只读视图，
+│   │   │                                  不建第二份持久 store；motive 仅剧透模式显式展开可见
+│   │   ├── plot-thread-view.ts      ← 上者的展示层判定（纯函数，不 mount 可测）：分组/蒙版/边遮蔽/
+│   │   │                               状态中文标签（引用引擎集中映射，UI 不内联第二份）
 │   │   ├── BeautifiedNarrative.vue  ← [工坊正则] 正文渲染入口：`compileBeautifierSegments` 分段 +
 │   │   │                               `splitSceneImageSegments` 切插画锚点，再分派给
 │   │   │                               BeautifierFrame（美化段）与 SceneImageSegment（插画格）。
@@ -847,6 +868,11 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               🔴 本区块回答的是「调度器会不会考虑它」，**不做过期/权重 0 的
 │   │   │                                  撤池判定**（`isPendingStillValid` 那一套）；`inPool` 只原样
 │   │   │                                  报告池里有没有这个名字，不替它判活
+│   │   ├── plot-thread-debug.ts     ← 🆕 [主线细化 ADR-35] DebugPanel 事件线区块的展示层判定（纯函数）：
+│   │   │                               节点状态计数/未揭示数/收口游标 + **下一轮闸门预览**（直接调生产
+│   │   │                               `evaluatePlotThreadGate`，不复制判据；纯函数无副作用，查看面板
+│   │   │                               不推进随机状态）。DebugPanel 区块对上一轮实际结果与下一轮预览
+│   │   │                               分别标注
 │   │   ├── TurnActivityLedger.vue   ← [管线并行化] 一回合的 Agent 活动账本（逐步骤状态/耗时/重试入口）；
 │   │   │                               中文步骤名出自 `lib/agent-activity.ts`，本组件不自造文案
 │   │   ├── SceneImageSegment.vue    ← [图像 v1] 正文里一格插画的六种样子。**不判定**该显示什么
@@ -946,3 +972,7 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 ### 预设系统（正文 Agent 专用）
 
 仿 SillyTavern AI Response Configuration 面板：预设选择器 + 导入 ST JSON / 新建 / 导出 / 删除；采样器参数预览；条目列表（启用/名称/角色/字数/编辑）；ST 导入完整保留 `prompts[]`。
+
+### 2026-09-05 键盘契约补注
+
+共享 `AppModal` 经 `lib/modal-focus.ts` 管理嵌套焦点、Tab 环绕、Escape 与焦点归还；Toast 使用 live region，点击型 AppCard 支持键盘。存档选择与背景选择使用独立原生按钮，避免包裹行内其他交互控件。

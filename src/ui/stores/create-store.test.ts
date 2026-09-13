@@ -142,21 +142,26 @@ vi.mock('@engine/agent-client', () => ({
       const result = await chatMock(_req);
       if (result.error) {
         callbacks.onError(result.error);
-      } else {
-        const raw = result.rawResponse || '';
-        if (raw) callbacks.onChunk?.(raw, false);
-        callbacks.onComplete({
-          fullText: raw,
-          toolCalls: [],
-          reasoning: result.reasoning || '',
-          tokensUsed: result.tokensUsed || 0,
-          cacheHit: false,
-          cacheHitTokens: 0,
-          cacheMissTokens: 0,
-          completionTokens: 0,
-          duration: result.duration || 0,
-        });
+        return;
       }
+      // 允许测试自定义流式时序（如「先思维链、后正文」），未提供则走最小默认时序
+      if (typeof result.__stream === 'function') {
+        await result.__stream(callbacks);
+        return;
+      }
+      const raw = result.rawResponse || '';
+      if (raw) callbacks.onChunk?.(raw, false);
+      callbacks.onComplete({
+        fullText: raw,
+        toolCalls: [],
+        reasoning: result.reasoning || '',
+        tokensUsed: result.tokensUsed || 0,
+        cacheHit: false,
+        cacheHitTokens: 0,
+        cacheMissTokens: 0,
+        completionTokens: 0,
+        duration: result.duration || 0,
+      });
     }
   },
 }));
@@ -1057,7 +1062,7 @@ describe('buildOpeningPrompt', () => {
     expect(prompt).toContain('身无分文');
     // 开局时间总是存在（纪元基准 488 年）；纪元名由内容侧 branding 面供给（D9）
     expect(prompt).toContain(`${FIXTURE_ERA}0488年`);
-    expect(prompt).toContain('故事便从这个瞬间继续');
+    expect(prompt).toContain('首轮叙事请以「开局剧情」');
     expect(prompt).not.toContain('不要解释规则');
   });
 
@@ -1076,7 +1081,7 @@ describe('buildOpeningPrompt', () => {
     expect(prompt).toContain('阿黑身无分文，衣袋里连一枚帝冕币也没有。');
     expect(prompt).toContain('阿黑生性天真。');
     expect(prompt).toContain('阿黑的身形与外貌给人的印象是：男娘。');
-    expect(prompt).toContain('都将从阿黑此刻的处境自然延伸');
+    expect(prompt).toContain('再自然续写后续发展');
     expect(prompt).not.toContain('---');
     expect(prompt).not.toContain('初始数据');
     expect(prompt).not.toContain('起源印记');
@@ -1184,6 +1189,63 @@ describe('预设系统', () => {
     expect(store2.name).toBe('预设测试');
     expect(store2.level).toBe(5);
     expect(store2.difficulty?.id).toBe('normal');
+  });
+
+  it('保存/加载预设往返剧情大纲本体（plotOutline + plotOutlineChapters）', () => {
+    store.plotOutline = {
+      id: 'o1',
+      saveId: '',
+      mode: 'main',
+      title: '血色纹章',
+      summary: '一句话摘要',
+      content: '大纲正文',
+      chapters: [{ title: '第一章', summary: '开端', status: 'pending' }],
+      confirmed: false,
+      version: 1,
+      timeRange: { start: '488-01', end: '488-03' },
+      createdAt: 1,
+      updatedAt: 1,
+    } as any;
+    store.plotOutlineChapters = [
+      { title: '第一章', summary: '开端', keyEvents: [{ title: '事件一', description: '描述一' }] },
+    ] as any;
+
+    const data = store.getCurrentPresetData();
+    expect(data.plotOutline?.title).toBe('血色纹章');
+    expect(data.plotOutlineChapters).toHaveLength(1);
+
+    const store2 = makeStore();
+    store2.applyPresetData({
+      id: 'test',
+      name: 'test-preset',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      ...data,
+    });
+    expect(store2.plotOutline?.title).toBe('血色纹章');
+    expect(store2.plotOutlineChapters[0].keyEvents).toHaveLength(1);
+  });
+
+  it('旧预设（无大纲字段）不清空当前大纲（A 口径）', () => {
+    const data = store.getCurrentPresetData();
+    // 模拟旧预设：两个新增字段都不存在
+    delete (data as any).plotOutline;
+    delete (data as any).plotOutlineChapters;
+
+    const store2 = makeStore();
+    const existing = { title: '已有大纲' } as any;
+    store2.plotOutline = existing;
+    store2.plotOutlineChapters = [{ title: '已有章', summary: '', keyEvents: [] }] as any;
+
+    store2.applyPresetData({
+      id: 'test',
+      name: 'old-preset',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      ...data,
+    });
+    expect(store2.plotOutline?.title).toBe('已有大纲');
+    expect(store2.plotOutlineChapters).toHaveLength(1);
   });
 });
 
@@ -1414,11 +1476,12 @@ function outlineJson(score = 8, title = '血色纹章') {
   });
 }
 
-function okResult(raw: string) {
+function okResult(raw: string, reasoning = '') {
   return {
     agentId: 'plot_outline',
     output: raw,
     rawResponse: raw,
+    reasoning,
     tokensUsed: 100,
     cacheHit: false,
     duration: 10,
@@ -1535,6 +1598,68 @@ describe('generatePlotOutline 大纲生成', () => {
     const ok = await store.generatePlotOutline();
     expect(ok).toBe(true);
     expect(store.plotStreamStats).toBeNull();
+  });
+
+  it('推理模型：仅思维链先到达也应进入 thinking 态并累计字数，正文到达后转 streaming', async () => {
+    const store = setupPlotStore();
+    const snapshots: Array<{ phase: string; chars: number; reasoningChars: number }> = [];
+    const reasoning = '思'.repeat(600);
+    const raw = outlineJson(8);
+    chatMock.mockResolvedValueOnce({
+      __stream: async (cb: any) => {
+        cb.onReasoning?.(reasoning);
+        const st = store.plotStreamStats!;
+        snapshots.push({ phase: st.phase, chars: st.chars, reasoningChars: st.reasoningChars });
+        cb.onChunk?.(raw, false);
+        const st2 = store.plotStreamStats!;
+        snapshots.push({ phase: st2.phase, chars: st2.chars, reasoningChars: st2.reasoningChars });
+        cb.onComplete({
+          fullText: raw,
+          toolCalls: [],
+          reasoning,
+          tokensUsed: 0,
+          cacheHit: false,
+          cacheHitTokens: 0,
+          cacheMissTokens: 0,
+          completionTokens: 0,
+          duration: 0,
+        });
+      },
+    });
+    const ok = await store.generatePlotOutline();
+    expect(ok).toBe(true);
+    expect(snapshots[0]).toEqual({ phase: 'thinking', chars: 0, reasoningChars: 600 });
+    expect(snapshots[1].phase).toBe('streaming');
+    expect(snapshots[1].chars).toBe(raw.length);
+    expect(snapshots[1].reasoningChars).toBe(600);
+  });
+
+  it('预计总字数含上一轮思维链（与实时统计同口径，不再只算正文）', async () => {
+    const store = setupPlotStore();
+    const raw = outlineJson(8);
+    const reasoning = '思'.repeat(700);
+    chatMock.mockResolvedValueOnce(okResult(raw, reasoning));
+    expect(await store.generatePlotOutline()).toBe(true);
+
+    let estimatedTotalAtStart = 0;
+    chatMock.mockResolvedValueOnce({
+      __stream: async (cb: any) => {
+        estimatedTotalAtStart = store.plotStreamStats!.estimatedTotal;
+        cb.onComplete({
+          fullText: raw,
+          toolCalls: [],
+          reasoning: '',
+          tokensUsed: 0,
+          cacheHit: false,
+          cacheHitTokens: 0,
+          cacheMissTokens: 0,
+          completionTokens: 0,
+          duration: 0,
+        });
+      },
+    });
+    expect(await store.generatePlotOutline()).toBe(true);
+    expect(estimatedTotalAtStart).toBe(raw.length + reasoning.length);
   });
 
   it('输出解析失败时应设置错误状态', async () => {
@@ -1683,6 +1808,33 @@ describe('reviseOutline 重 roll 与 outlineHistory', () => {
 // ===== startJourney 落库（plotSettings metadata + 大纲 + 事件树） =====
 
 describe('startJourney 剧情落库', () => {
+  it('concurrent submissions create one complete journey', async () => {
+    const store = setupPlotStore();
+    const [first, second] = await Promise.all([store.startJourney(), store.startJourney()]);
+    const { getSaves, getCharacters } = await import('@engine/database');
+    expect(first).toBe(second);
+    expect(await getSaves()).toHaveLength(1);
+    expect(await getCharacters(first)).toHaveLength(1);
+  });
+
+  it('a profile write failure rolls back the whole journey and permits retry', async () => {
+    const store = setupPlotStore();
+    const { getDatabase, getSaves } = await import('@engine/database');
+    const db = getDatabase();
+    const failure = vi
+      .spyOn(db.saveProfiles, 'put')
+      .mockRejectedValueOnce(new Error('disk failure'));
+    try {
+      await expect(store.startJourney()).rejects.toThrow('disk failure');
+      expect(await getSaves()).toHaveLength(0);
+      expect(await db.characters.count()).toBe(0);
+      await expect(store.startJourney()).resolves.toEqual(expect.any(String));
+      expect(await getSaves()).toHaveLength(1);
+    } finally {
+      failure.mockRestore();
+    }
+  });
+
   beforeEach(async () => {
     chatMock.mockReset();
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false })) as any);
