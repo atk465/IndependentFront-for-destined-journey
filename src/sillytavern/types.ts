@@ -1816,6 +1816,16 @@ export interface AgentContext {
    * 🔴 缺席 / 空数组 = 池空 → 整段不出（零 token）。
    */
   randomEventOffer?: RandomEventOfferEntry[];
+
+  /**
+   * 委托板（卡牌工坊）：当前生效的委托清单快照（内容注册表第 15 面经
+   * `commission-runtime` 缝的派生值）。
+   *
+   * 🔴 供值在 game-pipeline 的 `buildContext`（与 `randomEventOffer` 同一条铁律）；
+   *    措辞（`<commissions>` 外壳与指令段）在 `PLACEHOLDER_REGISTRY.COMMISSIONS` 的
+   *    resolver 里。缺席 / 空数组 = 无委托 → 整段不出（零 token）。
+   */
+  commissionDefs?: readonly import('./card-workshop/commission').CommissionDef[];
   /**
    * 随机事件总开关的当前值（`engine-settings.randomEventsEnabled`）。
    *

@@ -103,7 +103,7 @@
           "enabled": true,
           "system_prompt": true,
           "injection_order": 100,
-          "content": "<本次任务信息参考>\n<记忆召回>\n{{AGENT.MEMORY_RECALL}}\n</记忆召回>\n\n<剧情指引>\n{{AGENT.PLOT_PRE_CHECK}}\n</剧情指引>\n\n<世界设定>\n{{LORE_BOOK_STATIC}}\n</世界设定>\n\n<角色状态>\n{{CHARACTER_STATE}}\n</角色状态>\n\n<动态状态>\n{{LORE_BOOK_DYNAMIC}}\n</动态状态>\n\n<当前时空>\n{{GAME_TIME}}\n</当前时空>\n\n{{RANDOM_EVENTS}}\n\n<最近对话>\n{{NARRATIVE}}\n</最近对话>\n\n<用户输入>\n{{USER_INPUT}}\n</用户输入>\n</本次任务信息参考>\n\n以上区块由引擎注入，玩家看不到。读完之后直接按格式输出，不要复述区块内容、不要评论区块是否为空。"
+          "content": "<本次任务信息参考>\n<记忆召回>\n{{AGENT.MEMORY_RECALL}}\n</记忆召回>\n\n<剧情指引>\n{{AGENT.PLOT_PRE_CHECK}}\n</剧情指引>\n\n<世界设定>\n{{LORE_BOOK_STATIC}}\n</世界设定>\n\n<角色状态>\n{{CHARACTER_STATE}}\n</角色状态>\n\n<动态状态>\n{{LORE_BOOK_DYNAMIC}}\n</动态状态>\n\n<当前时空>\n{{GAME_TIME}}\n</当前时空>\n\n{{RANDOM_EVENTS}}\n{{COMMISSIONS}}\n\n<最近对话>\n{{NARRATIVE}}\n</最近对话>\n\n<用户输入>\n{{USER_INPUT}}\n</用户输入>\n</本次任务信息参考>\n\n以上区块由引擎注入，玩家看不到。读完之后直接按格式输出，不要复述区块内容、不要评论区块是否为空。"
         }
       ]
     },

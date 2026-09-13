@@ -44,6 +44,7 @@ import {
 } from '@engine/card-workshop/skirmish';
 import { cardPlayPlan, sealedCardPlay } from '@engine/card-workshop/entry-combat';
 import { willModifierOf } from '@engine/card-workshop/unsealing';
+import { getCommissionDefs } from '@engine/commission-runtime';
 import { basicCounterAction, deriveCombatStats } from '@engine/card-workshop/derived-stats';
 import {
   crushFinish,
@@ -1174,6 +1175,9 @@ export class GamePipeline {
       //    漏供任一格的症状都不是报错，是那个块静默消失或永远静默（blurByDefault 的教训），
       //    故 placeholder-registry.random-events.test.ts 有一条源码断言盯着这三行。
       randomEventOffer: this.buildRandomEventOffer(),
+      // 委托板（卡牌工坊）：内容注册表第 15 面经 commission-runtime 缝的派生清单。
+      // 漏供的症状同样不是报错，是委托块静默消失。战斗静默由 resolver 判 combatActive。
+      commissionDefs: getCommissionDefs(),
       randomEventsEnabled: getEngineSettings().randomEventsEnabled,
       combatActive: this.game.isInCombat,
       // 🔴 2026-08-02 修: 初始技能走 item_gen 链路 —— request_dispatcher 的 {{SKILL_STATE}}

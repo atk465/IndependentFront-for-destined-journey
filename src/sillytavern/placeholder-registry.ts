@@ -21,6 +21,7 @@
  *   角色状态实际由 CHARACTER_STATE / INVENTORY / SKILL_STATE 各自的内联实现产出）
  */
 
+import type { CommissionDef } from './card-workshop/commission';
 import type {
   AgentContext,
   AgentConfig,
@@ -600,6 +601,54 @@ function renderMapContextBlock(snapshot: MapSnapshot, gameTime: GameTime | undef
 }
 
 // ═══════════════════════════════════════════════════════════
+// COMMISSIONS 渲染（卡牌工坊 委托板 —— 与 RANDOM_EVENTS 同款分工）
+// ═══════════════════════════════════════════════════════════
+
+/** 单条委托的行内摘要：折叠空白（一条委托恒占一行，照 flattenOfferText 同款纪律） */
+function flattenCommissionText(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+/** 需求摘要（minTier / formEntry / elements / exactName 全可选，只摘有值的） */
+function renderCommissionRequirement(req: CommissionDef['requireCard']): string {
+  const parts: string[] = [];
+  if (req.exactName) parts.push(`指定卡「${req.exactName}」`);
+  if (req.minTier) parts.push(`品质不低于${req.minTier}`);
+  if (req.formEntry) parts.push(`${req.formEntry}类`);
+  if (req.elements && req.elements.length > 0) parts.push(`含${req.elements.join('、')}元素`);
+  return parts.length > 0 ? parts.join('，') : '不限';
+}
+
+/** 奖励摘要（gc / reputation / materials 只摘有值的） */
+function renderCommissionRewards(req: CommissionDef['rewards']): string {
+  const parts: string[] = [];
+  if (req.gc) parts.push(`赏金 ${req.gc}G`);
+  if (req.reputation) parts.push(`声望 +${req.reputation}`);
+  if (req.materials && req.materials.length > 0) {
+    parts.push(`素材 ${req.materials.map((m) => `${m.name}×${m.quantity}`).join('、')}`);
+  }
+  return parts.length > 0 ? parts.join('，') : '面议';
+}
+
+/** 委托清单 → `<commissions>` 块（一条一行：名称｜描述｜收卡要求｜报酬） */
+function renderCommissionsBlock(defs: readonly CommissionDef[]): string {
+  const lines = defs.map((d) => {
+    const desc = d.description ? `：${flattenCommissionText(d.description)}` : '';
+    const line = `「${d.name}」${desc} ｜ 收卡：${renderCommissionRequirement(d.requireCard)} ｜ 报酬：${renderCommissionRewards(d.rewards)}`;
+    return flattenCommissionText(line);
+  });
+  return [
+    '<commissions>',
+    '以下是冒险者公会当前的委托板。玩家询问委托或想接活时，从下列条目中向其介绍；',
+    '玩家明确接取某条委托时，用既有 quest 机制立一个与委托**同名**的任务（模板名逐字一致，不得改写）；',
+    '玩家交卡时只做叙事确认，验收与发奖由引擎结算——你不得自行宣布委托完成或发放奖励。',
+    '---',
+    ...lines,
+    '</commissions>',
+  ].join('\n');
+}
+
+// ═══════════════════════════════════════════════════════════
 // RANDOM_EVENTS 渲染（随机事件 v1 §5.1 —— 与 MAP_CONTEXT 同款分工）
 // ═══════════════════════════════════════════════════════════
 
@@ -886,6 +935,25 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
     const offer = ctx.randomEventOffer ?? [];
     if (offer.length === 0) return '';
     return renderRandomEventsBlock(offer, (ctx.plotSettings?.mode ?? 'off') !== 'off');
+  },
+
+  /**
+   * {{COMMISSIONS}} — 冒险者公会当前的委托板（卡牌工坊 委托接线）。
+   *
+   * 数据来自 `ctx.commissionDefs`（内容注册表第 15 面经 `commission-runtime` 缝、
+   * game-pipeline `buildContext` 供值——与 randomEventOffer 同一条铁律）。
+   *
+   * 🔴 **两条空串出口**：① 没装内容包或清单为空（引擎仓零内置委托，常态）；
+   *    ② **战斗会话活跃**（combatActive，照随机事件 §13-2 同款静默）。
+   *    块自带 XML 外壳，模板里不要再包一层中文标签。
+   * 🔴 只给名字/描述/收卡要求/报酬：验收过滤器和奖励发放是引擎的活
+   *    （`matchesCommission` / `buildDeliveryPatches`），讲给 AI 只会诱导它自行宣判交付。
+   */
+  COMMISSIONS: (ctx, _config, _params) => {
+    if (ctx.combatActive === true) return '';
+    const defs = ctx.commissionDefs ?? [];
+    if (defs.length === 0) return '';
+    return renderCommissionsBlock(defs);
   },
 
   /**
