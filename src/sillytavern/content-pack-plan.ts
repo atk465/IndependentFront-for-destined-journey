@@ -198,6 +198,11 @@ export function planPackInstall(
     // planner 再做一遍就是两处口径，而不一致时先出错的那一处永远没人手工验。
     sections.randomEvents = planOpaqueSection(pack.randomEvents);
   }
+  if (pack.commissions !== undefined) {
+    // commissions（第 15 面）照 randomEvents 同档：整块替换、planner 不解释结构——
+    // 「坏定义逐条丢」的容错在 coerceCommissions（content-store 装缝之前过一遍）。
+    sections.commissions = planOpaqueSection(pack.commissions);
+  }
 
   // ── agentDefaults / branding 名册/键集（透传，无四态）──
   const agentDefaults: PackInstallPlan['agentDefaults'] | undefined = pack.agentDefaults

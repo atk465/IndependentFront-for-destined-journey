@@ -56,6 +56,7 @@ describe('content-store — 注册表（D16 八面同步读取）', () => {
       'bloodlines',
       'branding',
       'catalog',
+      'commissions',
       'imageDialects',
       'locations',
       'mapPack',
@@ -77,6 +78,7 @@ describe('content-store — 注册表（D16 八面同步读取）', () => {
       imageDialects: { dialects: [] },
       mapPack: { version: 'test-map', tiles: [] },
       randomEvents: { defs: [] },
+      commissions: { defs: [] },
       remoteAssets: [],
     };
     setContentRegistry(next);
@@ -96,6 +98,7 @@ describe('content-store — 注册表（D16 八面同步读取）', () => {
       imageDialects: 'filled',
       mapPack: 'filled',
       randomEvents: 'filled',
+      commissions: 'filled',
       remoteAssets: 'filled',
     });
     seedPlaceholderRegistry();

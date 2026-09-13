@@ -77,6 +77,7 @@ describe('占位内容 · 注册表八面能被生产解析器吃下', () => {
       imageDialects: imageDialectsRaw,
       mapPack: mapPackRaw,
       randomEvents: randomEventsRaw,
+      commissions: { defs: [] },
       remoteAssets: remoteAssetsRaw,
     });
   });
