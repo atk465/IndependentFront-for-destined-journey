@@ -82,6 +82,8 @@ export interface SkirmishAction {
   label: string;
   power: number;
   tags: readonly CounterTag[];
+  /** 出卡反制时的卡名（逻辑键）；基础应对缺省。会话账本据此记参战卡（卡牌经验分成对象） */
+  cardName?: string;
 }
 
 export type SkirmishGrade = 'S' | 'A' | 'B' | 'C';
@@ -253,16 +255,20 @@ export function judgeCrush(playerPower: number, enemyPower: number): boolean {
 // ========== 终局评价与经验 ==========
 
 /**
- * 战斗评价：C = 撤退；S = 全拍反制且 HP 损失 ≤25%；A = 胜利且 HP 损失 ≤50%；其余 B。
+ * 战斗评价：C = 撤退/败北；碾压速胜 = S（评价封顶 S，跳拍不打折）；S = 全拍反制且
+ * HP 损失 ≤25%；A = 胜利且 HP 损失 ≤50%；其余 B。
  * hpLossRatio 由调用方算好传入（受伤 / 最大HP，0..1，越界夹逼）。
  */
 export function gradeBattle(input: {
   fled: boolean;
+  crush?: boolean;
+  defeated?: boolean;
   totalBeats: number;
   counteredBeats: number;
   hpLossRatio: number;
 }): SkirmishGrade {
-  if (input.fled) return 'C';
+  if (input.fled || input.defeated) return 'C';
+  if (input.crush) return 'S';
   const ratio = Number.isFinite(input.hpLossRatio)
     ? Math.min(Math.max(input.hpLossRatio, 0), 1)
     : 1;
