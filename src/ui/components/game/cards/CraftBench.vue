@@ -10,13 +10,16 @@
  * Phase 3 接入委托结算），这里绝不绕开制作链直接造卡。素材元素标签可手动增删
  * —— 推导只是缺省，玩家对自己素材的元素认知优先（确定性内核吃标签，不吃叙事）。
  */
-import { computed, reactive, watch } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 import { useGameStore } from '../../../stores/game-store';
 import { cardTierVar } from '../../../lib/quality-colors';
-import type { InventoryItem } from '@engine/types';
+import type { CardItem, InventoryItem } from '@engine/types';
 import { fuse } from '@engine/card-workshop/card-fusion';
 import { ELEMENT_KEYWORDS, deriveElements, toMaterial } from '@engine/card-workshop/material';
 import type { MaterialSpec } from '@engine/card-workshop/card-fusion';
+import { REPAIR_RECIPE, isDamaged, planRepair } from '@engine/card-workshop/repair';
+import type { RepairPlan } from '@engine/card-workshop/repair';
+import AppButton from '../../shared/AppButton.vue';
 
 const game = useGameStore();
 const player = computed(() => game.player);
@@ -25,6 +28,65 @@ const player = computed(() => game.player);
 const materials = computed<InventoryItem[]>(() =>
   (player.value?.inventory ?? []).filter((i) => i.type === '材料'),
 );
+
+// ═══ 修复区（契约召唤 C' 制：损坏的卡可修复，双轨制——模板直修 + 额外素材强化）═══
+
+const damagedCards = computed<CardItem[]>(() =>
+  (player.value?.inventory ?? []).filter((i): i is CardItem => i.type === '卡牌' && isDamaged(i)),
+);
+const repairCardName = ref('');
+const selectedMaterials = ref<string[]>([]);
+const repairing = ref(false);
+const repairError = ref('');
+
+const repairTarget = computed(() =>
+  damagedCards.value.find((c) => c.name === repairCardName.value),
+);
+const repairRecipe = computed(() =>
+  repairTarget.value ? REPAIR_RECIPE[repairTarget.value.cardTier] : undefined,
+);
+const resolvedSelected = computed<InventoryItem[]>(() =>
+  selectedMaterials.value
+    .map((n) => (player.value?.inventory ?? []).find((i) => i.name === n))
+    .filter((i): i is InventoryItem => !!i),
+);
+/** 选中的素材按顺序切分：先填满模板配额，其余作为额外强化素材 */
+const repairSplit = computed(() => {
+  const quota = repairRecipe.value?.materialCount ?? 0;
+  return {
+    template: resolvedSelected.value.slice(0, quota),
+    extra: resolvedSelected.value.slice(quota),
+  };
+});
+const repairValidation = computed(() => {
+  if (!repairTarget.value || repairSplit.value.template.length === 0) return undefined;
+  return planRepair(repairTarget.value, repairSplit.value.template, repairSplit.value.extra);
+});
+const repairPlan = computed<RepairPlan | undefined>(() => repairValidation.value?.plan);
+const canRepair = computed(() => !!repairTarget.value && !!repairValidation.value?.ok);
+
+function toggleMaterial(name: string) {
+  const i = selectedMaterials.value.indexOf(name);
+  if (i === -1) selectedMaterials.value.push(name);
+  else selectedMaterials.value.splice(i, 1);
+}
+
+async function doRepair() {
+  if (!repairCardName.value || !canRepair.value) return;
+  repairing.value = true;
+  repairError.value = '';
+  const r = await game.repairCard(
+    repairCardName.value,
+    repairSplit.value.template.map((m) => m.name),
+    repairSplit.value.extra.map((m) => m.name),
+  );
+  repairing.value = false;
+  if (!r.ok) {
+    repairError.value = r.reason ?? '修复失败';
+    return;
+  }
+  selectedMaterials.value = [];
+}
 
 type SlotKey = 'main' | 'sub1' | 'sub2';
 const selection = reactive<Record<SlotKey, string>>({ main: '', sub1: '', sub2: '' });
@@ -194,6 +256,62 @@ const RATING_HINT: Record<string, string> = {
         </div>
       </section>
     </div>
+
+    <!-- 修复区（契约召唤 C' 制：伙伴被打倒 → 卡损坏；有损坏卡时出现） -->
+    <section v-if="damagedCards.length > 0" class="repair-section" aria-label="修复损坏的卡">
+      <h4 class="d-label">修复损坏的卡</h4>
+      <div class="slot-card">
+        <div class="slot-head">
+          <select v-model="repairCardName" class="slot-select" aria-label="选择损坏的卡">
+            <option value="" disabled>选择损坏的卡…</option>
+            <option v-for="c in damagedCards" :key="c.name" :value="c.name">
+              {{ c.name }}（{{ c.cardTier }}）
+            </option>
+          </select>
+        </div>
+        <div v-if="repairRecipe" class="slot-price">
+          配方：{{ repairRecipe.materialCount }} 份稀有度 ≥{{ repairRecipe.minMaterialTier }}
+          的素材（点选下方素材，先填满模板配额，其余作为强化）
+        </div>
+        <div class="chip-row">
+          <button
+            v-for="m in materials"
+            :key="m.name"
+            type="button"
+            class="chip toggle"
+            :class="{ on: selectedMaterials.includes(m.name) }"
+            @click="toggleMaterial(m.name)"
+          >
+            {{ m.name }}
+          </button>
+        </div>
+        <div v-if="repairPlan" class="kv-grid">
+          <div class="kv-row">
+            <span class="k">跃迁</span>
+            <span class="v">{{
+              repairPlan.upgraded ? `${repairTarget?.cardTier} → ${repairPlan.newTier}` : '否'
+            }}</span>
+          </div>
+          <div class="kv-row">
+            <span class="k">新增词条</span>
+            <span class="v">{{
+              repairPlan.new词条.length ? repairPlan.new词条.join('、') : '无'
+            }}</span>
+          </div>
+        </div>
+        <p v-if="repairPlan?.summary" class="bench-note">{{ repairPlan.summary }}</p>
+        <p v-if="repairError" class="clash-warn" role="alert">{{ repairError }}</p>
+        <AppButton
+          size="sm"
+          variant="primary"
+          :disabled="!canRepair || repairing"
+          :loading="repairing"
+          @click="doRepair"
+        >
+          修复
+        </AppButton>
+      </div>
+    </section>
   </div>
 </template>
 
@@ -399,5 +517,8 @@ const RATING_HINT: Record<string, string> = {
 }
 .empty-tab.small::before {
   display: none;
+}
+.repair-section {
+  margin-top: var(--theme-spacing-md);
 }
 </style>

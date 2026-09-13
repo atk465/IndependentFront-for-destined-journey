@@ -4,6 +4,9 @@ import type {
   SaveSlot,
   CharacterState,
   ChatMessage,
+  CardItem,
+  InventoryItem,
+  StatePatch,
   MemoryRecord,
   PlotEvent,
   PlotOutline,
@@ -20,6 +23,7 @@ export type { DebugAgentEntry, DebugTurnRecord } from '@engine/types';
 import type { CombatView, CombatCommand, DeckCardData } from '@engine/combat-v3';
 import { tryParsePlayCard } from '@engine/combat-v3';
 import { isConsumableKind } from '@engine/card-workshop/card-kind';
+import { planRepair } from '@engine/card-workshop/repair';
 import {
   getSave,
   getSaves,
@@ -335,6 +339,66 @@ export const useGameStore = defineStore('game', () => {
     combatConsumedCards.value = [];
     combatPendingConsume.value = [];
     return consumed;
+  }
+
+  /**
+   * 修复损坏的卡（契约召唤 C' 制，卡牌工坊可玩闭环 4/9）。
+   * 双轨制：模板素材承担修复（必成功）；额外素材强化（元素并入 + 相生复合），
+   * 素材品质高于卡品质 → 品质跃迁（卡 cardTier 与角色 tier 同一次提交双写 + 属性包）。
+   * 规则校验全在引擎 card-workshop/repair.ts 纯函数，这里只装配 patches 提交。
+   */
+  async function repairCard(
+    cardName: string,
+    templateMaterialNames: string[],
+    extraMaterialNames: string[],
+  ): Promise<{ ok: boolean; reason?: string }> {
+    const playerChar = player.value;
+    if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
+    const resolve = (names: string[]): InventoryItem[] =>
+      names
+        .map((n) => playerChar.inventory.find((i) => i.name === n))
+        .filter((i): i is InventoryItem => !!i);
+    const card = playerChar.inventory.find(
+      (i): i is CardItem => i.name === cardName && i.type === '卡牌',
+    );
+    if (!card) return { ok: false, reason: '找不到该卡' };
+
+    const templateMaterials = resolve(templateMaterialNames);
+    const extraMaterials = resolve(extraMaterialNames);
+    const { ok, reason, plan } = planRepair(card, templateMaterials, extraMaterials);
+    if (!ok) return { ok: false, reason };
+
+    const patches: StatePatch[] = [
+      {
+        op: 'update_item',
+        target: `characters.${playerChar.name}`,
+        value: {
+          name: cardName,
+          changes: {
+            data: { ...(card.data ?? {}), ...plan.cardData },
+            ...(plan.upgraded ? { cardTier: plan.newTier } : {}),
+          },
+        },
+      },
+      ...[...templateMaterialNames, ...extraMaterialNames].map((name) => ({
+        op: 'remove_item' as const,
+        target: `characters.${playerChar.name}`,
+        value: { name, quantity: 1 },
+      })),
+    ];
+    if (plan.upgraded) {
+      // 品质跃迁双写（世界内投影）：角色 tier +1（delta）+ 属性包
+      patches.push({
+        op: 'update_character',
+        target: `characters.${playerChar.name}`,
+        value: { tier: 1, attributes: plan.attributeDelta },
+        metadata: { delta: true, source: 'card_repair' },
+      } as StatePatch);
+    }
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState(patches);
+    if (result.success) await refreshFromDb();
+    return result.success ? { ok: true } : { ok: false, reason: result.errors.join('; ') };
   }
 
   /** v3：controller 挂 Coordinator 句柄（game-pipeline 在 coordinator 启动时挂） */
@@ -1579,6 +1643,7 @@ export const useGameStore = defineStore('game', () => {
     submitCombatIntent,
     setCombatDeckSnapshot,
     takeConsumedCards,
+    repairCard,
     abandonCombat,
     skipCombat,
     startCombat,
