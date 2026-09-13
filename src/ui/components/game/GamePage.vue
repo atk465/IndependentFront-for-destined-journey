@@ -305,13 +305,30 @@ onBeforeUnmount(() => {
 });
 
 async function handleSend(content: string) {
-  if (game.isGenerating || !pipeline) return;
+  // 🔴 2026-09-13 真机：这两个守卫原先**静默 return** —— 一旦某个请求长时间不返回
+  //（上游 60s 超时/重试中），玩家看到的就是「按什么都没反应」，无从判断是卡死还是
+  // 在生成。改为明说原因：生成中提示可点停止；管线缺失提示重进存档。
+  if (!pipeline) {
+    ui.toast('游戏管线未就绪，请退出存档后重新进入', 'error');
+    return;
+  }
+  if (game.isGenerating) {
+    ui.toast('本回合生成中：可点「停止」中断，或等待其结束', 'info');
+    return;
+  }
   cancelStreamingPreview();
   await pipeline.run(content, handleStoryChunk);
 }
 
 async function handleRetry(messageId: string) {
-  if (game.isGenerating || !pipeline) return;
+  if (!pipeline) {
+    ui.toast('游戏管线未就绪，请退出存档后重新进入', 'error');
+    return;
+  }
+  if (game.isGenerating) {
+    ui.toast('本回合生成中：可点「停止」中断，或等待其结束', 'info');
+    return;
+  }
   const message = game.messages.find((entry) => entry.id === messageId && entry.role === 'user');
   if (!message) return;
   cancelStreamingPreview();
