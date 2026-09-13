@@ -26,6 +26,8 @@ import { cardKindOf, isConsumableKind } from '@engine/card-workshop/card-kind';
 import { planRepair } from '@engine/card-workshop/repair';
 import { downedSummonCards } from '@engine/card-workshop/contract';
 import { buildDemoCardsPatches, buildDemoDeckPatches } from '@engine/card-workshop/demo';
+import type { SkirmishSession } from '@engine/card-workshop/skirmish-session';
+import type { SkirmishChoice } from '@engine/card-workshop/skirmish';
 import { createDefaultCharacterState } from '@engine/types';
 import {
   getSave,
@@ -444,6 +446,79 @@ export const useGameStore = defineStore('game', () => {
         changes: { data: { ...(card?.data ?? {}), damaged: true } },
       };
     });
+  }
+
+  // ══════ 交锋拍制战斗（设计共识 §8）：store 持响应式状态，pipeline 持编排 ══════
+  // 架构约束与 v3 同款：store 接触不到 pipeline，pipeline 经 setter 写状态、经
+  // controller 句柄挂编排（同 combatCoordinator 先例）；UI 只调本区块的三个入口。
+
+  /** 交锋拍会话账本（game-pipeline 唯一写入口；null = 无交锋进行中） */
+  const skirmishSession = ref<SkirmishSession | null>(null);
+  /** AI 评估/演绎或结算提交进行中（反制按钮禁用依据，防并发拍） */
+  const skirmishBusy = ref(false);
+
+  function setSkirmishSession(s: SkirmishSession | null) {
+    skirmishSession.value = s;
+  }
+  function setSkirmishBusy(b: boolean) {
+    skirmishBusy.value = b;
+  }
+
+  /** pipeline 挂进来的交锋编排句柄 */
+  const skirmishController = ref<{
+    start: (enemyHint?: string, sceneHint?: string) => Promise<void>;
+    counter: (choice: SkirmishChoice) => Promise<void>;
+    flee: () => Promise<void>;
+  } | null>(null);
+
+  function setSkirmishController(
+    c: {
+      start: (enemyHint?: string, sceneHint?: string) => Promise<void>;
+      counter: (choice: SkirmishChoice) => Promise<void>;
+      flee: () => Promise<void>;
+    } | null,
+  ) {
+    skirmishController.value = c;
+  }
+
+  /** UI 入口：开战（敌情评估预提交整场意图）。busy 守卫防双击 */
+  async function startSkirmish(enemyHint?: string, sceneHint?: string): Promise<void> {
+    if (skirmishBusy.value) return;
+    const c = skirmishController.value;
+    if (!c) return;
+    skirmishBusy.value = true;
+    try {
+      await c.start(enemyHint, sceneHint);
+    } finally {
+      skirmishBusy.value = false;
+    }
+  }
+
+  /** UI 入口：一拍反制（出卡或基础应对）。交锋中且静止时才受理 */
+  async function submitSkirmishCounter(choice: SkirmishChoice): Promise<void> {
+    if (skirmishBusy.value) return;
+    if (!skirmishSession.value || skirmishSession.value.finished !== null) return;
+    const c = skirmishController.value;
+    if (!c) return;
+    skirmishBusy.value = true;
+    try {
+      await c.counter(choice);
+    } finally {
+      skirmishBusy.value = false;
+    }
+  }
+
+  /** UI 入口：撤退（终局 C 档，脱离接触） */
+  async function fleeSkirmish(): Promise<void> {
+    if (skirmishBusy.value || !skirmishSession.value) return;
+    const c = skirmishController.value;
+    if (!c) return;
+    skirmishBusy.value = true;
+    try {
+      await c.flee();
+    } finally {
+      skirmishBusy.value = false;
+    }
   }
 
   /**
@@ -1776,6 +1851,14 @@ export const useGameStore = defineStore('game', () => {
     repairCard,
     collectDamagedSummonCards,
     seedDemoCards,
+    skirmishSession,
+    skirmishBusy,
+    setSkirmishSession,
+    setSkirmishBusy,
+    setSkirmishController,
+    startSkirmish,
+    submitSkirmishCounter,
+    fleeSkirmish,
     combatDeckStripStates,
     abandonCombat,
     skipCombat,

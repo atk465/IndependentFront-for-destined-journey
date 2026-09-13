@@ -64,6 +64,9 @@ export type BasicCounter = '强攻' | '防御' | '闪避';
 
 export const BASIC_COUNTERS: readonly BasicCounter[] = ['强攻', '防御', '闪避'];
 
+/** 玩家反制输入（UI/聊天解析 → 会话的统一形状；行动值/标签装配在集成层） */
+export type SkirmishChoice = { kind: '卡'; name: string } | { kind: '应对'; move: BasicCounter };
+
 /** 敌方拍内意图（AI 战前预提交、Code 夹逼校验后的可信形状） */
 export interface EnemyIntent {
   /** 招式名（叙事用，不参与计算） */
