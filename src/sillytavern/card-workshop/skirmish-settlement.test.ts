@@ -19,8 +19,8 @@ const 开战 = () =>
     ],
     playerHp: 155,
     playerMaxHp: 155,
-    enemyHp: 320,
-    enemyMaxHp: 320,
+    enemyHp: 60, // 压到两拍内可打空（拍数不设限后，胜利只来自 HP 清空）
+    enemyMaxHp: 60,
     guard: 10,
   });
 

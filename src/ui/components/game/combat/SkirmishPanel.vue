@@ -3,10 +3,10 @@
  * SkirmishPanel.vue — 交锋拍制战斗面板（卡牌工坊 战斗形态改版 §8）
  *
  * 战报审计行走正文流（pipeline emitMessage），本面板只承载**活的战斗状态**：
- * 双方 HP / 本拍敌方意图（读招）/ 反制通道（基础应对三选一 + 出卡增强）/
- * 撤退。终局后显示评价徽记，按钮全部禁用——数值不在这里算，在这里只读。
+ * 双方 HP / 本拍敌方意图（读招）/ 反制通道（基础应对三选一 + 出卡增强，出卡可附
+ * 一句宣言作终局记叙素材）/ 结束战斗（附理由）。数值不在这里算，这里只读。
  */
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import type { CardItem } from '@engine/types';
 import { useGameStore } from '../../../stores/game-store';
 import type { BasicCounter } from '@engine/card-workshop/skirmish';
@@ -18,8 +18,8 @@ const game = useGameStore();
 const session = computed(() => game.skirmishSession);
 const currentIntent = computed(() => {
   const s = session.value;
-  if (!s || s.finished !== null) return null;
-  return s.intents[s.beat] ?? null;
+  if (!s || s.finished !== null || s.intents.length === 0) return null;
+  return s.intents[s.beat % s.intents.length] ?? null;
 });
 /** 出卡通道：未启封、未损坏的背包卡（会话层装配战力与标签） */
 const cardOptions = computed(() => {
@@ -33,14 +33,43 @@ const cardOptions = computed(() => {
   return cards.map((c) => ({ name: c.name, cardTier: c.cardTier, tags: cardCombatTags(c.词条) }));
 });
 
+/** 已选中待发动的卡（点卡 → 填宣言 → 发动） */
+const selectedCard = ref<string | null>(null);
+const cardIntentText = ref('');
+/** 结束战斗流（展开理由输入） */
+const ending = ref(false);
+const endReasonText = ref('');
+
 function onCounter(move: BasicCounter) {
   void game.submitSkirmishCounter({ kind: '应对', move });
 }
 function onCard(name: string) {
-  void game.submitSkirmishCounter({ kind: '卡', name });
+  selectedCard.value = name;
+  cardIntentText.value = '';
 }
-function onFlee() {
-  void game.fleeSkirmish();
+function confirmCard() {
+  if (!selectedCard.value) return;
+  const intent = cardIntentText.value.trim();
+  void game.submitSkirmishCounter({
+    kind: '卡',
+    name: selectedCard.value,
+    ...(intent ? { intent } : {}),
+  });
+  selectedCard.value = null;
+  cardIntentText.value = '';
+}
+function cancelCard() {
+  selectedCard.value = null;
+  cardIntentText.value = '';
+}
+function onEndBattle() {
+  ending.value = true;
+  endReasonText.value = '';
+}
+function confirmEnd() {
+  const reason = endReasonText.value.trim();
+  void game.fleeSkirmish(reason || undefined);
+  ending.value = false;
 }
 function dismiss() {
   game.setSkirmishSession(null);
@@ -113,9 +142,52 @@ function dismiss() {
       >
         {{ m }}
       </button>
-      <button type="button" class="counter-btn flee" :disabled="game.skirmishBusy" @click="onFlee">
-        撤退
+      <button
+        type="button"
+        class="counter-btn flee"
+        :disabled="game.skirmishBusy"
+        @click="onEndBattle"
+      >
+        结束战斗…
       </button>
+    </div>
+
+    <!-- 结束战斗：理由作为终局 AI 记叙的收束参考（可留空） -->
+    <div v-if="ending && !session.finished" class="note-box">
+      <textarea
+        v-model="endReasonText"
+        class="note-input"
+        rows="2"
+        placeholder="为何在此收手？（如：它已无战意 / 我体力见底要先撤……留空则直接脱离）"
+      ></textarea>
+      <div class="note-actions">
+        <button type="button" class="counter-btn" :disabled="game.skirmishBusy" @click="confirmEnd">
+          确认结束
+        </button>
+        <button type="button" class="counter-btn" @click="ending = false">继续战斗</button>
+      </div>
+    </div>
+
+    <!-- 出卡宣言：纯叙事素材，数值照常结算 -->
+    <div v-if="selectedCard && !session.finished" class="note-box">
+      <p class="note-title">用【{{ selectedCard }}】做什么？（可留空——终局 AI 记叙会参考这句话）</p>
+      <textarea
+        v-model="cardIntentText"
+        class="note-input"
+        rows="2"
+        placeholder="如：扬手掷出符卡，火线掠地烧它的后腿"
+      ></textarea>
+      <div class="note-actions">
+        <button
+          type="button"
+          class="counter-btn primary"
+          :disabled="game.skirmishBusy"
+          @click="confirmCard"
+        >
+          发动
+        </button>
+        <button type="button" class="counter-btn" @click="cancelCard">取消</button>
+      </div>
     </div>
 
     <div
@@ -130,6 +202,7 @@ function dismiss() {
         :key="c.name"
         type="button"
         class="strip-card"
+        :class="{ selected: selectedCard === c.name }"
         role="listitem"
         :disabled="game.skirmishBusy"
         :title="c.tags.length > 0 ? `${c.name}｜反制：${c.tags.join('/')}` : c.name"
@@ -280,6 +353,44 @@ function dismiss() {
 }
 .counter-btn.flee {
   margin-left: auto;
+}
+.note-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px dashed var(--theme-card-border, #72502d);
+  border-radius: var(--theme-radius-sm, 4px);
+  background: var(--theme-surface-muted, #1a130d);
+}
+.note-title {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--theme-text-secondary, #c7a77e);
+}
+.note-input {
+  width: 100%;
+  resize: vertical;
+  padding: 6px 8px;
+  border: 1px solid var(--theme-card-border, #72502d);
+  border-radius: var(--theme-radius-sm, 4px);
+  background: var(--theme-window-bg, #120e0b);
+  color: var(--theme-text-primary, #eadcc5);
+  font: inherit;
+  font-size: 0.875rem;
+}
+.note-actions {
+  display: flex;
+  gap: 6px;
+}
+.counter-btn.primary {
+  background: var(--theme-primary-bg, rgba(196, 140, 75, 0.15));
+  border-color: var(--theme-primary, #c48c4b);
+  color: var(--theme-accent, #d2a25f);
+}
+.strip-card.selected {
+  border-color: var(--theme-primary, #c48c4b);
+  background: var(--theme-primary-bg, rgba(196, 140, 75, 0.15));
 }
 .card-strip {
   display: flex;

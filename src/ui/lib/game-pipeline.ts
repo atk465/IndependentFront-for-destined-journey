@@ -2836,7 +2836,7 @@ export class GamePipeline {
     this.game.setSkirmishController?.({
       start: (enemyHint, sceneHint) => this.runSkirmishEncounter(enemyHint, sceneHint),
       counter: (choice) => this.submitSkirmishCounter(choice),
-      flee: () => this.fleeSkirmishEncounter(),
+      flee: (endReason) => this.fleeSkirmishEncounter(endReason),
     });
   }
 
@@ -2923,6 +2923,10 @@ export class GamePipeline {
         card,
         deriveCombatStats({ attributes: playerC.attributes, level: playerC.level }),
       );
+      // 出卡宣言（主人裁定：纯叙事素材，数值照常结算；置于拍审计之前的「意图」行）
+      if (choice.intent && choice.intent.trim()) {
+        action = { ...action, note: choice.intent.trim().slice(0, 200) };
+      }
     } else {
       action = basicCounterAction(
         choice.move,
@@ -2937,10 +2941,10 @@ export class GamePipeline {
   }
 
   /** 撤退：终局 C 档，脱离接触 */
-  private async fleeSkirmishEncounter(): Promise<void> {
+  private async fleeSkirmishEncounter(endReason?: string): Promise<void> {
     const session = this.game.skirmishSession;
     if (!session || session.finished !== null) return;
-    const next = fleeSkirmish(session);
+    const next = fleeSkirmish(session, endReason);
     this.game.setSkirmishSession(next);
     this.emitMessage(next.log.slice(session.log.length).join('\n'), 'assistant');
     await this.settleAndNarrate(next);
@@ -2971,6 +2975,7 @@ export class GamePipeline {
             enemyName: session.enemyName,
             log: session.log,
             finish: session.finished,
+            endReason: session.endReason,
           },
           { clientFactory: this.getClientFactory() },
         );

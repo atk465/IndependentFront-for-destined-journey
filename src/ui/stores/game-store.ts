@@ -468,7 +468,7 @@ export const useGameStore = defineStore('game', () => {
   const skirmishController = ref<{
     start: (enemyHint?: string, sceneHint?: string) => Promise<{ ok: boolean; reason?: string }>;
     counter: (choice: SkirmishChoice) => Promise<void>;
-    flee: () => Promise<void>;
+    flee: (endReason?: string) => Promise<void>;
   } | null>(null);
 
   /** controller 未就绪时点下的开战请求（attach 后自动补发——消灭「点了没反应」的时序窗） */
@@ -478,7 +478,7 @@ export const useGameStore = defineStore('game', () => {
     c: {
       start: (enemyHint?: string, sceneHint?: string) => Promise<{ ok: boolean; reason?: string }>;
       counter: (choice: SkirmishChoice) => Promise<void>;
-      flee: () => Promise<void>;
+      flee: (endReason?: string) => Promise<void>;
     } | null,
   ) {
     skirmishController.value = c;
@@ -523,14 +523,14 @@ export const useGameStore = defineStore('game', () => {
     }
   }
 
-  /** UI 入口：撤退（终局 C 档，脱离接触） */
-  async function fleeSkirmish(): Promise<void> {
+  /** UI 入口：结束战斗（主人裁定 2026-09-13：附结束理由，供终局记叙参考；评价 C） */
+  async function fleeSkirmish(endReason?: string): Promise<void> {
     if (skirmishBusy.value || !skirmishSession.value) return;
     const c = skirmishController.value;
     if (!c) return;
     skirmishBusy.value = true;
     try {
-      await c.flee();
+      await c.flee(endReason);
     } finally {
       skirmishBusy.value = false;
     }

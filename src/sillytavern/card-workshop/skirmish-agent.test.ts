@@ -46,7 +46,7 @@ const fakeDeps = (
 });
 
 describe('buildAssessmentMessages —— 提示词硬约束', () => {
-  it('system 含 JSON 形状、白名单四标签、拍数与威胁标定锚', () => {
+  it('system 含 JSON 形状、白名单四标签、招式轮换与威胁标定锚', () => {
     const [sys] = buildAssessmentMessages({
       saveId: 's',
       endpoint,
@@ -56,21 +56,22 @@ describe('buildAssessmentMessages —— 提示词硬约束', () => {
     expect(sys.role).toBe('system');
     expect(sys.content).toContain('"intents"');
     expect(sys.content).toContain('强攻 / 防御 / 闪避 / 打断');
-    expect(sys.content).toContain('恰好 3 条');
+    expect(sys.content).toContain('intents 输出 3 条');
+    expect(sys.content).toContain('招式轮换');
     expect(sys.content).toContain('势均力敌 ≈ 40'); // 威胁锚 = 行动值 30 + 10
     expect(sys.content).toContain('玩家等级 9');
   });
-  it('maxBeats 覆盖拍数；线索与场景进 user 消息', () => {
+  it('intentsCount 覆盖招式条数（夹 MAX_INTENTS）；线索与场景进 user 消息', () => {
     const msgs = buildAssessmentMessages({
       saveId: 's',
       endpoint,
       playerLevel: 9,
       playerPower: 30,
-      maxBeats: 5,
+      intentsCount: 5,
       enemyHint: '熔岩裂缝里的巨兽',
       sceneHint: '灼热盆地',
     });
-    expect(msgs[0].content).toContain('恰好 5 条');
+    expect(msgs[0].content).toContain('intents 输出 5 条');
     expect(msgs[1].content).toContain('熔岩裂缝里的巨兽');
     expect(msgs[1].content).toContain('灼热盆地');
   });
@@ -150,7 +151,7 @@ describe('runSkirmishAssessment —— 调用与错误路径', () => {
   });
 });
 
-describe('buildChronicleMessages —— 终局演绎提示词', () => {
+describe('buildChronicleMessages —— 战斗记叙提示词', () => {
   it('system 含结局基调与「不引入新数值」约束；user 带玩家称呼与审计链', () => {
     const msgs = buildChronicleMessages({
       saveId: 's',
@@ -164,8 +165,21 @@ describe('buildChronicleMessages —— 终局演绎提示词', () => {
     expect(msgs[0].content).toContain('不得引入任何新数值');
     expect(msgs[0].content).toContain('200~350 字');
     expect(msgs[0].content).toContain('拍次推进');
+    expect(msgs[0].content).not.toContain('结束缘由');
     expect(msgs[1].content).toContain('星辉冒险者');
     expect(msgs[1].content).toContain('▸ 打出 燎原符卡：d20=17');
+  });
+  it('玩家主动结束：结束缘由进提示词，收束必须贴合（主人裁定）', () => {
+    const msgs = buildChronicleMessages({
+      saveId: 's',
+      endpoint,
+      enemyName: '岩爪兽',
+      log: ['▸ 冒险者收手：「它已无战意，放它归山」'],
+      finish: '撤退',
+      endReason: '它已无战意，放它归山',
+    });
+    expect(msgs[0].content).toContain('「它已无战意，放它归山」');
+    expect(msgs[0].content).toContain('收束必须贴合');
   });
 });
 

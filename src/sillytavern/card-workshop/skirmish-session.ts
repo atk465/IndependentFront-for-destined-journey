@@ -47,6 +47,8 @@ export interface SkirmishSession {
   playedCards: string[];
   counteredBeats: number;
   finished: SkirmishFinish;
+  /** 玩家主动结束战斗时写的理由（终局记叙的收束参考；其余终局缺省） */
+  endReason?: string;
 }
 
 export interface StartSkirmishInput {
@@ -85,18 +87,23 @@ export function startSkirmish(input: StartSkirmishInput): SkirmishSession {
     guard: Math.max(0, Math.round(finiteOr(input.guard, 0))),
     log: [
       `◆ 战斗模式 · 交锋拍制 ◆`,
-      `▸ 【${input.enemyName}】Lv.${Math.max(1, Math.round(finiteOr(input.enemyLevel, 1)))} 现身——${intents.length} 拍意图已锁定`,
+      `▸ 【${input.enemyName}】Lv.${Math.max(1, Math.round(finiteOr(input.enemyLevel, 1)))} 现身——${intents.length} 式招已锁定（招式轮换，打到一方倒下或冒险者收手为止）`,
     ],
     playedCards: [],
     counteredBeats: 0,
     finished: null,
   };
+  // 无敌方招式（评估被夹逼成空）→ 不战自溃，UI 永不卡在无拍可打的账本上
+  if (intents.length === 0) {
+    return withFinish(session, '胜利', [`▸ 【${session.enemyName}】毫无章法——不战自溃！`]);
+  }
   return session;
 }
 
-/** 本拍敌方意图（打完即 null） */
+/** 本拍敌方意图（序列打完按原序轮换；已终局 → null） */
 export function currentIntent(s: SkirmishSession): EnemyIntent | null {
-  return s.finished === null ? (s.intents[s.beat] ?? null) : null;
+  if (s.finished !== null || s.intents.length === 0) return null;
+  return s.intents[s.beat % s.intents.length] ?? null;
 }
 
 const withFinish = (
@@ -109,7 +116,8 @@ const withFinish = (
   finished: finish,
 });
 
-/** 打一拍：拍结算 + 记账 + 终局判定。未开始/已结束/拍尽 → 原样返回（幂等） */
+/** 打一拍：拍结算 + 记账 + 终局判定（只按 HP 归零终局；拍数不限，招式轮换）。
+ *  未开始/已结束/无敌方招式 → 原样返回（幂等） */
 export function playBeat(
   s: SkirmishSession,
   action: SkirmishAction,
@@ -125,12 +133,17 @@ export function playBeat(
     guard: s.guard,
     dice,
   });
+  const lines = [
+    // 出卡宣言（主人裁定：玩家写这张牌用来做什么，纯叙事素材，置于拍审计之前）
+    ...(action.note ? [`▸ 意图：${action.note}`] : []),
+    ...result.audit,
+  ];
   const next: SkirmishSession = {
     ...s,
     beat: s.beat + 1,
     playerHp: result.playerHp,
     enemyHp: result.enemyHp,
-    log: [...s.log, ...result.audit],
+    log: [...s.log, ...lines],
     playedCards:
       action.cardName && !s.playedCards.includes(action.cardName)
         ? [...s.playedCards, action.cardName]
@@ -143,11 +156,6 @@ export function playBeat(
   if (next.playerHp <= 0) {
     return withFinish(next, '败北', [`▸ 玩家倒下——败北（经验照常结算，评价 C）`]);
   }
-  if (next.beat >= next.intents.length) {
-    return withFinish(next, '胜利', [
-      `▸ ${next.intents.length} 拍交锋打完，敌方攻势穷尽——打退了【${s.enemyName}】！`,
-    ]);
-  }
   return next;
 }
 
@@ -157,10 +165,17 @@ export function crushFinish(s: SkirmishSession): SkirmishSession {
   return withFinish(s, '碾压', [`▸ 数值碾压：我方战力达敌方 ×${2} → 跳过交锋，直接结算`]);
 }
 
-/** 撤退（平移既有 handleFlee 语义）：脱离接触，评价 C */
-export function fleeSkirmish(s: SkirmishSession): SkirmishSession {
+/** 玩家主动结束战斗（主人裁定 2026-09-13：附结束理由，供终局记叙参考），评价 C */
+export function fleeSkirmish(s: SkirmishSession, endReason?: string): SkirmishSession {
   if (s.finished !== null) return s;
-  return withFinish(s, '撤退', [`▸ 撤退成功——脱离接触（评价 C）`]);
+  const reason = typeof endReason === 'string' ? endReason.trim().slice(0, 200) : '';
+  return {
+    ...withFinish(s, '撤退', [
+      ...(reason ? [`▸ 冒险者收手：「${reason}」`] : []),
+      `▸ 撤退成功——脱离接触（评价 C）`,
+    ]),
+    ...(reason ? { endReason: reason } : {}),
+  };
 }
 
 /** 终局结算数据（未结束 → null）。只算账不落库：玩家 EXP/卡牌经验持久化由集成层提交 */

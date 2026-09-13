@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import type { EnemyIntent, SkirmishAction } from './skirmish';
 import {
-  MAX_BEATS,
+  MAX_INTENTS,
   CRUSH_RATIO,
   GRADE_MULTIPLIER,
   CARD_EXP_CAP,
@@ -33,7 +33,7 @@ const 出卡行动: SkirmishAction = { label: '打出 燎原符卡', power: 12, 
 
 describe('数值表（单一真源）', () => {
   it('拍数/碾压/分成/基础经验锚点', () => {
-    expect(MAX_BEATS).toBe(3);
+    expect(MAX_INTENTS).toBe(6); // 招式轮换上限（主人裁定：拍数不设限）
     expect(CRUSH_RATIO).toBe(2);
     expect(CARD_EXP_SHARE).toBe(0.5);
     expect(EXP_PER_ENEMY_LEVEL).toBe(10);
@@ -89,10 +89,14 @@ describe('coerceIntents —— AI 预提交数据不可信', () => {
     expect(got.move).toBe('未知招式');
     expect(got.hook).toBeUndefined();
   });
-  it('条数截到拍数上限（上限可传参放宽 Boss 战）', () => {
-    const raw = [1, 2, 3, 4, 5].map((i) => ({ move: `招${i}`, threat: i, counters: ['防御'] }));
-    expect(coerceIntents(raw)).toHaveLength(3);
-    expect(coerceIntents(raw, 5)).toHaveLength(5);
+  it('条数截到招式上限（招式轮换制，战斗不限拍数）', () => {
+    const raw = [1, 2, 3, 4, 5, 6, 7, 8].map((i) => ({
+      move: `招${i}`,
+      threat: i,
+      counters: ['防御'],
+    }));
+    expect(coerceIntents(raw)).toHaveLength(6);
+    expect(coerceIntents(raw, 3)).toHaveLength(3);
   });
 });
 

@@ -19,8 +19,11 @@ import type { CardTier } from '../field-enums';
 
 // ========== 数值表（单一真源，数值总表终审对象） ==========
 
-/** 拍数上限（Boss 战未来放宽 4~5 时由调用方传参） */
-export const MAX_BEATS = 3;
+/**
+ * 敌方预提交招式序列的上限（主人裁定 2026-09-13：不设拍数上限——战斗打到一方
+ * HP 清空或玩家主动结束为止）。序列打完按原序**轮换**，公平性不破：剧本开战锁死。
+ */
+export const MAX_INTENTS = 6;
 
 /** 数值碾压速胜判据：我方战力 ≥ 敌方战力 × 2 → 跳过交锋直接碾压结算 */
 export const CRUSH_RATIO = 2;
@@ -65,7 +68,13 @@ export type BasicCounter = '强攻' | '防御' | '闪避';
 export const BASIC_COUNTERS: readonly BasicCounter[] = ['强攻', '防御', '闪避'];
 
 /** 玩家反制输入（UI/聊天解析 → 会话的统一形状；行动值/标签装配在集成层） */
-export type SkirmishChoice = { kind: '卡'; name: string } | { kind: '应对'; move: BasicCounter };
+export type SkirmishChoice =
+  | {
+      kind: '卡';
+      name: string;
+      /** 出卡宣言：这张牌用来做什么（纯叙事素材，进战报供终局记叙参考；数值照常结算） */ intent?: string;
+    }
+  | { kind: '应对'; move: BasicCounter };
 
 /** 敌方拍内意图（AI 战前预提交、Code 夹逼校验后的可信形状） */
 export interface EnemyIntent {
@@ -79,14 +88,16 @@ export interface EnemyIntent {
   hook?: string;
 }
 
-/** 玩家的一拍反制行动（label 进审计行；power/tags 由调用方装配：出卡 = 战力+词条标签，应对 = 派生值+同名标签） */
+/** 玩家的一拍反制行动（label 进审计行；power/tags 由调用方装配：出卡 = 攻+战力加成+词条标签，应对 = 派生值+同名标签） */
 export interface SkirmishAction {
-  /** 审计显示名，如「打出 燎原符卡」或「防御」 */
+  /** 审计显示名，如「打出 燎原符卡（攻44+卡6）」或「防御」 */
   label: string;
   power: number;
   tags: readonly CounterTag[];
   /** 出卡反制时的卡名（逻辑键）；基础应对缺省。会话账本据此记参战卡（卡牌经验分成对象） */
   cardName?: string;
+  /** 出卡宣言（主人裁定 2026-09-13：玩家写这张牌用来做什么，纯叙事素材）——会话账本在拍审计前记一行「意图」 */
+  note?: string;
 }
 
 export type SkirmishGrade = 'S' | 'A' | 'B' | 'C';
@@ -157,14 +168,14 @@ const clampInt = (n: number, lo: number, hi: number): number =>
   Math.min(Math.max(Math.round(n), lo), hi);
 
 /**
- * AI 预提交意图序列夹逼：非数组 → 空序列；条数截到 maxBeats；威胁夹逼 1..99 取整；
+ * AI 预提交招式序列夹逼：非数组 → 空序列；条数截到 maxIntents；威胁夹逼 1..99 取整；
  * 反制标签过滤白名单并去重，滤空后兜底 ['防御']（任何招式都必须可反制）；
  * 招式名/钩子非字符串丢弃。坏数据静默降级，不抛。
  */
-export function coerceIntents(raw: unknown, maxBeats = MAX_BEATS): EnemyIntent[] {
+export function coerceIntents(raw: unknown, maxIntents = MAX_INTENTS): EnemyIntent[] {
   if (!Array.isArray(raw)) return [];
   const intents: EnemyIntent[] = [];
-  for (const item of raw.slice(0, Math.max(1, maxBeats))) {
+  for (const item of raw.slice(0, Math.max(1, maxIntents))) {
     if (item === null || typeof item !== 'object') continue;
     const obj = item as Record<string, unknown>;
     const threat =
