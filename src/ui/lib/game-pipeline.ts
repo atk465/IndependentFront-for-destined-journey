@@ -2383,15 +2383,25 @@ export class GamePipeline {
     marker: CombatTriggerMarker,
     storyOutput: string,
   ): Promise<CombatSummaryResult | null> {
-    // feature flag（架构 §十四 14.5）：分支点唯一。v3 走 coordinator；打回 'v2' 走优雅退役提示。
+    // feature flag（架构 §十四 14.5）：分支点唯一。
+    // 🔀 战斗形态改版（设计共识 §8 问题 28，主人裁定「不使用战斗页面」2026-09-12）：
+    // combat_trigger 统一改走**交锋拍**——正文流战报 + 数值约束结算，v3 战斗页退役待收。
+    // 回滚开关：SKIRMISH_DEFAULT 改回 false 即恢复 v3 战斗页（引擎代码保留 dormant）。
+    const SKIRMISH_DEFAULT = true;
     const engineVersion = this.settings?.settings?.combatEngineVersion ?? 'v3';
-    if (engineVersion === 'v3') {
+    if (!SKIRMISH_DEFAULT && engineVersion === 'v3') {
       return this.handleCombatTriggerV3(marker, storyOutput);
+    }
+    if (SKIRMISH_DEFAULT && engineVersion !== 'v2') {
+      // 交锋拍内联结算 + 终局演绎，不经 v3 的 CombatSummary 确认框
+      await this.handleCombatTriggerSkirmish(marker);
+      return null;
     }
     // ⚠️ v2 战斗运行时已于 M5 真正退役删除（combat-runner/pipeline/resolver/settlement）。
     //    打回 'v2' 不再真实开局战斗——改为优雅退役提示，避免悬空 import 与编译错误。
+    //    （交锋拍分支的提前 return 在上方；走到这里 = 显式打回 'v2'。）
     const message =
-      '【系统】v2 战斗引擎已退役删除。若非显式切换，战斗请走 v3（当前 AppSettings.combatEngineVersion）' +
+      '【系统】v2 战斗引擎已退役删除。若非显式切换，战斗请走交锋拍（当前 AppSettings.combatEngineVersion）' +
       `。当前设置被显式打回 'v2'，本场战斗不执行。`;
     console.warn('[GamePipeline] combat v2 分支已退役，返回优雅提示而非真实开局');
     this.emitMessage(message, 'assistant');
@@ -2404,6 +2414,24 @@ export class GamePipeline {
       rounds: 1,
       outcome: 'draw',
     };
+  }
+
+  /**
+   * 交锋拍分支：marker 里的敌情线索 → 敌情评估预提交 → 正文流交锋。
+   * 结算与演绎都在 runSkirmishEncounter/settleAndNarrate 内联完成（含落库），
+   * 这里只负责把 dispatcher 的战斗意图翻译成敌方线索。
+   */
+  private async handleCombatTriggerSkirmish(marker: CombatTriggerMarker): Promise<void> {
+    const enemies = (marker.enemies ?? '')
+      .split(/[,，、]/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const enemyHint =
+      [enemies.join('、'), marker.environment].filter(Boolean).join('｜') || undefined;
+    const result = await this.runSkirmishEncounter(enemyHint, marker.environment || undefined);
+    if (!result.ok) {
+      console.warn('[GamePipeline] 交锋拍开局失败:', result.reason);
+    }
   }
 
   /**
@@ -2813,17 +2841,21 @@ export class GamePipeline {
     });
   }
 
-  /** 开战：敌情评估预提交整场意图 → 会话入账 → 战报开场注入正文流。评估失败不开战 */
-  private async runSkirmishEncounter(enemyHint?: string, sceneHint?: string): Promise<void> {
+  /** 开战：敌情评估预提交整场意图 → 会话入账 → 战报开场注入正文流。
+   *  返回结果供调用方明示反馈（dev 按钮/触发方）——评估失败不开战，绝不静默。 */
+  private async runSkirmishEncounter(
+    enemyHint?: string,
+    sceneHint?: string,
+  ): Promise<{ ok: boolean; reason?: string }> {
     const playerC = this.game.player;
-    if (!playerC) return;
+    if (!playerC) return { ok: false, reason: '没有玩家角色（存档未就绪）' };
     const endpoint = this.getEndpointForAgent('skirmish_eval');
     if (!endpoint) {
       this.emitMessage(
         '【交锋】敌情评估不可用：请到设置 → Agent 配置为「skirmish_eval」选择 API 池。',
         'assistant',
       );
-      return;
+      return { ok: false, reason: 'skirmish_eval 未解析到 API 池（设置 → Agent 配置）' };
     }
     const stats = deriveCombatStats({ attributes: playerC.attributes, level: playerC.level });
     try {
@@ -2854,9 +2886,14 @@ export class GamePipeline {
       this.game.setSkirmishSession(session);
       this.emitMessage(session.log.join('\n'), 'assistant');
       if (session.finished) await this.settleAndNarrate(session);
+      return { ok: true };
     } catch (err) {
       console.warn('[GamePipeline] 敌情评估失败:', err);
       this.emitMessage('【交锋】敌情评估失败，战斗未能开始（可再试一次）。', 'assistant');
+      return {
+        ok: false,
+        reason: `敌情评估失败：${err instanceof Error ? err.message : String(err)}`,
+      };
     }
   }
 
@@ -2946,6 +2983,18 @@ export class GamePipeline {
         console.warn('[GamePipeline] 交锋结算部分失败:', result.errors);
       }
       await this.game.refreshFromDb(this.saveId);
+      // 记录「最近已结算战斗」防 dispatcher 对已结算战斗再发 combat_trigger（v3 同款语义）
+      this._recentCombat = {
+        allies: [playerC.name],
+        enemies: [session.enemyName],
+        outcome:
+          session.finished === '撤退'
+            ? 'fled'
+            : session.finished === '败北'
+              ? 'enemy_win'
+              : 'ally_win',
+        endedAtTurn: this.game.activeSave?.metadata?.totalTurns ?? 0,
+      };
     }
 
     const endpoint = this.getEndpointForAgent('skirmish_epilogue');

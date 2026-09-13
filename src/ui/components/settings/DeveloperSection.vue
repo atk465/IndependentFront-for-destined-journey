@@ -21,9 +21,12 @@ async function seedDemo() {
     : { kind: 'err', msg: r.reason ?? '注入失败' };
 }
 
-/** 交锋拍试打：直接发起遭遇战（busy 守卫在 store 入口） */
-function onSkirmishTrial() {
-  void game.startSkirmish();
+/** 交锋拍试打：直接发起遭遇战——结果明示到本页反馈行，绝不静默 */
+async function onSkirmishTrial() {
+  const r = await game.startSkirmish();
+  devFeedback.value = r.ok
+    ? { kind: 'ok', msg: '遭遇战已发起——回游戏页看战报与「战斗模式 · 交锋拍」面板' }
+    : { kind: 'err', msg: r.reason ?? '发起失败' };
 }
 </script>
 

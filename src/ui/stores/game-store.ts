@@ -466,29 +466,44 @@ export const useGameStore = defineStore('game', () => {
 
   /** pipeline 挂进来的交锋编排句柄 */
   const skirmishController = ref<{
-    start: (enemyHint?: string, sceneHint?: string) => Promise<void>;
+    start: (enemyHint?: string, sceneHint?: string) => Promise<{ ok: boolean; reason?: string }>;
     counter: (choice: SkirmishChoice) => Promise<void>;
     flee: () => Promise<void>;
   } | null>(null);
 
+  /** controller 未就绪时点下的开战请求（attach 后自动补发——消灭「点了没反应」的时序窗） */
+  let pendingSkirmishStart: { enemyHint?: string; sceneHint?: string } | null = null;
+
   function setSkirmishController(
     c: {
-      start: (enemyHint?: string, sceneHint?: string) => Promise<void>;
+      start: (enemyHint?: string, sceneHint?: string) => Promise<{ ok: boolean; reason?: string }>;
       counter: (choice: SkirmishChoice) => Promise<void>;
       flee: () => Promise<void>;
     } | null,
   ) {
     skirmishController.value = c;
+    if (c && pendingSkirmishStart) {
+      const p = pendingSkirmishStart;
+      pendingSkirmishStart = null;
+      void startSkirmish(p.enemyHint, p.sceneHint);
+    }
   }
 
-  /** UI 入口：开战（敌情评估预提交整场意图）。busy 守卫防双击 */
-  async function startSkirmish(enemyHint?: string, sceneHint?: string): Promise<void> {
-    if (skirmishBusy.value) return;
+  /** UI 入口：开战（敌情评估预提交整场意图）。busy 防双击；结果明示，不静默 */
+  async function startSkirmish(
+    enemyHint?: string,
+    sceneHint?: string,
+  ): Promise<{ ok: boolean; reason?: string }> {
+    if (skirmishBusy.value) return { ok: false, reason: '上一场交锋还在处理中，稍候片刻' };
     const c = skirmishController.value;
-    if (!c) return;
+    if (!c) {
+      // 编排未就绪（存档还在加载）——记下请求，setSkirmishController 就绪后自动补发
+      pendingSkirmishStart = { enemyHint, sceneHint };
+      return { ok: false, reason: '战斗编排尚未就绪（存档加载中）——已记下，就绪后自动开战' };
+    }
     skirmishBusy.value = true;
     try {
-      await c.start(enemyHint, sceneHint);
+      return await c.start(enemyHint, sceneHint);
     } finally {
       skirmishBusy.value = false;
     }
