@@ -49,6 +49,8 @@ export interface SkirmishAssessRequest {
   playerLevel: number;
   /** 玩家典型行动值（攻击/防御/敏捷派生值或卡面战力量级，威胁 DC 标定锚） */
   playerPower: number;
+  /** 玩家综合战力（三维和 + 卡组战力；enemyPower 碾压判定的对照锚，可缺省） */
+  playerTotalPower?: number;
   /** 拍数（缺省 3；Boss 战可放宽） */
   maxBeats?: number;
 }
@@ -58,6 +60,8 @@ export interface SkirmishAssessment {
   enemyName: string;
   enemyLevel: number;
   enemyHp: number;
+  /** 敌方总战力（碾压速胜判定的敌方输入；AI 未给 = enemyLevel） */
+  enemyPower: number;
   intents: EnemyIntent[];
 }
 
@@ -73,11 +77,12 @@ export function buildAssessmentMessages(req: SkirmishAssessRequest): Array<{
     '你是卡兰大陆的战斗导演。请为一场即将开始的交锋预提交敌方战斗档案与整场意图序列。',
     '',
     '硬性规则：',
-    '1. 只输出一个 JSON 对象，不要任何其他文字：{"enemyName":"敌人名","enemyLevel":整数,"enemyHp":整数,"intents":[{"move":"招式名","threat":整数,"counters":["反制标签"],"hook":"敌方本拍行动钩子"}]}',
+    '1. 只输出一个 JSON 对象，不要任何其他文字：{"enemyName":"敌人名","enemyLevel":整数,"enemyHp":整数,"enemyPower":整数,"intents":[{"move":"招式名","threat":整数,"counters":["反制标签"],"hook":"敌方本拍行动钩子"}]}',
     `2. intents 必须恰好 ${beats} 条（整场拍数锁死，开战后不可追加或修改）。`,
     '3. counters 只能从白名单里选：强攻 / 防御 / 闪避 / 打断（可多选）。含义：玩家的行动若带有其中任一标签，反制会获得加成——这是玩家的读招空间，务必让每拍都有可反制面。',
     `4. 威胁标定：玩家的典型行动值约为 ${power}（反制掷骰 = d20 + 行动值 + 克制加成，对上 threat 即反制成功）。请把 threat 设在这个量级：势均力敌 ≈ ${power + 10}，明显弱于玩家 ≈ ${Math.max(1, power - 5)}，头目级 ≈ ${power + 15}。enemyLevel 参考玩家等级 ${plLevel} 上下浮动，enemyHp 决定战斗拍数内能否被打倒（量级 ≈ 单拍伤害 × ${beats} 的 60%~120%）。`,
-    '5. move/hook 用中文短句，hook 写敌方本拍的动作画面，不写结果（结果由结算产生）。',
+    `5. enemyPower = 敌方总战力，玩家综合战力约为 ${Math.max(1, Math.round(req.playerTotalPower ?? power))}；远弱于玩家（≤ 一半）的遭遇会被跳拍碾压结算，请如实标定。`,
+    '6. move/hook 用中文短句，hook 写敌方本拍的动作画面，不写结果（结果由结算产生）。',
   ].join('\n');
   const user = [
     req.enemyHint ? `敌方线索：${req.enemyHint}` : '敌方线索：（无，请依场景自拟一只有趣的遭遇）',
@@ -110,7 +115,17 @@ export function parseSkirmishAssessment(raw: string): SkirmishAssessment | null 
       typeof o.enemyHp === 'number' && Number.isFinite(o.enemyHp) && o.enemyHp > 0
         ? Math.round(o.enemyHp)
         : 30;
-    return { enemyName: name, enemyLevel: level, enemyHp: hp, intents: coerceIntents(o.intents) };
+    return {
+      enemyName: name,
+      enemyLevel: level,
+      enemyHp: hp,
+      // AI 未给/给了脏值 → 按 enemyLevel 估（碾压判定宁可保守，不误跳拍）
+      enemyPower:
+        typeof o.enemyPower === 'number' && Number.isFinite(o.enemyPower) && o.enemyPower > 0
+          ? Math.round(o.enemyPower)
+          : level,
+      intents: coerceIntents(o.intents),
+    };
   });
 }
 

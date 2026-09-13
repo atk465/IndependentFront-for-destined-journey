@@ -27,6 +27,7 @@ const 好档案 = {
   enemyName: '岩爪兽',
   enemyLevel: 12,
   enemyHp: 320,
+  enemyPower: 95,
   intents: [
     { move: '蓄力·崩山击', threat: 30, counters: ['打断', '防御'], hook: '后肢刨地蓄力' },
     { move: '连环爪击', threat: 22, counters: ['闪避'] },
@@ -90,7 +91,18 @@ describe('parseSkirmishAssessment —— 解析兜底', () => {
     expect(got?.enemyName).toBe('岩爪兽');
     expect(got?.enemyLevel).toBe(12);
     expect(got?.enemyHp).toBe(320);
+    expect(got?.enemyPower).toBe(95);
     expect(got?.intents[2].counters).toEqual(['防御']); // 打断了/火球 被滤空 → 兜底防御
+  });
+  it('enemyPower 缺失/脏 → 按 enemyLevel 估（碾压判定保守，不误跳拍）', () => {
+    expect(
+      parseSkirmishAssessment(JSON.stringify({ enemyName: '史莱姆', enemyLevel: 3 }))?.enemyPower,
+    ).toBe(3);
+    expect(
+      parseSkirmishAssessment(
+        JSON.stringify({ enemyName: '史莱姆', enemyLevel: 3, enemyPower: -1 }),
+      )?.enemyPower,
+    ).toBe(3);
   });
   it('围栏 JSON 也能剥（model-json 能力）', () => {
     const got = parseSkirmishAssessment('```json\n' + JSON.stringify(好档案) + '\n```');

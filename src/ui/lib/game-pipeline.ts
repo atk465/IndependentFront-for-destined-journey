@@ -37,6 +37,24 @@ import type {
 } from '@engine/types';
 import { isPlayableCard } from '@engine/card-workshop/card-kind';
 import { isDamaged } from '@engine/card-workshop/repair';
+import { cardPower } from '@engine/card-workshop/deck-power';
+import {
+  judgeCrush,
+  type SkirmishAction,
+  type SkirmishChoice,
+} from '@engine/card-workshop/skirmish';
+import { cardCombatTags } from '@engine/card-workshop/entry-combat';
+import { basicCounterAction, deriveCombatStats } from '@engine/card-workshop/derived-stats';
+import {
+  crushFinish,
+  fleeSkirmish,
+  playBeat,
+  settleSkirmish,
+  startSkirmish,
+  type SkirmishSession,
+} from '@engine/card-workshop/skirmish-session';
+import { buildSkirmishSettlementPatches } from '@engine/card-workshop/skirmish-settlement';
+import { runSkirmishAssessment, runSkirmishEpilogue } from '@engine/card-workshop/skirmish-agent';
 import type { DeckCardData } from '@engine/combat-v3';
 import type {
   ImageGenFailure,
@@ -440,6 +458,7 @@ export class GamePipeline {
     this.game = deps.gameStore;
     this.settings = deps.settingsStore;
     this.saveId = deps.saveId;
+    this.attachSkirmishController();
   }
 
   // 🪦 Q-06：`syncSnapshotSettings` 已删。它把 settings-store 的两个字段每轮抄进
@@ -2771,6 +2790,180 @@ export class GamePipeline {
       this.game.exitCombat();
       console.error('[GamePipeline] combat_v3 失败:', err);
       return null;
+    }
+  }
+
+  // ══════ 交锋拍制战斗（设计共识 §8，问题 28~31）══════
+  // 编排在本层（store 接触不到 pipeline）：AI 评估/演绎 + Code 拍结算 + 同窗原子落库。
+  // UI 经 game-store 三入口（startSkirmish/submitSkirmishCounter/fleeSkirmish）进来，
+  // busy 守卫在 store 入口，本层不再自行判忙。
+
+  /** d20 —— 骰值调用方供给（内核零随机）。MVP 用真随机；接 v3 骰带回放体系为后续工作 */
+  private rollD20(): number {
+    return 1 + Math.floor(Math.random() * 20);
+  }
+
+  /** 构造时挂交锋编排句柄（UI 的三个入口经 store 委托到这里）。
+   *  可选调用：单测的精简 mock store 没有此方法，静默跳过；真实 store 必有。 */
+  attachSkirmishController(): void {
+    this.game.setSkirmishController?.({
+      start: (enemyHint, sceneHint) => this.runSkirmishEncounter(enemyHint, sceneHint),
+      counter: (choice) => this.submitSkirmishCounter(choice),
+      flee: () => this.fleeSkirmishEncounter(),
+    });
+  }
+
+  /** 开战：敌情评估预提交整场意图 → 会话入账 → 战报开场注入正文流。评估失败不开战 */
+  private async runSkirmishEncounter(enemyHint?: string, sceneHint?: string): Promise<void> {
+    const playerC = this.game.player;
+    if (!playerC) return;
+    const endpoint = this.getEndpointForAgent('skirmish_eval');
+    if (!endpoint) {
+      this.emitMessage(
+        '【交锋】敌情评估不可用：请到设置 → Agent 配置为「skirmish_eval」选择 API 池。',
+        'assistant',
+      );
+      return;
+    }
+    const stats = deriveCombatStats({ attributes: playerC.attributes, level: playerC.level });
+    try {
+      const assessment = await runSkirmishAssessment(
+        {
+          saveId: this.saveId,
+          endpoint,
+          enemyHint,
+          sceneHint,
+          playerLevel: playerC.level,
+          playerPower: stats.atk,
+          playerTotalPower: stats.atk + stats.guard + stats.agi,
+        },
+        { clientFactory: this.getClientFactory() },
+      );
+      const base = startSkirmish({
+        enemyName: assessment.enemyName,
+        enemyLevel: assessment.enemyLevel,
+        intents: assessment.intents,
+        playerHp: playerC.hp,
+        playerMaxHp: playerC.maxHp,
+        enemyHp: assessment.enemyHp,
+        guard: stats.guard,
+      });
+      const session = judgeCrush(stats.atk + stats.guard + stats.agi, assessment.enemyPower)
+        ? crushFinish(base)
+        : base;
+      this.game.setSkirmishSession(session);
+      this.emitMessage(session.log.join('\n'), 'assistant');
+      if (session.finished) await this.settleAndNarrate(session);
+    } catch (err) {
+      console.warn('[GamePipeline] 敌情评估失败:', err);
+      this.emitMessage('【交锋】敌情评估失败，战斗未能开始（可再试一次）。', 'assistant');
+    }
+  }
+
+  /** 一拍反制：出卡 = 卡面战力 + 词条反制标签；基础应对 = 派生值 + 同名标签 */
+  private async submitSkirmishCounter(choice: SkirmishChoice): Promise<void> {
+    const session = this.game.skirmishSession;
+    const playerC = this.game.player;
+    if (!session || session.finished !== null || !playerC) return;
+
+    let action: SkirmishAction;
+    if (choice.kind === '卡') {
+      // InventoryItem.type 是宽松 string，这里做一次卡牌收窄（脏存档的 type 异常按查无卡处理）
+      const found = playerC.inventory.find((i) => i.name === choice.name);
+      const card = found?.type === '卡牌' ? (found as CardItem) : undefined;
+      if (!card) {
+        this.emitMessage(`【交锋】卡里没有【${choice.name}】。`, 'assistant');
+        return;
+      }
+      if (card.sealed) {
+        // 启封判定接入拍内掷骰为后续工作：先按「未启封不可反制」处理，给出游戏语言提示
+        this.emitMessage(
+          `【交锋】【${choice.name}】还被封印着——先在卡册启封，或改用 强攻/防御/闪避。`,
+          'assistant',
+        );
+        return;
+      }
+      action = {
+        label: `打出 ${card.name}`,
+        power: cardPower(card),
+        tags: cardCombatTags(card.词条),
+        cardName: card.name,
+      };
+    } else {
+      action = basicCounterAction(
+        choice.move,
+        deriveCombatStats({ attributes: playerC.attributes, level: playerC.level }),
+      );
+    }
+
+    const next = playBeat(session, action, this.rollD20());
+    this.game.setSkirmishSession(next);
+    this.emitMessage(next.log.slice(session.log.length).join('\n'), 'assistant');
+    if (next.finished) await this.settleAndNarrate(next);
+  }
+
+  /** 撤退：终局 C 档，脱离接触 */
+  private async fleeSkirmishEncounter(): Promise<void> {
+    const session = this.game.skirmishSession;
+    if (!session || session.finished !== null) return;
+    const next = fleeSkirmish(session);
+    this.game.setSkirmishSession(next);
+    this.emitMessage(next.log.slice(session.log.length).join('\n'), 'assistant');
+    await this.settleAndNarrate(next);
+  }
+
+  /**
+   * 终局收尾：结算审计链 → 同窗原子落库（玩家 EXP/HP + 参战卡经验/消耗，一次
+   * commitChatState，照 v3 结算先例）→ 落库后回读（否则 HUD 是开战前血量假象）
+   * → 终局演绎一次调用（只演绎不算数）。
+   * 🔴 后续接线：此处应记录 _recentCombat（防 dispatcher 对已结算战斗再发 combat_trigger），
+   * 待交锋拍的战斗触发走 dispatcher 通道时一并接。
+   */
+  private async settleAndNarrate(session: SkirmishSession): Promise<void> {
+    if (!session.finished) return;
+    const playerC = this.game.player;
+    if (!playerC) return;
+    const settlement = settleSkirmish(session, playerC.level);
+    if (!settlement) return;
+
+    this.emitMessage(settlement.expLines.join('\n'), 'assistant');
+
+    if (this.ownsActiveSave) {
+      const sm = createStateManager(this.saveId);
+      const result = await sm.commitChatState(
+        buildSkirmishSettlementPatches({
+          playerName: playerC.name,
+          playerTotalExp: playerC.totalExp,
+          session,
+          settlement,
+          cardOf: (name) => {
+            const found = playerC.inventory.find((i) => i.name === name);
+            return found?.type === '卡牌' ? (found as CardItem) : undefined;
+          },
+        }),
+      );
+      if (result.errors.length > 0) {
+        console.warn('[GamePipeline] 交锋结算部分失败:', result.errors);
+      }
+      await this.game.refreshFromDb(this.saveId);
+    }
+
+    const endpoint = this.getEndpointForAgent('skirmish_epilogue');
+    if (!endpoint) return;
+    try {
+      const text = await runSkirmishEpilogue(
+        {
+          saveId: this.saveId,
+          endpoint,
+          enemyName: session.enemyName,
+          log: session.log,
+          finish: session.finished,
+        },
+        { clientFactory: this.getClientFactory() },
+      );
+      this.emitMessage(`【战斗终局】${text}`, 'assistant');
+    } catch (err) {
+      console.warn('[GamePipeline] 终局演绎失败:', err);
     }
   }
 
