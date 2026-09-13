@@ -52,6 +52,8 @@ export interface SkirmishSession {
   endReason?: string;
   /** 在场持续效果（领域/场景/装备/召唤/军团；从打出后的下一拍起每拍生效） */
   activeEffects: readonly CardInPlayEffect[];
+  /** 本场破封的卡名（结算时同窗持久化 sealed:false） */
+  unsealedCards: string[];
 }
 
 export interface StartSkirmishInput {
@@ -95,6 +97,7 @@ export function startSkirmish(input: StartSkirmishInput): SkirmishSession {
     playedCards: [],
     counteredBeats: 0,
     activeEffects: [],
+    unsealedCards: [],
     finished: null,
   };
   // 无敌方招式（评估被夹逼成空）→ 不战自溃，UI 永不卡在无拍可打的账本上
@@ -120,17 +123,29 @@ const withFinish = (
   finished: finish,
 });
 
+/** 打一拍的附加裁定（启封/在场激活/反冲） */
+export interface BeatOptions {
+  /** 本拍打出的在场卡（领域/场景/装备/召唤/军团），效果从下一拍起生效 */
+  activate?: CardInPlayEffect;
+  /** 启封判定等前置审计行（置于意图行之后、拍审计之前） */
+  prepend?: string[];
+  /** 暴走/反噬反冲：拍末玩家 HP −n（clamp 0，可致死 → 败北） */
+  recoil?: number;
+  /** 本拍破封的卡名 → 记入 unsealedCards（结算持久化 sealed:false） */
+  sealBroke?: string;
+}
+
 /** 打一拍：拍结算 + 记账 + 终局判定（只按 HP 归零终局；拍数不限，招式轮换）。
- *  activate = 本拍打出的在场卡（领域/场景/装备/召唤/军团），效果从下一拍起生效。
  *  未开始/已结束/无敌方招式 → 原样返回（幂等） */
 export function playBeat(
   s: SkirmishSession,
   action: SkirmishAction,
   dice: number,
-  activate?: { name: string; type: 'dot' | 'buff'; amount: number },
+  opts?: BeatOptions,
 ): SkirmishSession {
   const intent = currentIntent(s);
   if (!intent) return s;
+  const activate = opts?.activate;
 
   // 在场加成（此前打出的领域/装备/召唤…）：行动值先行叠加，审计单列一行可复算
   const buffTotal = s.activeEffects
@@ -150,6 +165,7 @@ export function playBeat(
   const lines = [
     // 出卡宣言（主人裁定：玩家写这张牌用来做什么，纯叙事素材，置于拍审计之前）
     ...(action.note ? [`▸ 意图：${action.note}`] : []),
+    ...(opts?.prepend ?? []),
     ...(buffTotal > 0 ? [`▸ 在场加成：行动值 +${buffTotal}`] : []),
     ...result.audit,
   ];
@@ -161,6 +177,15 @@ export function playBeat(
   const enemyHpAfterDot = Math.max(0, result.enemyHp - dotTotal);
   if (dotTotal > 0 && result.enemyHp > 0) {
     lines.push(`▸ 在场持续：敌方 −${dotTotal}（${result.enemyHp} → ${enemyHpAfterDot}）`);
+  }
+
+  // 暴走/反噬反冲（启封失败的代价）：拍末玩家扣血，可致死
+  const recoil = opts?.recoil ?? 0;
+  const playerHpAfterRecoil = Math.max(0, result.playerHp - Math.max(0, Math.round(recoil)));
+  if (recoil > 0) {
+    lines.push(
+      `▸ 失控反冲：玩家 −${Math.round(recoil)}（${result.playerHp} → ${playerHpAfterRecoil}）`,
+    );
   }
 
   // 本拍激活的在场卡：效果自下一拍起生效
@@ -183,7 +208,7 @@ export function playBeat(
   const next: SkirmishSession = {
     ...s,
     beat: s.beat + 1,
-    playerHp: result.playerHp,
+    playerHp: playerHpAfterRecoil,
     enemyHp: enemyHpAfterDot,
     log: [...s.log, ...lines],
     playedCards:
@@ -192,6 +217,10 @@ export function playBeat(
         : s.playedCards,
     counteredBeats: s.counteredBeats + (result.countered ? 1 : 0),
     activeEffects: nextEffects,
+    unsealedCards:
+      opts?.sealBroke && !s.unsealedCards.includes(opts.sealBroke)
+        ? [...s.unsealedCards, opts.sealBroke]
+        : s.unsealedCards,
   };
   if (next.enemyHp <= 0) {
     return withFinish(next, '胜利', [`▸ 【${s.enemyName}】倒下——胜利！`]);

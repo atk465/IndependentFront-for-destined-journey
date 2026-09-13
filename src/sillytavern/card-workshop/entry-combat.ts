@@ -98,8 +98,9 @@ export function cardCounterAction(
 /** 在场生效类：打出后转入持续效果（每场一次） */
 export const IN_PLAY_KINDS: ReadonlySet<string> = new Set(['装备', '召唤', '军团', '领域', '场景']);
 
-/** 在场持续效果（数值初稿，终审对象） */
+/** 在场持续效果（数值初稿，终审对象）；name = 来源卡名（审计行用） */
 export interface CardInPlayEffect {
+  name: string;
   /** dot = 每拍拍末敌方持续损失；buff = 每拍玩家行动值加成 */
   type: 'dot' | 'buff';
   amount: number;
@@ -127,13 +128,13 @@ export function cardPlayPlan(
   const tags = cardCombatTags(card.词条);
   let effect: CardInPlayEffect;
   if (kind === '装备' || kind === '召唤' || kind === '军团') {
-    effect = { type: 'buff', amount: 2 * power };
+    effect = { name: card.name, type: 'buff', amount: 2 * power };
   } else {
     // 领域/场景：攻系元素（强攻/打断标签）→ 持续伤害；防系/风/无战斗词条 → 玩家加成
     effect =
       tags.includes('强攻') || tags.includes('打断')
-        ? { type: 'dot', amount: 2 * power }
-        : { type: 'buff', amount: power };
+        ? { name: card.name, type: 'dot', amount: 2 * power }
+        : { name: card.name, type: 'buff', amount: power };
   }
   const verb =
     kind === '装备'
@@ -148,4 +149,99 @@ export function cardPlayPlan(
     cardName: card.name,
   };
   return { mode: '在场', action, effect };
+}
+
+// ========== 封印卡的交锋拍出牌（启封判定接入拍内，真机积压 2026-09-14） ==========
+//
+// 此前封印卡在交锋拍被一刀切「不能用」。裁定：打封印卡 = 这一拍的行动就是**启封
+// 判定**（d20 + 意志修正 vs 封印 DC），照阶段 2 内核分级：
+//   启封 → 封印破，卡效果本拍全额发动；哑火 → 封印扛住，本拍空过（不记已用账）；
+//   暴走 → 封印破、效果发动，但失控反冲（玩家 −⌈反噬伤害/2⌉）；
+//   反噬 → 封印破但效果炸空，玩家 −反噬伤害，本拍空过。
+// 破封的卡在会话账本记 unsealedCards，由结算同窗持久化 sealed:false。
+
+import { judgeUnseal, unsealDC, REBOUND_DAMAGE, sealBreaks, type UnsealOutcome } from './unsealing';
+
+/** 封印卡出牌的完整裁定（纯数据；HP/账本落地由会话层执行） */
+export interface SealedPlayResult {
+  outcome: UnsealOutcome;
+  dc: number;
+  action: SkirmishAction;
+  /** 启封判定审计行（置于拍审计之前） */
+  prepend: string[];
+  /** 破封卡名（哑火缺省）——会话账本记入 unsealedCards，结算持久化 sealed:false */
+  sealBroke?: string;
+  /** 暴走/反噬反冲伤害（拍末玩家 HP −n，可致死） */
+  recoil?: number;
+  /** 卡效果是否实际发动（启封/暴走 = true；哑火/反噬 = false） */
+  effectFired: boolean;
+  /** 在场卡激活（effectFired 且该卡为在场类时存在） */
+  activate?: CardInPlayEffect;
+}
+
+const 空过行动 = (label: string): SkirmishAction => ({ label, power: 0, tags: [] });
+
+/** 封印卡出牌裁定：启封判定 + 按四态分级装配行动/反冲/破封账 */
+export function sealedCardPlay(
+  card: Pick<CardItem, 'name' | 'cardTier' | '词条' | 'cardPowerBonus' | 'recipe'>,
+  stats: { atk: number },
+  d20: number,
+  willMod: number,
+): SealedPlayResult {
+  const outcome = judgeUnseal(card, d20, willMod);
+  const dc = unsealDC(card);
+  const prepend = [
+    `▸ 启封判定：d20=${d20}+意志${willMod} vs DC${dc} → ${outcome.kind}（${outcome.margin >= 0 ? '+' : ''}${outcome.margin}）`,
+  ];
+  const rebound = REBOUND_DAMAGE[card.cardTier] ?? REBOUND_DAMAGE['白铁'];
+
+  if (!sealBreaks(outcome)) {
+    // 哑火：封印扛住——本拍空过，卡不记已用账（下拍可再试）
+    return {
+      outcome,
+      dc,
+      action: 空过行动(`启封 ${card.name}（哑火——这一拍空过）`),
+      prepend,
+      effectFired: false,
+    };
+  }
+
+  // 反噬：封印破但效果炸空——全额反冲，本拍空过（卡已可正常使用，下拍再打）
+  if (outcome.kind === '反噬') {
+    return {
+      outcome,
+      dc,
+      action: 空过行动(`启封 ${card.name}（反噬——效果炸空，这一拍空过）`),
+      prepend,
+      sealBroke: card.name,
+      effectFired: false,
+      recoil: rebound,
+    };
+  }
+
+  const plan = cardPlayPlan(card, stats);
+  if (plan.mode === '禁打') {
+    // 破封的是素材卡：无战斗效果（暴走仍半额反冲）
+    return {
+      outcome,
+      dc,
+      action: 空过行动(`启封 ${card.name}（破封——无战斗效果）`),
+      prepend,
+      sealBroke: card.name,
+      effectFired: false,
+      ...(outcome.kind === '暴走' ? { recoil: Math.max(1, Math.ceil(rebound / 2)) } : {}),
+    };
+  }
+  const activate = plan.mode === '在场' ? plan.effect : undefined;
+  return {
+    outcome,
+    dc,
+    action: plan.action,
+    prepend,
+    sealBroke: card.name,
+    effectFired: true,
+    ...(activate ? { activate } : {}),
+    // 暴走：效果发动但失控反冲（半额反噬伤害）
+    ...(outcome.kind === '暴走' ? { recoil: Math.max(1, Math.ceil(rebound / 2)) } : {}),
+  };
 }

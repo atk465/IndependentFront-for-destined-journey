@@ -42,7 +42,8 @@ import {
   type SkirmishAction,
   type SkirmishChoice,
 } from '@engine/card-workshop/skirmish';
-import { cardPlayPlan } from '@engine/card-workshop/entry-combat';
+import { cardPlayPlan, sealedCardPlay } from '@engine/card-workshop/entry-combat';
+import { willModifierOf } from '@engine/card-workshop/unsealing';
 import { basicCounterAction, deriveCombatStats } from '@engine/card-workshop/derived-stats';
 import {
   crushFinish,
@@ -2920,12 +2921,24 @@ export class GamePipeline {
         this.emitMessage(`【交锋】卡里没有【${choice.name}】。`, 'assistant');
         return;
       }
+      // 封印卡：这一拍的行动就是启封判定（阶段 2 内核分级：启封/哑火/暴走/反噬）
       if (card.sealed) {
-        // 启封判定接入拍内掷骰为后续工作：先按「未启封不可反制」处理，给出游戏语言提示
-        this.emitMessage(
-          `【交锋】【${choice.name}】还被封印着——先在卡册启封，或改用 强攻/防御/闪避。`,
-          'assistant',
+        const res = sealedCardPlay(
+          card,
+          deriveCombatStats({ attributes: playerC.attributes, level: playerC.level }),
+          this.rollD20(),
+          willModifierOf(playerC.attributes),
         );
+        const beatDice = this.rollD20();
+        const next = playBeat(session, res.action, beatDice, {
+          activate: res.activate,
+          prepend: res.prepend,
+          recoil: res.recoil,
+          sealBroke: res.sealBroke,
+        });
+        this.game.setSkirmishSession(next);
+        this.emitMessage(next.log.slice(session.log.length).join('\n'), 'assistant');
+        if (next.finished) await this.settleAndNarrate(next);
         return;
       }
       const plan = cardPlayPlan(
@@ -2951,7 +2964,7 @@ export class GamePipeline {
       );
     }
 
-    const next = playBeat(session, action, this.rollD20(), activate);
+    const next = playBeat(session, action, this.rollD20(), activate ? { activate } : undefined);
     this.game.setSkirmishSession(next);
     this.emitMessage(next.log.slice(session.log.length).join('\n'), 'assistant');
     if (next.finished) await this.settleAndNarrate(next);

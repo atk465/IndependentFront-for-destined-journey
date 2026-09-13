@@ -46,6 +46,15 @@ export function buildSkirmishSettlementPatches(input: SkirmishPersistInput): Sta
       },
     },
   ];
+  // 本场破封的卡 → sealed:false 持久化（哑火不破不记；先于消耗/经验补丁执行）
+  for (const name of input.session.unsealedCards ?? []) {
+    if (!input.cardOf(name)) continue;
+    patches.push({
+      op: 'update_item',
+      target,
+      value: { name, changes: { sealed: false } },
+    });
+  }
   for (const share of input.settlement.cardExp) {
     const card = input.cardOf(share.name);
     if (!card) continue;

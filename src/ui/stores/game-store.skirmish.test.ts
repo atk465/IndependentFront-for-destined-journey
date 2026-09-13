@@ -24,6 +24,7 @@ const session = (finished: null | '胜利' = null): SkirmishSession => ({
   playedCards: [],
   counteredBeats: 1,
   activeEffects: [],
+  unsealedCards: [],
   finished,
 });
 
