@@ -30,7 +30,13 @@ const cardOptions = computed(() => {
     if (card.sealed === true || card.data?.damaged === true) continue;
     cards.push(card);
   }
-  return cards.map((c) => ({ name: c.name, cardTier: c.cardTier, tags: cardCombatTags(c.词条) }));
+  const used = new Set(session.value?.playedCards ?? []);
+  return cards.map((c) => ({
+    name: c.name,
+    cardTier: c.cardTier,
+    tags: cardCombatTags(c.词条),
+    used: used.has(c.name),
+  }));
 });
 
 /** 已选中待发动的卡（点卡 → 填宣言 → 发动） */
@@ -202,15 +208,22 @@ function dismiss() {
         :key="c.name"
         type="button"
         class="strip-card"
-        :class="{ selected: selectedCard === c.name }"
+        :class="{ selected: selectedCard === c.name, spent: c.used }"
         role="listitem"
-        :disabled="game.skirmishBusy"
-        :title="c.tags.length > 0 ? `${c.name}｜反制：${c.tags.join('/')}` : c.name"
+        :disabled="game.skirmishBusy || c.used"
+        :title="
+          c.used
+            ? `${c.name}｜本局已用（一场一次）`
+            : c.tags.length > 0
+              ? `${c.name}｜反制：${c.tags.join('/')}`
+              : c.name
+        "
         @click="onCard(c.name)"
       >
         <span class="tier-dot" :style="{ background: cardTierVar(c.cardTier) }" />
         {{ c.name }}
-        <span v-if="c.tags.length > 0" class="tag-hint">{{ c.tags.join('·') }}</span>
+        <span v-if="c.used" class="tag-hint">已用</span>
+        <span v-else-if="c.tags.length > 0" class="tag-hint">{{ c.tags.join('·') }}</span>
       </button>
     </div>
   </section>
@@ -391,6 +404,9 @@ function dismiss() {
 .strip-card.selected {
   border-color: var(--theme-primary, #c48c4b);
   background: var(--theme-primary-bg, rgba(196, 140, 75, 0.15));
+}
+.strip-card.spent {
+  opacity: 0.45;
 }
 .card-strip {
   display: flex;

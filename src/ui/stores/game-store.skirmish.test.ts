@@ -23,6 +23,7 @@ const session = (finished: null | '胜利' = null): SkirmishSession => ({
   log: [],
   playedCards: [],
   counteredBeats: 1,
+  activeEffects: [],
   finished,
 });
 

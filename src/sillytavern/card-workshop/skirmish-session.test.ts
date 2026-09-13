@@ -207,3 +207,63 @@ describe('settleSkirmish —— 终局结算数据', () => {
     expect(got?.exp.total).toBe(200); // 基础 200 × 等级差修正 2.0（封顶）× C 0.5
   });
 });
+
+describe('在场效果 —— 领域 DoT / 装备召唤助战（真机裁定 2026-09-13）', () => {
+  const 开战 = () =>
+    startSkirmish({
+      enemyName: '岩爪兽',
+      enemyLevel: 12,
+      intents: [{ move: '蓄力·崩山击', threat: 18, counters: ['打断', '防御'] }],
+      playerHp: 155,
+      playerMaxHp: 155,
+      enemyHp: 200, // 高血量：直击打不死，才能观察 DoT 行
+      enemyMaxHp: 200,
+      guard: 10,
+    });
+  const 应对 = { label: '防御', power: 32, tags: ['防御' as const] };
+
+  it('激活行入账，效果自下一拍生效（激活当拍无加成行）', () => {
+    const s = playBeat(开战(), 应对, 15, { name: '灼热盆地', type: 'dot', amount: 6 });
+    expect(s.activeEffects).toEqual([{ name: '灼热盆地', type: 'dot', amount: 6 }]);
+    // 激活当拍：无「在场持续」行（DoT 下一拍才烧），有激活行
+    expect(s.log.some((l) => l.startsWith('▸ 在场持续'))).toBe(false);
+    expect(s.log[s.log.length - 1]).toBe('▸ 【灼热盆地】灼烧生效——此后每拍敌方 −6');
+  });
+
+  it('DoT 拍末结算：审计行带前后 HP', () => {
+    const activated = playBeat(开战(), 应对, 15, { name: '灼热盆地', type: 'dot', amount: 6 });
+    const s = playBeat(activated, 应对, 15);
+    const dotLine = s.log.find((l) => l.startsWith('▸ 在场持续'));
+    expect(dotLine).toMatch(/敌方 −6（\d+ → \d+）/);
+  });
+
+  it('buff 下一拍起叠加行动值，审计单列加成行', () => {
+    const activated = playBeat(开战(), 应对, 15, { name: '秘银长剑', type: 'buff', amount: 6 });
+    const s = playBeat(activated, 应对, 1);
+    // 防御 32 + 加成 6 = 38；d20=1 + 38 + 克制9 = 48 vs 威胁18 → 反制成功
+    expect(s.log.some((l) => l === '▸ 在场加成：行动值 +6')).toBe(true);
+    expect(s.log.some((l) => l.includes('行动值38'))).toBe(true);
+  });
+
+  it('DoT 收下人头 → 胜利（直击没打死、烧倒）', () => {
+    const base = startSkirmish({
+      enemyName: '残血兽',
+      enemyLevel: 5,
+      intents: [{ move: '咬', threat: 10, counters: ['防御'] }],
+      playerHp: 100,
+      enemyHp: 8,
+      guard: 20,
+    });
+    // 激活拍：弱闪避（roll 2 < 10 反制失败，直击仍打 1）→ 敌方 8−1 = 7
+    const activated = playBeat(base, { label: '闪避', power: 1, tags: ['闪避'] }, 1, {
+      name: '灼热盆地',
+      type: 'dot',
+      amount: 9,
+    });
+    expect(activated.enemyHp).toBe(7);
+    // 下一拍：直击 1 → 6，DoT 9 → 0 → 胜利
+    const s = playBeat(activated, { label: '闪避', power: 1, tags: ['闪避'] }, 1);
+    expect(s.finished).toBe('胜利');
+    expect(s.enemyHp).toBe(0);
+  });
+});

@@ -9,6 +9,8 @@ import {
   entryCombatTagsOf,
   cardCombatTags,
   cardCounterAction,
+  cardPlayPlan,
+  IN_PLAY_KINDS,
 } from './entry-combat';
 
 describe('ENTRY_COMBAT_TABLE（单一真源）', () => {
@@ -77,5 +79,62 @@ describe('cardCounterAction —— 出卡 = 基础攻击的增强（真机校准
   it('cardPowerBonus 计入卡面战力（卡牌经验满管转化）', () => {
     const got = cardCounterAction(卡({ cardTier: '白铁', 词条: [], cardPowerBonus: 3 }), stats);
     expect(got.power).toBe(44 + 2 * (1 + 3));
+  });
+});
+
+describe('cardPlayPlan —— 八类卡语义矩阵（真机裁定 2026-09-13）', () => {
+  const stats = { atk: 44 };
+  const 卡 = (overrides: Record<string, unknown>) =>
+    ({ name: '测试卡', cardTier: '白银', 词条: [], ...overrides }) as never;
+
+  it('技能/物资（缺省技能）→ 直击：攻+2×卡力，审计拆解进 label', () => {
+    const plan = cardPlayPlan(卡({ 词条: ['技能', '火'] }), stats);
+    expect(plan.mode).toBe('直击');
+    if (plan.mode === '直击') {
+      expect(plan.action.power).toBe(50); // 44 + 2×白银3（火是元素词条，不计复合）
+      expect(plan.action.tags).toEqual(['强攻']);
+    }
+  });
+  it('领域（攻系元素）→ 在场 DoT 2×卡力；当拍不造伤', () => {
+    const plan = cardPlayPlan(卡({ name: '灼热盆地', 词条: ['地景', '火'] }), stats);
+    expect(plan.mode).toBe('在场');
+    if (plan.mode === '在场') {
+      expect(plan.effect).toEqual({ type: 'dot', amount: 6 }); // 白银3 → 2×3
+      expect(plan.action.power).toBe(44); // 场地不能直接打人
+      expect(plan.action.label).toContain('灼烧−6');
+    }
+  });
+  it('领域（防系/风元素）→ 在场 buff 卡力', () => {
+    const plan = cardPlayPlan(卡({ name: '静水湖畔', 词条: ['地景', '水'] }), stats);
+    expect(plan.mode).toBe('在场');
+    if (plan.mode === '在场') expect(plan.effect).toEqual({ type: 'buff', amount: 3 });
+  });
+  it('装备 → 在场 buff 2×卡力；召唤 → 登场直击 + 助战 buff', () => {
+    const equip = cardPlayPlan(卡({ name: '秘银长剑', 词条: ['装备', '金'] }), stats);
+    expect(equip.mode).toBe('在场');
+    if (equip.mode === '在场') {
+      expect(equip.effect).toEqual({ type: 'buff', amount: 6 }); // 2×白银3
+    }
+  });
+  it('召唤 → 登场直击 + 助战 buff', () => {
+    const plan = cardPlayPlan(
+      卡({ name: '远古巨兽', cardTier: '鎏金', 词条: ['召唤', '土'] }),
+      stats,
+    );
+    expect(plan.mode).toBe('在场');
+    if (plan.mode === '在场') {
+      expect(plan.action.power).toBe(44 + 2 * 4); // 鎏金4，土防系不计直击加成? 直击 = 攻 + 2×卡力
+      expect(plan.effect).toEqual({ type: 'buff', amount: 8 });
+    }
+  });
+  it('素材 → 禁打', () => {
+    const plan = cardPlayPlan(卡({ name: '巨兽骨', cardTier: '白铁', 词条: ['素材'] }), stats);
+    expect(plan.mode).toBe('禁打');
+  });
+});
+
+describe('IN_PLAY_KINDS（单一真源）', () => {
+  it('在场生效类 = 装备/召唤/军团/领域/场景；技能物资直击、素材禁打', () => {
+    expect([...IN_PLAY_KINDS].sort()).toEqual(['召唤', '场景', '装备', '军团', '领域'].sort());
   });
 });

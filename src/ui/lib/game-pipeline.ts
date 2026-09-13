@@ -42,7 +42,7 @@ import {
   type SkirmishAction,
   type SkirmishChoice,
 } from '@engine/card-workshop/skirmish';
-import { cardCounterAction } from '@engine/card-workshop/entry-combat';
+import { cardPlayPlan } from '@engine/card-workshop/entry-combat';
 import { basicCounterAction, deriveCombatStats } from '@engine/card-workshop/derived-stats';
 import {
   crushFinish,
@@ -2896,14 +2896,23 @@ export class GamePipeline {
     }
   }
 
-  /** 一拍反制：出卡 = 卡面战力 + 词条反制标签；基础应对 = 派生值 + 同名标签 */
+  /** 一拍反制：出卡走八类语义矩阵（直击/在场/禁打），基础应对 = 派生值 + 同名标签 */
   private async submitSkirmishCounter(choice: SkirmishChoice): Promise<void> {
     const session = this.game.skirmishSession;
     const playerC = this.game.player;
     if (!session || session.finished !== null || !playerC) return;
 
     let action: SkirmishAction;
+    let activate: { name: string; type: 'dot' | 'buff'; amount: number } | undefined;
     if (choice.kind === '卡') {
+      // 会话临时账（真机裁定 2026-09-13）：同一张卡一场只能打出一次
+      if (session.playedCards.includes(choice.name)) {
+        this.emitMessage(
+          `【交锋】【${choice.name}】本局已经用过了——同一张牌一场只能打出一次。`,
+          'assistant',
+        );
+        return;
+      }
       // InventoryItem.type 是宽松 string，这里做一次卡牌收窄（脏存档的 type 异常按查无卡处理）
       const found = playerC.inventory.find((i) => i.name === choice.name);
       const card = found?.type === '卡牌' ? (found as CardItem) : undefined;
@@ -2919,10 +2928,18 @@ export class GamePipeline {
         );
         return;
       }
-      action = cardCounterAction(
+      const plan = cardPlayPlan(
         card,
         deriveCombatStats({ attributes: playerC.attributes, level: playerC.level }),
       );
+      if (plan.mode === '禁打') {
+        this.emitMessage(`【交锋】${plan.reason}。`, 'assistant');
+        return;
+      }
+      action = plan.action;
+      if (plan.mode === '在场') {
+        activate = { name: card.name, type: plan.effect.type, amount: plan.effect.amount };
+      }
       // 出卡宣言（主人裁定：纯叙事素材，数值照常结算；置于拍审计之前的「意图」行）
       if (choice.intent && choice.intent.trim()) {
         action = { ...action, note: choice.intent.trim().slice(0, 200) };
@@ -2934,7 +2951,7 @@ export class GamePipeline {
       );
     }
 
-    const next = playBeat(session, action, this.rollD20());
+    const next = playBeat(session, action, this.rollD20(), activate);
     this.game.setSkirmishSession(next);
     this.emitMessage(next.log.slice(session.log.length).join('\n'), 'assistant');
     if (next.finished) await this.settleAndNarrate(next);

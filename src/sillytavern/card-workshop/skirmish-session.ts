@@ -23,6 +23,7 @@ import {
   type SkirmishAction,
   type SkirmishGrade,
 } from './skirmish';
+import type { CardInPlayEffect } from './entry-combat';
 
 /** 会话终局态；null = 交锋中 */
 export type SkirmishFinish = null | '胜利' | '碾压' | '撤退' | '败北';
@@ -49,6 +50,8 @@ export interface SkirmishSession {
   finished: SkirmishFinish;
   /** 玩家主动结束战斗时写的理由（终局记叙的收束参考；其余终局缺省） */
   endReason?: string;
+  /** 在场持续效果（领域/场景/装备/召唤/军团；从打出后的下一拍起每拍生效） */
+  activeEffects: readonly CardInPlayEffect[];
 }
 
 export interface StartSkirmishInput {
@@ -91,6 +94,7 @@ export function startSkirmish(input: StartSkirmishInput): SkirmishSession {
     ],
     playedCards: [],
     counteredBeats: 0,
+    activeEffects: [],
     finished: null,
   };
   // 无敌方招式（评估被夹逼成空）→ 不战自溃，UI 永不卡在无拍可打的账本上
@@ -117,17 +121,27 @@ const withFinish = (
 });
 
 /** 打一拍：拍结算 + 记账 + 终局判定（只按 HP 归零终局；拍数不限，招式轮换）。
+ *  activate = 本拍打出的在场卡（领域/场景/装备/召唤/军团），效果从下一拍起生效。
  *  未开始/已结束/无敌方招式 → 原样返回（幂等） */
 export function playBeat(
   s: SkirmishSession,
   action: SkirmishAction,
   dice: number,
+  activate?: { name: string; type: 'dot' | 'buff'; amount: number },
 ): SkirmishSession {
   const intent = currentIntent(s);
   if (!intent) return s;
+
+  // 在场加成（此前打出的领域/装备/召唤…）：行动值先行叠加，审计单列一行可复算
+  const buffTotal = s.activeEffects
+    .filter((e) => e.type === 'buff')
+    .reduce((sum, e) => sum + Math.max(0, e.amount), 0);
+  const effectiveAction =
+    buffTotal > 0 ? { ...action, power: Math.max(0, action.power) + buffTotal } : action;
+
   const result = resolveBeat({
-    intent,
-    action,
+    intent: intent,
+    action: effectiveAction,
     playerHp: s.playerHp,
     enemyHp: s.enemyHp,
     guard: s.guard,
@@ -136,19 +150,48 @@ export function playBeat(
   const lines = [
     // 出卡宣言（主人裁定：玩家写这张牌用来做什么，纯叙事素材，置于拍审计之前）
     ...(action.note ? [`▸ 意图：${action.note}`] : []),
+    ...(buffTotal > 0 ? [`▸ 在场加成：行动值 +${buffTotal}`] : []),
     ...result.audit,
   ];
+
+  // 在场持续伤害（领域 DoT）：拍末结算，可收到人头
+  const dotTotal = s.activeEffects
+    .filter((e) => e.type === 'dot')
+    .reduce((sum, e) => sum + Math.max(0, e.amount), 0);
+  const enemyHpAfterDot = Math.max(0, result.enemyHp - dotTotal);
+  if (dotTotal > 0 && result.enemyHp > 0) {
+    lines.push(`▸ 在场持续：敌方 −${dotTotal}（${result.enemyHp} → ${enemyHpAfterDot}）`);
+  }
+
+  // 本拍激活的在场卡：效果自下一拍起生效
+  const nextEffects = activate
+    ? [
+        ...s.activeEffects,
+        {
+          name: activate.name,
+          type: activate.type,
+          amount: Math.max(0, Math.round(activate.amount)),
+        },
+      ]
+    : s.activeEffects;
+  if (activate) {
+    lines.push(
+      `▸ 【${activate.name}】${activate.type === 'dot' ? '灼烧' : '助阵'}生效——此后每拍${activate.type === 'dot' ? `敌方 −${activate.amount}` : `行动值 +${activate.amount}`}`,
+    );
+  }
+
   const next: SkirmishSession = {
     ...s,
     beat: s.beat + 1,
     playerHp: result.playerHp,
-    enemyHp: result.enemyHp,
+    enemyHp: enemyHpAfterDot,
     log: [...s.log, ...lines],
     playedCards:
       action.cardName && !s.playedCards.includes(action.cardName)
         ? [...s.playedCards, action.cardName]
         : s.playedCards,
     counteredBeats: s.counteredBeats + (result.countered ? 1 : 0),
+    activeEffects: nextEffects,
   };
   if (next.enemyHp <= 0) {
     return withFinish(next, '胜利', [`▸ 【${s.enemyName}】倒下——胜利！`]);

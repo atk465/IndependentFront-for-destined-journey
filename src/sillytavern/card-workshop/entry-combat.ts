@@ -18,6 +18,7 @@ import type { CardItem } from '../types';
 import type { CounterTag, SkirmishAction } from './skirmish';
 import { COUNTER_TAGS } from './skirmish';
 import { cardPower } from './deck-power';
+import { cardKindOf } from './card-kind';
 
 /** 词条 → 反制标签（单一真源；key 必须与 card-fusion/material 的词条字面一致） */
 export const ENTRY_COMBAT_TABLE: Readonly<Record<string, readonly CounterTag[]>> = {
@@ -80,4 +81,71 @@ export function cardCounterAction(
     tags: cardCombatTags(card.词条),
     cardName: card.name,
   };
+}
+
+// ========== 八类卡的交锋拍语义矩阵（真机裁定 2026-09-13） ==========
+//
+// 真机漏洞：交锋拍最初把所有卡压平成「直击」，导致领域卡反复打出、场地直接造伤。
+// 修正后的矩阵（每张卡每场**只能打出一次**，会话账本按卡名记账）：
+//   技能/物资（消耗）       → 直击（攻+2×卡力），结算后入已耗账
+//   召唤/军团（永久）       → 登场直击（攻+2×卡力），此后每拍并肩助战（行动值 +2×卡力）
+//   装备（永久）            → 不造伤，此后每拍加持（行动值 +2×卡力）
+//   领域/场景（消耗）       → 不造伤（场地不能直接打人），攻系元素 → 每拍敌方持续伤
+//                             2×卡力；防系/风 → 每拍行动值 +卡力
+//   素材                    → 禁打（材料载体）
+// 在场效果从**下一拍**开始生效；数值均为初稿，数值总表终审对象。
+
+/** 在场生效类：打出后转入持续效果（每场一次） */
+export const IN_PLAY_KINDS: ReadonlySet<string> = new Set(['装备', '召唤', '军团', '领域', '场景']);
+
+/** 在场持续效果（数值初稿，终审对象） */
+export interface CardInPlayEffect {
+  /** dot = 每拍拍末敌方持续损失；buff = 每拍玩家行动值加成 */
+  type: 'dot' | 'buff';
+  amount: number;
+}
+
+/** 八类卡的出牌计划 */
+export type CardPlayPlan =
+  | { mode: '直击'; action: SkirmishAction }
+  | { mode: '在场'; action: SkirmishAction; effect: CardInPlayEffect }
+  | { mode: '禁打'; reason: string };
+
+/** 八类 → 交锋拍出牌计划（纯函数；数值见矩阵注释） */
+export function cardPlayPlan(
+  card: Pick<CardItem, 'name' | 'cardTier' | '词条' | 'cardPowerBonus'>,
+  stats: { atk: number },
+): CardPlayPlan {
+  const kind = cardKindOf(card.词条);
+  if (kind === '素材') {
+    return { mode: '禁打', reason: '素材卡是材料载体，不能在战斗中打出' };
+  }
+  if (!IN_PLAY_KINDS.has(kind)) {
+    return { mode: '直击', action: cardCounterAction(card, stats) };
+  }
+  const power = cardPower(card);
+  const tags = cardCombatTags(card.词条);
+  let effect: CardInPlayEffect;
+  if (kind === '装备' || kind === '召唤' || kind === '军团') {
+    effect = { type: 'buff', amount: 2 * power };
+  } else {
+    // 领域/场景：攻系元素（强攻/打断标签）→ 持续伤害；防系/风/无战斗词条 → 玩家加成
+    effect =
+      tags.includes('强攻') || tags.includes('打断')
+        ? { type: 'dot', amount: 2 * power }
+        : { type: 'buff', amount: power };
+  }
+  const verb =
+    kind === '装备'
+      ? `装备 ${card.name}`
+      : kind === '召唤' || kind === '军团'
+        ? `祭出 ${card.name}`
+        : `展开 ${card.name}`;
+  const action: SkirmishAction = {
+    label: `${verb}（${effect.type === 'dot' ? `此后每拍灼烧−${effect.amount}` : `此后每拍行动值+${effect.amount}`}）`,
+    power: kind === '召唤' || kind === '军团' ? stats.atk + 2 * power : stats.atk,
+    tags,
+    cardName: card.name,
+  };
+  return { mode: '在场', action, effect };
 }
