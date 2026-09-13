@@ -37,6 +37,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   restartCombat.mockResolvedValue({ status: 'restored', continuation: 'same-save' });
   mockGame = reactive({
+    combatDeckStripStates: [],
     isInCombat: true,
     // F2 就绪态：战斗还没开（v3ActiveCombat=null），面板数据 = marker 快照
     combatReady: {

@@ -28,7 +28,7 @@ function onCard(name: string, state: string) {
 </script>
 
 <template>
-  <div v-if="strip.length > 0" class="deck-strip" role="list" aria-label="本局卡组">
+  <div v-if="(strip ?? []).length > 0" class="deck-strip" role="list" aria-label="本局卡组">
     <span class="strip-label">卡组</span>
     <button
       v-for="c in strip"
