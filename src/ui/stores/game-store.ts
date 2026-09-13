@@ -22,7 +22,7 @@ import type {
 export type { DebugAgentEntry, DebugTurnRecord } from '@engine/types';
 import type { CombatView, CombatCommand, DeckCardData } from '@engine/combat-v3';
 import { tryParsePlayCard } from '@engine/combat-v3';
-import { isConsumableKind } from '@engine/card-workshop/card-kind';
+import { cardKindOf, isConsumableKind } from '@engine/card-workshop/card-kind';
 import { planRepair } from '@engine/card-workshop/repair';
 import { downedSummonCards } from '@engine/card-workshop/contract';
 import { createDefaultCharacterState } from '@engine/types';
@@ -180,6 +180,8 @@ export const useGameStore = defineStore('game', () => {
   /** 阶段5-闭环（1.3 消耗制）：本局消耗账——consumed = 封印破裂待结算；pending = 封印卡已打出等启封结果 */
   const combatConsumedCards = ref<string[]>([]);
   const combatPendingConsume = ref<string[]>([]);
+  /** 阶段5-闭环：本局全部确定生效的玩卡（v3_card_played 事件账，卡组条四态显示用） */
+  const combatPlayedCards = ref<{ name: string; cardKind: string; sealed: boolean }[]>([]);
   /** 🆕 v3：Coordinator 句柄（submitCommand / abandon / 重开），供前端 Command 路由与放弃（C4）
    *  T16 §3.5：+preSnapshotId（pre-combat 快照，重开战斗 restoreSnapshot 用）与
    *  +restart（重开战斗回调 —— pipeline 持有 combat marker，重触发归它）。
@@ -335,6 +337,7 @@ export const useGameStore = defineStore('game', () => {
         break;
       // 阶段5-闭环（1.3 消耗制）：玩卡确定生效 → 消耗卡入待定账（sealed 先挂起等启封结果）
       case 'v3_card_played':
+        combatPlayedCards.value.push({ name: evt.name, cardKind: evt.kind, sealed: evt.sealed });
         if (isConsumableKind(evt.kind)) {
           if (evt.sealed) combatPendingConsume.value.push(evt.name);
           else combatConsumedCards.value.push(evt.name);
@@ -360,6 +363,22 @@ export const useGameStore = defineStore('game', () => {
     combatPendingConsume.value = [];
     return consumed;
   }
+
+  /** 阶段5-闭环（1.4）：卡组条四态投影（可用/生效中/伙伴在场/本局已耗） */
+  const combatDeckStripStates = computed(() =>
+    combatDeckSnapshot.value.map((card) => {
+      const kind = cardKindOf(card.词条);
+      const played = combatPlayedCards.value.some((p) => p.name === card.name);
+      const consumed =
+        combatConsumedCards.value.includes(card.name) ||
+        combatPendingConsume.value.includes(card.name);
+      let state: '可用' | '生效中' | '伙伴在场' | '本局已耗' = '可用';
+      if (consumed) state = '本局已耗';
+      else if (played && kind === '装备') state = '生效中';
+      else if (played && (kind === '召唤' || kind === '军团')) state = '伙伴在场';
+      return { name: card.name, cardTier: card.cardTier, 词条: card.词条, kind, state };
+    }),
+  );
 
   /**
    * 阶段5-闭环（名字即契约）：伙伴契约入库。角色名 = 卡名（契约键）；
@@ -539,6 +558,7 @@ export const useGameStore = defineStore('game', () => {
     combatDeckSnapshot.value = [];
     combatConsumedCards.value = [];
     combatPendingConsume.value = [];
+    combatPlayedCards.value = [];
     combatReady.value = null;
     const c = combatCoordinator.value;
     if (c?.abandon) c.abandon();
@@ -1723,6 +1743,7 @@ export const useGameStore = defineStore('game', () => {
     takeConsumedCards,
     repairCard,
     collectDamagedSummonCards,
+    combatDeckStripStates,
     abandonCombat,
     skipCombat,
     startCombat,
