@@ -26,6 +26,7 @@ import { cardKindOf, isConsumableKind } from '@engine/card-workshop/card-kind';
 import { planRepair } from '@engine/card-workshop/repair';
 import { downedSummonCards } from '@engine/card-workshop/contract';
 import { buildDemoCardsPatches, buildDemoDeckPatches } from '@engine/card-workshop/demo';
+import { toPlainCardAlbum } from '@engine/card-workshop/album';
 import type { SkirmishSession } from '@engine/card-workshop/skirmish-session';
 import type { SkirmishChoice } from '@engine/card-workshop/skirmish';
 import { createDefaultCharacterState } from '@engine/types';
@@ -1744,7 +1745,9 @@ export const useGameStore = defineStore('game', () => {
       {
         op: 'update_character',
         target: `characters.${player.value?.name ?? ''}`,
-        value: { cardAlbum: album },
+        // 🔴 真机 DataCloneError：面板传来的 album 携带 Pinia 响应式数组（Proxy），
+        // IDB 结构化克隆拒收——落库前深净化成普通数组
+        value: { cardAlbum: toPlainCardAlbum(album) },
       },
     ]);
     if (result.success) await refreshFromDb();

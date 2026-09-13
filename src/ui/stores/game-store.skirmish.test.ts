@@ -120,3 +120,21 @@ describe('交锋拍状态桥', () => {
     await expect(game.fleeSkirmish()).resolves.toBeUndefined();
   });
 });
+
+describe('toPlainCardAlbum —— UI 侧真响应式回归（IDB 结构化克隆）', () => {
+  it('Pinia reactive 专辑净化后可被 structuredClone（真机 DataCloneError 钉死）', async () => {
+    const { reactive } = await import('vue');
+    const { toPlainCardAlbum } = await import('@engine/card-workshop/album');
+    const proxyAlbum = reactive({
+      owned: ['灼热盆地', '苍穹之翼'],
+      deck: ['灼热盆地'],
+      capacity: 60,
+    });
+    // 响应式 Proxy 本体过不了结构化克隆（真机炸点）
+    expect(() => structuredClone(proxyAlbum)).toThrow();
+    const plain = toPlainCardAlbum(proxyAlbum);
+    const cloned = structuredClone(plain); // 净化后必须可克隆
+    expect(cloned.owned).toEqual(['灼热盆地', '苍穹之翼']);
+    expect(cloned.deck).toEqual(['灼热盆地']);
+  });
+});

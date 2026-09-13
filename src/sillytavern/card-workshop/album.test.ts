@@ -15,6 +15,7 @@ import {
   canAddToDeck,
   addToDeck,
   removeFromDeck,
+  toPlainCardAlbum,
 } from './album';
 import type { CardAlbumState } from '../types';
 
@@ -120,5 +121,30 @@ describe('removeFromDeck / removeCardFromAlbum', () => {
     const next = removeCardFromAlbum(album, '燎原');
     expect(next.owned).toEqual([]);
     expect(next.deck).toEqual([]);
+  });
+});
+
+describe('toPlainCardAlbum —— 响应式 Proxy 净化（真机 DataCloneError 修复）', () => {
+  it('Proxy 数组 → 普通数组（拷贝引用，元素与顺序保持；引擎禁 import vue，手搓同款形状）', () => {
+    const proxyAlbum = {
+      owned: new Proxy(['灼热盆地', '苍穹之翼'], {}) as string[],
+      deck: new Proxy(['灼热盆地'], {}) as string[],
+      capacity: 60,
+    };
+    const plain = toPlainCardAlbum(proxyAlbum);
+    // owned/deck 不再是同一个 Proxy（浅拷成普通数组），元素与顺序保持
+    expect(plain.owned).not.toBe(proxyAlbum.owned);
+    expect(plain.deck).not.toBe(proxyAlbum.deck);
+    expect([...plain.owned]).toEqual(['灼热盆地', '苍穹之翼']);
+    expect([...plain.deck]).toEqual(['灼热盆地']);
+    expect(plain.capacity).toBe(60);
+    // 深路径也不再携带 Proxy：owned 的每个元素是普通字符串
+    expect(plain.owned.map((n) => typeof n)).toEqual(['string', 'string']);
+  });
+  it('脏形状兜底：非数组/缺 capacity 归一为安全缺省', () => {
+    const plain = toPlainCardAlbum({ owned: '坏数据', capacity: undefined } as never);
+    expect(plain.owned).toEqual([]);
+    expect(plain.deck).toEqual([]);
+    expect(plain.capacity).toBe(60);
   });
 });

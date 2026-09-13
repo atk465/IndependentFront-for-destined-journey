@@ -39,6 +39,20 @@ export function ensureCardAlbum(album: CardAlbumState | undefined): CardAlbumSta
   return album ?? createCardAlbum();
 }
 
+/**
+ * 深净化成可结构化克隆的普通对象（真机 DataCloneError 修复，2026-09-14）：
+ * 面板里的 album 来自 Pinia 响应式玩家状态，owned/deck 数组是 Proxy —— IDB put
+ * 的结构化克隆拒收 Proxy（`[object Array] could not be cloned`）。落库唯一写入口
+ * （game-store.updateCardAlbum）必须先过这里：元素全是字符串，逐项浅拷即成普通数组。
+ */
+export function toPlainCardAlbum(album: CardAlbumState): CardAlbumState {
+  return {
+    owned: Array.isArray(album?.owned) ? [...album.owned] : [],
+    deck: Array.isArray(album?.deck) ? [...album.deck] : [],
+    capacity: typeof album?.capacity === 'number' ? album.capacity : 60,
+  };
+}
+
 /** 某张卡在卡组里的张数 */
 export function countInDeck(deck: string[], cardName: string): number {
   return deck.filter((n) => n === cardName).length;
