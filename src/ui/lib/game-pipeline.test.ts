@@ -2645,3 +2645,80 @@ describe('combat_trigger 路由交锋拍（SKIRMISH_DEFAULT，2026-09-12 主人�
     expect(result).toBeNull(); // getEndpointForAgent 在测试环境下解析不到 → 明示失败路径，不抛
   });
 });
+
+// ══════ 封印卡启封流（积压 2026-09-14）：pipeline 组合链验证 ══════
+
+describe('submitSkirmishCounter —— 封印卡启封流', () => {
+  const 封印会话 = () => ({
+    enemyName: '岩爪兽',
+    enemyLevel: 12,
+    intents: [{ move: '咬', threat: 10, counters: ['防御'] }],
+    beat: 0,
+    playerHp: 155,
+    playerMaxHp: 155,
+    enemyHp: 200,
+    enemyMaxHp: 200,
+    guard: 10,
+    log: [],
+    playedCards: [],
+    counteredBeats: 0,
+    activeEffects: [],
+    unsealedCards: [],
+    finished: null,
+  });
+  const 封印玩家 = (cardTier: string) => ({
+    name: '莱恩',
+    level: 9,
+    attributes: { str: 14, con: 14, dex: 12, int: 10, spi: 10 },
+    hp: 155,
+    maxHp: 155,
+    totalExp: 0,
+    inventory: [
+      {
+        name: '封印试卡',
+        type: '卡牌',
+        quantity: 1,
+        cardTier,
+        词条: ['技能', '火'],
+        sealed: true,
+        recipe: { fusionKind: '叠加' },
+      },
+    ],
+  });
+
+  it('nat20 → 必启封：效果发动 + 破封账 + 参战卡账', async () => {
+    const setSkirmishSession = vi.fn();
+    const pipeline = makePipeline({
+      player: 封印玩家('白铁'), // 白铁 DC8：20+0 必启封
+      skirmishSession: 封印会话(),
+      setSkirmishSession,
+    });
+    (pipeline as any).rollD20 = vi.fn(() => 20);
+    await (pipeline as any).submitSkirmishCounter({ kind: '卡', name: '封印试卡' });
+
+    const s = setSkirmishSession.mock.calls[setSkirmishSession.mock.calls.length - 1][0];
+    expect(s.log.join('\n')).toContain('启封判定：d20=20+意志0 vs DC8 → 启封');
+    expect(s.unsealedCards).toEqual(['封印试卡']);
+    expect(s.playedCards).toEqual(['封印试卡']);
+    expect(s.finished).toBeNull();
+  });
+
+  it('nat1 + 星辉 → 反噬：效果炸空 + 全额反冲，不记已用账', async () => {
+    const setSkirmishSession = vi.fn();
+    const pipeline = makePipeline({
+      player: 封印玩家('星辉'), // DC20：1+0-20 = -19 → 反噬，反冲 20
+      skirmishSession: 封印会话(),
+      setSkirmishSession,
+    });
+    (pipeline as any).rollD20 = vi.fn(() => 1);
+    await (pipeline as any).submitSkirmishCounter({ kind: '卡', name: '封印试卡' });
+
+    const s = setSkirmishSession.mock.calls[setSkirmishSession.mock.calls.length - 1][0];
+    expect(s.log.join('\n')).toContain('→ 反噬');
+    expect(s.log.join('\n')).toContain('失控反冲：玩家 −20');
+    expect(s.unsealedCards).toEqual(['封印试卡']); // 封印破了
+    expect(s.playedCards).toEqual([]); // 但效果炸空，不算参战
+    // 反制失败（行动值0）吃威胁 10 − 防御减免5 = 5，再吃反冲 20：155−5−20 = 130
+    expect(s.playerHp).toBe(130);
+  });
+});
