@@ -119,7 +119,14 @@ export type CombatEvent =
     }
   | { type: 'v3_status_changed'; unitId: string; statusId: string; op: 'applied' | 'removed' }
   | { type: 'v3_morale_changed'; unitId: string; state: string }
-  | { type: 'v3_roster_changed'; op: 'summoned' | 'despawned'; unitId: string; unitName: string }
+  | {
+      type: 'v3_roster_changed';
+      op: 'summoned' | 'despawned';
+      unitId: string;
+      unitName: string;
+      /** 阶段5-闭环：召唤来源（召唤卡名 = 契约键；会话层据它做伙伴契约入库） */
+      sourceItem?: string;
+    }
   | { type: 'v3_special_damage'; targetId: string; final: number; kind: string }
   | { type: 'v3_rule_override'; effectDescription: string; reason?: string }
   | { type: 'v3_effect_rejected'; code: string; detail: string }

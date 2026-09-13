@@ -410,7 +410,9 @@ function handleSpawnIntents(
 
   const requestId = spawnRequestId(command.actorId);
 
-  // A35-1：templateRef 缺省（创造性召唤）→ 冻结 spawn frame + CharGenRequest
+  // 阶段5-闭环（名字即契约）：召唤卡打出的 spawn → 生成角色名 = 卡名（契约键）。
+  // 会话层据 sourceItem 识别「这是契约召唤」→ 生成角色入库（名字即契约）。
+  const card = command.payload.card;
   out.requiredInput = {
     kind: 'CharGenRequest',
     requestId,
@@ -418,8 +420,11 @@ function handleSpawnIntents(
       race: undefined,
       tier: undefined,
       role: undefined,
-      sourceItem,
-      summonerIntent,
+      sourceItem: card ? card.name : sourceItem,
+      summonerIntent: card
+        ? `${state.units[command.actorId]?.name ?? command.actorId} 打出召唤卡【${card.name}】`
+        : summonerIntent,
+      ...(card ? { name: card.name } : {}),
     },
     constraints: {
       divinityCap: state.units[command.actorId]?.ability?.divinity ?? 0,

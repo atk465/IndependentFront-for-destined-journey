@@ -555,6 +555,8 @@ export async function runCharGenForCombat(
       role?: string;
       sourceItem: string;
       summonerIntent: string;
+      /** 阶段5-闭环（名字即契约）：召唤卡打出时约束生成角色名 = 卡名 */
+      name?: string;
     };
     constraints: { divinityCap: number; attributeBudget: number; durationRounds?: number };
     base: CharGenRequest;
@@ -568,6 +570,8 @@ export async function runCharGenForCombat(
     `来源物品: ${req.prompt.sourceItem}`,
     req.prompt.role ? `战斗定位: ${req.prompt.role}` : '',
     `召唤者意图: ${req.prompt.summonerIntent}`,
+    // 阶段5-闭环（名字即契约）：契约键 = 卡名，生成角色必须沿用
+    req.prompt.name ? `角色名: ${req.prompt.name}（必须使用此名）` : '',
     req.constraints.durationRounds ? `持续回合: ${req.constraints.durationRounds}` : '',
     '</char_gen_request>',
   ]
@@ -577,7 +581,7 @@ export async function runCharGenForCombat(
   const marker: CharGenRequestMarker = {
     type: 'char_gen_request',
     attributes: {
-      characterName: undefined,
+      characterName: req.prompt.name,
       race: req.prompt.race,
       tier: tierStr,
       characterType: 'summon',
@@ -598,7 +602,7 @@ export async function runCharGenForCombat(
   // 映射为 SummonedUnitDefinition（不落库）。CharacterState 无 defense/dr（那些在
   // CombatParticipant），召唤物防御/DR 走保守默认，由内核/后续战斗管线逐步精化。
   return {
-    name: character.name,
+    name: req.prompt.name ?? character.name,
     race: character.race,
     tier: character.tier,
     level: character.level,

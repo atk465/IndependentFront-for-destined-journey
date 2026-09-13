@@ -24,6 +24,8 @@ import type { CombatView, CombatCommand, DeckCardData } from '@engine/combat-v3'
 import { tryParsePlayCard } from '@engine/combat-v3';
 import { isConsumableKind } from '@engine/card-workshop/card-kind';
 import { planRepair } from '@engine/card-workshop/repair';
+import { downedSummonCards } from '@engine/card-workshop/contract';
+import { createDefaultCharacterState } from '@engine/types';
 import {
   getSave,
   getSaves,
@@ -308,6 +310,24 @@ export const useGameStore = defineStore('game', () => {
           v3ActiveCombat.value = { ...v3ActiveCombat.value, phase: 'Terminal' };
         }
         break;
+      // 阶段5-闭环（名字即契约）：召唤卡的伙伴生成上场 → 契约入库（角色名=卡名）。
+      // 同名已存在 = 已契约（自愈语义：静默跳过）；非卡牌召唤（sourceItem 不在编组）不触发。
+      case 'v3_roster_changed':
+        if (evt.op === 'summoned' && evt.sourceItem) {
+          const isCardSummon = combatDeckSnapshot.value.some((c) => c.name === evt.sourceItem);
+          if (isCardSummon) {
+            const unit = v3ActiveCombat.value?.units?.[evt.unitId];
+            void contractCompanion(evt.sourceItem, {
+              hp: unit?.hp ?? 1,
+              maxHp: unit?.maxHp ?? 1,
+              mp: unit?.mp ?? 0,
+              maxMp: unit?.maxMp ?? 0,
+              sp: unit?.sp ?? 0,
+              maxSp: unit?.maxSp ?? 0,
+            });
+          }
+        }
+        break;
       case 'v3_settlement':
         if (v3ActiveCombat.value) {
           v3ActiveCombat.value = { ...v3ActiveCombat.value, phase: 'SettlementCommitted' };
@@ -339,6 +359,64 @@ export const useGameStore = defineStore('game', () => {
     combatConsumedCards.value = [];
     combatPendingConsume.value = [];
     return consumed;
+  }
+
+  /**
+   * 阶段5-闭环（名字即契约）：伙伴契约入库。角色名 = 卡名（契约键）；
+   * 同名角色已存在 = 已契约（自愈语义：静默跳过，不抛）。世界内账本只记存在
+   * 与核心资源，完整战斗数值以召唤时的定义在场生效。
+   */
+  async function contractCompanion(
+    cardName: string,
+    resources: { hp: number; maxHp: number; mp: number; maxMp: number; sp: number; maxSp: number },
+  ): Promise<void> {
+    if (!activeSaveId.value) return;
+    if (characters.value.some((c) => c.name === cardName)) return; // 已契约
+    const companion = createDefaultCharacterState({
+      type: 'summon',
+      name: cardName,
+      hp: Math.max(1, resources.hp),
+      maxHp: Math.max(1, resources.maxHp),
+      mp: resources.mp,
+      maxMp: resources.maxMp,
+      sp: resources.sp,
+      maxSp: resources.maxSp,
+    });
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState([
+      {
+        op: 'add_character',
+        target: `characters.${cardName}`,
+        value: companion,
+        metadata: { source: 'card_contract' },
+      },
+    ]);
+    if (!result.success) {
+      // 同名冲突 = 已契约（重复事件并发）——静默；其余错误记日志不阻断战斗
+      console.warn('[GameStore] 伙伴契约入库跳过/失败:', result.errors.join('; '));
+    }
+  }
+
+  /**
+   * 阶段5-闭环（3-①a 一击损坏）：终局扫描——召唤/军团卡的伙伴倒下（HP≤0）
+   * → 卡损坏名单（game-pipeline settlement 提交 update_item data.damaged）。
+   */
+  function collectDamagedSummonCards(): {
+    name: string;
+    changes: { data: Record<string, unknown> };
+  }[] {
+    const units = Object.values(v3ActiveCombat.value?.units ?? {}).map((u) => ({
+      name: u.name,
+      hp: u.hp,
+    }));
+    // update_item 的 data 是整体替换——这里合并现有 data，只翻转 damaged 标记
+    return downedSummonCards(combatDeckSnapshot.value, units).map((name) => {
+      const card = player.value?.inventory.find((i) => i.name === name);
+      return {
+        name,
+        changes: { data: { ...(card?.data ?? {}), damaged: true } },
+      };
+    });
   }
 
   /**
@@ -1644,6 +1722,7 @@ export const useGameStore = defineStore('game', () => {
     setCombatDeckSnapshot,
     takeConsumedCards,
     repairCard,
+    collectDamagedSummonCards,
     abandonCombat,
     skipCombat,
     startCombat,

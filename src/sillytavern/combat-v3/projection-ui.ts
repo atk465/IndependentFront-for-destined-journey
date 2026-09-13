@@ -272,6 +272,7 @@ function mapEvent(evt: DomainEvent): CombatEvent {
         op: 'summoned',
         unitId: evt.unitId,
         unitName: evt.unitId,
+        sourceItem: evt.sourceItem,
       };
     case 'UnitDespawned':
       return {

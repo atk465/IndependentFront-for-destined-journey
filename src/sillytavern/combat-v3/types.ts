@@ -802,6 +802,8 @@ export type RequiredInput =
         role?: string;
         sourceItem: string;
         summonerIntent: string;
+        /** 阶段5-闭环（名字即契约）：召唤卡打出时约束生成角色名 = 卡名 */
+        name?: string;
       };
       constraints: {
         divinityCap: number;

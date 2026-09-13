@@ -34,6 +34,7 @@ import type {
   DebugAgentEntry,
 } from '@engine/types';
 import { isPlayableCard } from '@engine/card-workshop/card-kind';
+import { isDamaged } from '@engine/card-workshop/repair';
 import type { DeckCardData } from '@engine/combat-v3';
 import type {
   ImageGenFailure,
@@ -113,7 +114,7 @@ function buildDeckCardSnapshot(player: CharacterState): DeckCardData[] {
   return (player.cardAlbum?.deck ?? [])
     .map((name) => player.inventory.find((i) => i.name === name && i.type === '卡牌'))
     .filter((i): i is CardItem => !!i)
-    .filter((card) => isPlayableCard(card))
+    .filter((card) => isPlayableCard(card) && !isDamaged(card))
     .map((card) => ({
       name: card.name,
       cardTier: card.cardTier,
@@ -2346,6 +2347,22 @@ export class GamePipeline {
         );
         if (result.errors.length > 0) {
           console.warn('[GamePipeline] 消耗卡结算部分失败:', result.errors);
+        }
+      }
+      // 阶段5-闭环（3-①a 一击损坏）：伙伴被打倒的召唤/军团卡 → data.damaged 标记。
+      // 损坏卡在下次开战快照中被排除（修复前不可再召）；修复走制卡台修复模式。
+      const damagedCards = this.game.collectDamagedSummonCards();
+      if (damagedCards.length > 0 && this.ownsActiveSave) {
+        const sm = createStateManager(this.saveId);
+        const result = await sm.commitChatState(
+          damagedCards.map((item) => ({
+            op: 'update_item' as const,
+            target: `characters.${playerC.name}`,
+            value: { name: item.name, changes: item.changes },
+          })),
+        );
+        if (result.errors.length > 0) {
+          console.warn('[GamePipeline] 损坏标记结算部分失败:', result.errors);
         }
       }
       // 🔴 2026-08-13 真机 debug：战斗终局的 commitChatState 只写 Dexie，而本条链路
