@@ -29,22 +29,17 @@ export interface CommissionRequirement {
   exactName?: string;
 }
 
-/** 委托奖励包 */
-export interface CommissionRewards {
-  /** 赏金（GC，update_character money delta） */
-  gc?: number;
-  /** 声望（delta_variable 'profile.reputation'，照 FP 通道） */
-  reputation?: number;
-  /** 素材奖励（add_item） */
-  materials?: readonly { name: string; quantity: number }[];
-}
-
 /** 委托定义（内容数据的引擎侧形状） */
 export interface CommissionDef {
   name: string;
   description?: string;
   requireCard: CommissionRequirement;
-  rewards: CommissionRewards;
+  /** 奖励包：赏金（GC）/ 声望（'profile.reputation' delta）/ 素材（add_item） */
+  rewards: {
+    gc?: number;
+    reputation?: number;
+    materials?: readonly { name: string; quantity: number }[];
+  };
 }
 
 /**

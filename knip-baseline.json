@@ -27,7 +27,6 @@
   "exports|src/sillytavern/ejs-fmt.ts|compareName",
   "exports|src/sillytavern/ejs-quickjs-backend.ts|clearGuestBodyCache",
   "exports|src/sillytavern/ejs-runtime.ts|rewriteCodeMacros",
-  "exports|src/sillytavern/field-enums.ts|CRAFT_INDUSTRIES",
   "exports|src/sillytavern/memory-summarizer.ts|stripJsonEnvelope",
   "exports|src/sillytavern/save-profile.ts|getQuest",
   "exports|src/sillytavern/start-catalog.ts|ATTR_EN_TO_CN",
