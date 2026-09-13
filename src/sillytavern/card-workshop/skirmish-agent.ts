@@ -147,31 +147,34 @@ export async function runSkirmishAssessment(
   return parsed;
 }
 
-// ========== 终局演绎 ==========
+// ========== 战斗记叙（终局演绎：AI 对着逐拍审计链写过程，抒发情绪） ==========
 
-export interface SkirmishEpilogueRequest {
+export interface SkirmishChronicleRequest {
   saveId: string;
   endpoint: ApiEndpoint;
   enemyName: string;
   /** 玩家称呼（缺省「冒险者」） */
   playerTitle?: string;
-  /** 战报审计链（开场行 + 逐拍行 + 结算行，演绎的唯一样本） */
+  /** 战报审计链（开场行 + 逐拍行，记叙的唯一样本） */
   log: readonly string[];
   finish: '胜利' | '碾压' | '撤退' | '败北';
 }
 
-/** 终局演绎 system 提示词（只演绎不算数） */
-export function buildEpilogueMessages(req: SkirmishEpilogueRequest): Array<{
+/** 战斗记叙 system 提示词（只演绎不算数；主人裁定 2026-09-13：终局要写战斗过程，抒发情绪） */
+export function buildChronicleMessages(req: SkirmishChronicleRequest): Array<{
   role: string;
   content: string;
 }> {
   const system = [
-    '你是卡兰大陆的战斗记事官。交锋已经结束，战报审计链如下所附——所有数值都已定案，你只负责给这场战斗写一段收束叙事。',
+    '你是卡兰大陆的战斗记事官。一场交锋刚刚结束，逐拍的战报审计链附后——所有数值都已定案。',
+    '请写一段**战斗过程的记叙**，让亲历者读来有情绪。',
     '硬性规则：',
-    '1. 直接输出叙事正文（80~160 字），不要 JSON、不要标题、不要逐条复述审计行。',
-    '2. 不得引入任何新数值（伤害/经验/等级/HP），不得更改编造战报里已有的数字。',
-    `3. 结局是「${req.finish}」——叙事基调必须与之相符（碾压=摧枯拉朽、胜利=险中取胜或干净利落、撤退=保留余地的脱身、败北=力竭落败但不写死亡）。`,
-    '4. 用中文，贴合敌方与场景的风味，收在一句有余韵的话上。',
+    '1. 200~350 字，直接输出正文；不要 JSON、不要标题、不要逐条复述审计行。',
+    '2. 按战报的拍次推进：每一拍的反制或失手都要有画面（招式、身法、创口落在何处），',
+    '   起伏严格照战报来——反制成功的痛快、失手挨打的代价，都要写到；结尾收束整场。',
+    '3. 不得引入任何新数值（伤害/经验/等级/HP），不得更改战报里已有的数字。',
+    `4. 结局是「${req.finish}」——基调必须相符（碾压=摧枯拉朽、胜利=险中取胜或干净利落、撤退=保留余地的脱身、败北=力竭落败但不写死亡）。`,
+    '5. 用中文，贴合敌方与场景的风味，收在一句有余韵的话上。',
   ].join('\n');
   return [
     { role: 'system', content: system },
@@ -184,15 +187,15 @@ export function buildEpilogueMessages(req: SkirmishEpilogueRequest): Array<{
   ];
 }
 
-/** 终局演绎调用（一次 chat，纯文本）。错误抛错；空输出回退确定性一句话 */
-export async function runSkirmishEpilogue(
-  req: SkirmishEpilogueRequest,
+/** 战斗记叙调用（一次 chat，纯文本）。错误抛错；空输出回退确定性一句话 */
+export async function runSkirmishChronicle(
+  req: SkirmishChronicleRequest,
   deps: SkirmishAgentDeps,
 ): Promise<string> {
   const client = deps.clientFactory('skirmish_epilogue', req.endpoint, req.saveId);
-  const result = await client.chat({ messages: buildEpilogueMessages(req) });
+  const result = await client.chat({ messages: buildChronicleMessages(req) });
   if (result.error) {
-    throw new Error(`终局演绎调用失败: ${result.error}`);
+    throw new Error(`战斗记叙调用失败: ${result.error}`);
   }
   const text = (result.output ?? result.rawResponse ?? '').trim();
   return text || `与【${req.enemyName}】的交锋落幕（${req.finish}）。`;

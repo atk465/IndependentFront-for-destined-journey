@@ -53,7 +53,7 @@ import {
   type SkirmishSession,
 } from '@engine/card-workshop/skirmish-session';
 import { buildSkirmishSettlementPatches } from '@engine/card-workshop/skirmish-settlement';
-import { runSkirmishAssessment, runSkirmishEpilogue } from '@engine/card-workshop/skirmish-agent';
+import { runSkirmishAssessment, runSkirmishChronicle } from '@engine/card-workshop/skirmish-agent';
 import type { DeckCardData } from '@engine/combat-v3';
 import type {
   ImageGenFailure,
@@ -2947,11 +2947,11 @@ export class GamePipeline {
   }
 
   /**
-   * 终局收尾：结算审计链 → 同窗原子落库（玩家 EXP/HP + 参战卡经验/消耗，一次
-   * commitChatState，照 v3 结算先例）→ 落库后回读（否则 HUD 是开战前血量假象）
-   * → 终局演绎一次调用（只演绎不算数）。
-   * 🔴 后续接线：此处应记录 _recentCombat（防 dispatcher 对已结算战斗再发 combat_trigger），
-   * 待交锋拍的战斗触发走 dispatcher 通道时一并接。
+   * 终局收尾（主人裁定 2026-09-13：终局要 AI 写战斗过程，抒发情绪）：
+   * ① 战斗记叙——AI 对着逐拍审计链写过程叙事（先故事）；② 结算审计链（后账本）；
+   * ③ 同窗原子落库（玩家 EXP/HP + 参战卡经验/消耗，一次 commitChatState）→ 落库后
+   * 回读（否则 HUD 是开战前血量假象）。整场战斗 AI 调用恒为 2 次（评估 + 记叙），
+   * 拍内零 AI——拖沓的病根不回归。记叙失败静默降级（账本照发）。
    */
   private async settleAndNarrate(session: SkirmishSession): Promise<void> {
     if (!session.finished) return;
@@ -2960,8 +2960,30 @@ export class GamePipeline {
     const settlement = settleSkirmish(session, playerC.level);
     if (!settlement) return;
 
+    // ① 战斗记叙（一次 AI 调用，只演绎不算数）
+    const endpoint = this.getEndpointForAgent('skirmish_epilogue');
+    if (endpoint) {
+      try {
+        const text = await runSkirmishChronicle(
+          {
+            saveId: this.saveId,
+            endpoint,
+            enemyName: session.enemyName,
+            log: session.log,
+            finish: session.finished,
+          },
+          { clientFactory: this.getClientFactory() },
+        );
+        this.emitMessage(`【战斗记叙】\n${text}`, 'assistant');
+      } catch (err) {
+        console.warn('[GamePipeline] 战斗记叙失败:', err);
+      }
+    }
+
+    // ② 结算审计链（先故事后账本）
     this.emitMessage(settlement.expLines.join('\n'), 'assistant');
 
+    // ③ 同窗原子落库 + 回读 + 防重触发记录
     if (this.ownsActiveSave) {
       const sm = createStateManager(this.saveId);
       const result = await sm.commitChatState(
@@ -2992,24 +3014,6 @@ export class GamePipeline {
               : 'ally_win',
         endedAtTurn: this.game.activeSave?.metadata?.totalTurns ?? 0,
       };
-    }
-
-    const endpoint = this.getEndpointForAgent('skirmish_epilogue');
-    if (!endpoint) return;
-    try {
-      const text = await runSkirmishEpilogue(
-        {
-          saveId: this.saveId,
-          endpoint,
-          enemyName: session.enemyName,
-          log: session.log,
-          finish: session.finished,
-        },
-        { clientFactory: this.getClientFactory() },
-      );
-      this.emitMessage(`【战斗终局】${text}`, 'assistant');
-    } catch (err) {
-      console.warn('[GamePipeline] 终局演绎失败:', err);
     }
   }
 

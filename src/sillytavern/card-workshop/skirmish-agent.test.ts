@@ -11,8 +11,8 @@ import {
   buildAssessmentMessages,
   parseSkirmishAssessment,
   runSkirmishAssessment,
-  buildEpilogueMessages,
-  runSkirmishEpilogue,
+  buildChronicleMessages,
+  runSkirmishChronicle,
   type SkirmishClient,
   type SkirmishAgentDeps,
 } from './skirmish-agent';
@@ -150,9 +150,9 @@ describe('runSkirmishAssessment —— 调用与错误路径', () => {
   });
 });
 
-describe('buildEpilogueMessages —— 终局演绎提示词', () => {
+describe('buildChronicleMessages —— 终局演绎提示词', () => {
   it('system 含结局基调与「不引入新数值」约束；user 带玩家称呼与审计链', () => {
-    const msgs = buildEpilogueMessages({
+    const msgs = buildChronicleMessages({
       saveId: 's',
       endpoint,
       enemyName: '岩爪兽',
@@ -162,15 +162,17 @@ describe('buildEpilogueMessages —— 终局演绎提示词', () => {
     });
     expect(msgs[0].content).toContain('「碾压」');
     expect(msgs[0].content).toContain('不得引入任何新数值');
+    expect(msgs[0].content).toContain('200~350 字');
+    expect(msgs[0].content).toContain('拍次推进');
     expect(msgs[1].content).toContain('星辉冒险者');
     expect(msgs[1].content).toContain('▸ 打出 燎原符卡：d20=17');
   });
 });
 
-describe('runSkirmishEpilogue —— 调用与回退', () => {
+describe('runSkirmishChronicle —— 调用与回退', () => {
   it('返回 trim 后的叙事文本', async () => {
     const deps = fakeDeps({ chat: async () => ({ output: '  岩爪兽轰然倒地。\n\n' }) });
-    const got = await runSkirmishEpilogue(
+    const got = await runSkirmishChronicle(
       { saveId: 's', endpoint, enemyName: '岩爪兽', log: ['x'], finish: '胜利' },
       deps,
     );
@@ -178,16 +180,19 @@ describe('runSkirmishEpilogue —— 调用与回退', () => {
   });
   it('空输出 → 回退确定性一句话（不空转）', async () => {
     const deps = fakeDeps({ chat: async () => ({ output: '' }) });
-    const got = await runSkirmishEpilogue(
+    const got = await runSkirmishChronicle(
       { saveId: 's', endpoint, enemyName: '岩爪兽', log: [], finish: '撤退' },
       deps,
     );
     expect(got).toBe('与【岩爪兽】的交锋落幕（撤退）。');
   });
-  it('client 报 error → 抛「终局演绎调用失败」', async () => {
+  it('client 报 error → 抛「战斗记叙调用失败」', async () => {
     const deps = fakeDeps({ chat: async () => ({ output: null, error: '限流' }) });
     await expect(
-      runSkirmishEpilogue({ saveId: 's', endpoint, enemyName: 'x', log: [], finish: '胜利' }, deps),
-    ).rejects.toThrow('终局演绎调用失败');
+      runSkirmishChronicle(
+        { saveId: 's', endpoint, enemyName: 'x', log: [], finish: '胜利' },
+        deps,
+      ),
+    ).rejects.toThrow('战斗记叙调用失败');
   });
 });
