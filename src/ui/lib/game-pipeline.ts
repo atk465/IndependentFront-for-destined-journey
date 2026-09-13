@@ -37,13 +37,12 @@ import type {
 } from '@engine/types';
 import { isPlayableCard } from '@engine/card-workshop/card-kind';
 import { isDamaged } from '@engine/card-workshop/repair';
-import { cardPower } from '@engine/card-workshop/deck-power';
 import {
   judgeCrush,
   type SkirmishAction,
   type SkirmishChoice,
 } from '@engine/card-workshop/skirmish';
-import { cardCombatTags } from '@engine/card-workshop/entry-combat';
+import { cardCounterAction } from '@engine/card-workshop/entry-combat';
 import { basicCounterAction, deriveCombatStats } from '@engine/card-workshop/derived-stats';
 import {
   crushFinish,
@@ -2920,12 +2919,10 @@ export class GamePipeline {
         );
         return;
       }
-      action = {
-        label: `打出 ${card.name}`,
-        power: cardPower(card),
-        tags: cardCombatTags(card.词条),
-        cardName: card.name,
-      };
+      action = cardCounterAction(
+        card,
+        deriveCombatStats({ attributes: playerC.attributes, level: playerC.level }),
+      );
     } else {
       action = basicCounterAction(
         choice.move,

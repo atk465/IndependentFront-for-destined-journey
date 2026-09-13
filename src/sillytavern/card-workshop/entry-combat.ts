@@ -14,8 +14,10 @@
  * - **未知词条安全无效果**（4-② 裁定原文）——不抛、不猜、不给标签。
  */
 
-import type { CounterTag } from './skirmish';
+import type { CardItem } from '../types';
+import type { CounterTag, SkirmishAction } from './skirmish';
 import { COUNTER_TAGS } from './skirmish';
+import { cardPower } from './deck-power';
 
 /** 词条 → 反制标签（单一真源；key 必须与 card-fusion/material 的词条字面一致） */
 export const ENTRY_COMBAT_TABLE: Readonly<Record<string, readonly CounterTag[]>> = {
@@ -54,4 +56,28 @@ export function cardCombatTags(词条: readonly string[] | null | undefined): Co
     for (const tag of entryCombatTagsOf(word)) found.add(tag);
   }
   return COUNTER_TAGS.filter((t) => found.has(t));
+}
+
+// ========== 出卡行动装配（出卡 = 基础攻击的增强，不是替代） ==========
+
+/**
+ * 出卡反制行动：行动值 = 派生攻击 + 2×卡面战力，标签 = 词条反制标签。
+ *
+ * 🔴 2026-09-13 真机校准：最初出卡只用卡面战力（白铁 1 ~ 星辉 5+）当行动值，
+ * 而基础强攻 = 派生攻击（Lv12 str16 = 44）——出卡永远比按强攻亏，「增强通道」
+ * 共识（§8 问题 29）被数值倒挂。修正口径：**卡在攻击之上叠战力**，出卡严格 ≥
+ * 对应基础应对，再叠加反制标签的克制收益；代价是消耗卡会耗掉、启封有风险。
+ * label 携带拆解（攻44+卡6），战报审计行天然可复算。
+ */
+export function cardCounterAction(
+  card: Pick<CardItem, 'name' | 'cardTier' | '词条' | 'cardPowerBonus'>,
+  stats: { atk: number },
+): SkirmishAction {
+  const cardPart = 2 * cardPower(card);
+  return {
+    label: `打出 ${card.name}（攻${stats.atk}+卡${cardPart}）`,
+    power: stats.atk + cardPart,
+    tags: cardCombatTags(card.词条),
+    cardName: card.name,
+  };
 }

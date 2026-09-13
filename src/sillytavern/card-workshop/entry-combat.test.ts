@@ -4,7 +4,12 @@
  * 表内词条 → 标签翻译必须确定一致；未知词条安全无效果（4-② 裁定）。
  */
 import { describe, it, expect } from 'vitest';
-import { ENTRY_COMBAT_TABLE, entryCombatTagsOf, cardCombatTags } from './entry-combat';
+import {
+  ENTRY_COMBAT_TABLE,
+  entryCombatTagsOf,
+  cardCombatTags,
+  cardCounterAction,
+} from './entry-combat';
 
 describe('ENTRY_COMBAT_TABLE（单一真源）', () => {
   it('相生产物带稀缺的打断标签', () => {
@@ -46,5 +51,31 @@ describe('cardCombatTags —— 多词条展开去重且输出序稳定', () => 
     expect(cardCombatTags(null)).toEqual([]);
     expect(cardCombatTags(undefined)).toEqual([]);
     expect(cardCombatTags('火' as never)).toEqual([]);
+  });
+});
+
+describe('cardCounterAction —— 出卡 = 基础攻击的增强（真机校准 2026-09-13）', () => {
+  const stats = { atk: 44 };
+  const 卡 = (overrides: Record<string, unknown>) =>
+    ({ name: '苍穹之翼', cardTier: '白银', 词条: ['风'], ...overrides }) as never;
+
+  it('行动值 = 攻击 + 2×卡面战力；label 带拆解，审计可复算', () => {
+    // 白银 3 + 复合词条 0 → 卡部分 6
+    const got = cardCounterAction(卡({ name: '苍穹之翼' }), stats);
+    expect(got.power).toBe(50);
+    expect(got.label).toBe('打出 苍穹之翼（攻44+卡6）');
+    expect(got.cardName).toBe('苍穹之翼');
+  });
+  it('反制标签随词条走（风 → 闪避）', () => {
+    expect(cardCounterAction(卡({}), stats).tags).toEqual(['闪避']);
+    expect(cardCounterAction(卡({ 词条: ['火', '燎原'] }), stats).tags).toEqual(['强攻', '打断']);
+  });
+  it('出卡严格优于裸强攻（44 + 正卡力），无死卡', () => {
+    const weak = cardCounterAction(卡({ cardTier: '白铁', 词条: [] }), stats);
+    expect(weak.power).toBeGreaterThan(44);
+  });
+  it('cardPowerBonus 计入卡面战力（卡牌经验满管转化）', () => {
+    const got = cardCounterAction(卡({ cardTier: '白铁', 词条: [], cardPowerBonus: 3 }), stats);
+    expect(got.power).toBe(44 + 2 * (1 + 3));
   });
 });

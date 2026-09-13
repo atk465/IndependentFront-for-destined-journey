@@ -42,18 +42,30 @@ function onCard(name: string) {
 function onFlee() {
   void game.fleeSkirmish();
 }
+function dismiss() {
+  game.setSkirmishSession(null);
+}
 </script>
 
 <template>
-  <section v-if="session" class="skirmish-panel" role="region" aria-label="交锋拍战斗">
+  <!-- 终局后收成一条紧凑横幅：评价在正文流，这里只留出口 -->
+  <section
+    v-if="session && session.finished"
+    class="skirmish-panel is-done"
+    role="region"
+    aria-label="交锋终局"
+  >
+    <span>战斗结束</span>
+    <span class="finish-badge" :class="session.finished">{{ session.finished }}</span>
+    <span class="done-hint">战报见正文</span>
+    <button type="button" class="counter-btn" @click="dismiss">收起</button>
+  </section>
+
+  <!-- 交锋中：悬浮 HUD（战报审计行走正文流，这里只承载活状态与反制入口） -->
+  <section v-else-if="session" class="skirmish-panel" role="region" aria-label="交锋拍战斗">
     <header class="skirmish-head">
       <h3>战斗模式 · 交锋拍</h3>
-      <span v-if="session.finished" class="finish-badge" :class="session.finished">{{
-        session.finished
-      }}</span>
-      <span v-else class="beat-badge"
-        >第 {{ session.beat + 1 }} / {{ session.intents.length }} 拍</span
-      >
+      <span class="beat-badge">第 {{ session.beat + 1 }} / {{ session.intents.length }} 拍</span>
     </header>
 
     <div class="hp-row">
@@ -133,15 +145,34 @@ function onFlee() {
 
 <style scoped>
 .skirmish-panel {
+  position: fixed;
+  bottom: 96px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 900;
+  width: min(46rem, 92vw);
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin: 8px 0;
   padding: 10px 14px;
   border: 1px solid var(--theme-card-border, #72502d);
   border-radius: var(--theme-radius-md, 6px);
-  background: var(--theme-card-bg, #211810);
+  background: color-mix(in srgb, var(--theme-card-bg, #211810) 94%, transparent);
+  backdrop-filter: blur(3px);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
   color: var(--theme-text-primary, #eadcc5);
+}
+.skirmish-panel.is-done {
+  bottom: 72px;
+  width: auto;
+  max-width: min(32rem, 90vw);
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+.done-hint {
+  font-size: 0.75rem;
+  color: var(--theme-text-muted, #967756);
 }
 .skirmish-head {
   display: flex;
