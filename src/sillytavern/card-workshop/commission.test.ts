@@ -9,6 +9,7 @@ import {
   buildDeliveryPatches,
   isDeliverableCard,
   type CommissionDef,
+  planCommissionDelivery,
 } from './commission';
 import type { CardItem } from '../types';
 
@@ -121,5 +122,63 @@ describe('isDeliverableCard', () => {
   it('素材卡不可交付', () => {
     expect(isDeliverableCard({ 词条: ['素材'] })).toBe(false);
     expect(isDeliverableCard({ 词条: ['火', '技能'] })).toBe(true);
+  });
+});
+
+describe('planCommissionDelivery —— 交付规划（切片 C）', () => {
+  const 委托 = {
+    name: '清剿矿坑魔物',
+    requireCard: { minTier: '白银' as const, formEntry: '召唤' },
+    rewards: { gc: 120, reputation: 8, materials: [{ name: '魔物结晶', quantity: 2 }] },
+  };
+  const 合格卡 = { name: '远古巨兽·岩爪', cardTier: '鎏金' as const, 词条: ['召唤', '土'] };
+
+  it('委托名不存在 → 明示原因', () => {
+    const got = planCommissionDelivery({
+      commissions: [委托],
+      commissionName: '不存在的',
+      card: 合格卡,
+      playerName: '莱恩',
+    });
+    expect(got.ok).toBe(false);
+    expect(got.reason).toContain('没有');
+    expect(got.patches).toEqual([]);
+  });
+  it('背包无目标卡 → 明示原因', () => {
+    const got = planCommissionDelivery({
+      commissions: [委托],
+      commissionName: '清剿矿坑魔物',
+      card: undefined,
+      playerName: '莱恩',
+    });
+    expect(got.ok).toBe(false);
+    expect(got.reason).toContain('背包');
+  });
+  it('验收不过（品质/类型不符）→ 明示原因', () => {
+    const 差卡 = { name: '燃魂打击', cardTier: '青铜' as const, 词条: ['技能', '火'] };
+    const got = planCommissionDelivery({
+      commissions: [委托],
+      commissionName: '清剿矿坑魔物',
+      card: 差卡,
+      playerName: '莱恩',
+    });
+    expect(got.ok).toBe(false);
+    expect(got.reason).toContain('不符合');
+  });
+  it('验收通过 → 上交 + 赏金 + 声望 + 素材全部在补丁里（原子同窗）', () => {
+    const got = planCommissionDelivery({
+      commissions: [委托],
+      commissionName: '清剿矿坑魔物',
+      card: 合格卡,
+      playerName: '莱恩',
+    });
+    expect(got.ok).toBe(true);
+    const ops = got.patches.map((p) => p.op);
+    expect(ops[0]).toBe('remove_item'); // 上交第一
+    expect(ops).toContain('delta_variable'); // 声望
+    expect(got.patches.length).toBe(4); // remove + gc + reputation + material
+    const rep = got.patches.find((p) => p.op === 'delta_variable');
+    expect((rep as { target: string }).target).toBe('profile.reputation');
+    expect((rep as { metadata?: { source?: string } }).metadata?.source).toBe('commission');
   });
 });

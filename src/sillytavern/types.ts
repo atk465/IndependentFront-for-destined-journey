@@ -3262,6 +3262,10 @@ export interface SaveProfile {
   experienceMode: ExperienceMode;
   fp: number;
   fpHistory: FPTransaction[];
+  /** 🆕 委托声望（卡牌工坊 单一数值；旧档缺失读侧 `?? 0` 兜底。AI 零写路径——
+   *  唯一变更是 delta_variable profile.reputation 且 metadata.source='commission'
+   *  的引擎委托结算，stat-projection 只读投影） */
+  reputation: number;
   contracts: FateContract[];
   achievements: Achievement[];
   news: NewsItem[];

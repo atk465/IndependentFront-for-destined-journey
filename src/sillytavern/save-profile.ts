@@ -668,3 +668,24 @@ export async function commitPlotThreadTurn(
     };
   });
 }
+
+// ========== 委托声望（卡牌工坊 委托接线，2026-09-14） ==========
+
+/** 读委托声望 —— 旧存档缺 `reputation` 时兜底 0。唯一读取辅助 */
+export function getReputation(profile: SaveProfile): number {
+  return typeof profile.reputation === 'number' && Number.isFinite(profile.reputation)
+    ? profile.reputation
+    : 0;
+}
+
+/**
+ * 声望 delta（可正可负，clamp ≥ 0——声望不为负）。
+ * 🔴 调用方只有**委托结算**（state-manager 的 delta_variable profile.reputation
+ *    分支，metadata.source='commission' 门禁在那一侧）——AI 零写路径由该门禁保证。
+ */
+export function addReputation(profile: SaveProfile, amount: number): SaveProfile {
+  const base = getReputation(profile);
+  const next = Number.isFinite(amount) ? amount : 0;
+  profile.reputation = Math.max(0, base + next);
+  return profile;
+}

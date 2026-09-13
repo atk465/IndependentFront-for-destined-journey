@@ -27,6 +27,8 @@ import { planRepair } from '@engine/card-workshop/repair';
 import { downedSummonCards } from '@engine/card-workshop/contract';
 import { buildDemoCardsPatches, buildDemoDeckPatches } from '@engine/card-workshop/demo';
 import { toPlainCardAlbum } from '@engine/card-workshop/album';
+import { planCommissionDelivery } from '@engine/card-workshop/commission';
+import { getCommissionDefs } from '@engine/commission-runtime';
 import type { SkirmishSession } from '@engine/card-workshop/skirmish-session';
 import type { SkirmishChoice } from '@engine/card-workshop/skirmish';
 import { createDefaultCharacterState } from '@engine/types';
@@ -522,6 +524,40 @@ export const useGameStore = defineStore('game', () => {
     } finally {
       skirmishBusy.value = false;
     }
+  }
+
+  /**
+   * 委托交付（卡牌工坊 委托接线 切片 C）：清点（委托存在 / 卡可交付 / matchesCommission
+   * 验收）→ buildDeliveryPatches（上交 + 赏金 + 声望 + 素材）一次 commitChatState 原子提交。
+   * 委托清单来自 commission-runtime 注入缝（内容包第 15 面）；接取由 AI 按委托名立 quest。
+   */
+  async function deliverCommission(
+    commissionName: string,
+    cardName: string,
+  ): Promise<{ ok: boolean; reason?: string }> {
+    if (!activeSaveId.value) return { ok: false, reason: '无活跃存档' };
+    const playerChar = player.value;
+    if (!playerChar) return { ok: false, reason: '无玩家角色' };
+    const commissions = getCommissionDefs();
+    if (commissions.length === 0)
+      return { ok: false, reason: '当前没有委托板（未装含委托的内容包）' };
+    const found = playerChar.inventory.find((i) => i.name === cardName);
+    const card = found?.type === '卡牌' ? (found as never as CardItem) : undefined;
+    if (card && card.data?.damaged === true) {
+      return { ok: false, reason: `【${cardName}】已损坏，先去制卡台修复再交付` };
+    }
+    const plan = planCommissionDelivery({
+      commissions,
+      commissionName,
+      card,
+      playerName: playerChar.name,
+    });
+    if (!plan.ok) return { ok: false, reason: plan.reason };
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState(plan.patches);
+    if (!result.success) return { ok: false, reason: result.errors.join('; ') };
+    await refreshFromDb();
+    return { ok: true };
   }
 
   /** UI 入口：结束战斗（主人裁定 2026-09-13：附结束理由，供终局记叙参考；评价 C） */
@@ -1877,6 +1913,8 @@ export const useGameStore = defineStore('game', () => {
     startSkirmish,
     submitSkirmishCounter,
     fleeSkirmish,
+    deliverCommission,
+    getCommissionDefs,
     combatDeckStripStates,
     abandonCombat,
     skipCombat,

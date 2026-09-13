@@ -32,6 +32,8 @@ import {
   addAchievement,
   addNews,
   markNewsRead,
+  getReputation,
+  addReputation,
 } from './save-profile';
 
 // ---- Helpers ----
@@ -44,6 +46,7 @@ function makeProfile(overrides: Partial<SaveProfile> = {}): SaveProfile {
     experienceMode: 'normal',
     fp: 0,
     fpHistory: [],
+    reputation: 0,
     contracts: [],
     achievements: [],
     news: [],
@@ -64,6 +67,7 @@ function makeDefaultProfile(saveId: string): SaveProfile {
     experienceMode: 'normal',
     fp: 0,
     fpHistory: [],
+    reputation: 0,
     contracts: [],
     achievements: [],
     news: [],
@@ -186,6 +190,7 @@ describe('getFP', () => {
         { id: 'tx1', timestamp: 1, amount: 100, reason: '初始', balance: 100, source: 'other' },
         { id: 'tx2', timestamp: 2, amount: -25, reason: '消费', balance: 75, source: 'craft' },
       ],
+      reputation: 0,
     });
     expect(getFP(profile)).toBe(75);
   });
@@ -1063,5 +1068,21 @@ describe('MapMarker', () => {
     expect(raw).toHaveLength(1);
     expect(raw[0].name).toBe('艾瑟嘉德');
     expect(raw[0].position.nx).toBe(0.42);
+  });
+});
+
+describe('委托声望（卡牌工坊 委托接线）', () => {
+  it('getReputation：旧档缺字段兜底 0', () => {
+    expect(getReputation({ ...makeProfile(), reputation: undefined } as never)).toBe(0);
+    expect(getReputation(makeProfile())).toBe(0);
+  });
+  it('addReputation：正负皆可、clamp ≥ 0', () => {
+    const p = makeProfile();
+    addReputation(p, 8);
+    expect(p.reputation).toBe(8);
+    addReputation(p, -3);
+    expect(p.reputation).toBe(5);
+    addReputation(p, -99);
+    expect(p.reputation).toBe(0);
   });
 });

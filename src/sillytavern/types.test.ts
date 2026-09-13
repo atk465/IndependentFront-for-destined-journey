@@ -402,6 +402,7 @@ describe('Snapshot 重定义 (M5 规范 §11.2)', () => {
         experienceMode: 'normal',
         fp: 0,
         fpHistory: [],
+        reputation: 0,
         contracts: [],
         achievements: [],
         news: [],

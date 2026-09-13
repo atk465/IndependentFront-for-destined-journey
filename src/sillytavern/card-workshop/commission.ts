@@ -171,3 +171,45 @@ export function buildDeliveryPatches(
 export function isDeliverableCard(card: Pick<CardItem, '词条'>): boolean {
   return cardKindOf(card.词条) !== '素材';
 }
+
+// ========== 交付规划（切片 C：校验 + 补丁一步；调用方只管原子提交） ==========
+
+export interface CommissionDeliveryPlan {
+  ok: boolean;
+  reason?: string;
+  patches: StatePatch[];
+}
+
+/**
+ * 委托交付规划：校验（委托存在 / 卡在背包且可交付 / matchesCommission 验收）
+ * → buildDeliveryPatches 一次性出全部补丁（上交 + 赏金 + 声望 + 素材）。
+ * 提交（commitChatState）由调用方做——不变量④：上交与奖励同窗原子。
+ */
+export function planCommissionDelivery(input: {
+  commissions: readonly CommissionDef[];
+  commissionName: string;
+  card: Pick<CardItem, 'name' | 'cardTier' | '词条'> | undefined;
+  playerName: string;
+}): CommissionDeliveryPlan {
+  const def = input.commissions.find((c) => c.name === input.commissionName);
+  if (!def)
+    return { ok: false, reason: `委托板上没有「${input.commissionName}」这张委托`, patches: [] };
+  if (!input.card) {
+    return {
+      ok: false,
+      reason: `背包里没有可交付的【${input.commissionName}】目标卡`,
+      patches: [],
+    };
+  }
+  if (!matchesCommission(input.card, def.requireCard)) {
+    return {
+      ok: false,
+      reason: `【${input.card.name}】不符合「${def.name}」的收卡要求`,
+      patches: [],
+    };
+  }
+  return {
+    ok: true,
+    patches: buildDeliveryPatches(def, { name: input.card.name }, input.playerName),
+  };
+}

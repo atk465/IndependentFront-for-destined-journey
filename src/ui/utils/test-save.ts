@@ -424,6 +424,7 @@ export async function createTestSave(options: { reset?: boolean } = {}): Promise
         source: 'other',
       },
     ],
+    reputation: 0,
     contracts: [
       {
         id: crypto.randomUUID(),

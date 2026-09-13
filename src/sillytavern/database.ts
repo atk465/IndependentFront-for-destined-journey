@@ -1959,6 +1959,7 @@ export function createDefaultSaveProfile(saveId: string, era?: string): SaveProf
     experienceMode: 'normal',
     fp: 0,
     fpHistory: [],
+    reputation: 0,
     contracts: [],
     achievements: [],
     news: [],

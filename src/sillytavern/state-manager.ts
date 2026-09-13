@@ -70,6 +70,7 @@ import { withSaveWriteLock } from './state-write-queue';
 import {
   getProfile,
   addFP,
+  addReputation,
   spendFP,
   updateProfile,
   setQuestInPlace,
@@ -411,6 +412,21 @@ export class StateManager {
           try {
             const events: GameEvent[] = [];
             for (const patch of patches) {
+              // 委托声望（卡牌工坊）：**AI 零写路径**——只认 metadata.source='commission'
+              // 的引擎委托结算；AI vars_update 直接 delta profile.reputation 一律拒绝。
+              if (patch.op === 'delta_variable' && patch.target === 'profile.reputation') {
+                if (patch.metadata?.source !== 'commission') {
+                  throw new Error('声望只能由委托结算变更（profile.reputation 无 AI 写路径）');
+                }
+                this.validatePatch(patch);
+                const amount = patch.amount!;
+                if (!Number.isFinite(amount)) throw new Error('声望变化必须为有限数');
+                const profile = await this.readProfile();
+                addReputation(profile, amount);
+                await this.persistProfile(profile);
+                events.push(this.createEvent('variable_change', patch));
+                continue;
+              }
               if (patch.op === 'delta_variable' && patch.target === 'profile.fp') {
                 this.validatePatch(patch);
                 const amount = patch.amount!;
