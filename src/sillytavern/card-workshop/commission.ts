@@ -14,7 +14,7 @@
  */
 
 import { CARD_TIERS, type CardTier } from '../field-enums';
-import type { CardItem, InventoryItem, StatePatch } from '../types';
+import type { CardItem, StatePatch } from '../types';
 import { cardKindOf } from './card-kind';
 
 /** 验收过滤器（全字段可选；空对象 = 万能收购） */

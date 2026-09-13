@@ -4,7 +4,6 @@
 import { describe, it, expect } from 'vitest';
 import {
   DAMAGED_FLAG,
-  REPAIR_RECIPE,
   UPGRADE_ATTRIBUTE_DELTA,
   isDamaged,
   isRepairable,
@@ -13,16 +12,9 @@ import {
 } from './repair';
 import type { CardItem, InventoryItem } from '../types';
 
-function material(name: string, rarity: keyof typeof tierByRarity): InventoryItem {
+function material(name: string, rarity: '普通' | '优良' | '稀有' | '史诗' | '传说'): InventoryItem {
   return { name, quantity: 1, type: '材料', rarity };
 }
-const tierByRarity = {
-  普通: 1,
-  优良: 2,
-  稀有: 3,
-  史诗: 4,
-  传说: 5,
-} as const;
 
 function card(
   tier: CardItem['cardTier'],
