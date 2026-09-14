@@ -138,6 +138,7 @@ import {
 } from './random-event-scheduler';
 // 地点键与上下文快照的**唯一**实现（写侧与读侧共用，见该模块文件头）
 import { buildRandomEventRollContext } from './random-event-snapshot';
+import { validateTalentEntries, type TalentEntry } from './card-workshop/talent-entry';
 import type { RandomEventRollContext } from './types-random-events';
 import type { EjsVarsDiff } from './ejs-vars-diff';
 import {
@@ -288,6 +289,10 @@ const UPDATE_CHAR_WHITELIST = new Set<string>([
   'customFields',
   // 卡册（卡牌工坊 MVP）：整份 CardAlbumState 替换；读写规则唯一集中在 card-workshop/album.ts
   'cardAlbum',
+  // 天赋（卡牌工坊 §4-天赋，访谈共识 T1~T8）：整对象替换；AI 可起名写文案，但骨架
+  // 条目必须逐字命中 talent-entry 池（写入门禁见 applyUpdateCharacter 的 talents
+  // 特判——AI 零编数）。只有玩家主角有天赋为既定语义。
+  'talents',
 ]);
 
 /** 禁止的数组实体字段 → 必须走各自专用 op（杀 #21 假字段污染） */
@@ -943,6 +948,47 @@ export class StateManager {
     await this.persistProfile(profile);
   }
 
+  /**
+   * 天赋写入门禁（applyUpdateCharacter 的 talents 特判，访谈共识 T1~T8）：
+   *  ① 形状合法（capacity 数值 / list 数组）；② 容量不超；③ 同名唯一；
+   *  ④ 互斥组不可共存；⑤ 🔴 AI 零编数——entries 逐字命中 talent-entry 池，
+   *  并回填池内规范对象（AI 伪造的 channel/参数就地纠正或拒绝）。原地规范化 value。
+   */
+  private normalizeTalentsValue(value: { talents?: unknown }): void {
+    const t = value.talents as { capacity?: unknown; list?: unknown } | undefined;
+    if (!t || typeof t !== 'object' || !Array.isArray(t.list)) {
+      throw new Error('talents 形状非法（需要 { capacity, list }）');
+    }
+    const capacity =
+      typeof t.capacity === 'number' && Number.isFinite(t.capacity) && t.capacity > 0
+        ? Math.round(t.capacity)
+        : 3;
+    if (t.list.length > capacity) {
+      throw new Error(`天赋容量已满（${t.list.length}/${capacity}）——请先遗忘或融合`);
+    }
+    const names = new Set<string>();
+    const exclGroups = new Set<string>();
+    for (const talent of t.list as Array<Record<string, unknown>>) {
+      const name = typeof talent.name === 'string' ? talent.name.trim() : '';
+      if (!name) throw new Error('天赋缺少名字');
+      if (names.has(name)) throw new Error(`同名天赋不可重复习得：${name}`);
+      names.add(name);
+      const rawEntries = Array.isArray(talent.entries) ? (talent.entries as TalentEntry[]) : [];
+      const v = validateTalentEntries(rawEntries);
+      if (!v.ok) throw new Error(`天赋「${name}」${v.reason}`);
+      talent.entries = v.normalized;
+      for (const entry of v.normalized) {
+        const group = entry.params.excl;
+        if (!group) continue;
+        if (exclGroups.has(group)) {
+          throw new Error(`互斥天赋不可共存（组：${group}）——请先遗忘或融合`);
+        }
+        exclGroups.add(group);
+      }
+    }
+    t.capacity = capacity;
+  }
+
   private async applyUpdateCharacter(patch: StatePatch): Promise<GameEvent> {
     const char = await this.resolveCharTarget(patch.target);
 
@@ -990,6 +1036,11 @@ export class StateManager {
             );
           }
         }
+      }
+
+      // ===== 天赋写入门禁（访谈共识 T1~T8：AI 零编数 + 同名唯一 + 容量 + 互斥组）=====
+      if (keys.includes('talents')) {
+        this.normalizeTalentsValue(value);
       }
 
       // ===== 全部合法 → 落地 =====

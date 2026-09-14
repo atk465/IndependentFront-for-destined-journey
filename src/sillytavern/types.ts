@@ -1186,6 +1186,19 @@ export interface CharacterState {
   // ===== 卡牌工坊（卡兰大陆世界观 MVP） =====
   /** 卡册状态：owned=已拥有卡牌名，deck=当前卡组，capacity=容量。逻辑键=名字，无 id */
   cardAlbum?: CardAlbumState;
+  /** 天赋（设计 §4-天赋，访谈共识 T1~T8 / docs/planning/2026-09-14-talent-system-design.md）：
+   *  只有玩家主角有天赋。两层：name/description = AI 表现层（起名写文案），
+   *  entries = 骨架条目（card-workshop/talent-entry 池内预设，state-manager 写入门禁
+   *  校验——AI 零编数）。列表 + 容量，同名唯一；缺省 = 旧档/伙伴无天赋（既定语义）。 */
+  talents?: {
+    capacity: number;
+    list: Array<{
+      name: string;
+      description?: string;
+      source: import('./card-workshop/talent-entry').TalentChannel;
+      entries: import('./card-workshop/talent-entry').TalentEntry[];
+    }>;
+  };
 
   // ===== 经济 =====
   money: number; // G
