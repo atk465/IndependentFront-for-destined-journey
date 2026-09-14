@@ -13,6 +13,11 @@ import { useGameStore } from '../../../stores/game-store';
 import { getCommissionDefs } from '@engine/commission-runtime';
 import { getReputation } from '@engine/save-profile';
 import { matchesCommission } from '@engine/card-workshop/commission';
+import {
+  getExchangeCatalog,
+  talentExchangePrice,
+  type TalentTemplate,
+} from '@engine/card-workshop/talent-entry';
 import { cardTierVar } from '../../../lib/quality-colors';
 
 const game = useGameStore();
@@ -53,6 +58,23 @@ async function onDeliver(cardName: string) {
       ? { kind: 'ok', msg: `已交付【${cardName}】——奖励到账，去任务栏看看声望变化吧` }
       : { kind: 'err', msg: r.reason ?? '交付失败' };
     if (r.ok) selectedName.value = null;
+  } finally {
+    busy.value = false;
+  }
+}
+
+const exchangeCatalog = getExchangeCatalog();
+const ownedNames = computed(() => new Set(game.player?.talents?.list.map((t) => t.name) ?? []));
+function priceOf(t: TalentTemplate): number {
+  return talentExchangePrice(t);
+}
+async function onExchange(t: TalentTemplate) {
+  busy.value = true;
+  try {
+    const r = await game.exchangeTalent(t.name);
+    feedback.value = r.ok
+      ? { kind: 'ok', msg: `已习得天赋【${t.name}】` }
+      : { kind: 'err', msg: r.reason ?? '兑换失败' };
   } finally {
     busy.value = false;
   }
@@ -135,6 +157,32 @@ function rewardsText(rewards: {
         </div>
       </li>
     </ul>
+
+    <div v-if="exchangeCatalog.length > 0" class="exchange-zone">
+      <p class="exchange-title">
+        <i class="fa-solid fa-star" aria-hidden="true"></i>
+        声望兑换（当前声望 {{ reputation }}）
+      </p>
+      <div class="exchange-list">
+        <div v-for="t in exchangeCatalog" :key="t.name" class="exchange-item">
+          <div class="exchange-info">
+            <span class="c-name">{{ t.name }}</span>
+            <span v-if="t.description" class="c-desc">{{ t.description }}</span>
+            <span class="c-meta">
+              {{ t.entries.length }} 条骨架 ｜ 价格 {{ priceOf(t) }} 声望
+            </span>
+          </div>
+          <button
+            type="button"
+            class="deliver-card"
+            :disabled="busy || ownedNames.has(t.name) || reputation < priceOf(t)"
+            @click="onExchange(t)"
+          >
+            {{ ownedNames.has(t.name) ? '已习得' : '兑换' }}
+          </button>
+        </div>
+      </div>
+    </div>
 
     <p v-if="feedback" class="board-feedback" :class="feedback.kind">{{ feedback.msg }}</p>
   </section>
@@ -253,6 +301,39 @@ function rewardsText(rewards: {
 .board-feedback {
   margin: 0;
   font-size: 0.8125rem;
+}
+.exchange-zone {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--theme-card-border, #72502d);
+}
+.exchange-title {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--theme-accent, #d2a25f);
+}
+.exchange-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.exchange-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--theme-card-border, #72502d);
+  border-radius: var(--theme-radius-sm, 4px);
+  background: var(--theme-surface-muted, #1a130d);
+}
+.exchange-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
 .board-feedback.ok {
   color: var(--theme-success, #78b96d);

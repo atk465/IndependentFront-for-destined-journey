@@ -1178,6 +1178,9 @@ export class GamePipeline {
       // 委托板（卡牌工坊）：内容注册表第 15 面经 commission-runtime 缝的派生清单。
       // 漏供的症状同样不是报错，是委托块静默消失。战斗静默由 resolver 判 combatActive。
       commissionDefs: getCommissionDefs(),
+      // 天赋（卡牌工坊）：玩家 CharacterState.talents 快照（{{TALENT}} 数据源；
+      // 玩家无天赋时为 undefined → 块静默，出身必选保证建档即有）。
+      talents: this.game.player?.talents,
       randomEventsEnabled: getEngineSettings().randomEventsEnabled,
       combatActive: this.game.isInCombat,
       // 🔴 2026-08-02 修: 初始技能走 item_gen 链路 —— request_dispatcher 的 {{SKILL_STATE}}

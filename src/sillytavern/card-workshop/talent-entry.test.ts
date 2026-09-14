@@ -13,6 +13,11 @@ import {
   type TalentChannel,
   type TalentEntryKind,
   type TalentEntry,
+  TALENT_CATALOG,
+  getCreationCatalog,
+  getExchangeCatalog,
+  talentExchangePrice,
+  getTalentTemplate,
 } from './talent-entry';
 
 const 废弃材料限定: TalentEntry = {
@@ -129,5 +134,29 @@ describe('tierUp —— 品质越一级', () => {
     expect(tierUp('优良')).toBe('稀有');
     expect(tierUp('史诗')).toBe('传说');
     expect(tierUp('传说')).toBe('传说'); // 唯一不可生产
+  });
+});
+
+describe('TALENT_CATALOG —— 目录与条目池一致性（门禁不被自家目录打脸）', () => {
+  it('目录每条模板的骨架条目都逐字命中条目池', () => {
+    for (const tpl of TALENT_CATALOG) {
+      const v = validateTalentEntries(tpl.entries);
+      expect(`${tpl.name}: ${v.reason ?? 'ok'}`).toBe(`${tpl.name}: ok`);
+    }
+  });
+  it('融合独占不进 捏人/兑换 清单；捏人含出身独占、兑换含兑换独占', () => {
+    const creation = getCreationCatalog().map((t) => t.name);
+    const exchange = getExchangeCatalog().map((t) => t.name);
+    expect(creation).toContain('天才卡师');
+    expect(creation).not.toContain('垃圾摩托');
+    expect(exchange).toContain('卡牌宗师');
+    expect(exchange).not.toContain('天才卡师');
+    expect(exchange).not.toContain('封印斗士');
+  });
+  it('兑换定价 = 10 + 5×(条目数−1)；getTalentTemplate 按名查册', () => {
+    expect(talentExchangePrice(getExchangeCatalog()[0])).toBeGreaterThanOrEqual(10);
+    const 宗师 = getTalentTemplate('卡牌宗师');
+    expect(宗师?.entries).toHaveLength(2);
+    expect(talentExchangePrice(宗师!)).toBe(15);
   });
 });

@@ -76,6 +76,8 @@ export const TALENT_ENTRY_POOL: readonly TalentEntry[] = [
   e({ kind: '行动值加成', channel: 'universal', params: { amount: 2 } }),
   e({ kind: '行动值加成', channel: 'universal', params: { amount: 3 } }),
   e({ kind: '防御加值', channel: 'universal', params: { amount: 4 } }),
+  e({ kind: '行动值加成', channel: 'universal', params: { amount: 3, excl: '攻防' } }),
+  e({ kind: '防御加值', channel: 'universal', params: { amount: 4, excl: '攻防' } }),
   // ── 渠道独占 ──
   e({ kind: '成功率加成', channel: 'creation', params: { bonus: 20, excl: '天才卡师' } }),
   e({
@@ -192,4 +194,142 @@ export function fuseEntrySets(a: readonly TalentEntry[], b: readonly TalentEntry
     seen.add(g);
     return true;
   });
+}
+
+// ========== 天赋目录（捏人/兑换/剧情授予的命名模板；融合独占条目也在册但不可直接获得） ==========
+
+/** 命名天赋模板：渠道归属 + 骨架条目组合（名字即模板键） */
+export interface TalentTemplate {
+  name: string;
+  source: TalentChannel;
+  /** 融合独占：只能由融合产生，任何渠道不可直接获得 */
+  fusionOnly?: boolean;
+  description?: string;
+  entries: TalentEntry[];
+}
+
+const entry = (
+  kind: TalentEntryKind,
+  channel: TalentChannel,
+  params: TalentEntry['params'],
+): TalentEntry => ({ kind, channel, params });
+
+/** v1 天赋目录（单一真源；加天赋 = 加一条模板） */
+export const TALENT_CATALOG: readonly TalentTemplate[] = [
+  // ── 通用池（三渠道皆可）──
+  {
+    name: '节俭持家',
+    source: 'universal',
+    description: '总能把垃圾变成不那么垃圾的东西。',
+    entries: [
+      entry('材料限定', 'universal', { materialClass: '废弃' }),
+      entry('成功率加成', 'universal', { bonus: 50 }),
+      entry('品质锁定', 'universal', { direction: '保底', tier: '普通' }),
+    ],
+  },
+  {
+    name: '摩托小子',
+    source: 'universal',
+    description: '只对结构简单的双轮魔动车感兴趣，且颇有手感。',
+    entries: [
+      entry('成品限定', 'universal', { productClass: '简单载具' }),
+      entry('成功率加成', 'universal', { bonus: 30 }),
+      entry('品质锁定', 'universal', { direction: '上限', tier: '普通' }),
+    ],
+  },
+  {
+    name: '封印亲和',
+    source: 'universal',
+    description: '封印物在你面前总是格外温顺。',
+    entries: [entry('启封加值', 'universal', { amount: 2 })],
+  },
+  {
+    name: '斗志昂扬',
+    source: 'universal',
+    description: '出手永远带着三分先声。',
+    entries: [entry('行动值加成', 'universal', { amount: 3, excl: '攻防' })],
+  },
+  {
+    name: '铜筋铁骨',
+    source: 'universal',
+    description: '硬挨一下，不丢人。',
+    entries: [entry('防御加值', 'universal', { amount: 4, excl: '攻防' })],
+  },
+  {
+    name: '卡牌大师',
+    source: 'universal',
+    description: '启封与出手，一气呵成。',
+    entries: [
+      entry('启封加值', 'universal', { amount: 1 }),
+      entry('行动值加成', 'universal', { amount: 2 }),
+    ],
+  },
+  // ── 渠道独占 ──
+  {
+    name: '天才卡师',
+    source: 'creation',
+    description: '天生就是吃这碗饭的。',
+    entries: [entry('成功率加成', 'creation', { bonus: 20, excl: '天才卡师' })],
+  },
+  {
+    name: '命运宠儿',
+    source: 'story',
+    description: '命运偶尔也会偏心。',
+    entries: [
+      entry('启封加值', 'story', { amount: 1, excl: '命运宠儿' }),
+      entry('行动值加成', 'story', { amount: 1, excl: '命运宠儿' }),
+      entry('防御加值', 'story', { amount: 1, excl: '命运宠儿' }),
+    ],
+  },
+  {
+    name: '卡牌宗师',
+    source: 'exchange',
+    description: '宗师之手，点卡成金。',
+    entries: [
+      entry('启封加值', 'exchange', { amount: 2, excl: '卡牌宗师' }),
+      entry('行动值加成', 'exchange', { amount: 2, excl: '卡牌宗师' }),
+    ],
+  },
+  // ── 融合独占 ──
+  {
+    name: '垃圾摩托',
+    source: 'fusion',
+    fusionOnly: true,
+    description: '你的摩托是自己用边角料攒的，但它能和豪车媲美。',
+    entries: [entry('品质突破', 'fusion', { materialClass: '废弃', productClass: '摩托' })],
+  },
+  {
+    name: '封印斗士',
+    source: 'fusion',
+    fusionOnly: true,
+    description: '开封即出鞘，出鞘必见血。',
+    entries: [
+      entry('启封加值', 'fusion', { amount: 2 }),
+      entry('行动值加成', 'fusion', { amount: 3 }),
+    ],
+  },
+];
+
+/** 按名字查目录模板 */
+export function getTalentTemplate(name: string): TalentTemplate | undefined {
+  return TALENT_CATALOG.find((t) => t.name === name);
+}
+
+/** 捏人出身可选清单：通用池 + 出身独占（融合产物除外） */
+export function getCreationCatalog(): TalentTemplate[] {
+  return TALENT_CATALOG.filter(
+    (t) => !t.fusionOnly && (t.source === 'universal' || t.source === 'creation'),
+  );
+}
+
+/** 声望兑换清单：通用池 + 兑换独占（融合产物/出身/剧情独占除外） */
+export function getExchangeCatalog(): TalentTemplate[] {
+  return TALENT_CATALOG.filter(
+    (t) => !t.fusionOnly && (t.source === 'universal' || t.source === 'exchange'),
+  );
+}
+
+/** 兑换定价（初稿）：10 + 5×(条目数−1)，即单条目 10、双条目 15；数值总表终审对象 */
+export function talentExchangePrice(template: TalentTemplate): number {
+  return 10 + 5 * Math.max(0, template.entries.length - 1);
 }

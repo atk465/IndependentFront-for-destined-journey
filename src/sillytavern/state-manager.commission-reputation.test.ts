@@ -46,7 +46,7 @@ describe('delta_variable profile.reputation —— 委托声望门禁', () => {
       manager.commitDomainCommand([
         { op: 'delta_variable', target: 'profile.reputation', amount: 999 },
       ]),
-    ).rejects.toThrow('声望只能由委托结算变更');
+    ).rejects.toThrow('声望只能由委托交付或天赋兑换变更');
     expect((await getProfile(SAVE)).reputation).toBe(10);
   });
 

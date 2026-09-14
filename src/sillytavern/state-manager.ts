@@ -417,11 +417,15 @@ export class StateManager {
           try {
             const events: GameEvent[] = [];
             for (const patch of patches) {
-              // 委托声望（卡牌工坊）：**AI 零写路径**——只认 metadata.source='commission'
-              // 的引擎委托结算；AI vars_update 直接 delta profile.reputation 一律拒绝。
+              // 声望（卡牌工坊）：**AI 零写路径**——只认引擎两条结算通道的 metadata 来源
+              // （委托交付 'commission' / 天赋兑换 'talent-exchange'）；
+              // AI vars_update 直接 delta profile.reputation 一律拒绝。
               if (patch.op === 'delta_variable' && patch.target === 'profile.reputation') {
-                if (patch.metadata?.source !== 'commission') {
-                  throw new Error('声望只能由委托结算变更（profile.reputation 无 AI 写路径）');
+                const src = patch.metadata?.source;
+                if (src !== 'commission' && src !== 'talent-exchange') {
+                  throw new Error(
+                    '声望只能由委托交付或天赋兑换变更（profile.reputation 无 AI 写路径）',
+                  );
                 }
                 this.validatePatch(patch);
                 const amount = patch.amount!;

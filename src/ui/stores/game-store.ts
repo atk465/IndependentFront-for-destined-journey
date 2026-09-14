@@ -29,6 +29,8 @@ import { buildDemoCardsPatches, buildDemoDeckPatches } from '@engine/card-worksh
 import { toPlainCardAlbum } from '@engine/card-workshop/album';
 import { planCommissionDelivery } from '@engine/card-workshop/commission';
 import { getCommissionDefs } from '@engine/commission-runtime';
+import { getExchangeCatalog, talentExchangePrice } from '@engine/card-workshop/talent-entry';
+import { getReputation as getTalentReputation } from '@engine/save-profile';
 import type { SkirmishSession } from '@engine/card-workshop/skirmish-session';
 import type { SkirmishChoice } from '@engine/card-workshop/skirmish';
 import { createDefaultCharacterState } from '@engine/types';
@@ -1791,6 +1793,59 @@ export const useGameStore = defineStore('game', () => {
   }
 
   /**
+   * 声望兑换天赋（卡牌工坊 切片 T-S2b）：查兑换目录 → 同名唯一/容量/互斥由
+   * state-manager 门禁终审 → 声望扣费（delta_variable profile.reputation，
+   * source='talent-exchange'）+ 天赋列表追加，同一次 commitChatState 原子提交。
+   */
+  async function exchangeTalent(talentName: string): Promise<{ ok: boolean; reason?: string }> {
+    if (!activeSaveId.value) return { ok: false, reason: '无活跃存档' };
+    const playerChar = player.value;
+    if (!playerChar) return { ok: false, reason: '无玩家角色' };
+    const template = getExchangeCatalog().find((t) => t.name === talentName);
+    if (!template) return { ok: false, reason: '兑换清单里没有这个天赋' };
+    const profile = saveProfile.value;
+    const reputation = profile ? getTalentReputation(profile) : 0;
+    const price = talentExchangePrice(template);
+    if (reputation < price) {
+      return { ok: false, reason: `声望不足（需要 ${price}，当前 ${reputation}）` };
+    }
+    const current = playerChar.talents ?? { capacity: 3, list: [] };
+    if (current.list.some((t) => t.name === template.name)) {
+      return { ok: false, reason: '同名天赋不可重复习得' };
+    }
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState([
+      {
+        op: 'update_character',
+        target: `characters.${playerChar.name}`,
+        value: {
+          talents: {
+            capacity: current.capacity ?? 3,
+            list: [
+              ...current.list.map((t) => ({ ...t })),
+              {
+                name: template.name,
+                description: template.description,
+                source: 'exchange' as const,
+                entries: template.entries.map((e) => ({ ...e })),
+              },
+            ],
+          },
+        },
+      },
+      {
+        op: 'delta_variable',
+        target: 'profile.reputation',
+        amount: -price,
+        metadata: { source: 'talent-exchange' },
+      },
+    ]);
+    if (!result.success) return { ok: false, reason: result.errors.join('; ') };
+    await refreshFromDb();
+    return { ok: true };
+  }
+
+  /**
    * 单条目重铸（2026-08-24）：把某角色的一条技能/装备/物品交给 item_gen 重写。
    *
    * 🔴 实现走注入缝（GamePipeline.rewriteLoadoutItem），store 不直接碰引擎装配；
@@ -1914,6 +1969,7 @@ export const useGameStore = defineStore('game', () => {
     submitSkirmishCounter,
     fleeSkirmish,
     deliverCommission,
+    exchangeTalent,
     getCommissionDefs,
     combatDeckStripStates,
     abandonCombat,

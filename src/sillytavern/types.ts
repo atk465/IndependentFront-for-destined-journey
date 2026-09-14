@@ -1839,6 +1839,15 @@ export interface AgentContext {
    *    resolver 里。缺席 / 空数组 = 无委托 → 整段不出（零 token）。
    */
   commissionDefs?: readonly import('./card-workshop/commission').CommissionDef[];
+
+  /**
+   * 天赋（卡牌工坊 §4-天赋）：玩家当前的 `CharacterState.talents` 快照。
+   * `{{TALENT}}` 注入块的数据源（game-pipeline buildContext 供值，同 randomEventOffer
+   * 铁律）；resolver 据此渲染 现有天赋/容量/可授条目池/融合提示。
+   * 缺席或 list 空 = 玩家还没有任何天赋 → 整段不出（零 token；出身天赋为必选，
+   * 正常流程下建档即有第一条）。
+   */
+  talents?: CharacterState['talents'];
   /**
    * 随机事件总开关的当前值（`engine-settings.randomEventsEnabled`）。
    *
