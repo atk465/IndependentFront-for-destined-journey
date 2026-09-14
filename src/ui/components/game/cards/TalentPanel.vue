@@ -65,6 +65,29 @@ async function onForget(name: string) {
   await game.forgetTalent(name);
 }
 
+const namingBusy = ref(false);
+async function onAiName() {
+  if (!fuseA.value || !fuseB.value || !fusePreview.value) return;
+  namingBusy.value = true;
+  try {
+    const a = talents.value.list.find((t) => t.name === fuseA.value);
+    const b = talents.value.list.find((t) => t.name === fuseB.value);
+    const r = await game.requestFusionNaming(
+      `【${fuseA.value}】${a?.description ?? ''}（${a?.entries.map(entryLine).join('，')}）`,
+      `【${fuseB.value}】${b?.description ?? ''}（${b?.entries.map(entryLine).join('，')}）`,
+      fusePreview.value.map(entryLine),
+    );
+    if (r.ok && r.name) {
+      fuseName.value = r.name;
+      if (r.description) fuseDesc.value = r.description;
+    } else {
+      fuseFeedback.value = { kind: 'err', msg: r.reason ?? 'AI 起名失败，自己填一个吧' };
+    }
+  } finally {
+    namingBusy.value = false;
+  }
+}
+
 async function onFuse() {
   if (!fuseA.value || !fuseB.value || !fuseName.value.trim()) return;
   const r = await game.fuseTalents(fuseA.value, fuseB.value, fuseName.value, fuseDesc.value);
@@ -127,7 +150,17 @@ async function onFuse() {
           <span class="fuse-preview-label">产物条目预览：</span>
           <span v-for="(e, i) in fusePreview" :key="i" class="fuse-entry">{{ entryLine(e) }}</span>
         </div>
-        <input v-model="fuseName" class="fuse-name" placeholder="为融合产物起个名字…" />
+        <div class="fuse-name-row">
+          <input v-model="fuseName" class="fuse-name" placeholder="为融合产物起个名字…" />
+          <button
+            type="button"
+            class="talent-btn"
+            :disabled="namingBusy || game.skirmishBusy"
+            @click="onAiName"
+          >
+            {{ namingBusy ? '起名中…' : 'AI 起名' }}
+          </button>
+        </div>
         <textarea
           v-model="fuseDesc"
           class="fuse-desc"
@@ -264,6 +297,11 @@ async function onFuse() {
   padding: 2px 8px;
   border-radius: 999px;
   background: var(--theme-primary-bg, rgba(196, 140, 75, 0.15));
+}
+.fuse-name-row {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
 }
 .fuse-name,
 .fuse-desc {

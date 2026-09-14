@@ -1926,6 +1926,40 @@ export const useGameStore = defineStore('game', () => {
     return { ok: true };
   }
 
+  /** 融合起名缝（game-pipeline 注入；T8-② 裁定 B：AI 起名为主，玩家自填兜底） */
+  let fuseNamingImpl:
+    | ((
+        sourceA: string,
+        sourceB: string,
+        entryLines: string[],
+      ) => Promise<{ name: string; description: string }>)
+    | null = null;
+  function setFuseNamingImpl(
+    impl: (
+      sourceA: string,
+      sourceB: string,
+      entryLines: string[],
+    ) => Promise<{ name: string; description: string }>,
+  ): void {
+    fuseNamingImpl = impl;
+  }
+  async function requestFusionNaming(
+    sourceA: string,
+    sourceB: string,
+    entryLines: string[],
+  ): Promise<{ ok: boolean; name?: string; description?: string; reason?: string }> {
+    if (!fuseNamingImpl) return { ok: false, reason: 'AI 起名未接入' };
+    try {
+      const r = await fuseNamingImpl(sourceA, sourceB, entryLines);
+      return { ok: true, name: r.name, description: r.description };
+    } catch (err) {
+      return {
+        ok: false,
+        reason: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
+
   /**
    * 单条目重铸（2026-08-24）：把某角色的一条技能/装备/物品交给 item_gen 重写。
    *
@@ -2053,6 +2087,8 @@ export const useGameStore = defineStore('game', () => {
     exchangeTalent,
     forgetTalent,
     fuseTalents,
+    setFuseNamingImpl,
+    requestFusionNaming,
     getCommissionDefs,
     combatDeckStripStates,
     abandonCombat,

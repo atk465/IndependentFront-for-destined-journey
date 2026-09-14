@@ -45,6 +45,7 @@ import {
 import { cardPlayPlan, sealedCardPlay } from '@engine/card-workshop/entry-combat';
 import { willModifierOf } from '@engine/card-workshop/unsealing';
 import { getCommissionDefs } from '@engine/commission-runtime';
+import { runTalentFusionNaming } from '@engine/card-workshop/talent-naming';
 import { basicCounterAction, deriveCombatStats } from '@engine/card-workshop/derived-stats';
 import {
   crushFinish,
@@ -460,6 +461,12 @@ export class GamePipeline {
     this.settings = deps.settingsStore;
     this.saveId = deps.saveId;
     this.attachSkirmishController();
+    // 融合起名缝（AI 零编数：只起名写描述；mock store 无此方法则跳过）
+    this.game.setFuseNamingImpl?.(async (sourceA, sourceB, entryLines) => {
+      const r = await this.runTalentFusionNaming(sourceA, sourceB, entryLines);
+      if (!r.ok || !r.name) throw new Error(r.reason ?? 'AI 起名失败');
+      return { name: r.name, description: r.description ?? '' };
+    });
   }
 
   // 🪦 Q-06：`syncSnapshotSettings` 已删。它把 settings-store 的两个字段每轮抄进
@@ -3056,6 +3063,28 @@ export class GamePipeline {
               : 'ally_win',
         endedAtTurn: this.game.activeSave?.metadata?.totalTurns ?? 0,
       };
+    }
+  }
+
+  /**
+   * 融合起名（T8-② 裁定 B）：把两源天赋与产物骨架条目交给 AI 起名写描述。
+   * 只演绎不算数——条目数值由 Code 化学反应定案；失败走玩家自填兜底。
+   */
+  private async runTalentFusionNaming(
+    sourceA: string,
+    sourceB: string,
+    entryLines: string[],
+  ): Promise<{ ok: boolean; name?: string; description?: string; reason?: string }> {
+    const endpoint = this.getEndpointForAgent('talent-naming');
+    if (!endpoint) return { ok: false, reason: 'talent-naming 未解析到 API 池' };
+    try {
+      const r = await runTalentFusionNaming(
+        { saveId: this.saveId, endpoint, sourceA, sourceB, productEntryLines: entryLines },
+        { clientFactory: this.getClientFactory() },
+      );
+      return { ok: true, name: r.name, description: r.description };
+    } catch (err) {
+      return { ok: false, reason: err instanceof Error ? err.message : String(err) };
     }
   }
 
