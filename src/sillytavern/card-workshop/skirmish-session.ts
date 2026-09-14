@@ -147,6 +147,21 @@ export function playBeat(
   if (!intent) return s;
   const activate = opts?.activate;
 
+  // 在场战技：眩晕（敌方本拍放弃行动）/ 减速（威胁降低），只在剩余拍数内生效
+  const live = s.activeEffects.filter((e) => e.beatsLeft === undefined || e.beatsLeft > 0);
+  const stunActive = live.some((e) => e.type === 'stun');
+  const weakenTotal = live
+    .filter((e) => e.type === 'weaken')
+    .reduce((sum, e) => sum + Math.max(0, e.amount), 0);
+  const effectiveIntent = stunActive
+    ? { ...intent, threat: 0 }
+    : weakenTotal > 0
+      ? { ...intent, threat: Math.max(0, intent.threat - weakenTotal) }
+      : intent;
+  const effectLines: string[] = [];
+  if (stunActive) effectLines.push(`▸ 敌方被【眩晕】——本拍放弃行动`);
+  else if (weakenTotal > 0) effectLines.push(`▸ 减速战技：敌方威胁 −${weakenTotal}`);
+
   // 在场加成（此前打出的领域/装备/召唤…）：行动值先行叠加，审计单列一行可复算
   const buffTotal = s.activeEffects
     .filter((e) => e.type === 'buff')
@@ -155,7 +170,7 @@ export function playBeat(
     buffTotal > 0 ? { ...action, power: Math.max(0, action.power) + buffTotal } : action;
 
   const result = resolveBeat({
-    intent: intent,
+    intent: effectiveIntent,
     action: effectiveAction,
     playerHp: s.playerHp,
     enemyHp: s.enemyHp,
@@ -166,6 +181,7 @@ export function playBeat(
     // 出卡宣言（主人裁定：玩家写这张牌用来做什么，纯叙事素材，置于拍审计之前）
     ...(action.note ? [`▸ 意图：${action.note}`] : []),
     ...(opts?.prepend ?? []),
+    ...effectLines,
     ...(buffTotal > 0 ? [`▸ 在场加成：行动值 +${buffTotal}`] : []),
     ...result.audit,
   ];
@@ -188,21 +204,35 @@ export function playBeat(
     );
   }
 
-  // 本拍激活的在场卡：效果自下一拍起生效
-  const nextEffects = activate
-    ? [
-        ...s.activeEffects,
-        {
-          name: activate.name,
-          type: activate.type,
-          amount: Math.max(0, Math.round(activate.amount)),
-        },
-      ]
-    : s.activeEffects;
+  // 本拍激活的在场卡：效果自下一拍起生效（带持续拍数的每拍递减，归零移除）
+  const decremented = s.activeEffects.map((e) =>
+    e.beatsLeft !== undefined ? { ...e, beatsLeft: Math.max(0, e.beatsLeft - 1) } : e,
+  );
+  const nextEffects = [
+    ...decremented.filter((e) => e.beatsLeft === undefined || e.beatsLeft > 0),
+    ...(activate
+      ? [
+          {
+            name: activate.name,
+            type: activate.type,
+            amount: Math.max(0, Math.round(activate.amount)),
+            ...(activate.beatsLeft !== undefined
+              ? { beatsLeft: Math.max(1, activate.beatsLeft) }
+              : {}),
+          },
+        ]
+      : []),
+  ];
   if (activate) {
-    lines.push(
-      `▸ 【${activate.name}】${activate.type === 'dot' ? '灼烧' : '助阵'}生效——此后每拍${activate.type === 'dot' ? `敌方 −${activate.amount}` : `行动值 +${activate.amount}`}`,
-    );
+    const line =
+      activate.type === 'dot'
+        ? `灼烧生效——此后每拍敌方 −${activate.amount}`
+        : activate.type === 'buff'
+          ? `助阵生效——此后每拍行动值 +${activate.amount}`
+          : activate.type === 'weaken'
+            ? `减速生效——此后每拍敌方威胁 −${activate.amount}`
+            : `震慑生效——敌方将短暂失去战意`;
+    lines.push(`▸ 【${activate.name}】${line}`);
   }
 
   const next: SkirmishSession = {

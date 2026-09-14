@@ -271,3 +271,53 @@ describe('在场效果 —— 领域 DoT / 装备召唤助战（真机裁定 202
     expect(s.enemyHp).toBe(0);
   });
 });
+
+describe('在场战技 v2 —— 减速/眩晕/持续拍数（截图灵感波）', () => {
+  const 开战 = () =>
+    startSkirmish({
+      enemyName: '岩爪兽',
+      enemyLevel: 12,
+      intents: [
+        { move: '蓄力·崩山击', threat: 18, counters: ['打断', '防御'] },
+        { move: '连环爪击', threat: 12, counters: ['闪避'] },
+      ],
+      playerHp: 155,
+      playerMaxHp: 155,
+      enemyHp: 500,
+      enemyMaxHp: 500,
+      guard: 10,
+    });
+  const 防御 = { label: '防御', power: 32, tags: ['防御' as const] };
+
+  it('stun：敌方本拍放弃行动（威胁归零），持续拍数耗尽后恢复', () => {
+    const activated = playBeat(开战(), 防御, 10, {
+      activate: { name: '海妖之歌', type: 'stun', amount: 0, beatsLeft: 1 },
+    });
+    // 激活拍本身不受 stun 影响（自下一拍起），但激活行存在
+    expect(activated.log.some((l) => l.includes('震慑生效'))).toBe(true);
+    const second = playBeat(activated, 防御, 10);
+    expect(second.log.some((l) => l === '▸ 敌方被【眩晕】——本拍放弃行动')).toBe(true);
+    const third = playBeat(second, 防御, 10);
+    // beatsLeft 1 已耗尽 → 第三拍不再出眩晕行（注意 log 是累积的，只看新增段）
+    expect(third.log.slice(second.log.length).some((l) => l.includes('眩晕'))).toBe(false);
+  });
+
+  it('weaken：持续拍内威胁降低，审计行可见；耗尽后消失', () => {
+    const activated = playBeat(开战(), 防御, 10, {
+      activate: { name: '收缩射线', type: 'weaken', amount: 4, beatsLeft: 2 },
+    });
+    const second = playBeat(activated, 防御, 10);
+    expect(second.log.some((l) => l === '▸ 减速战技：敌方威胁 −4')).toBe(true);
+    // 威胁 18 − 4 = 14，仍被防御反制（32+9=41 ≥ 14）
+    expect(second.counteredBeats).toBe(activated.counteredBeats + 1);
+  });
+
+  it('带持续拍数的效果耗尽后从 activeEffects 移除', () => {
+    const activated = playBeat(开战(), 防御, 10, {
+      activate: { name: '收缩射线', type: 'weaken', amount: 4, beatsLeft: 1 },
+    });
+    expect(activated.activeEffects).toHaveLength(1);
+    const second = playBeat(activated, 防御, 10);
+    expect(second.activeEffects).toHaveLength(0); // beatsLeft 1 → 本拍用掉后归零移除
+  });
+});

@@ -20,6 +20,7 @@ export type TalentChannel = 'creation' | 'story' | 'exchange' | 'fusion' | 'univ
 
 /** 骨架条目种类（v1 八条目） */
 export type TalentEntryKind =
+  // 数值层（Code 直算）
   | '材料限定'
   | '成品限定'
   | '成功率加成'
@@ -27,7 +28,16 @@ export type TalentEntryKind =
   | '品质突破'
   | '启封加值'
   | '行动值加成'
-  | '防御加值';
+  | '防御加值'
+  | '产出数量' // 每次制作额外产出 n 份（丰饶祝福）
+  | '风险系数' // 成功率波动 ±%（梦境织造者时好时坏 / 侏儒工程师爆炸率）
+  | '金钱加投' // 制卡时投入额外金钱换成功率与正面词条（鎏金大佬）
+  | '判定取优' // 掷骰取两次较高者（欧皇系统）
+  // 生成倾向层（改写炼制提示词：数值=权重档，内容=AI 生成）
+  | '词条加权' // 关键词更常出现（倾向1/强倾向2/必附3）
+  | '形态转化' // 产出物形态定向为某系列（猫娘/塞壬/菌娘…）
+  // 战技赋予层（交锋拍战技表落地）
+  | '战技附加'; // 产出的卡带战斗状态（中毒/减速/眩晕…），params 携带量与持续拍数
 
 /** 骨架条目：kind + 预设参数 + 独占渠道标记 */
 export interface TalentEntry {
@@ -38,7 +48,7 @@ export interface TalentEntry {
     materialClass?: string;
     /** 成品限定 / 品质突破·域限定的成品类别（如「简单载具」「摩托」） */
     productClass?: string;
-    /** 成功率加成档位（%）：20 / 30 / 50 */
+    /** 成功率加成档位（%）：20 / 30 / 50 / 100(必成) */
     bonus?: number;
     /** 品质锁定方向 */
     direction?: '保底' | '上限';
@@ -48,6 +58,24 @@ export interface TalentEntry {
     amount?: number;
     /** 互斥组（同组非空值不可共存，如「攻防」） */
     excl?: string;
+    /** 产出数量（+n 份） */
+    copies?: number;
+    /** 风险系数（成功率波动 ±n%，或爆炸/劣化概率 n%） */
+    risk?: number;
+    /** 金钱加投（每次制卡额外投入 nG） */
+    gold?: number;
+    /** 词条加权的关键词组（如 忠诚/追踪） */
+    keywords?: string[];
+    /** 词条加权档位：1 倾向 / 2 强倾向 / 3 必附 */
+    weight?: 1 | 2 | 3;
+    /** 形态转化的系列名（猫娘/塞壬/菌娘…） */
+    series?: string;
+    /** 战技附加：状态名（中毒/减速/眩晕…） */
+    status?: string;
+    /** 战技附加：量（DoT 伤害 / 威胁降低值） */
+    power?: number;
+    /** 战技附加：持续拍数 */
+    beats?: number;
   };
 }
 
@@ -59,7 +87,14 @@ const e = (entry: TalentEntry): TalentEntry => entry;
 export const TALENT_ENTRY_POOL: readonly TalentEntry[] = [
   // ── 制作域 ──
   e({ kind: '材料限定', channel: 'universal', params: { materialClass: '废弃' } }),
+  e({ kind: '材料限定', channel: 'universal', params: { materialClass: '犬类' } }),
+  e({ kind: '材料限定', channel: 'universal', params: { materialClass: '羽毛' } }),
+  e({ kind: '材料限定', channel: 'universal', params: { materialClass: '水晶' } }),
+  e({ kind: '材料限定', channel: 'universal', params: { materialClass: '植物' } }),
+  e({ kind: '材料限定', channel: 'universal', params: { materialClass: '血液' } }),
   e({ kind: '成品限定', channel: 'universal', params: { productClass: '简单载具' } }),
+  e({ kind: '成品限定', channel: 'universal', params: { productClass: '靴袜腿甲' } }),
+  e({ kind: '成品限定', channel: 'universal', params: { productClass: '武器' } }),
   e({ kind: '成功率加成', channel: 'universal', params: { bonus: 20 } }),
   e({ kind: '成功率加成', channel: 'universal', params: { bonus: 30 } }),
   e({ kind: '成功率加成', channel: 'universal', params: { bonus: 50 } }),
@@ -78,6 +113,33 @@ export const TALENT_ENTRY_POOL: readonly TalentEntry[] = [
   e({ kind: '防御加值', channel: 'universal', params: { amount: 4 } }),
   e({ kind: '行动值加成', channel: 'universal', params: { amount: 3, excl: '攻防' } }),
   e({ kind: '防御加值', channel: 'universal', params: { amount: 4, excl: '攻防' } }),
+  // ── v2 扩容（截图灵感；数值/倾向/战技三层）──
+  e({ kind: '产出数量', channel: 'universal', params: { copies: 1 } }),
+  e({ kind: '风险系数', channel: 'universal', params: { risk: 20 } }),
+  e({ kind: '金钱加投', channel: 'universal', params: { gold: 50, bonus: 20 } }),
+  e({ kind: '判定取优', channel: 'exchange', params: {} }),
+  e({ kind: '词条加权', channel: 'universal', params: { keywords: ['忠诚', '追踪'], weight: 2 } }),
+  e({ kind: '词条加权', channel: 'universal', params: { keywords: ['飞行', '加速'], weight: 2 } }),
+  e({
+    kind: '词条加权',
+    channel: 'universal',
+    params: { keywords: ['魔法增幅', '精神守护'], weight: 2 },
+  }),
+  e({
+    kind: '词条加权',
+    channel: 'universal',
+    params: { keywords: ['迅捷', '优雅', '防滑'], weight: 1 },
+  }),
+  e({ kind: '词条加权', channel: 'universal', params: { keywords: ['加速', '暴击'], weight: 3 } }),
+  e({ kind: '词条加权', channel: 'universal', params: { keywords: ['恶臭', '感染'], weight: 3 } }),
+  e({ kind: '形态转化', channel: 'universal', params: { series: '猫娘' } }),
+  e({ kind: '形态转化', channel: 'universal', params: { series: '塞壬' } }),
+  e({ kind: '战技附加', channel: 'universal', params: { status: '中毒', power: 3, beats: 3 } }),
+  e({ kind: '战技附加', channel: 'universal', params: { status: '蚀血', power: 4, beats: 2 } }),
+  e({ kind: '战技附加', channel: 'universal', params: { status: '减速', power: 4, beats: 2 } }),
+  e({ kind: '战技附加', channel: 'universal', params: { status: '眩晕', power: 0, beats: 1 } }),
+  e({ kind: '战技附加', channel: 'universal', params: { status: '魅惑', power: 0, beats: 1 } }),
+  e({ kind: '词条加权', channel: 'universal', params: { keywords: ['敏捷'], weight: 2 } }),
   // ── 渠道独占 ──
   e({ kind: '成功率加成', channel: 'creation', params: { bonus: 20, excl: '天才卡师' } }),
   e({
@@ -91,34 +153,35 @@ export const TALENT_ENTRY_POOL: readonly TalentEntry[] = [
   e({ kind: '行动值加成', channel: 'exchange', params: { amount: 2, excl: '卡牌宗师' } }),
 ];
 
+/** 参数全等（逐键比较全部已知参数位；新参数加入时同步这里） */
+function sameParams(a: TalentEntry['params'], b: TalentEntry['params']): boolean {
+  return (
+    a.materialClass === b.materialClass &&
+    a.productClass === b.productClass &&
+    a.bonus === b.bonus &&
+    a.direction === b.direction &&
+    a.tier === b.tier &&
+    a.amount === b.amount &&
+    a.excl === b.excl &&
+    a.copies === b.copies &&
+    a.risk === b.risk &&
+    a.gold === b.gold &&
+    a.weight === b.weight &&
+    a.series === b.series &&
+    a.status === b.status &&
+    a.power === b.power &&
+    a.beats === b.beats
+  );
+}
+
 /** 条目全等（kind + params + channel 逐字段；校验和融合都用它，不落 JSON.stringify） */
 export function sameEntry(a: TalentEntry, b: TalentEntry): boolean {
-  return (
-    a.kind === b.kind &&
-    a.channel === b.channel &&
-    a.params.materialClass === b.params.materialClass &&
-    a.params.productClass === b.params.productClass &&
-    a.params.bonus === b.params.bonus &&
-    a.params.direction === b.params.direction &&
-    a.params.tier === b.params.tier &&
-    a.params.amount === b.params.amount &&
-    a.params.excl === b.params.excl
-  );
+  return a.kind === b.kind && a.channel === b.channel && sameParams(a.params, b.params);
 }
 
 /** 池内查找：kind + params 全等即命中（channel 由授予渠道决定，不参与比对） */
 function findPreset(entry: TalentEntry): TalentEntry | undefined {
-  return TALENT_ENTRY_POOL.find(
-    (p) =>
-      p.kind === entry.kind &&
-      p.params.materialClass === entry.params.materialClass &&
-      p.params.productClass === entry.params.productClass &&
-      p.params.bonus === entry.params.bonus &&
-      p.params.direction === entry.params.direction &&
-      p.params.tier === entry.params.tier &&
-      p.params.amount === entry.params.amount &&
-      p.params.excl === entry.params.excl,
-  );
+  return TALENT_ENTRY_POOL.find((p) => p.kind === entry.kind && sameParams(p.params, entry.params));
 }
 
 /** 条目规范化：命中池 → 返回池内规范对象（channel 以池为准）；未命中 → null */
@@ -203,10 +266,26 @@ export function fuseEntrySets(a: readonly TalentEntry[], b: readonly TalentEntry
 
 // ========== 天赋目录（捏人/兑换/剧情授予的命名模板；融合独占条目也在册但不可直接获得） ==========
 
-/** 命名天赋模板：渠道归属 + 骨架条目组合（名字即模板键） */
+/** 天赋品级（照截图品级制；影响兑换定价与（未来）授予出现权重） */
+export type TalentGrade = 'SSS' | 'SS' | 'S' | 'A' | 'B' | 'C' | 'D' | 'E';
+
+/** 品级 → 兑换定价乘数（初稿：SSS×4 … E×1；数值总表终审对象） */
+export const GRADE_PRICE_MULTIPLIER: Record<TalentGrade, number> = {
+  SSS: 4,
+  SS: 3,
+  S: 2.5,
+  A: 2,
+  B: 1.5,
+  C: 1.2,
+  D: 1,
+  E: 1,
+};
+
+/** 命名天赋模板：渠道归属 + 品级 + 骨架条目组合（名字即模板键） */
 export interface TalentTemplate {
   name: string;
   source: TalentChannel;
+  grade: TalentGrade;
   /** 融合独占：只能由融合产生，任何渠道不可直接获得 */
   fusionOnly?: boolean;
   description?: string;
@@ -224,6 +303,7 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
   // ── 通用池（三渠道皆可）──
   {
     name: '节俭持家',
+    grade: 'D' as TalentGrade,
     source: 'universal',
     description: '总能把垃圾变成不那么垃圾的东西。',
     entries: [
@@ -234,6 +314,7 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
   },
   {
     name: '摩托小子',
+    grade: 'D' as TalentGrade,
     source: 'universal',
     description: '只对结构简单的双轮魔动车感兴趣，且颇有手感。',
     entries: [
@@ -244,24 +325,28 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
   },
   {
     name: '封印亲和',
+    grade: 'B' as TalentGrade,
     source: 'universal',
     description: '封印物在你面前总是格外温顺。',
     entries: [entry('启封加值', 'universal', { amount: 2 })],
   },
   {
     name: '斗志昂扬',
+    grade: 'B' as TalentGrade,
     source: 'universal',
     description: '出手永远带着三分先声。',
     entries: [entry('行动值加成', 'universal', { amount: 3, excl: '攻防' })],
   },
   {
     name: '铜筋铁骨',
+    grade: 'B' as TalentGrade,
     source: 'universal',
     description: '硬挨一下，不丢人。',
     entries: [entry('防御加值', 'universal', { amount: 4, excl: '攻防' })],
   },
   {
     name: '卡牌大师',
+    grade: 'A' as TalentGrade,
     source: 'universal',
     description: '启封与出手，一气呵成。',
     entries: [
@@ -272,12 +357,14 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
   // ── 渠道独占 ──
   {
     name: '天才卡师',
+    grade: 'C' as TalentGrade,
     source: 'creation',
     description: '天生就是吃这碗饭的。',
     entries: [entry('成功率加成', 'creation', { bonus: 20, excl: '天才卡师' })],
   },
   {
     name: '命运宠儿',
+    grade: 'S' as TalentGrade,
     source: 'story',
     description: '命运偶尔也会偏心。',
     entries: [
@@ -288,6 +375,7 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
   },
   {
     name: '卡牌宗师',
+    grade: 'SS' as TalentGrade,
     source: 'exchange',
     description: '宗师之手，点卡成金。',
     entries: [
@@ -295,9 +383,173 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
       entry('行动值加成', 'exchange', { amount: 2, excl: '卡牌宗师' }),
     ],
   },
+  // ── v2 扩容（截图灵感精选；生成倾向/战技/数值三层）──
+  {
+    name: '犬类伙伴',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '你更容易获得犬类魔物的信任。',
+    entries: [
+      e({ kind: '材料限定', channel: 'universal', params: { materialClass: '犬类' } }),
+      e({
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['忠诚', '追踪'], weight: 2 },
+      }),
+    ],
+  },
+  {
+    name: '风之语',
+    grade: 'B' as TalentGrade,
+    source: 'universal',
+    description: '羽毛与落叶会向你低语风的方向。',
+    entries: [
+      e({ kind: '材料限定', channel: 'universal', params: { materialClass: '羽毛' } }),
+      e({
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['飞行', '加速'], weight: 2 },
+      }),
+    ],
+  },
+  {
+    name: '水晶雕刻家',
+    grade: 'D' as TalentGrade,
+    source: 'universal',
+    description: '水晶与宝石在你手里格外听话。',
+    entries: [
+      e({ kind: '材料限定', channel: 'universal', params: { materialClass: '水晶' } }),
+      e({
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['魔法增幅', '精神守护'], weight: 2 },
+      }),
+    ],
+  },
+  {
+    name: '恋足癖',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '专注足部装备卡，成品常带令人在意的风味。',
+    entries: [
+      e({ kind: '成品限定', channel: 'universal', params: { productClass: '靴袜腿甲' } }),
+      e({
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['迅捷', '优雅', '防滑'], weight: 1 },
+      }),
+    ],
+  },
+  {
+    name: '污秽武装',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '武器会散发令人不适的气息——对敌人而言。',
+    entries: [
+      e({ kind: '成品限定', channel: 'universal', params: { productClass: '武器' } }),
+      e({
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['恶臭', '感染'], weight: 3 },
+      }),
+    ],
+  },
+  {
+    name: '速度与激情',
+    grade: 'B' as TalentGrade,
+    source: 'universal',
+    description: '你做的所有卡都格外快，且带一点疯狂。',
+    entries: [
+      e({
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['加速', '暴击'], weight: 3 },
+      }),
+    ],
+  },
+  {
+    name: '猫之九命',
+    grade: 'S' as TalentGrade,
+    source: 'universal',
+    description: '你的卡牌会转化为慵懒而敏捷的猫娘系生物。',
+    entries: [
+      e({ kind: '形态转化', channel: 'universal', params: { series: '猫娘' } }),
+      e({ kind: '词条加权', channel: 'universal', params: { keywords: ['敏捷'], weight: 2 } }),
+    ],
+  },
+  {
+    name: '海妖之歌',
+    grade: 'B' as TalentGrade,
+    source: 'universal',
+    description: '歌声能魅惑心智不坚定的敌人。',
+    entries: [
+      e({ kind: '形态转化', channel: 'universal', params: { series: '塞壬' } }),
+      e({
+        kind: '战技附加',
+        channel: 'universal',
+        params: { status: '魅惑', power: 0, beats: 1 },
+      }),
+    ],
+  },
+  {
+    name: '足尖的剧毒',
+    grade: 'A' as TalentGrade,
+    source: 'universal',
+    description: '足尖的剧毒会慢慢侵蚀敌人的神经。',
+    entries: [
+      e({
+        kind: '战技附加',
+        channel: 'universal',
+        params: { status: '中毒', power: 3, beats: 3 },
+      }),
+    ],
+  },
+  {
+    name: '收缩射线',
+    grade: 'A' as TalentGrade,
+    source: 'universal',
+    description: '被射线照到的敌人会暂时变小、大幅削弱属性。',
+    entries: [
+      e({
+        kind: '战技附加',
+        channel: 'universal',
+        params: { status: '减速', power: 4, beats: 2 },
+      }),
+    ],
+  },
+  {
+    name: '丰饶祝福',
+    grade: 'B' as TalentGrade,
+    source: 'universal',
+    description: '受到丰收女神的眷顾，产出总比预期多一份。',
+    entries: [e({ kind: '产出数量', channel: 'universal', params: { copies: 1 } })],
+  },
+  {
+    name: '鎏金大佬',
+    grade: 'S' as TalentGrade,
+    source: 'universal',
+    description: '投的钱越多，卡越好看——这是真理。',
+    entries: [e({ kind: '金钱加投', channel: 'universal', params: { gold: 50, bonus: 20 } })],
+  },
+  {
+    name: '欧皇系统',
+    grade: 'SS' as TalentGrade,
+    source: 'exchange',
+    description: '你的幸运值被锁定在一个极高的水平。',
+    entries: [e({ kind: '判定取优', channel: 'exchange', params: {} })],
+  },
+  {
+    name: '梦境织造者',
+    grade: 'D' as TalentGrade,
+    source: 'universal',
+    description: '睡着后制卡，效果时好时坏。',
+    entries: [e({ kind: '风险系数', channel: 'universal', params: { risk: 20 } })],
+  },
+
   // ── 融合独占 ──
   {
     name: '垃圾摩托',
+    grade: 'A' as TalentGrade,
     source: 'fusion',
     fusionOnly: true,
     description: '你的摩托是自己用边角料攒的，但它能和豪车媲美。',
@@ -305,6 +557,7 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
   },
   {
     name: '封印斗士',
+    grade: 'S' as TalentGrade,
     source: 'fusion',
     fusionOnly: true,
     description: '开封即出鞘，出鞘必见血。',
@@ -334,7 +587,9 @@ export function getExchangeCatalog(): TalentTemplate[] {
   );
 }
 
-/** 兑换定价（初稿）：10 + 5×(条目数−1)，即单条目 10、双条目 15；数值总表终审对象 */
+/** 兑换定价（初稿）：基础 10+5×(条目数−1)，再乘品级乘数；数值总表终审对象 */
 export function talentExchangePrice(template: TalentTemplate): number {
-  return 10 + 5 * Math.max(0, template.entries.length - 1);
+  const base = 10 + 5 * Math.max(0, template.entries.length - 1);
+  const mult = GRADE_PRICE_MULTIPLIER[template.grade] ?? 1;
+  return Math.round((base * mult) / 5) * 5; // 5 的倍数取整，好看
 }

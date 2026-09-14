@@ -18,6 +18,8 @@ import {
   getExchangeCatalog,
   talentExchangePrice,
   getTalentTemplate,
+  GRADE_PRICE_MULTIPLIER,
+  type TalentGrade,
 } from './talent-entry';
 
 const 废弃材料限定: TalentEntry = {
@@ -57,6 +59,13 @@ describe('TALENT_ENTRY_POOL（单一真源）', () => {
     '启封加值',
     '行动值加成',
     '防御加值',
+    '产出数量',
+    '风险系数',
+    '金钱加投',
+    '判定取优',
+    '词条加权',
+    '形态转化',
+    '战技附加',
   ];
   const ALL_CHANNELS: readonly TalentChannel[] = [
     'creation',
@@ -153,10 +162,49 @@ describe('TALENT_CATALOG —— 目录与条目池一致性（门禁不被自家
     expect(exchange).not.toContain('天才卡师');
     expect(exchange).not.toContain('封印斗士');
   });
-  it('兑换定价 = 10 + 5×(条目数−1)；getTalentTemplate 按名查册', () => {
+  it('兑换定价 = 基础×品级乘数，取整到 5 的倍数；getTalentTemplate 按名查册', () => {
     expect(talentExchangePrice(getExchangeCatalog()[0])).toBeGreaterThanOrEqual(10);
     const 宗师 = getTalentTemplate('卡牌宗师');
     expect(宗师?.entries).toHaveLength(2);
-    expect(talentExchangePrice(宗师!)).toBe(15);
+    expect(talentExchangePrice(宗师!)).toBe(45); // 基础 15 × SS 3
+  });
+});
+
+describe('v2 扩容 —— 品级 / 生成倾向 / 战技赋予（截图灵感波）', () => {
+  /** 品级八档（可扩展枚举） */
+  const GRADES: readonly TalentGrade[] = ['SSS', 'SS', 'S', 'A', 'B', 'C', 'D', 'E'];
+
+  it('品级枚举八档齐全（GRADE_PRICE_MULTIPLIER 全覆盖）', () => {
+    for (const g of GRADES) {
+      expect(GRADE_PRICE_MULTIPLIER[g]).toBeGreaterThan(0);
+    }
+  });
+
+  it('品级定价乘数：双条目 C 级 20、单条目 SS 级 30（5 的倍数取整）', () => {
+    const 犬类 = getTalentTemplate('犬类伙伴');
+    expect(犬类?.grade).toBe('C');
+    expect(talentExchangePrice(犬类!)).toBe(20); // 基础 15 × C 1.2 = 18 → 取整 20
+    const 欧皇 = getTalentTemplate('欧皇系统');
+    expect(欧皇?.grade).toBe('SS');
+    expect(talentExchangePrice(欧皇!)).toBe(30); // 基础 10 × SS 3 = 30
+  });
+
+  it('生成倾向条目：词条加权带关键词与档位', () => {
+    const 犬类 = getTalentTemplate('犬类伙伴');
+    const 加权 = 犬类?.entries.find((e) => e.kind === '词条加权');
+    expect(加权?.params.keywords).toEqual(['忠诚', '追踪']);
+    expect(加权?.params.weight).toBe(2);
+  });
+
+  it('战技赋予条目：状态/量/持续拍数齐备', () => {
+    const 足尖 = getTalentTemplate('足尖的剧毒');
+    const 战技 = 足尖?.entries.find((e) => e.kind === '战技附加');
+    expect(战技?.params).toMatchObject({ status: '中毒', power: 3, beats: 3 });
+  });
+
+  it('形态转化条目：系列名定向', () => {
+    const 猫 = getTalentTemplate('猫之九命');
+    const 转化 = 猫?.entries.find((e) => e.kind === '形态转化');
+    expect(转化?.params.series).toBe('猫娘');
   });
 });

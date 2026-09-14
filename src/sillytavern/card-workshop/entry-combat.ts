@@ -98,12 +98,15 @@ export function cardCounterAction(
 /** 在场生效类：打出后转入持续效果（每场一次） */
 export const IN_PLAY_KINDS: ReadonlySet<string> = new Set(['装备', '召唤', '军团', '领域', '场景']);
 
-/** 在场持续效果（数值初稿，终审对象）；name = 来源卡名（审计行用） */
+/** 在场持续效果（数值初稿，终审对象）；name = 来源名（审计行用） */
 export interface CardInPlayEffect {
   name: string;
-  /** dot = 每拍拍末敌方持续损失；buff = 每拍玩家行动值加成 */
-  type: 'dot' | 'buff';
+  /** dot = 每拍拍末敌方持续损失；buff = 每拍玩家行动值加成；
+   *  weaken = 每拍敌方威胁降低；stun = 敌方本拍放弃行动 */
+  type: 'dot' | 'buff' | 'weaken' | 'stun';
   amount: number;
+  /** 持续拍数（缺省 = 整场）；每拍结束递减，归零移除 */
+  beatsLeft?: number;
 }
 
 /** 八类卡的出牌计划 */

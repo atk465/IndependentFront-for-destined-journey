@@ -42,7 +42,11 @@ import {
   type SkirmishAction,
   type SkirmishChoice,
 } from '@engine/card-workshop/skirmish';
-import { cardPlayPlan, sealedCardPlay } from '@engine/card-workshop/entry-combat';
+import {
+  cardPlayPlan,
+  sealedCardPlay,
+  type CardInPlayEffect,
+} from '@engine/card-workshop/entry-combat';
 import { willModifierOf } from '@engine/card-workshop/unsealing';
 import { getCommissionDefs } from '@engine/commission-runtime';
 import { runTalentFusionNaming } from '@engine/card-workshop/talent-naming';
@@ -2918,7 +2922,7 @@ export class GamePipeline {
     if (!session || session.finished !== null || !playerC) return;
 
     let action: SkirmishAction;
-    let activate: { name: string; type: 'dot' | 'buff'; amount: number } | undefined;
+    let activate: CardInPlayEffect | undefined;
     if (choice.kind === '卡') {
       // 会话临时账（真机裁定 2026-09-13）：同一张卡一场只能打出一次
       if (session.playedCards.includes(choice.name)) {
