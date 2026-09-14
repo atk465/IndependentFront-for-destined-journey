@@ -32,6 +32,7 @@ import CgGalleryPanel from './CgGalleryPanel.vue';
 import MapPanel from './MapPanel.vue';
 import DebugPanel from './DebugPanel.vue';
 import CardAlbumPanel from './cards/CardAlbumPanel.vue';
+import CommissionBoard from './cards/CommissionBoard.vue';
 import CraftBench from './cards/CraftBench.vue';
 import MiniPlayer from './MiniPlayer.vue';
 import CombatPanel from './combat/CombatPanel.vue';
@@ -502,6 +503,16 @@ function onModalOpenChange(v: boolean) {
       @update:open="onModalOpenChange"
     >
       <CardAlbumPanel />
+    </AppModal>
+    <AppModal
+      title="公会委托板 · 卡兰大陆"
+      :open="game.activeModal === 'commissionBoard'"
+      size="lg"
+      closable
+      @close="game.closeModal()"
+      @update:open="onModalOpenChange"
+    >
+      <CommissionBoard />
     </AppModal>
     <AppModal
       title="制卡工作台"
