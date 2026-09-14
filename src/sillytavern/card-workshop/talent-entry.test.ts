@@ -69,6 +69,9 @@ describe('TALENT_ENTRY_POOL（单一真源）', () => {
     '击杀掠取',
     '连战递增',
     '鉴定',
+    '威压',
+    '配方解锁',
+    '体魄',
   ];
   const ALL_CHANNELS: readonly TalentChannel[] = [
     'creation',
@@ -87,17 +90,17 @@ describe('TALENT_ENTRY_POOL（单一真源）', () => {
 });
 
 describe('validateTalentEntries —— AI 零编数门禁', () => {
-  it('池内条目命中并回填池内规范对象（channel 以池为准）', () => {
-    const forged: TalentEntry = { ...成功率加成50, channel: 'story' }; // AI 想改渠道标记
+  it('池内档位条目命中（channel 保留授予方标记，结构校验不改写）', () => {
+    const forged: TalentEntry = { ...成功率加成50, channel: 'story' };
     const got = validateTalentEntries([forged]);
     expect(got.ok).toBe(true);
-    expect(got.normalized[0].channel).toBe('universal');
+    expect(got.normalized[0].channel).toBe('story');
   });
   it('编数值 → 整组拒绝（bonus 不在档位）', () => {
     const hacked: TalentEntry = { kind: '成功率加成', channel: 'universal', params: { bonus: 99 } };
     const got = validateTalentEntries([成功率加成50, hacked]);
     expect(got.ok).toBe(false);
-    expect(got.reason).toContain('不在骨架条目池内');
+    expect(got.reason).toContain('不在档位白名单');
     expect(got.normalized).toEqual([]);
   });
   it('未知 kind → 拒绝', () => {
@@ -149,8 +152,8 @@ describe('tierUp —— 品质越一级', () => {
   });
 });
 
-describe('TALENT_CATALOG —— 目录与条目池一致性（门禁不被自家目录打脸）', () => {
-  it('目录每条模板的骨架条目都逐字命中条目池', () => {
+describe('TALENT_CATALOG —— 目录条目过种类规则校验（门禁不被自家目录打脸）', () => {
+  it('目录每条模板的骨架条目都通过结构校验', () => {
     for (const tpl of TALENT_CATALOG) {
       const v = validateTalentEntries(tpl.entries);
       expect(`${tpl.name}: ${v.reason ?? 'ok'}`).toBe(`${tpl.name}: ok`);
@@ -209,5 +212,34 @@ describe('v2 扩容 —— 品级 / 生成倾向 / 战技赋予（截图灵感�
     const 猫 = getTalentTemplate('猫之九命');
     const 转化 = 猫?.entries.find((e) => e.kind === '形态转化');
     expect(转化?.params.series).toBe('猫娘');
+  });
+});
+
+describe('v4 扩容 —— 威压/配方解锁/体魄 条目', () => {
+  it('威压参数命中池（30% 档）', () => {
+    const v = validateTalentEntries([
+      { kind: '威压', channel: 'universal', params: { percent: 30 } },
+    ]);
+    expect(v.ok).toBe(true);
+  });
+  it('配方解锁：配方名是内容（任意非空名都放行），缺名才拒绝', () => {
+    const 命中 = validateTalentEntries([
+      { kind: '配方解锁', channel: 'universal', params: { recipe: '任意配方名' } },
+    ]);
+    expect(命中.ok).toBe(true);
+    const 缺名 = validateTalentEntries([{ kind: '配方解锁', channel: 'universal', params: {} }]);
+    expect(缺名.ok).toBe(false);
+  });
+  it('体魄参数命中池（200% 档）', () => {
+    const v = validateTalentEntries([
+      { kind: '体魄', channel: 'universal', params: { percent: 200 } },
+    ]);
+    expect(v.ok).toBe(true);
+  });
+  it('威压参数越档（percent 77）→ 拒绝', () => {
+    const v = validateTalentEntries([
+      { kind: '威压', channel: 'universal', params: { percent: 77 } },
+    ]);
+    expect(v.ok).toBe(false);
   });
 });

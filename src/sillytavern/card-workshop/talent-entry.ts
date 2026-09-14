@@ -41,7 +41,10 @@ export type TalentEntryKind =
   // 数值层·击杀与连胜
   | '击杀掠取' // 击败敌人时缴获赏金（踏碎的尊严/无限猎杀系统）
   | '连战递增' // 每多打一拍行动值递增（征服印记/无情连打）
-  | '鉴定'; // 感知素材真实价值（风味条目，无机械参数）
+  | '鉴定' // 感知素材真实价值（风味条目，无机械参数）
+  | '威压' // 敌方全体属性百分比降低（交锋拍威胁 ×(1−pct/100)）
+  | '配方解锁' // 解锁特殊卡牌的制作方法（注入炼制提示词）
+  | '体魄'; // HP 上限百分比提升（交锋拍 maxHp ×(1+pct/100)）
 
 /** 骨架条目：kind + 预设参数 + 独占渠道标记 */
 export interface TalentEntry {
@@ -80,6 +83,10 @@ export interface TalentEntry {
     power?: number;
     /** 战技附加：持续拍数 */
     beats?: number;
+    /** 威压：敌方属性降低百分比 */
+    percent?: number;
+    /** 配方解锁：解锁的配方名 */
+    recipe?: string;
   };
 }
 
@@ -163,6 +170,58 @@ export const TALENT_ENTRY_POOL: readonly TalentEntry[] = [
   e({ kind: '战技附加', channel: 'universal', params: { status: '驯服', power: 0, beats: 1 } }),
   e({ kind: '战技附加', channel: 'universal', params: { status: '退化', power: 6, beats: 2 } }),
   e({ kind: '战技附加', channel: 'universal', params: { status: '墨狼', power: 2, beats: 2 } }),
+  // ── v4 扩容（威压/配方解锁/体魄 + 新状态新材料新词条）──
+  e({ kind: '威压', channel: 'universal', params: { percent: 30 } }),
+  e({ kind: '配方解锁', channel: 'universal', params: { recipe: '示例配方' } }),
+  e({ kind: '体魄', channel: 'universal', params: { percent: 200 } }),
+  e({ kind: '战技附加', channel: 'universal', params: { status: '幻觉', power: 2, beats: 2 } }),
+  e({ kind: '战技附加', channel: 'universal', params: { status: '快感', power: 0, beats: 1 } }),
+  e({ kind: '战技附加', channel: 'universal', params: { status: '惩戒', power: 1, beats: 1 } }),
+  e({ kind: '战技附加', channel: 'universal', params: { status: '诅咒', power: 3, beats: 3 } }),
+  e({ kind: '战技附加', channel: 'universal', params: { status: '麻痹', power: 0, beats: 1 } }),
+  e({ kind: '战技附加', channel: 'universal', params: { status: '破贞', power: 0, beats: 0 } }),
+  e({
+    kind: '战技附加',
+    channel: 'universal',
+    params: { status: '窃取属性', power: 10, beats: 1 },
+  }),
+  e({ kind: '材料限定', channel: 'universal', params: { materialClass: '机械' } }),
+  e({ kind: '材料限定', channel: 'universal', params: { materialClass: '装备' } }),
+  e({ kind: '材料限定', channel: 'universal', params: { materialClass: '活体' } }),
+  e({ kind: '材料限定', channel: 'universal', params: { materialClass: '失能生命' } }),
+  e({ kind: '材料限定', channel: 'universal', params: { materialClass: '神圣' } }),
+  e({ kind: '材料限定', channel: 'universal', params: { materialClass: '哥布林' } }),
+  e({ kind: '材料限定', channel: 'universal', params: { materialClass: '低阶' } }),
+  e({ kind: '词条加权', channel: 'universal', params: { keywords: ['舞绊'], weight: 3 } }),
+  e({
+    kind: '词条加权',
+    channel: 'universal',
+    params: { keywords: ['穿甲', '爆破', '追踪'], weight: 3 },
+  }),
+  e({
+    kind: '词条加权',
+    channel: 'universal',
+    params: { keywords: ['庇护', '治愈光环'], weight: 2 },
+  }),
+  e({ kind: '词条加权', channel: 'universal', params: { keywords: ['削弱', '控制'], weight: 2 } }),
+  e({ kind: '词条加权', channel: 'universal', params: { keywords: ['元气少女'], weight: 3 } }),
+  e({ kind: '词条加权', channel: 'universal', params: { keywords: ['良性突变'], weight: 3 } }),
+  e({ kind: '词条加权', channel: 'universal', params: { keywords: ['神烙'], weight: 3 } }),
+  e({ kind: '词条加权', channel: 'universal', params: { keywords: ['腿部攻击'], weight: 2 } }),
+  e({ kind: '词条加权', channel: 'universal', params: { keywords: ['猫系'], weight: 2 } }),
+  e({ kind: '词条加权', channel: 'universal', params: { keywords: ['圣水'], weight: 2 } }),
+  e({ kind: '词条加权', channel: 'universal', params: { keywords: ['野猪'], weight: 2 } }),
+  e({ kind: '词条加权', channel: 'universal', params: { keywords: ['组合'], weight: 3 } }),
+  e({ kind: '词条加权', channel: 'universal', params: { keywords: ['雷电'], weight: 2 } }),
+  e({
+    kind: '词条加权',
+    channel: 'universal',
+    params: { keywords: ['献身', '淫乱'], weight: 3 },
+  }),
+  e({ kind: '词条加权', channel: 'universal', params: { keywords: ['哥布林'], weight: 3 } }),
+  e({ kind: '词条加权', channel: 'universal', params: { keywords: ['家畜'], weight: 2 } }),
+  e({ kind: '行动值加成', channel: 'universal', params: { amount: 6 } }),
+  e({ kind: '防御加值', channel: 'universal', params: { amount: 2 } }),
   // ── 渠道独占 ──
   e({ kind: '成功率加成', channel: 'creation', params: { bonus: 20, excl: '天才卡师' } }),
   e({
@@ -176,6 +235,7 @@ export const TALENT_ENTRY_POOL: readonly TalentEntry[] = [
   e({ kind: '行动值加成', channel: 'exchange', params: { amount: 2, excl: '卡牌宗师' } }),
 ];
 
+/** 参数全等（逐键比较全部已知参数位；新参数加入时同步这里） */
 /** 参数全等（逐键比较全部已知参数位；新参数加入时同步这里） */
 function sameParams(a: TalentEntry['params'], b: TalentEntry['params']): boolean {
   return (
@@ -194,8 +254,8 @@ function sameParams(a: TalentEntry['params'], b: TalentEntry['params']): boolean
     a.status === b.status &&
     a.power === b.power &&
     a.beats === b.beats &&
-    a.gold === b.gold &&
-    a.copies === b.copies
+    a.percent === b.percent &&
+    a.recipe === b.recipe
   );
 }
 
@@ -215,27 +275,100 @@ export function normalizeTalentEntry(entry: TalentEntry): TalentEntry | null {
 }
 
 /**
- * 条目校验（AI 零编数门禁）：每一条都必须逐字命中池内预设；命中后**回填池内规范对象**
- * （channel 以池为准——独占天赋的条目渠道标记不可被授予方改写）。任一条不命中 → 整组拒绝。
+ * 条目校验 v2（按种类规则校验，取代「逐字命中池」——内容名归 AI，数值档位归 Code）：
+ *  - kind 必须是已知条目种类；
+ *  - 数值参数必须命中该种类的**档位白名单**（AI 零编数）；
+ *  - 内容参数（材料类/成品类/系列名/配方名/状态名/关键词）为非空字符串即可——名字是内容；
+ *  - 未知参数键一律拒绝。
+ * normalized = 原样回传（结构已合法；此处不做对象改写）。
  */
+const ENTRY_NUMERIC_TIERS: Partial<
+  Record<TalentEntryKind, Partial<Record<string, readonly number[]>>>
+> = {
+  成功率加成: { bonus: [20, 30, 50, 100] },
+  启封加值: { amount: [1, 2] },
+  行动值加成: { amount: [1, 2, 3, 6] },
+  防御加值: { amount: [1, 2, 4] },
+  威压: { percent: [30] },
+  体魄: { percent: [200] },
+  产出数量: { copies: [1, 3] },
+  风险系数: { risk: [20] },
+  金钱加投: { gold: [50], bonus: [20] },
+  连战递增: { amount: [2, 3] },
+  击杀掠取: { gold: [5, 10] },
+  战技附加: { power: [0, 2, 3, 4, 6, 10], beats: [0, 1, 2, 3] },
+  词条加权: { weight: [1, 2, 3] },
+};
+
+/** 各种类的必填内容参数（非空字符串；keywords 为字符串数组） */
+const ENTRY_REQUIRED_STRINGS: Partial<Record<TalentEntryKind, readonly string[]>> = {
+  材料限定: ['materialClass'],
+  成品限定: ['productClass'],
+  形态转化: ['series'],
+  配方解锁: ['recipe'],
+  战技附加: ['status'],
+};
+
+const ENTRY_KIND_LIST: readonly TalentEntryKind[] = [
+  '材料限定',
+  '成品限定',
+  '成功率加成',
+  '品质锁定',
+  '品质突破',
+  '启封加值',
+  '行动值加成',
+  '防御加值',
+  '产出数量',
+  '风险系数',
+  '金钱加投',
+  '判定取优',
+  '词条加权',
+  '形态转化',
+  '战技附加',
+  '击杀掠取',
+  '连战递增',
+  '鉴定',
+  '威压',
+  '配方解锁',
+  '体魄',
+];
+
 export function validateTalentEntries(entries: readonly TalentEntry[]): {
   ok: boolean;
   reason?: string;
   normalized: TalentEntry[];
 } {
-  const normalized: TalentEntry[] = [];
   for (const entry of entries) {
-    const preset = findPreset(entry);
-    if (!preset) {
-      return {
-        ok: false,
-        reason: `条目「${entry.kind}」不在骨架条目池内（AI 零编数）`,
-        normalized: [],
-      };
+    if (!ENTRY_KIND_LIST.includes(entry.kind)) {
+      return { ok: false, reason: `条目种类「${entry.kind}」未知`, normalized: [] };
     }
-    normalized.push(preset);
+    const tiers = ENTRY_NUMERIC_TIERS[entry.kind] ?? {};
+    for (const [key, allowed] of Object.entries(tiers)) {
+      const v = entry.params[key as keyof TalentEntry['params']];
+      if (
+        typeof v !== 'number' ||
+        !Number.isFinite(v) ||
+        !(allowed as readonly number[]).includes(v)
+      ) {
+        return {
+          ok: false,
+          reason: `条目「${entry.kind}」参数 ${key}=${String(v)} 不在档位白名单`,
+          normalized: [],
+        };
+      }
+    }
+    for (const key of ENTRY_REQUIRED_STRINGS[entry.kind] ?? []) {
+      const v = entry.params[key as keyof TalentEntry['params']];
+      if (typeof v !== 'string' || v.trim().length === 0) {
+        return {
+          ok: false,
+          reason: `条目「${entry.kind}」缺少内容参数 ${key}`,
+          normalized: [],
+        };
+      }
+    }
   }
-  return { ok: true, normalized };
+  return { ok: true, normalized: [...entries] };
 }
 
 // ========== 融合化学反应 ==========

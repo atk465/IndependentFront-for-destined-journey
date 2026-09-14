@@ -86,7 +86,7 @@ describe('update_character talents 写入门禁', () => {
           },
         },
       ]),
-    ).rejects.toThrow('不在骨架条目池内');
+    ).rejects.toThrow('不在档位白名单');
   });
 
   it('同名唯一：重复习得 → 拒绝', async () => {
