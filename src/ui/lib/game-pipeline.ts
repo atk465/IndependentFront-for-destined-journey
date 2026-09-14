@@ -49,6 +49,7 @@ import {
 } from '@engine/card-workshop/entry-combat';
 import { willModifierOf } from '@engine/card-workshop/unsealing';
 import { getCommissionDefs } from '@engine/commission-runtime';
+import { buildCraftBiasLines } from '@engine/card-workshop/talent-entry';
 import { runTalentFusionNaming } from '@engine/card-workshop/talent-naming';
 import { basicCounterAction, deriveCombatStats } from '@engine/card-workshop/derived-stats';
 import {
@@ -3163,6 +3164,8 @@ export class GamePipeline {
     for (const marker of markers) {
       try {
         this.updateAgentActivityStatus('craft_gen', runActivityId);
+        const playerTalentList = this.game.player?.talents?.list ?? [];
+        const talentBias = buildCraftBiasLines(playerTalentList).join('\n');
         const request = {
           saveId: this.saveId,
           marker,
@@ -3172,6 +3175,7 @@ export class GamePipeline {
           configs: this.chainData?.agentConfigs,
           worldBooks: this.chainData?.worldBooks,
           presets: this.chainData?.presets,
+          talentBias,
         } as any;
         const result = await runCraftGenChain(request, {
           clientFactory,

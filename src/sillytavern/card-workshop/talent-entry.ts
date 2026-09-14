@@ -6644,3 +6644,49 @@ export function talentExchangePrice(template: TalentTemplate): number {
   const mult = GRADE_PRICE_MULTIPLIER[template.grade] ?? 1;
   return Math.round((base * mult) / 5) * 5; // 5 的倍数取整，好看
 }
+
+// ========== 炼制倾向汇总（生成倾向层 → craft_gen 提示词，T-S2 路线图实装） ==========
+
+/** 炼制天赋倾向的宽松输入形状 */
+export interface CraftBiasTalentLike {
+  name?: string;
+  entries?: Array<{
+    kind: string;
+    params: {
+      keywords?: string[];
+      weight?: number;
+      series?: string;
+      recipe?: string;
+      materialClass?: string;
+      productClass?: string;
+    };
+  }>;
+}
+
+/**
+ * 汇总玩家天赋中的「生成倾向」条目为提示词行：
+ *  - 词条加权 → 产出词条倾向（权重3=必附）
+ *  - 形态转化 → 产出形态定向
+ *  - 配方解锁 → 已解锁特殊配方
+ * 纯函数；无天赋/无倾向 → 空数组（调用方不注入，零 token）。
+ */
+export function buildCraftBiasLines(talents: readonly CraftBiasTalentLike[] | undefined): string[] {
+  const lines: string[] = [];
+  for (const t of talents ?? []) {
+    for (const e of t.entries ?? []) {
+      if (
+        e.kind === '词条加权' &&
+        Array.isArray(e.params.keywords) &&
+        e.params.keywords.length > 0
+      ) {
+        const w = e.params.weight === 3 ? '必附' : '倾向';
+        lines.push(`词条倾向（${w}）：${e.params.keywords.join('、')}`);
+      } else if (e.kind === '形态转化' && e.params.series) {
+        lines.push(`形态定向：${e.params.series}系列`);
+      } else if (e.kind === '配方解锁' && e.params.recipe) {
+        lines.push(`已解锁配方：${e.params.recipe}`);
+      }
+    }
+  }
+  return lines;
+}

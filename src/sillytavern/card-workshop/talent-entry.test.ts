@@ -17,6 +17,7 @@ import {
   getCreationCatalog,
   getExchangeCatalog,
   talentExchangePrice,
+  buildCraftBiasLines,
   getTalentTemplate,
   GRADE_PRICE_MULTIPLIER,
   type TalentGrade,
@@ -241,5 +242,44 @@ describe('v4 扩容 —— 威压/配方解锁/体魄 条目', () => {
       { kind: '威压', channel: 'universal', params: { percent: 77 } },
     ]);
     expect(v.ok).toBe(false);
+  });
+});
+
+describe('buildCraftBiasLines —— 炼制倾向汇总（切片 T-S2 实装）', () => {
+  it('词条加权 → 词条倾向行（权重3=必附）', async () => {
+    const { buildCraftBiasLines } = await import('./talent-entry');
+    const lines = buildCraftBiasLines([
+      {
+        name: '犬类伙伴',
+        entries: [
+          {
+            kind: '词条加权',
+            params: { keywords: ['忠诚', '追踪'], weight: 2 },
+          } as never,
+        ],
+      } as never,
+    ]);
+    expect(lines).toEqual(['词条倾向（倾向）：忠诚、追踪']);
+  });
+
+  it('形态转化与配方解锁各占一行', async () => {
+    const { buildCraftBiasLines } = await import('./talent-entry');
+    const lines = buildCraftBiasLines([
+      {
+        name: '猫之九命',
+        entries: [{ kind: '形态转化', params: { series: '猫娘' } } as never],
+      },
+      {
+        name: '军火巨头',
+        entries: [{ kind: '配方解锁', params: { recipe: '弹药卡' } } as never],
+      },
+    ]);
+    expect(lines).toContain('形态定向：猫娘系列');
+    expect(lines).toContain('已解锁配方：弹药卡');
+  });
+
+  it('无天赋 / 空列表 → 空数组（零 token）', async () => {
+    expect(buildCraftBiasLines(undefined)).toEqual([]);
+    expect(buildCraftBiasLines([])).toEqual([]);
   });
 });

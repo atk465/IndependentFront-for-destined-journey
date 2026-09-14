@@ -58,6 +58,8 @@ export interface CraftGenRequest {
   configs?: import('./types').AgentConfig[];
   worldBooks?: import('./types').WorldBook[];
   presets?: import('./types').AgentPreset[];
+  /** 天赋生成倾向段（卡牌工坊 T-S2 路线图实装；无天赋缺省，注入零成本） */
+  talentBias?: string;
 }
 
 /** Helper: extract attributes from old or new marker shape */
@@ -197,8 +199,15 @@ export async function callCraftGenAgent(
     agentOutputs: new Map([['story', markerContext]]),
   };
 
+  // 天赋生成倾向段（词条加权/形态转化/配方解锁）——置于请求体之前，AI 优先读
+  const talentBiasBlock = request.talentBias
+    ? `<制卡师天赋倾向>
+${request.talentBias}
+</制卡师天赋倾向>
+`
+    : '';
   const craftLocalParams: Record<string, string> = {
-    CRAFT_REQUEST: markerBody || request.storyOutput,
+    CRAFT_REQUEST: talentBiasBlock + (markerBody || request.storyOutput),
   };
 
   // 真机修(2026-07-17): configs/worldBooks/presets 透传
