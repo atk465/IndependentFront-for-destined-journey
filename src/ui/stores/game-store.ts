@@ -29,7 +29,11 @@ import { buildDemoCardsPatches, buildDemoDeckPatches } from '@engine/card-worksh
 import { toPlainCardAlbum } from '@engine/card-workshop/album';
 import { planCommissionDelivery } from '@engine/card-workshop/commission';
 import { getCommissionDefs } from '@engine/commission-runtime';
-import { getExchangeCatalog, talentExchangePrice } from '@engine/card-workshop/talent-entry';
+import {
+  fuseEntrySets,
+  getExchangeCatalog,
+  talentExchangePrice,
+} from '@engine/card-workshop/talent-entry';
 import { getReputation as getTalentReputation } from '@engine/save-profile';
 import type { SkirmishSession } from '@engine/card-workshop/skirmish-session';
 import type { SkirmishChoice } from '@engine/card-workshop/skirmish';
@@ -1845,6 +1849,83 @@ export const useGameStore = defineStore('game', () => {
     return { ok: true };
   }
 
+  /** 遗忘天赋（T-S3）：腾出容量位，无返还（二次确认由面板负责）。 */
+  async function forgetTalent(talentName: string): Promise<{ ok: boolean; reason?: string }> {
+    if (!activeSaveId.value) return { ok: false, reason: '无活跃存档' };
+    const playerChar = player.value;
+    const current = playerChar?.talents;
+    if (!playerChar || !current) return { ok: false, reason: '无玩家角色' };
+    if (!current.list.some((t) => t.name === talentName)) {
+      return { ok: false, reason: `没有天赋【${talentName}】` };
+    }
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState([
+      {
+        op: 'update_character',
+        target: `characters.${playerChar.name}`,
+        value: {
+          talents: {
+            capacity: current.capacity,
+            list: current.list.filter((t) => t.name !== talentName),
+          },
+        },
+      },
+    ]);
+    if (!result.success) return { ok: false, reason: result.errors.join('; ') };
+    await refreshFromDb();
+    return { ok: true };
+  }
+
+  /**
+   * 天赋融合（T-S3 融合工作台）：两源天赋条目化学反应（fuseEntrySets：品质保底+
+   * 上限对消成品质突破，其余叠加去重、互斥过滤）→ 产物占用 1 格。
+   * 名字/描述由面板提供（T8-② 裁定：AI 起名为主、玩家自填兜底）；提交带
+   * metadata source='talent-fusion'，写入门禁据此放行品质突破条目。
+   */
+  async function fuseTalents(
+    sourceAName: string,
+    sourceBName: string,
+    productName: string,
+    productDescription?: string,
+  ): Promise<{ ok: boolean; reason?: string }> {
+    if (!activeSaveId.value) return { ok: false, reason: '无活跃存档' };
+    const playerChar = player.value;
+    const current = playerChar?.talents;
+    if (!playerChar || !current) return { ok: false, reason: '无玩家角色' };
+    if (sourceAName === sourceBName) return { ok: false, reason: '不能拿同一个天赋融合自己' };
+    const a = current.list.find((t) => t.name === sourceAName);
+    const b = current.list.find((t) => t.name === sourceBName);
+    if (!a || !b) return { ok: false, reason: '源天赋不存在' };
+    const name = productName.trim();
+    if (!name) return { ok: false, reason: '融合产物需要一个名字' };
+    const mergedEntries = fuseEntrySets(a.entries, b.entries);
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState([
+      {
+        op: 'update_character',
+        target: `characters.${playerChar.name}`,
+        value: {
+          talents: {
+            capacity: current.capacity,
+            list: [
+              ...current.list.filter((t) => t.name !== sourceAName && t.name !== sourceBName),
+              {
+                name,
+                ...(productDescription?.trim() ? { description: productDescription.trim() } : {}),
+                source: 'fusion' as const,
+                entries: mergedEntries,
+              },
+            ],
+          },
+        },
+        metadata: { source: 'talent-fusion' },
+      },
+    ]);
+    if (!result.success) return { ok: false, reason: result.errors.join('; ') };
+    await refreshFromDb();
+    return { ok: true };
+  }
+
   /**
    * 单条目重铸（2026-08-24）：把某角色的一条技能/装备/物品交给 item_gen 重写。
    *
@@ -1970,6 +2051,8 @@ export const useGameStore = defineStore('game', () => {
     fleeSkirmish,
     deliverCommission,
     exchangeTalent,
+    forgetTalent,
+    fuseTalents,
     getCommissionDefs,
     combatDeckStripStates,
     abandonCombat,

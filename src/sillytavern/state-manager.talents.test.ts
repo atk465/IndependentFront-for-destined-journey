@@ -57,6 +57,7 @@ describe('update_character talents 写入门禁', () => {
             ],
           },
         },
+        metadata: { source: 'talent-fusion' },
       },
     ]);
     const t = await readTalents();

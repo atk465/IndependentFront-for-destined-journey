@@ -33,6 +33,7 @@ import MapPanel from './MapPanel.vue';
 import DebugPanel from './DebugPanel.vue';
 import CardAlbumPanel from './cards/CardAlbumPanel.vue';
 import CommissionBoard from './cards/CommissionBoard.vue';
+import TalentPanel from './cards/TalentPanel.vue';
 import CraftBench from './cards/CraftBench.vue';
 import MiniPlayer from './MiniPlayer.vue';
 import CombatPanel from './combat/CombatPanel.vue';
@@ -513,6 +514,16 @@ function onModalOpenChange(v: boolean) {
       @update:open="onModalOpenChange"
     >
       <CommissionBoard />
+    </AppModal>
+    <AppModal
+      title="天赋 · 卡兰大陆"
+      :open="game.activeModal === 'talentPanel'"
+      size="lg"
+      closable
+      @close="game.closeModal()"
+      @update:open="onModalOpenChange"
+    >
+      <TalentPanel />
     </AppModal>
     <AppModal
       title="制卡工作台"

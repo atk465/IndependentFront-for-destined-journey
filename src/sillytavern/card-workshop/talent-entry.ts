@@ -121,6 +121,11 @@ function findPreset(entry: TalentEntry): TalentEntry | undefined {
   );
 }
 
+/** 条目规范化：命中池 → 返回池内规范对象（channel 以池为准）；未命中 → null */
+export function normalizeTalentEntry(entry: TalentEntry): TalentEntry | null {
+  return findPreset(entry) ?? null;
+}
+
 /**
  * 条目校验（AI 零编数门禁）：每一条都必须逐字命中池内预设；命中后**回填池内规范对象**
  * （channel 以池为准——独占天赋的条目渠道标记不可被授予方改写）。任一条不命中 → 整组拒绝。

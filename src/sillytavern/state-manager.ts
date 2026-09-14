@@ -138,7 +138,11 @@ import {
 } from './random-event-scheduler';
 // 地点键与上下文快照的**唯一**实现（写侧与读侧共用，见该模块文件头）
 import { buildRandomEventRollContext } from './random-event-snapshot';
-import { validateTalentEntries, type TalentEntry } from './card-workshop/talent-entry';
+import {
+  normalizeTalentEntry,
+  validateTalentEntries,
+  type TalentEntry,
+} from './card-workshop/talent-entry';
 import type { RandomEventRollContext } from './types-random-events';
 import type { EjsVarsDiff } from './ejs-vars-diff';
 import {
@@ -958,7 +962,7 @@ export class StateManager {
    *  ④ 互斥组不可共存；⑤ 🔴 AI 零编数——entries 逐字命中 talent-entry 池，
    *  并回填池内规范对象（AI 伪造的 channel/参数就地纠正或拒绝）。原地规范化 value。
    */
-  private normalizeTalentsValue(value: { talents?: unknown }): void {
+  private normalizeTalentsValue(value: { talents?: unknown }, talentSource: string): void {
     const t = value.talents as { capacity?: unknown; list?: unknown } | undefined;
     if (!t || typeof t !== 'object' || !Array.isArray(t.list)) {
       throw new Error('talents 形状非法（需要 { capacity, list }）');
@@ -978,9 +982,29 @@ export class StateManager {
       if (names.has(name)) throw new Error(`同名天赋不可重复习得：${name}`);
       names.add(name);
       const rawEntries = Array.isArray(talent.entries) ? (talent.entries as TalentEntry[]) : [];
-      const v = validateTalentEntries(rawEntries);
+      // 融合产物特例：品质突破条目由 Code 化学反应算出（metadata source='talent-fusion'
+      // 时放行，只做结构校验），不算 AI 编数；其余条目仍逐字命中条目池
+      const breakthroughs = rawEntries.filter((e) => e.kind === '品质突破');
+      if (breakthroughs.length > 0 && talentSource !== 'talent-fusion') {
+        throw new Error(`天赋「${name}」含融合产物条目——必须经融合工作台获得`);
+      }
+      if (breakthroughs.length > 1) throw new Error(`天赋「${name}」品质突破条目至多一条`);
+      for (const b of breakthroughs) {
+        const mc = b.params.materialClass;
+        const pc = b.params.productClass;
+        if (
+          (mc !== undefined && typeof mc !== 'string') ||
+          (pc !== undefined && typeof pc !== 'string')
+        ) {
+          throw new Error(`天赋「${name}」品质突破参数非法`);
+        }
+      }
+      const v = validateTalentEntries(rawEntries.filter((e) => e.kind !== '品质突破'));
       if (!v.ok) throw new Error(`天赋「${name}」${v.reason}`);
-      talent.entries = v.normalized;
+      talent.entries = [
+        ...v.normalized,
+        ...breakthroughs.map((b) => normalizeTalentEntry(b) ?? b), // 命中池则回填规范对象
+      ];
       for (const entry of v.normalized) {
         const group = entry.params.excl;
         if (!group) continue;
@@ -1044,7 +1068,7 @@ export class StateManager {
 
       // ===== 天赋写入门禁（访谈共识 T1~T8：AI 零编数 + 同名唯一 + 容量 + 互斥组）=====
       if (keys.includes('talents')) {
-        this.normalizeTalentsValue(value);
+        this.normalizeTalentsValue(value, String(patch.metadata?.source ?? ''));
       }
 
       // ===== 全部合法 → 落地 =====
