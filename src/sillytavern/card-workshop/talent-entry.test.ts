@@ -66,6 +66,9 @@ describe('TALENT_ENTRY_POOL（单一真源）', () => {
     '词条加权',
     '形态转化',
     '战技附加',
+    '击杀掠取',
+    '连战递增',
+    '鉴定',
   ];
   const ALL_CHANNELS: readonly TalentChannel[] = [
     'creation',

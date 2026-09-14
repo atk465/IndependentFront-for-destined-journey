@@ -2921,8 +2921,19 @@ export class GamePipeline {
     const playerC = this.game.player;
     if (!session || session.finished !== null || !playerC) return;
 
+    // 连战递增（天赋）：每多打一拍行动值 +条目量（第一拍无加成）
+    let escalate = 0;
+    for (const t of playerC.talents?.list ?? []) {
+      for (const e of t.entries) {
+        if (e.kind === '连战递增') escalate += Math.max(0, Math.round(e.params.amount ?? 0));
+      }
+    }
+
     let action: SkirmishAction;
     let activate: CardInPlayEffect | undefined;
+    let prepend: string[] | undefined;
+    let recoil: number | undefined;
+    let sealBroke: string | undefined;
     if (choice.kind === '卡') {
       // 会话临时账（真机裁定 2026-09-13）：同一张卡一场只能打出一次
       if (session.playedCards.includes(choice.name)) {
@@ -2948,11 +2959,25 @@ export class GamePipeline {
           willModifierOf(playerC.attributes),
         );
         const beatDice = this.rollD20();
-        const next = playBeat(session, res.action, beatDice, {
-          activate: res.activate,
-          prepend: res.prepend,
-          recoil: res.recoil,
-          sealBroke: res.sealBroke,
+        const escalateBeat = escalate > 0 && session.beat > 0 ? escalate * session.beat : 0;
+        action =
+          escalateBeat > 0 && res.action.power > 0
+            ? { ...res.action, power: res.action.power + escalateBeat }
+            : res.action;
+        activate = res.activate;
+        prepend = [
+          ...res.prepend,
+          ...(escalateBeat > 0
+            ? [`▸ 连战递增：行动值 +${escalateBeat}（第 ${session.beat + 1} 拍）`]
+            : []),
+        ];
+        recoil = res.recoil;
+        sealBroke = res.sealBroke;
+        const next = playBeat(session, action, beatDice, {
+          activate,
+          prepend,
+          recoil,
+          sealBroke,
         });
         this.game.setSkirmishSession(next);
         this.emitMessage(next.log.slice(session.log.length).join('\n'), 'assistant');
@@ -2982,7 +3007,16 @@ export class GamePipeline {
       );
     }
 
-    const next = playBeat(session, action, this.rollD20(), activate ? { activate } : undefined);
+    if (escalate > 0 && session.beat > 0) {
+      action = { ...action, power: action.power + escalate * session.beat };
+      prepend = [`▸ 连战递增：行动值 +${escalate * session.beat}（第 ${session.beat + 1} 拍）`];
+    }
+    const next = playBeat(
+      session,
+      action,
+      this.rollD20(),
+      prepend || activate ? { activate, prepend } : undefined,
+    );
     this.game.setSkirmishSession(next);
     this.emitMessage(next.log.slice(session.log.length).join('\n'), 'assistant');
     if (next.finished) await this.settleAndNarrate(next);
@@ -3039,18 +3073,35 @@ export class GamePipeline {
     // ③ 同窗原子落库 + 回读 + 防重触发记录
     if (this.ownsActiveSave) {
       const sm = createStateManager(this.saveId);
-      const result = await sm.commitChatState(
-        buildSkirmishSettlementPatches({
-          playerName: playerC.name,
-          playerTotalExp: playerC.totalExp,
-          session,
-          settlement,
-          cardOf: (name) => {
-            const found = playerC.inventory.find((i) => i.name === name);
-            return found?.type === '卡牌' ? (found as CardItem) : undefined;
-          },
-        }),
-      );
+      const settlementPatches = buildSkirmishSettlementPatches({
+        playerName: playerC.name,
+        playerTotalExp: playerC.totalExp,
+        session,
+        settlement,
+        cardOf: (name) => {
+          const found = playerC.inventory.find((i) => i.name === name);
+          return found?.type === '卡牌' ? (found as CardItem) : undefined;
+        },
+      });
+      // 击杀掠取（天赋）：胜利/碾压时按条目缴获赏金（delta 入账）
+      let killGc = 0;
+      if (session.finished === '胜利' || session.finished === '碾压') {
+        for (const t of playerC.talents?.list ?? []) {
+          for (const e of t.entries) {
+            if (e.kind === '击杀掠取') killGc += Math.max(0, Math.round(e.params.gold ?? 0));
+          }
+        }
+      }
+      if (killGc > 0) {
+        settlementPatches.push({
+          op: 'update_character',
+          target: `characters.${playerC.name}`,
+          value: { money: killGc },
+          metadata: { delta: true, source: 'skirmish-kill' },
+        });
+        this.emitMessage(`▸ 击杀掠取：缴获 ${killGc} G`, 'assistant');
+      }
+      const result = await sm.commitChatState(settlementPatches);
       if (result.errors.length > 0) {
         console.warn('[GamePipeline] 交锋结算部分失败:', result.errors);
       }

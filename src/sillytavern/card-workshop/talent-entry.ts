@@ -37,7 +37,11 @@ export type TalentEntryKind =
   | '词条加权' // 关键词更常出现（倾向1/强倾向2/必附3）
   | '形态转化' // 产出物形态定向为某系列（猫娘/塞壬/菌娘…）
   // 战技赋予层（交锋拍战技表落地）
-  | '战技附加'; // 产出的卡带战斗状态（中毒/减速/眩晕…），params 携带量与持续拍数
+  | '战技附加' // 产出的卡带战斗状态（中毒/减速/眩晕…），params 携带量与持续拍数
+  // 数值层·击杀与连胜
+  | '击杀掠取' // 击败敌人时缴获赏金（踏碎的尊严/无限猎杀系统）
+  | '连战递增' // 每多打一拍行动值递增（征服印记/无情连打）
+  | '鉴定'; // 感知素材真实价值（风味条目，无机械参数）
 
 /** 骨架条目：kind + 预设参数 + 独占渠道标记 */
 export interface TalentEntry {
@@ -134,12 +138,31 @@ export const TALENT_ENTRY_POOL: readonly TalentEntry[] = [
   e({ kind: '词条加权', channel: 'universal', params: { keywords: ['恶臭', '感染'], weight: 3 } }),
   e({ kind: '形态转化', channel: 'universal', params: { series: '猫娘' } }),
   e({ kind: '形态转化', channel: 'universal', params: { series: '塞壬' } }),
+  e({ kind: '形态转化', channel: 'universal', params: { series: '菌娘' } }),
+  e({ kind: '形态转化', channel: 'universal', params: { series: '树妖' } }),
   e({ kind: '战技附加', channel: 'universal', params: { status: '中毒', power: 3, beats: 3 } }),
   e({ kind: '战技附加', channel: 'universal', params: { status: '蚀血', power: 4, beats: 2 } }),
   e({ kind: '战技附加', channel: 'universal', params: { status: '减速', power: 4, beats: 2 } }),
   e({ kind: '战技附加', channel: 'universal', params: { status: '眩晕', power: 0, beats: 1 } }),
   e({ kind: '战技附加', channel: 'universal', params: { status: '魅惑', power: 0, beats: 1 } }),
   e({ kind: '词条加权', channel: 'universal', params: { keywords: ['敏捷'], weight: 2 } }),
+  // ── v3 扩容（击杀/连胜/鉴定 + 新材料类）──
+  e({ kind: '击杀掠取', channel: 'universal', params: { gold: 10 } }),
+  e({ kind: '击杀掠取', channel: 'universal', params: { gold: 5 } }),
+  e({ kind: '连战递增', channel: 'universal', params: { amount: 3 } }),
+  e({ kind: '连战递增', channel: 'universal', params: { amount: 2 } }),
+  e({ kind: '鉴定', channel: 'universal', params: {} }),
+  e({ kind: '材料限定', channel: 'universal', params: { materialClass: '植物' } }),
+  e({ kind: '材料限定', channel: 'universal', params: { materialClass: '亡灵' } }),
+  e({ kind: '材料限定', channel: 'universal', params: { materialClass: '兽类' } }),
+  e({ kind: '材料限定', channel: 'universal', params: { materialClass: '岩石' } }),
+  e({ kind: '材料限定', channel: 'universal', params: { materialClass: '水域' } }),
+  e({ kind: '成功率加成', channel: 'universal', params: { bonus: 100 } }),
+  e({ kind: '词条加权', channel: 'universal', params: { keywords: ['圣遗物'], weight: 2 } }),
+  e({ kind: '词条加权', channel: 'universal', params: { keywords: ['土墙', '地刺'], weight: 2 } }),
+  e({ kind: '战技附加', channel: 'universal', params: { status: '驯服', power: 0, beats: 1 } }),
+  e({ kind: '战技附加', channel: 'universal', params: { status: '退化', power: 6, beats: 2 } }),
+  e({ kind: '战技附加', channel: 'universal', params: { status: '墨狼', power: 2, beats: 2 } }),
   // ── 渠道独占 ──
   e({ kind: '成功率加成', channel: 'creation', params: { bonus: 20, excl: '天才卡师' } }),
   e({
@@ -170,7 +193,9 @@ function sameParams(a: TalentEntry['params'], b: TalentEntry['params']): boolean
     a.series === b.series &&
     a.status === b.status &&
     a.power === b.power &&
-    a.beats === b.beats
+    a.beats === b.beats &&
+    a.gold === b.gold &&
+    a.copies === b.copies
   );
 }
 
@@ -484,6 +509,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     description: '歌声能魅惑心智不坚定的敌人。',
     entries: [
       e({ kind: '形态转化', channel: 'universal', params: { series: '塞壬' } }),
+      e({ kind: '形态转化', channel: 'universal', params: { series: '菌娘' } }),
+      e({ kind: '形态转化', channel: 'universal', params: { series: '树妖' } }),
       e({
         kind: '战技附加',
         channel: 'universal',
@@ -544,6 +571,235 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description: '睡着后制卡，效果时好时坏。',
     entries: [e({ kind: '风险系数', channel: 'universal', params: { risk: 20 } })],
+  },
+
+  // ── v3 扩容（击杀/连胜/鉴定/新材料）──
+  {
+    name: '踏碎的尊严',
+    grade: 'B' as TalentGrade,
+    source: 'universal',
+    description: '击败敌人时，总能从尸体上踩出少量卡币。',
+    entries: [e({ kind: '击杀掠取', channel: 'universal', params: { gold: 10 } })],
+  },
+  {
+    name: '无限猎杀系统',
+    grade: 'S' as TalentGrade,
+    source: 'universal',
+    description: '每击杀一个敌人都会掉落灵魂碎片，可用于提升等级或强化装备。',
+    entries: [e({ kind: '击杀掠取', channel: 'universal', params: { gold: 5 } })],
+  },
+  {
+    name: '我来!我见!我征服!',
+    grade: 'SSS' as TalentGrade,
+    source: 'story',
+    description: '每击败一名目标，你就获得一层征服印记，越战越强。',
+    entries: [e({ kind: '连战递增', channel: 'universal', params: { amount: 3 } })],
+  },
+  {
+    name: '无情连打',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '他会执着于将一个敌人彻底击倒。',
+    entries: [e({ kind: '连战递增', channel: 'universal', params: { amount: 2 } })],
+  },
+  {
+    name: '植物大战僵尸',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description: '制作植物和亡灵卡时必定成功。',
+    entries: [
+      e({ kind: '材料限定', channel: 'universal', params: { materialClass: '植物' } }),
+      e({ kind: '材料限定', channel: 'universal', params: { materialClass: '亡灵' } }),
+      e({ kind: '成功率加成', channel: 'universal', params: { bonus: 100 } }),
+    ],
+  },
+  {
+    name: '御兽奇才·东方',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description: '你与万兽有天然的亲和力，制作伙伴卡时成功率大幅提升。',
+    entries: [
+      e({ kind: '材料限定', channel: 'universal', params: { materialClass: '兽类' } }),
+      e({ kind: '成功率加成', channel: 'universal', params: { bonus: 50 } }),
+    ],
+  },
+  {
+    name: '血肉诅咒',
+    grade: 'A' as TalentGrade,
+    source: 'universal',
+    description: '擅长用血液、脓胎等素材制作恶毒的诅咒道具。',
+    entries: [
+      e({ kind: '材料限定', channel: 'universal', params: { materialClass: '血液' } }),
+      e({
+        kind: '战技附加',
+        channel: 'universal',
+        params: { status: '蚀血', power: 4, beats: 2 },
+      }),
+    ],
+  },
+  {
+    name: '墨绘丹青',
+    grade: 'A' as TalentGrade,
+    source: 'universal',
+    description: '水墨风味的卡牌，生物移动时会留下墨狼。',
+    entries: [
+      e({
+        kind: '战技附加',
+        channel: 'universal',
+        params: { status: '墨狼', power: 2, beats: 2 },
+      }),
+      e({
+        kind: '战技附加',
+        channel: 'universal',
+        params: { status: '减速', power: 4, beats: 2 },
+      }),
+    ],
+  },
+  {
+    name: '汗湿的诱惑',
+    grade: 'A' as TalentGrade,
+    source: 'universal',
+    description: '极常出汗的女性卡牌，散发出浓郁的气息。',
+    entries: [
+      e({
+        kind: '战技附加',
+        channel: 'universal',
+        params: { status: '魅惑', power: 0, beats: 1 },
+      }),
+    ],
+  },
+  {
+    name: '黏菌共生体',
+    grade: 'A' as TalentGrade,
+    source: 'universal',
+    description: '你的卡牌会转化为可爱的菌娘，能够分裂并拥抱感染敌人。',
+    entries: [
+      e({ kind: '形态转化', channel: 'universal', params: { series: '菌娘' } }),
+      e({
+        kind: '战技附加',
+        channel: 'universal',
+        params: { status: '魅惑', power: 0, beats: 1 },
+      }),
+    ],
+  },
+  {
+    name: '烈马驯教者',
+    grade: 'A' as TalentGrade,
+    source: 'universal',
+    description: '拥有绝对压制力，桀骜的坐骑终将变为你的专属。',
+    entries: [
+      e({
+        kind: '战技附加',
+        channel: 'universal',
+        params: { status: '驯服', power: 0, beats: 1 },
+      }),
+    ],
+  },
+  {
+    name: '退化射线',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description: '能将敌人的伙伴卡在战斗中降低一个等级。',
+    entries: [
+      e({
+        kind: '战技附加',
+        channel: 'universal',
+        params: { status: '退化', power: 6, beats: 2 },
+      }),
+    ],
+  },
+  {
+    name: '圣婴之躯',
+    grade: 'A' as TalentGrade,
+    source: 'universal',
+    description: '制作的伙伴卡有概率携带圣遗物——异味也会放大两倍。',
+    entries: [
+      e({
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['圣遗物'], weight: 2 },
+      }),
+    ],
+  },
+  {
+    name: '大地之握',
+    grade: 'B' as TalentGrade,
+    source: 'universal',
+    description: '岩石与土壤在你手里坚不可摧。',
+    entries: [
+      e({ kind: '材料限定', channel: 'universal', params: { materialClass: '岩石' } }),
+      e({
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['土墙', '地刺'], weight: 2 },
+      }),
+    ],
+  },
+  {
+    name: '草药学徒',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '植物类素材制作治疗药水时，成功率更高。',
+    entries: [
+      e({ kind: '材料限定', channel: 'universal', params: { materialClass: '植物' } }),
+      e({ kind: '成功率加成', channel: 'universal', params: { bonus: 30 } }),
+    ],
+  },
+  {
+    name: '深海测试',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '专精于水下与水面载具，密封性与抗压性一流。',
+    entries: [e({ kind: '材料限定', channel: 'universal', params: { materialClass: '水域' } })],
+  },
+  {
+    name: '树妖之心',
+    grade: 'B' as TalentGrade,
+    source: 'universal',
+    description: '你的卡牌会转化为热爱自然的树妖。',
+    entries: [e({ kind: '形态转化', channel: 'universal', params: { series: '树妖' } })],
+  },
+  {
+    name: '理科生',
+    grade: 'D' as TalentGrade,
+    source: 'universal',
+    description: '介绍文字就是干巴巴的数据和公式，但效果稳定可靠。',
+    entries: [],
+  },
+  {
+    name: '赌徒直觉',
+    grade: 'B' as TalentGrade,
+    source: 'universal',
+    description: '进行赌卡时，你能感觉到卡牌或素材的真实价值。',
+    entries: [e({ kind: '鉴定', channel: 'universal', params: {} })],
+  },
+  {
+    name: '口才',
+    grade: 'E' as TalentGrade,
+    source: 'universal',
+    description: '你说话比较利索，与人争论时不容易吃亏。',
+    entries: [],
+  },
+  {
+    name: '早起',
+    grade: 'E' as TalentGrade,
+    source: 'universal',
+    description: '每天早上你会比别人更早醒来，多出一些自由活动时间。',
+    entries: [],
+  },
+  {
+    name: '声优',
+    grade: 'E' as TalentGrade,
+    source: 'universal',
+    description: '你很会模仿各种声音，有时可以用来迷惑敌人。',
+    entries: [],
+  },
+  {
+    name: '不挑食',
+    grade: 'E' as TalentGrade,
+    source: 'universal',
+    description: '吃任何食物都能正常恢复体力，哪怕是味道古怪的炼金产物。',
+    entries: [],
   },
 
   // ── 融合独占 ──
