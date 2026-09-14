@@ -1,4 +1,51 @@
 {
-  "$comment": "占位内容（卡牌工坊 委托板）。真实委托定义住在私有内容仓的内容包 commissions 分节（第 15 面），公开仓只放空清单证明格式跑得通。🔴 defs 逐条走 coerceCommissions 容错：name 非串 / requireCard 非对象的条目逐条丢。requireCard 组合过滤器全可选：minTier（白铁~星辉）/ formEntry（八类形态词）/ elements（元素词条全含）/ exactName（剧情委托精确卡名）。奖励 rewards: gc（赏金）/ reputation（声望 delta）/ materials（素材 add_item）。",
-  "defs": []
+  "$comment": "占位内容（卡牌工坊 委托板）。真实委托定义住在私有内容仓的内容包 commissions 分节（第 15 面），公开仓只放三条**对着演示卡量身**的示例，让不装内容包也能走通「接取 → 炼卡/选卡 → 上交验收 → 奖励到账」全链。🔴 defs 逐条走 coerceCommissions 容错：name 非串 / requireCard 非对象的条目逐条丢。requireCard 组合过滤器全可选：minTier（白铁~星辉）/ formEntry（八类形态词）/ elements（元素词条全含）/ exactName（剧情委托精确卡名）。奖励 rewards: gc（赏金）/ reputation（声望 delta）/ materials（素材 add_item）。交付由引擎验收（matchesCommission / buildDeliveryPatches），AI 零写路径。",
+  "defs": [
+    {
+      "name": "军械库的补给单",
+      "description": "镇上守备队的制式装备在剿匪里折损过半，公会贴出单子征用上好装备。",
+      "requireCard": {
+        "minTier": "白银",
+        "formEntry": "装备"
+      },
+      "rewards": {
+        "gc": 80,
+        "reputation": 5
+      }
+    },
+    {
+      "name": "炼金屋的火种",
+      "description": "老炼金师要一张带着不灭火种的卡试验新方子，元素越烈越好。",
+      "requireCard": {
+        "elements": ["火"]
+      },
+      "rewards": {
+        "gc": 60,
+        "reputation": 4,
+        "materials": [
+          {
+            "name": "火融晶",
+            "quantity": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "寻回远古巨兽·岩爪",
+      "description": "商会重金悬赏传说中「岩爪」的封卡——据说是某次 excavation 遗失的珍品（剧情委托，指定卡名）。",
+      "requireCard": {
+        "exactName": "远古巨兽·岩爪"
+      },
+      "rewards": {
+        "gc": 300,
+        "reputation": 15,
+        "materials": [
+          {
+            "name": "鎏金碎鳞",
+            "quantity": 2
+          }
+        ]
+      }
+    }
+  ]
 }
