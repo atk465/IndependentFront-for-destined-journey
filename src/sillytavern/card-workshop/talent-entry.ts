@@ -6347,6 +6347,238 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     entries: [],
   },
 
+  // ── v12 第七批 E 级全量（主人 2026-09-15；纯风味/QoL，entries 全空）──
+  {
+    name: '扳手精通',
+    grade: 'E' as TalentGrade,
+    source: 'universal',
+    description: '在为载具卡添加坚固或耐用词条时，有微乎其微的几率提升词条效果。',
+    entries: [],
+  },
+  {
+    name: '二次利用',
+    grade: 'E' as TalentGrade,
+    source: 'universal',
+    description: '你制作的陷阱类道具有极小的概率在触发后不会被摧毁，可以回收再利用。',
+    entries: [],
+  },
+  {
+    name: '复古风尚',
+    grade: 'E' as TalentGrade,
+    source: 'universal',
+    description: '制造出的卡牌，无论是人物还是装备，总会带有一些过时或复古的设计元素。',
+    entries: [],
+  },
+  {
+    name: '劣质金属通晓',
+    grade: 'E' as TalentGrade,
+    source: 'universal',
+    description: '使用铁、铜等低级金属材料时，制成的卡牌物理防御有极其微弱的提升。',
+    entries: [],
+  },
+  {
+    name: '木材亲和',
+    grade: 'E' as TalentGrade,
+    source: 'universal',
+    description: '使用木头作为核心材料时，制成的卡牌会拥有更强的韧性，不易被物理攻击直接摧毁。',
+    entries: [],
+  },
+  {
+    name: '健壮之触',
+    grade: 'E' as TalentGrade,
+    source: 'universal',
+    description: '制作生物类卡牌时，有微小概率为其附加健壮词条（生命值+5%）。',
+    entries: [],
+  },
+  {
+    name: '敏锐之刻',
+    grade: 'E' as TalentGrade,
+    source: 'universal',
+    description: '在卡牌上铭刻风或羽毛的符号时，有微小概率使其获得轻盈词条（敏捷+5%）。',
+    entries: [],
+  },
+  {
+    name: '听个响',
+    grade: 'E' as TalentGrade,
+    source: 'universal',
+    description: '你能打出很响的响指，这也许很酷。',
+    entries: [],
+  },
+  {
+    name: '健壮',
+    grade: 'E' as TalentGrade,
+    source: 'universal',
+    description: '你的负重上限提升10公斤。',
+    entries: [],
+  },
+  {
+    name: '干净整洁',
+    grade: 'E' as TalentGrade,
+    source: 'universal',
+    description: '你总是能把自己的装备和卡牌擦得锃亮，与NPC初次见面时好感度有微弱提升。',
+    entries: [],
+  },
+  {
+    name: '方向感',
+    grade: 'E' as TalentGrade,
+    source: 'universal',
+    description: '在探索过的区域，你不会迷路。',
+    entries: [],
+  },
+  {
+    name: '甜食爱好者',
+    grade: 'E' as TalentGrade,
+    source: 'universal',
+    description: '吃甜食时，你的心情会变好，精神力恢复速度有微乎其微的提升。',
+    entries: [],
+  },
+  {
+    name: '恋物癖（内衣）',
+    grade: 'E' as TalentGrade,
+    source: 'universal',
+    description: '收集伙伴卡的内衣会让你感到满足，但并没有实际效果。',
+    entries: [],
+  },
+  {
+    name: '打屁股爱好者',
+    grade: 'E' as TalentGrade,
+    source: 'universal',
+    description: '通过打伙伴卡的屁股可以进行无伤大雅的训诫，小幅提升其执行命令的效率。',
+    entries: [],
+  },
+  {
+    name: '内衣交换',
+    grade: 'E' as TalentGrade,
+    source: 'universal',
+    description:
+      '获得内裤置换技能卡的制作方法。随机交换你与目标当前穿着的内裤。天知道你会换来一条龙的丁字裤还是一条公主的蕾丝内裤。',
+    entries: [],
+  },
+  {
+    name: '恶臭光环',
+    grade: 'E' as TalentGrade,
+    source: 'universal',
+    description:
+      '获得腐烂咸鱼之触技能卡的制作方法。让一件物品（或生物）在24小时内散发出强烈的腐烂咸鱼混合脚臭的气味，不可驱散。',
+    entries: [],
+  },
+  {
+    name: '催乳之术',
+    grade: 'E' as TalentGrade,
+    source: 'universal',
+    description:
+      '获得无限泌乳技能卡的制作方法。使一个哺乳动物目标在接下来的一小时内不受控制地喷射乳汁，射程一米。',
+    entries: [],
+  },
+  {
+    name: '凌晨四点的黑石城',
+    grade: 'E' as TalentGrade,
+    source: 'universal',
+    description: '在凌晨3点到4点之间制卡，有微小几率触发灵感迸发，无视规则随机生成一个词条。',
+    entries: [],
+  },
+  {
+    name: '闪光地狱',
+    grade: 'E' as TalentGrade,
+    source: 'universal',
+    description:
+      '获得妖娆金粉技能卡的制作方法。使用后撒向目标后会使其在黑暗中也闪闪发光，如同午夜牛郎。',
+    entries: [],
+  },
+  {
+    name: '娇小迷恋',
+    grade: 'E' as TalentGrade,
+    source: 'universal',
+    description: '你更容易制作出娇小的卡牌。',
+    entries: [],
+  },
+  {
+    name: '歌剧之魂',
+    grade: 'E' as TalentGrade,
+    source: 'universal',
+    description:
+      '获得咏叹调诅咒技能卡的制作方法。使目标在接下来的十分钟内，必须用破锣嗓子的歌剧咏叹调来说话，否则会受到微弱的电击伤害。',
+    entries: [],
+  },
+  {
+    name: '武器戏法',
+    grade: 'E' as TalentGrade,
+    source: 'universal',
+    description:
+      '获得橡胶鸡之神技能卡的制作方法。将目标手中的武器变成一只一捏就会惨叫的橡胶鸡，持续5秒。对空手的目标无效。',
+    entries: [],
+  },
+  {
+    name: '生理认知错乱',
+    grade: 'E' as TalentGrade,
+    source: 'universal',
+    description:
+      '获得幻鸡症技能卡的制作方法。让目标坚信自己长出了一条巨大的鸡巴（或骚屄），并试图用它来攻击，但实际上什么都不会发生。',
+    entries: [],
+  },
+  {
+    name: '凡骨【禁法】（东方）',
+    grade: 'E' as TalentGrade,
+    source: 'universal',
+    description:
+      '你只是个普通人，体内没有任何灵力，也无法感受到卡兰大陆的魔力，但你拥有概念级能力禁法：任何能量攻击都无法对你和你的伙伴卡造成伤害，你和你的伙伴卡也无法使用魔力，你的伙伴卡MP值始终为0，但每次升级其余的基础属性增长倍率为1.5。',
+    entries: [],
+  },
+  {
+    name: '强制露阴',
+    grade: 'E' as TalentGrade,
+    source: 'universal',
+    description:
+      '获得裤子消失术技能卡的制作方法。有50%的几率让目标的裤子（或裙子）瞬间消失，如果失败，则自己的裤子会消失。',
+    entries: [],
+  },
+  {
+    name: '变声器',
+    grade: 'E' as TalentGrade,
+    source: 'universal',
+    description:
+      '获得萝莉音/大叔音技能卡的制作方法。让目标的声音在接下来的对话中变成甜腻的萝莉音或油腻的大叔音。',
+    entries: [],
+  },
+  {
+    name: '视觉污染',
+    grade: 'E' as TalentGrade,
+    source: 'universal',
+    description:
+      '获得马赛克之眼技能卡的制作方法。让目标的视野中，所有生物的生殖器部位都被打上厚厚的马赛克，持续一分钟。',
+    entries: [],
+  },
+  {
+    name: '绝对音痴',
+    grade: 'E' as TalentGrade,
+    source: 'universal',
+    description:
+      '获得魔音贯耳技能卡的制作方法。强制目标唱一首儿歌，其歌声会对其自身和周围的友军造成微量的精神伤害和耳鸣效果。',
+    entries: [],
+  },
+  {
+    name: '过目不忘',
+    grade: 'E' as TalentGrade,
+    source: 'universal',
+    description: '你看过的卡牌图鉴和配方都能记住。',
+    entries: [],
+  },
+  {
+    name: '气味鉴赏家',
+    grade: 'E' as TalentGrade,
+    source: 'universal',
+    description: '你仅通过气味就能分辨出不同素材的产地和大致品质，在购买未鉴定素材时有点用。',
+    entries: [],
+  },
+  {
+    name: '人体彩绘师',
+    grade: 'E' as TalentGrade,
+    source: 'universal',
+    description:
+      '你可以用特殊的颜料在伙伴卡身上绘制魔法阵，提供一些微不足道但颇具观赏性的临时buff。',
+    entries: [],
+  },
+
   // ── 融合独占 ──
   {
     name: '垃圾摩托',
