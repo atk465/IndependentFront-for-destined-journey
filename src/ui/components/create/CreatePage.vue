@@ -58,14 +58,15 @@ const Step3 = defineAsyncComponent(() => import('./CreateStepCharacters.vue'));
 const Step4 = defineAsyncComponent(() => import('./CreateStepSelections.vue'));
 const Step5 = defineAsyncComponent(() => import('./CreateStepBackground.vue'));
 const Step6 = defineAsyncComponent(() => import('./CreateStepPlot.vue'));
-const Step7 = defineAsyncComponent(() => import('./CreateStepConfirm.vue'));
+const Step7 = defineAsyncComponent(() => import('./CreateStepTalent.vue'));
+const Step8 = defineAsyncComponent(() => import('./CreateStepConfirm.vue'));
 
-const stepComponents = [Step0, Step1, Step2, Step3, Step4, Step5, Step6, Step7] as const;
+const stepComponents = [Step0, Step1, Step2, Step3, Step4, Step5, Step6, Step7, Step8] as const;
 
 const currentComponent = computed(() => stepComponents[store.currentStep]);
 
 const nextLabel = computed(() =>
-  store.isCreating ? '正在创建…' : store.currentStep === 7 ? '✦ 开始命运之旅 ✦' : '下一步 →',
+  store.isCreating ? '正在创建…' : store.currentStep === 8 ? '✦ 开始命运之旅 ✦' : '下一步 →',
 );
 
 // Step 7 特殊处理: 点击"下一步" → 执行 startJourney
@@ -101,7 +102,7 @@ onMounted(() => {
       ← 首页
     </button>
 
-    <CreateSteps v-if="ready" :current="store.currentStep" :total="8" />
+    <CreateSteps v-if="ready" :current="store.currentStep" :total="9" />
 
     <PointsBar
       v-if="ready"

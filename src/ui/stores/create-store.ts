@@ -41,6 +41,7 @@ import {
 } from '@engine/plot-outline';
 import type { AgentContext } from '@engine/types';
 import { createDefaultTime, formatGameTime, GAME_EPOCH_YEAR } from '@engine/time-system';
+import { getCreationCatalog } from '@engine/card-workshop/talent-entry';
 import { normalizeRarity } from '@engine/field-enums';
 import { useSettingsStore } from './settings-store';
 import {
@@ -124,11 +125,12 @@ export const useCreateStore = defineStore('create', () => {
     4: true, // 装备选择
     5: true, // 背景故事
     6: true, // 剧情规划
-    7: attributesFullyAllocated.value, // 确认提交前再次守住预设晚加载等绕过路径
+    7: selectedCreationTalent.value !== null, // 出身天赋（7 选 1 必选）
+    8: attributesFullyAllocated.value, // 确认提交前再次守住预设晚加载等绕过路径
   }));
 
   function nextStep() {
-    if (currentStep.value < 7 && stepValid.value[currentStep.value]) currentStep.value++;
+    if (currentStep.value < 8 && stepValid.value[currentStep.value]) currentStep.value++;
   }
   function prevStep() {
     if (currentStep.value > 0) currentStep.value--;
@@ -565,6 +567,8 @@ export const useCreateStore = defineStore('create', () => {
   const selectedEquipments = ref<CatalogItem[]>([]);
   const selectedItems = ref<CatalogItem[]>([]);
   const selectedSkills = ref<CatalogItem[]>([]);
+  /** 出身天赋（天赋系统 T-S3：捏人第 9 步，7 选 1 必选；名字 = TALENT_CATALOG 模板键） */
+  const selectedCreationTalent = ref<string | null>(null);
 
   const activeCategory = ref<'equipment' | 'item' | 'skill'>('equipment');
   const rarityFilter = ref<CatalogRarityCode | 'all'>('all');
@@ -1637,6 +1641,26 @@ export const useCreateStore = defineStore('create', () => {
         divineKingdom: { name: '', description: '' },
       },
       // 开局 inventory/skills 留空 — 装备/道具/技能由开场正文经 item_gen 链正式生成落库
+      // 出身天赋（天赋系统 T-S3）：7 选 1 必选，条目逐字来自 TALENT_CATALOG 模板
+      ...(selectedCreationTalent.value
+        ? (() => {
+            const tpl = getCreationCatalog().find((t) => t.name === selectedCreationTalent.value);
+            if (!tpl) return {};
+            return {
+              talents: {
+                capacity: 3,
+                list: [
+                  {
+                    name: tpl.name,
+                    description: tpl.description,
+                    source: 'creation' as const,
+                    entries: tpl.entries.map((e) => ({ ...e })),
+                  },
+                ],
+              },
+            };
+          })()
+        : {}),
       skills: [],
       inventory: [],
       statusEffects: [],
@@ -2135,6 +2159,7 @@ export const useCreateStore = defineStore('create', () => {
     // 步骤
     currentStep,
     stepValid,
+    selectedCreationTalent,
     nextStep,
     prevStep,
     // 难度
