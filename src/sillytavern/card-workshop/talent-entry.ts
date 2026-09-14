@@ -425,7 +425,7 @@ export function fuseEntrySets(a: readonly TalentEntry[], b: readonly TalentEntry
 // ========== 天赋目录（捏人/兑换/剧情授予的命名模板；融合独占条目也在册但不可直接获得） ==========
 
 /** 天赋品级（照截图品级制；影响兑换定价与（未来）授予出现权重） */
-export type TalentGrade = 'SSS' | 'SS' | 'S' | 'A' | 'B' | 'C' | 'D' | 'E';
+export type TalentGrade = 'SSS' | 'SS' | 'S' | 'A' | 'B' | 'C' | 'D' | 'E' | 'F';
 
 /** 品级 → 兑换定价乘数（初稿：SSS×4 … E×1；数值总表终审对象） */
 export const GRADE_PRICE_MULTIPLIER: Record<TalentGrade, number> = {
@@ -437,6 +437,7 @@ export const GRADE_PRICE_MULTIPLIER: Record<TalentGrade, number> = {
   C: 1.2,
   D: 1,
   E: 1,
+  F: 1,
 };
 
 /** 命名天赋模板：渠道归属 + 品级 + 骨架条目组合（名字即模板键） */
@@ -6576,6 +6577,23 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你可以用特殊的颜料在伙伴卡身上绘制魔法阵，提供一些微不足道但颇具观赏性的临时buff。',
+    entries: [],
+  },
+
+  // ── v13 F 级（主人 2026-09-15；最低品级趣味条目）──
+  {
+    name: 'F级解释权',
+    grade: 'F' as TalentGrade,
+    source: 'universal',
+    description: '你拥有对你制作的白铁卡牌效果的最终解释权。当然，前提是有人信。',
+    entries: [],
+  },
+  {
+    name: '非酋系统',
+    grade: 'F' as TalentGrade,
+    source: 'universal',
+    description:
+      '你的幸运值被锁定在一个极低的水平。所有概率性事件你都会得到最差的结果。但作为补偿，你每次大失败后，都会获得一点永久属性点。',
     entries: [],
   },
 
