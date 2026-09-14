@@ -4815,6 +4815,1053 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     ],
   },
 
+  // ── v10 第五批 C 级全量（主人 2026-09-15；制作专精/形态转化/情境规则，条目映射或纯叙事）──
+  {
+    name: '套索大师',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '使用绳索类武器或卡牌时，极大地提升束缚状态的成功率。若目标为雌性或魔物娘，则束缚后自动附加极度敏感的羞耻debuff。',
+    entries: [
+      {
+        kind: '战技附加',
+        channel: 'universal',
+        params: { status: '羞耻束缚', power: 0, beats: 2 },
+      },
+    ],
+  },
+  {
+    name: '扑克脸',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '在进行赌卡或黑市讨价还价时，NPC极难看穿你的真实意图和底牌。交易成功率及捡漏捡到神卡的概率小幅提升。',
+    entries: [],
+  },
+  {
+    name: '警服崇拜',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '当你或你的伙伴卡穿戴警长徽章或制服时，制卡成功率提升，且所有攻击附带威严效果，极大削弱法外狂徒的抵抗意志。',
+    entries: [
+      { kind: '词条加权', channel: 'universal', params: { keywords: ['警服', '威严'], weight: 2 } },
+    ],
+  },
+  {
+    name: '硝烟催情药',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '火器开火时的硝烟味会让你感到极度兴奋。战斗环境中的火属性魔法或枪械开火频率越高，你的敏捷、攻击力以及欲望值就越高。',
+    entries: [],
+  },
+  {
+    name: '酒馆艳遇体质',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '在酒馆或居住区，NPC主动向你搭讪、提供隐藏任务或特殊服务的概率提升。你制作的恢复类卡牌会自带微弱的催情效果。',
+    entries: [],
+  },
+  {
+    name: '仙人掌绿洲',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '在沙漠地形中，你的体液会变得极其甘甜且具有强效恢复能力。你的伙伴卡可以通过吸吮你来快速回复HP和状态。',
+    entries: [],
+  },
+  {
+    name: '劣酒豪客',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '饮用劣质酒精类道具后，不仅不会中毒，反而会获得霸体效果，无视所有僵直，但事后有极大几率引发酒后乱性事件。',
+    entries: [],
+  },
+  {
+    name: '冰霜之子',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '你免疫一切冻伤、减速效果。在雪地环境中，你的隐蔽性极强，且冰属性魔法的MP消耗降低30%。',
+    entries: [],
+  },
+  {
+    name: '蜜酒豪饮者',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '饮用酒精类道具卡后，防御力翻倍，痛觉消失。但会大幅降低你的理智值，极易在酒后对身边的NPC或魔物娘做出野蛮行为。',
+    entries: [],
+  },
+  {
+    name: '极寒凝视',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '你的眼神冷若冰霜。与你对视的低等级敌人有几率陷入僵直。在交涉时，这种冰冷的气质对某些拥有M体质的NPC有着致命的吸引力。',
+    entries: [],
+  },
+  {
+    name: '冰渊垂钓者',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '在冰层上打洞垂钓时，你总能钓上来一些奇奇怪怪的高级素材，包括但不限于深海巨兽的触手、古代冻尸的器官，或是某种滑溜溜的催情海藻。',
+    entries: [],
+  },
+  {
+    name: '冻骨巫医',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '使用动物骨骼和冰雪素材制卡时，必定生成带有诅咒或毒性的冰霜法术卡。这些法术会在冻结敌人肉体的同时，腐蚀他们的理智。',
+    entries: [
+      { kind: '材料限定', channel: 'universal', params: { materialClass: '冰雪骸骨' } },
+      {
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['诅咒', '毒性冰霜'], weight: 2 },
+      },
+    ],
+  },
+  {
+    name: '冰原雪橇犬',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '使用锁链或项圈将战败的敌人（尤其是高傲的女性）套住拉雪橇时，你的移动速度大幅提升。她们爬得越屈辱，你在冰原上的状态就越好。',
+    entries: [],
+  },
+  {
+    name: '鲸骨束腰',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '用深海巨兽骨骼制作的装备。给女性伙伴卡穿上后，会强制改变其骨骼结构。降低少量HP上限，但大幅增加魅惑与拉仇恨能力。',
+    entries: [{ kind: '配方解锁', channel: 'universal', params: { recipe: '鲸骨束腰' } }],
+  },
+  {
+    name: '海象皮脂肪',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '自带极高的天然寒冷抗性，完全免疫冻伤debuff，受到的冰属性伤害降低20%。',
+    entries: [],
+  },
+  {
+    name: '军靴擦拭工',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '伙伴卡总是穿着一双锃亮的长筒军靴。她会强迫战败的敌人或你本人为她舔靴，从中获得满足感并恢复少量生命值。',
+    entries: [
+      { kind: '词条加权', channel: 'universal', params: { keywords: ['军靴'], weight: 2 } },
+    ],
+  },
+  {
+    name: '时尚先锋',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '专注于制作各种外观华丽、奇异的时装卡，防御力不高，但通常携带特效词条，能提供魅力、社交等方面的加成。',
+    entries: [
+      { kind: '词条加权', channel: 'universal', params: { keywords: ['时装特效'], weight: 2 } },
+    ],
+  },
+  {
+    name: '粘液亲和',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '使用任何粘稠、流动的液体作为材料，制作出的卡牌会附加减速、粘滞、无法挣脱等词条。',
+    entries: [
+      {
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['减速', '粘滞', '无法挣脱'], weight: 2 },
+      },
+    ],
+  },
+  {
+    name: '吟游诗人的浪漫',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '能制作出各种乐曲卡，通过演奏发动效果，多为群体增益或减益，甚至能记录历史事件，召唤历史残影助战。',
+    entries: [{ kind: '配方解锁', channel: 'universal', params: { recipe: '乐曲卡' } }],
+  },
+  {
+    name: '熟练工',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '常年的流水线工作经验让你在制作通用型载具卡时，MP消耗略有降低，且成品质量稳定。',
+    entries: [],
+  },
+  {
+    name: '深海调试',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '专精于水下与水面载具，制作的船只或潜艇拥有更好的密封性与抗压性，不易进水或被水压摧毁。',
+    entries: [],
+  },
+  {
+    name: '不稳定化合物',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '你制作的药水和炸弹效果总是随机上下浮动，偶尔有惊喜，但更多的是惊吓。',
+    entries: [],
+  },
+  {
+    name: '紧急维修套件',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '擅长制作能瞬间恢复载具少量耐久度的维修包道具卡。',
+    entries: [{ kind: '配方解锁', channel: 'universal', params: { recipe: '维修包' } }],
+  },
+  {
+    name: '燃料专家',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '能将多种材料转化为载具可用的能量块道具卡，以补充载具的MP消耗。',
+    entries: [{ kind: '配方解锁', channel: 'universal', params: { recipe: '能量块' } }],
+  },
+  {
+    name: '精准投掷',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '你使用任何投掷类道具卡时，其弹道更稳定，射程更远。',
+    entries: [],
+  },
+  {
+    name: '炎之亲和',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '制作火系技能卡时，有较高概率提升卡牌威力或附加燃烧词条。',
+    entries: [
+      { kind: '词条加权', channel: 'universal', params: { keywords: ['燃烧'], weight: 2 } },
+    ],
+  },
+  {
+    name: '绿拇指',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '使用植物种子或枝叶，极易制作出各种植物系伙伴卡（如豌豆射手、食人花），或带有缠绕效果的技能卡。',
+    entries: [
+      { kind: '材料限定', channel: 'universal', params: { materialClass: '种子枝叶' } },
+      { kind: '词条加权', channel: 'universal', params: { keywords: ['缠绕'], weight: 2 } },
+    ],
+  },
+  {
+    name: '史莱姆之心',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '你制作的卡牌会转化为天真烂漫的史莱姆娘系列生物，拥有极强的物理抗性与变形能力，性格单纯，战斗全凭直觉，能通过吞噬获得短暂的能力模仿。',
+    entries: [{ kind: '形态转化', channel: 'universal', params: { series: '史莱姆娘' } }],
+  },
+  {
+    name: '地精工程师',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '你制作的卡牌会转化为热衷发明的地精系列生物，擅长制作各种不稳定但威力巨大的爆炸物与机械装置，口头禅是为了更大的爆炸！。',
+    entries: [
+      { kind: '形态转化', channel: 'universal', params: { series: '地精' } },
+      { kind: '词条加权', channel: 'universal', params: { keywords: ['爆炸物'], weight: 2 } },
+    ],
+  },
+  {
+    name: '鹰身女妖之爪',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '你制作的卡牌会转化为尖啸的哈比系列生物，飞行能力优秀，叫声能造成精神干扰，但性格贪婪且残忍，喜欢抢夺一切发光的东西。',
+    entries: [
+      { kind: '形态转化', channel: 'universal', params: { series: '哈比' } },
+      {
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['精神干扰', '抢夺'], weight: 2 },
+      },
+    ],
+  },
+  {
+    name: '石像鬼守护',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '你制作的卡牌会转化为沉默的石像鬼系列生物，白天会变为防御力极高的石像，夜晚则恢复行动力，作为绝对忠诚的守护者而存在。',
+    entries: [{ kind: '形态转化', channel: 'universal', params: { series: '石像鬼' } }],
+  },
+  {
+    name: '中二病晚期',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '制作的生物卡牌在登场和攻击时，会念出冗长而羞耻的台词，攻击前摇增加，但技能会附带无法被驱散的微弱暗影伤害。',
+    entries: [
+      {
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['中二台词', '暗影'], weight: 2 },
+      },
+    ],
+  },
+  {
+    name: '天然呆',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '制作出的女性卡牌思维会有些脱线，经常会误解命令或在关键时刻发呆。她们的攻击有一定几率打偏，但也因为这种不确定性，偶尔会歪打正着，打出意想不到的暴击效果。',
+    entries: [],
+  },
+  {
+    name: '元气少女',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '制作出的女性卡牌总是精力充沛、活泼开朗。她们的存在会持续为我方全体单位提供微弱的振奋效果，提升移动速度和攻击速度，但她们的战斗风格大开大合，容易露出破绽。',
+    entries: [
+      { kind: '形态转化', channel: 'universal', params: { series: '元气少女' } },
+      { kind: '词条加权', channel: 'universal', params: { keywords: ['振奋'], weight: 2 } },
+    ],
+  },
+  {
+    name: '开源精神',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '你制作的装备卡上会多出一个插槽，可以镶嵌其他低等级的技能卡，但稳定性较差，有1%的概率在使用时失效。',
+    entries: [],
+  },
+  {
+    name: '艺术家',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '你制作的卡牌，卡面都异常精美，宛如艺术品。没有任何实际加成，但非常赏心悦目，也更容易卖出高价。',
+    entries: [],
+  },
+  {
+    name: '足模的骄傲',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '制作出的女性卡牌，其脚部被视为一个独立的装备栏，可以额外装备脚链、涂装等特殊道具卡。',
+    entries: [],
+  },
+  {
+    name: '棉袜的温暖',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '制作出的卡牌总是穿着厚厚的棉袜，给人一种邻家女孩的亲切感。她们擅长治疗和辅助，能用她们温暖的脚为队友驱散寒冷和诅咒。',
+    entries: [
+      { kind: '词条加权', channel: 'universal', params: { keywords: ['棉袜'], weight: 2 } },
+    ],
+  },
+  {
+    name: '木屐的节奏',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '制作出的卡牌必定穿着木屐，走路时会发出清脆的咔哒声。这种声音能扰乱敌人的心神，起到范围性嘲讽和降速的效果。',
+    entries: [
+      { kind: '词条加权', channel: 'universal', params: { keywords: ['木屐'], weight: 2 } },
+    ],
+  },
+  {
+    name: '垃圾佬系统',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '你拥有化腐朽为神奇的能力。任何被判定为垃圾或损坏的物品在你手中都有概率被修复或提炼出稀有素材，甚至找到被遗弃的神器。',
+    entries: [],
+  },
+  {
+    name: '深度睡眠系统',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '你的睡眠质量极高。只要进入深度睡眠，精神力的恢复速度就是常人的三倍，偶尔还会在梦中预见到未来的片段。',
+    entries: [],
+  },
+  {
+    name: '地图全开系统',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '你进入任何一个新区域，该区域的简易地图都会自动点亮，并标记出危险区域和大致的资源点。',
+    entries: [],
+  },
+  {
+    name: '奇迹暖暖系统',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '你拥有一个无限衣柜，可以随时换上任何风格的服装。搭配不同的服装会获得微小的属性加成或特殊效果。',
+    entries: [],
+  },
+  {
+    name: '杠精',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '你的生物卡牌会自动反驳敌人的强化效果。每当一个敌方单位获得增益时，你的卡牌会尝试反驳掉该增益，有一定成功率。',
+    entries: [],
+  },
+  {
+    name: '活体工具',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '倾向于制造拥有工具特性（如钻头、熔炉）的生物卡，它们既能战斗，也能辅助进行工程或锻造活动。',
+    entries: [],
+  },
+  {
+    name: '不死奴仆',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '使用尸体作为材料时，有较高概率完美保留死者生前的部分战斗技巧，制造出精英亡灵。',
+    entries: [{ kind: '材料限定', channel: 'universal', params: { materialClass: '尸体' } }],
+  },
+  {
+    name: '潮汐之心',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '对水与冰属性有天生的亲和力，制作此类卡牌时成功率更高，且有小概率附加潮湿或迟缓效果。',
+    entries: [
+      { kind: '材料限定', channel: 'universal', params: { materialClass: '水冰' } },
+      { kind: '词条加权', channel: 'universal', params: { keywords: ['潮湿', '迟缓'], weight: 1 } },
+    ],
+  },
+  {
+    name: '野性呼唤',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '使用高等级的魔兽素材，伙伴卡有极高概率觉醒兽化词条，可以在短时间内展现部分野兽特征，战斗风格狂野。',
+    entries: [
+      { kind: '材料限定', channel: 'universal', params: { materialClass: '高等级魔兽' } },
+      { kind: '词条加权', channel: 'universal', params: { keywords: ['兽化'], weight: 3 } },
+    ],
+  },
+  {
+    name: '巨物崇拜',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '你制造的伙伴卡有更高概率获得巨乳或丰臀词条，同时，你制造的武器也倾向于巨大化，如巨剑、巨斧。',
+    entries: [
+      { kind: '词条加权', channel: 'universal', params: { keywords: ['巨物化'], weight: 2 } },
+    ],
+  },
+  {
+    name: '娇小可爱',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '你制造的伙伴卡有更高概率获得萝莉或贫乳词条，她们身形小巧，擅长闪避和潜行。',
+    entries: [
+      { kind: '词条加权', channel: 'universal', params: { keywords: ['萝莉', '贫乳'], weight: 2 } },
+    ],
+  },
+  {
+    name: '废土朋克',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '你制造的卡牌充满废土气息，伙伴卡像是拾荒者，装备由破铜烂铁拼接而成，性格坚韧而多疑。',
+    entries: [
+      { kind: '词条加权', channel: 'universal', params: { keywords: ['废土'], weight: 2 } },
+    ],
+  },
+  {
+    name: '抖S气场',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '伙伴卡天生带有女王或施虐者的气质，她们的攻击有一定概率让敌人陷入畏缩状态。',
+    entries: [
+      { kind: '战技附加', channel: 'universal', params: { status: '畏缩', power: 0, beats: 1 } },
+    ],
+  },
+  {
+    name: '冰结之心',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '稳定制造出拥有冰冻（强减速）或冻结（定身）能力的卡牌，制卡师本人对寒冷效果有较高抗性。',
+    entries: [{ kind: '配方解锁', channel: 'universal', params: { recipe: '冰冻/冻结' } }],
+  },
+  {
+    name: '地形术士',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '可制造石墙、地刺、流沙等地形控制类卡牌，擅长分割战场和限制敌人移动。',
+    entries: [{ kind: '配方解锁', channel: 'universal', params: { recipe: '地形控制' } }],
+  },
+  {
+    name: '怪力少女',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '制作出的女性伙伴卡必定是看似纤细却力大无穷的类型。装备重型武器时，不再有敏捷惩罚。',
+    entries: [],
+  },
+  {
+    name: '足技专家',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '制作出的女性伙伴卡腿技战斗能力提升。所有腿部攻击技能的伤害和破防效果提升15%。',
+    entries: [
+      { kind: '词条加权', channel: 'universal', params: { keywords: ['腿部攻击'], weight: 2 } },
+    ],
+  },
+  {
+    name: '小恶魔的低语',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '你享受捉弄他人的乐趣。制作出的女性伙伴卡必定是小恶魔性格，喜欢用甜言蜜语捉弄你，战斗中擅长使用幻术、媚惑和削弱敌人的技能。',
+    entries: [
+      {
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['幻术', '媚惑', '削弱'], weight: 2 },
+      },
+    ],
+  },
+  {
+    name: '武者的荣耀',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '你崇尚公平的对决。制作出的女性伙伴卡必定是武痴性格，热衷于战斗和挑战强者，战斗方式为纯粹的武技或剑术，鄙视使用道具和陷阱。',
+    entries: [],
+  },
+  {
+    name: '炼金术师的探究',
+    grade: 'A' as TalentGrade,
+    source: 'universal',
+    description:
+      '你痴迷于物质的转化。制作出的女性伙伴卡会是炼金术师性格，求知欲旺盛，战斗中擅长使用各种药剂和人造召唤物，癖好是品尝各种矿石和植物。',
+    entries: [{ kind: '形态转化', channel: 'universal', params: { series: '炼金术师' } }],
+  },
+  {
+    name: '赌徒的狂热',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '你享受风险带来的刺激。制作出的女性伙伴卡性格好赌，战斗技能带有很强的随机性，运气好时能秒杀敌人，运气差时毫无作用。',
+    entries: [],
+  },
+  {
+    name: '姐姐的守护',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '你潜意识里渴望被当成弟弟或妹妹。制作出的女性伙伴卡必定是大姐姐性格，包容而温柔，身材丰满，战斗中拥有强大的保护和援护能力。',
+    entries: [
+      { kind: '形态转化', channel: 'universal', params: { series: '大姐姐' } },
+      { kind: '词条加权', channel: 'universal', params: { keywords: ['保护', '援护'], weight: 2 } },
+    ],
+  },
+  {
+    name: '妹妹的依赖',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '你潜意识里有强烈的保护欲。制作出的女性伙伴卡必定是妹妹性格，天真烂漫，非常依赖你，战斗中在你身边时，全属性会得到提升。',
+    entries: [
+      { kind: '形态转化', channel: 'universal', params: { series: '妹妹' } },
+      { kind: '词条加权', channel: 'universal', params: { keywords: ['依赖'], weight: 2 } },
+    ],
+  },
+  {
+    name: '健美体魄',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '制作出的伙伴卡，其力量和体质成长率会获得小幅提升，身材更倾向于运动型健美。',
+    entries: [],
+  },
+  {
+    name: '斗殴专家',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '伙伴卡的徒手攻击伤害提升，并且在使用拳套类武器时，攻击速度更快。',
+    entries: [
+      { kind: '词条加权', channel: 'universal', params: { keywords: ['拳套'], weight: 2 } },
+    ],
+  },
+  {
+    name: '高人一等',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '制作出的伙伴卡身高必定超过平均水平，在面对比自己矮的敌人时，有微小的命中加成。',
+    entries: [],
+  },
+  {
+    name: '重武器亲和',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '该伙伴卡在使用双手斧、大剑、战锤等重型武器时，不再有攻击速度惩罚。',
+    entries: [],
+  },
+  {
+    name: '亚马逊血统',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '制作出的女性伙伴卡天生擅长投掷和使用长矛，且体格必定为高挑健美型。',
+    entries: [
+      { kind: '形态转化', channel: 'universal', params: { series: '亚马逊' } },
+      { kind: '词条加权', channel: 'universal', params: { keywords: ['投掷', '长矛'], weight: 2 } },
+    ],
+  },
+  {
+    name: '幽魂的低泣',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '你对死亡和灵体有很强的感知力。制作出的女性伙伴卡会是幽灵少女，身体呈半透明，可以穿透物理障碍，战斗方式为精神攻击和诅咒。',
+    entries: [
+      { kind: '形态转化', channel: 'universal', params: { series: '幽灵' } },
+      {
+        kind: '战技附加',
+        channel: 'universal',
+        params: { status: '精神诅咒', power: 2, beats: 2 },
+      },
+    ],
+  },
+  {
+    name: '吸血鬼的优雅',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '你对血液和黑夜有种病态的迷恋。制作出的女性伙伴卡会是吸血鬼，外形优雅高贵，拥有吸血能力恢复自身，战斗方式迅捷而致命。',
+    entries: [
+      { kind: '形态转化', channel: 'universal', params: { series: '吸血鬼' } },
+      { kind: '战技附加', channel: 'universal', params: { status: '吸血', power: 3, beats: 2 } },
+    ],
+  },
+  {
+    name: '僵尸的执着',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '你相信死后依然有意志。制作出的女性伙伴卡会是僵尸娘，身体强韧但行动稍缓，痛觉迟钝，拥有强大的再生能力，对你有着至死不渝的忠诚。',
+    entries: [
+      { kind: '形态转化', channel: 'universal', params: { series: '僵尸娘' } },
+      { kind: '词条加权', channel: 'universal', params: { keywords: ['再生'], weight: 2 } },
+    ],
+  },
+  {
+    name: '淫靡陷阱',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '获得魅惑香氛技能卡的制作方法。布置一个散发着强烈荷尔蒙气味的陷阱，踏入的生物会陷入发情状态，无差别攻击周围最近的单位。',
+    entries: [{ kind: '配方解锁', channel: 'universal', params: { recipe: '魅惑香氛' } }],
+  },
+  {
+    name: '欢愉药剂',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '获得发情药水技能卡的制作方法。使用后获得短暂的攻击力与速度提升，但副作用是会不受控制地发出淫荡的呻吟，大幅增加被敌人发现的几率。',
+    entries: [{ kind: '配方解锁', channel: 'universal', params: { recipe: '发情药水' } }],
+  },
+  {
+    name: '痛苦转化（主动）',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '你所受到的部分伤害会转化为MP恢复，但同时会让你在受伤时发出听起来像高潮的呻吟。',
+    entries: [],
+  },
+  {
+    name: '气味伪装',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '获得骚臭伪装技能卡的制作方法。让自身散发出某种魔物的气味，可以用来欺骗嗅觉灵敏的敌人或融入特定魔物群落。',
+    entries: [{ kind: '配方解锁', channel: 'universal', params: { recipe: '骚臭伪装' } }],
+  },
+  {
+    name: '足控之力',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '获得足尖之舞装备卡的制作方法。装备后你的伙伴卡在用脚攻击时，会附加践踏和羞辱效果，伤害增加50%，对人形敌人有几率造成精神恍惚的debuff。',
+    entries: [{ kind: '配方解锁', channel: 'universal', params: { recipe: '足尖之舞' } }],
+  },
+  {
+    name: '粘液铠甲',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '获得粘液铠甲装备卡的制作方法。用史莱姆等粘性生物的素材制作的铠甲，提供不错的物理防御，但被攻击时会溅射出黏糊糊的液体，可能粘住敌人的武器。',
+    entries: [{ kind: '配方解锁', channel: 'universal', params: { recipe: '粘液铠甲' } }],
+  },
+  {
+    name: '食雪者',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '你可以通过食用新鲜的粪便，恢复少量HP并解除饥饿状态，但会获得口臭debuff，降低魅力。',
+    entries: [],
+  },
+  {
+    name: '人马一体',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '当你骑乘半人马或坐骑类伙伴卡时，你和伙伴的能力将合二为一，全属性提升10%。',
+    entries: [],
+  },
+  {
+    name: '快速成长',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '你和你的伙伴卡获取经验值的速度提升15%。',
+    entries: [],
+  },
+  {
+    name: '讨价还价',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '在商店购买物品时，可以获得5%的折扣。',
+    entries: [],
+  },
+  {
+    name: '坚韧之躯',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '你在卡牌爆炸中有更高的存活几率，受到的伤害降低30%。',
+    entries: [],
+  },
+  {
+    name: '野外生存',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '你在野外获得草药、矿石等基础素材时，质量小幅提升。',
+    entries: [],
+  },
+  {
+    name: '妹妹的祈愿',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '使用比自己年龄小的生物素材，或带有可爱标签的物品，伙伴卡会倾向于成为黏人的妹妹性格。',
+    entries: [
+      { kind: '形态转化', channel: 'universal', params: { series: '妹妹' } },
+      { kind: '词条加权', channel: 'universal', params: { keywords: ['可爱'], weight: 2 } },
+    ],
+  },
+  {
+    name: '教师的威严',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '使用书籍、戒尺、粉笔等素材，伙伴卡可能以教师形态出现，喜欢说教，并拥有惩罚类技能。',
+    entries: [
+      { kind: '形态转化', channel: 'universal', params: { series: '教师' } },
+      { kind: '词条加权', channel: 'universal', params: { keywords: ['惩罚'], weight: 2 } },
+    ],
+  },
+  {
+    name: '病娇之种',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '融合时混入自己的血液，并强烈地许下永远在一起的愿望，会埋下病娇的种子，伙伴卡忠诚度极高，但嫉妒心和占有欲会达到恐怖的程度。',
+    entries: [
+      { kind: '词条加权', channel: 'universal', params: { keywords: ['病娇'], weight: 3 } },
+    ],
+  },
+  {
+    name: '女仆的契约',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '使用扫帚、围裙等清洁工具作为素材，可以稳定制造出拥有侍奉精神的女仆伙伴卡。',
+    entries: [
+      { kind: '形态转化', channel: 'universal', params: { series: '女仆' } },
+      { kind: '词条加权', channel: 'universal', params: { keywords: ['侍奉'], weight: 2 } },
+    ],
+  },
+  {
+    name: '心灵手巧',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '修复受损卡牌时，消耗的精神力减少50%。',
+    entries: [],
+  },
+  {
+    name: '装备大师',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '你穿戴装备卡时，装备的基础属性有5%的额外加成。',
+    entries: [],
+  },
+  {
+    name: '酒豪',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '你酒量很好，可以通过喝酒快速恢复少量精神力，但有可能会进入醉酒状态。',
+    entries: [],
+  },
+  {
+    name: '足下臣服',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '通过舔舐伙伴卡的脚，可以小幅提升其忠诚度，并缓慢培养女王词条。',
+    entries: [],
+  },
+  {
+    name: '薛定谔的成功',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '制卡完成后，卡牌会处于成功或失败的叠加态，只有在第一次使用时才能确定最终结果。',
+    entries: [],
+  },
+  {
+    name: '贞操锁爱好者',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '你获得了贞操锁装备卡的制作配方，为伙伴卡佩戴后能提升其对于欲望攻击的影响，但会持续降低其愉悦度。',
+    entries: [{ kind: '配方解锁', channel: 'universal', params: { recipe: '贞操锁' } }],
+  },
+  {
+    name: '夜视能力',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '你在黑暗环境中的视野不受影响。',
+    entries: [],
+  },
+  {
+    name: '自我发电',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '通过自慰达到高潮可以恢复少量MP，但会进入短暂的贤者时间，全属性降低。',
+    entries: [],
+  },
+  {
+    name: '哥布林杀手',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '你对哥布林造成的伤害增加100%，从哥布林身上获取的素材品质更高。',
+    entries: [
+      { kind: '材料限定', channel: 'universal', params: { materialClass: '哥布林' } },
+      { kind: '词条加权', channel: 'universal', params: { keywords: ['哥布林杀手'], weight: 2 } },
+    ],
+  },
+  {
+    name: '廉价美学',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '使用价值低于1银币的素材组合制卡时，有几率触发化腐朽为神奇，强制提升成品一个等级。',
+    entries: [],
+  },
+  {
+    name: '人偶外壳',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '使用人偶、木偶等素材，伙伴卡会拥有精致如人偶的外貌，但可能缺乏情感，需要主人逐步唤醒。',
+    entries: [
+      { kind: '形态转化', channel: 'universal', params: { series: '人偶' } },
+      { kind: '词条加权', channel: 'universal', params: { keywords: ['人偶'], weight: 2 } },
+    ],
+  },
+  {
+    name: '卵生亲和',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '你可以通过让伙伴卡或魔物产卵的方式来获取特殊的生命之卵素材，甚至可以在伙伴卡体内孕育，孕期通常为一周，诞生下来的大概率是素材，小概率是可成长的伙伴卡。',
+    entries: [],
+  },
+  {
+    name: '石化凝视',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '有微弱的概率用眼神让低级敌人陷入石化状态。使用石化蜥蜴等素材制卡时，更容易获得石化词条。',
+    entries: [
+      { kind: '词条加权', channel: 'universal', params: { keywords: ['石化'], weight: 2 } },
+    ],
+  },
+  {
+    name: '改造癖',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '你更容易制作出身体改造的情趣装备卡，例如兽耳、肛塞尾巴等，这些改造会带来一些属性变化。',
+    entries: [
+      { kind: '词条加权', channel: 'universal', params: { keywords: ['改造'], weight: 2 } },
+    ],
+  },
+  {
+    name: '雌小鬼制造机',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '故意在制卡过程中犯点无伤大雅的小错误再修正，会极大地提升制作出毒舌雌小鬼性格伙伴卡的几率，她们傲慢且需要修正，每次修正后她们都会变强。',
+    entries: [
+      { kind: '词条加权', channel: 'universal', params: { keywords: ['毒舌雌小鬼'], weight: 3 } },
+    ],
+  },
+  {
+    name: '药人（东方）',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '你的身体自幼浸泡在药罐中，对草木类素材有着超乎常人的直觉。在制作恢复类与增益类卡牌时，成功率略有提升，同时所有debuff对你的效果减半。',
+    entries: [{ kind: '材料限定', channel: 'universal', params: { materialClass: '草木药材' } }],
+  },
+  {
+    name: 'M体质',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '受到攻击时，你会感到兴奋，并小幅提升攻击速度。',
+    entries: [],
+  },
+  {
+    name: 'S气质',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '你的攻击有概率让敌人陷入畏缩状态，降低其攻击欲望。',
+    entries: [
+      { kind: '战技附加', channel: 'universal', params: { status: '畏缩', power: 0, beats: 1 } },
+    ],
+  },
+  {
+    name: '崩坏快感',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '当伙伴卡的精神防线降低时，它反而会获得临时的攻击力加成。此天赋让你能制作精神摧毁类技能卡，主动降低伙伴或敌人的SAN值。',
+    entries: [{ kind: '配方解锁', channel: 'universal', params: { recipe: '精神摧毁' } }],
+  },
+  {
+    name: '屈辱之力',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '伙伴卡在战斗中经历被束缚、被公开羞辱等状态后，下一次攻击将附加屈辱效果，大幅降低敌人的防御和精神抗性。',
+    entries: [
+      { kind: '词条加权', channel: 'universal', params: { keywords: ['屈辱'], weight: 2 } },
+    ],
+  },
+  {
+    name: '恋物融合',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '制卡时，你可以额外添加一件私密衣物类素材。这会使最终卡牌继承衣物主人的部分特性，并对该主人产生特殊的依恋情感，你可以利用这个方法制作卡组中能和核心卡产生良好化学反应的副卡。',
+    entries: [
+      { kind: '词条加权', channel: 'universal', params: { keywords: ['依恋'], weight: 2 } },
+    ],
+  },
+  {
+    name: '矮个子的从容',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '你很矮，常常被人忽视，存在感减弱，个子越矮幸运值越高。',
+    entries: [],
+  },
+  {
+    name: '无限精液',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description: '你就拥有无限的精液，你完全不用担心被榨干了。',
+    entries: [],
+  },
+  {
+    name: '污秽洗礼',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '当你的伙伴卡或你自身被敌人的污物类技能命中时，不仅免疫其负面效果，反而会恢复少量MP，并暂时提升对腐蚀和精神攻击的抗性。',
+    entries: [],
+  },
+  {
+    name: '小小守护者',
+    grade: 'B' as TalentGrade,
+    source: 'universal',
+    description:
+      '当你的队伍中有幼态伙伴卡时，所有成年形态的伙伴卡都会自动获得守护词条，优先为幼态卡牌格挡伤害。',
+    entries: [
+      { kind: '词条加权', channel: 'universal', params: { keywords: ['守护'], weight: 2 } },
+    ],
+  },
+  {
+    name: '成长之痛',
+    grade: 'B' as TalentGrade,
+    source: 'universal',
+    description:
+      '你的幼态伙伴卡在进化时会经历巨大的痛苦，但作为补偿，她们可以从力量、敏捷、智慧中选择一项属性获得永久性的巨额加成。',
+    entries: [],
+  },
+  {
+    name: '观众席',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '你可以制作特殊的旁观卡技能卡。在战斗中对任意两名角色（可包含你的伙伴）使用，强制他们进行亲密互动，而你作为旁观者，可以从中汲取精神力。',
+    entries: [{ kind: '配方解锁', channel: 'universal', params: { recipe: '旁观卡' } }],
+  },
+  {
+    name: '体液收藏家',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '你对各种体液有特殊癖好。战斗中收集到的不同体液可以作为添加剂在制卡时使用，为卡牌附加各种意想不到的微弱效果。',
+    entries: [],
+  },
+  {
+    name: '鲨鱼嗅觉',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '你对血液的气味极度敏感。在半径500米内，只要有生物流血，你就能精准锁定其位置。血量越低的目标，你对其造成的伤害越高。',
+    entries: [],
+  },
+  {
+    name: '藤壶寄生',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '获得藤壶铠甲装备卡的制作方法。用海洋藤壶类素材制作的活体铠甲，提供中等物理防御。被近战攻击时，藤壶会自动割伤攻击者，造成流血效果。但穿戴者移动速度降低10%。',
+    entries: [{ kind: '配方解锁', channel: 'universal', params: { recipe: '藤壶铠甲' } }],
+  },
+  {
+    name: '深海发光体',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '你的身体在黑暗环境中会发出微弱的生物荧光，为周围提供照明。该光芒可以主动关闭，但在你情绪激动时会不受控制地闪烁。制作光属性素材时，可以用自身的荧光作为辅助催化剂。',
+    entries: [{ kind: '材料限定', channel: 'universal', params: { materialClass: '荧光' } }],
+  },
+  {
+    name: '海怪之胃',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '你可以食用任何海洋生物的生肉——无论多么恶心、有毒或腥臭——都不会中毒或生病，反而能恢复少量HP。食用高等级海洋魔物的肉时，有极低概率临时获得该魔物的一项能力。',
+    entries: [],
+  },
+  {
+    name: '龙涎香鉴定师',
+    grade: 'C' as TalentGrade,
+    source: 'universal',
+    description:
+      '你拥有鉴定海洋生物遗留物的专业能力。在处理海洋类素材时，你有20%的概率从普通素材中额外发现一个隐藏词条。此外，你在出售海洋素材时价格提升15%。',
+    entries: [],
+  },
+
   // ── 融合独占 ──
   {
     name: '垃圾摩托',
