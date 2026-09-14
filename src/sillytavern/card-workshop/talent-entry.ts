@@ -1315,6 +1315,375 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
 
+  // ── v6 规则层与东方系（主人 2026-09-15 第二批全量收录）──
+  {
+    name: '败犬烙印',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description:
+      '每一次战败，都会在你的灵魂上留下一枚【败犬烙印】。在制卡时，你可以消耗一枚烙印，强行扭转一次词条冲突，极大增加成功率，甚至能化腐朽为神奇。',
+    entries: [],
+  },
+  {
+    name: '因果炼金术',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description:
+      '能够制作出短暂操纵"运气"的道具卡。例如，必定成功的【幸运硬币】或必定失败的【厄运护符】，但使用后必然会在其他方面遭到反噬。',
+    entries: [],
+  },
+  {
+    name: '液体机械',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description:
+      '能够将金属与流体素材结合，制作出【液态金属】或【纳米机群】类的特殊道具卡。激活后可短暂构筑成武器、护盾甚至简易载具。',
+    entries: [
+      { kind: '材料限定', channel: 'universal', params: { materialClass: '金属' } },
+      { kind: '材料限定', channel: 'universal', params: { materialClass: '流体' } },
+      { kind: '配方解锁', channel: 'universal', params: { recipe: '液态金属/纳米机群' } },
+    ],
+  },
+  {
+    name: '便携黑洞',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description:
+      '使用蕴含重力或空间属性的素材，有极小概率制作出一次性的【微型黑洞】道具卡，激活后会吞噬周围的一切。',
+    entries: [
+      { kind: '材料限定', channel: 'universal', params: { materialClass: '重力空间' } },
+      { kind: '配方解锁', channel: 'universal', params: { recipe: '微型黑洞' } },
+    ],
+  },
+  {
+    name: '时间沙漏',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description:
+      '使用蕴含时间之力的稀有素材，有几率制作出能小范围【加速】或【减速】时间的道具卡，效果结束后素材会彻底化为凡尘。',
+    entries: [
+      { kind: '材料限定', channel: 'universal', params: { materialClass: '时间之力' } },
+      { kind: '配方解锁', channel: 'universal', params: { recipe: '时间加速/减速' } },
+    ],
+  },
+  {
+    name: '绝对母权',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description:
+      '【恋母情结】你制作的所有【伙伴卡】都会视你为"孩子"，拥有极强的保护欲和控制欲。她们会为你提供无与伦比的防御和恢复，在战斗时强行吸引仇恨，但当你试图使用她们不认可的卡牌时，有概率遭到"母爱惩戒"，该卡牌被无效化并对你造成精神冲击。',
+    entries: [],
+  },
+  {
+    name: '最终解释权',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description:
+      '每场战斗一次，你可以重新定义你制作的一张卡牌描述中的一个关键词。例如，将"造成火焰伤害"改为"造成真实伤害"。',
+    entries: [],
+  },
+  {
+    name: '混沌理论',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description:
+      '使用【对冲融合】时，素材的冲突值越高，【良性突变】的概率反而越大。你总能在最混乱的能量中找到秩序。',
+    entries: [],
+  },
+  {
+    name: '盗火者',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description: '越阶挑战时，若挑战成功，制成的卡牌有50%的概率直接提升一个大等级。',
+    entries: [],
+  },
+  {
+    name: '神级选项系统',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description:
+      '在人生的重要十字路口，时间会为你暂停，面前将出现三个选项，每个选项后面都清晰地标注了可能带来的后果。',
+    entries: [],
+  },
+  {
+    name: '一拳超人系统',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description:
+      '你每天只能挥出一拳，但这一拳的威力会被增幅到你当前等级所能达到的极限。出拳后，你将进入24小时的虚弱状态。',
+    entries: [],
+  },
+  {
+    name: '世界线变动系统',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description:
+      '当你做出足以影响世界的重大决定时，你能看到数条不同的世界线分支，并选择其中一条进入。',
+    entries: [],
+  },
+  {
+    name: '剧本编写系统',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description:
+      '你可以消耗大量精神力，编写一段简短的"剧本"，在未来一段时间内，世界会大概率按照你的剧本发展。',
+    entries: [],
+  },
+  {
+    name: '天生剑骨（东方）',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description:
+      '你天生拥有一把跟自己同步成长，极其强大的【本名剑】装备卡，你不能拿装备其他武器类装备卡，但你在制作剑类装备卡时触发良性进化概率为百分之百。',
+    entries: [],
+  },
+  {
+    name: '阵法大师（东方）',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description:
+      '你的脑海中天生便刻印着无数阵图，对空间与能量的排布极为敏感。制作【阵法】（即领域卡）的成功率和效果均得到极大提升，并且你制作的所有卡组必定是精英级卡组。',
+    entries: [{ kind: '配方解锁', channel: 'universal', params: { recipe: '阵法领域卡' } }],
+  },
+  {
+    name: '符箓宗师（东方）',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description:
+      '你获得【空白符篆】（特殊物品）的制作配方，制作起来极其简单，可以同时携带大量空白符篆，你使用任何技能将不会损耗MP值，同时也没有冷却时间，每一次使用技能都会消耗一张空白符篆，并以使用符篆的形式使用技能。',
+    entries: [{ kind: '配方解锁', channel: 'universal', params: { recipe: '空白符篆' } }],
+  },
+  {
+    name: '炼器神手（东方）',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description:
+      '你与器物有特殊的缘分。你只能制作【装备卡】，并且在素材等级等于你的制卡师等级时成功率为百分之百，有较大概率触发良性进化，每次触发良性进化，则必定附带器灵【配套伙伴卡】和本命决【配套技能卡】，并且自动形成精英级卡组。',
+    entries: [
+      { kind: '成品限定', channel: 'universal', params: { productClass: '装备卡' } },
+      { kind: '配方解锁', channel: 'universal', params: { recipe: '器灵与本命诀' } },
+    ],
+  },
+  {
+    name: '御兽奇才（东方）',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description:
+      '你与万兽有着天然的亲和力，能够轻易理解它们的灵魂。制作【伙伴卡】时成功率大幅提升，且召唤出的伙伴初始好感度更高，每天你都可以将一个等级不高于你的兽类卡牌或素材强行提升一个大等级。',
+    entries: [
+      { kind: '材料限定', channel: 'universal', params: { materialClass: '兽类' } },
+      { kind: '成功率加成', channel: 'universal', params: { bonus: 50 } },
+    ],
+  },
+  {
+    name: '词条窃贼',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description:
+      '每天一次，当你接触到不属于自己的【卡牌】或【素材】时，可以从它们身上随机窃取一个【词条】，并附加到自己的任意一张卡牌上。',
+    entries: [],
+  },
+  {
+    name: '道法自然（东方）',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description:
+      '你天生与大道相合，制卡时可大幅降低素材间的属性冲突，【对冲融合】的成功率与收益远超常人，万物皆可为你所用，制作的每张卡片都会有一个符合卡片特质的概念性词条。',
+    entries: [],
+  },
+  {
+    name: '完美人形',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description:
+      '你执着于创造完美的幼女。你可以将大量型伙伴与【畸变】类素材进行融合献祭，通过残酷的淘汰与缝合，最终制造出一张拥有强大能力、外表天真可爱、内在绝对服从的强大幼女怪物伙伴。',
+    entries: [{ kind: '配方解锁', channel: 'universal', params: { recipe: '完美人形' } }],
+  },
+  {
+    name: '天生丹心（东方）',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description:
+      '你拥有成为炼丹大师的心窍，你可以将三个完全不同的素材放入心中丹炉炼制，炼制出没有任何负面词条，并且素材等级不变，完美融合三个素材优点的高级素材。',
+    entries: [{ kind: '配方解锁', channel: 'universal', params: { recipe: '丹炉三合' } }],
+  },
+  {
+    name: '下克上',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description:
+      '你的卡牌在攻击实际等级（即不计算任何增益的原生等级）高于自身的敌人时，会获得【克上】效果，无视对方部分防御力并造成额外伤害。等级差距越大，该效果越强。',
+    entries: [],
+  },
+  {
+    name: '寄生殖入',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description:
+      '你制作的卡牌是活体寄生卵。你可以将这些"卡牌"植入生物体内，它们会汲取宿主的生命力成长。成熟后，宿主会被瞬间改造，破体而出一个完全忠于你，并且吸收母体和寄生卡牌所有特性的强大生物兵器伙伴卡。被植入者等阶越高，兵器越强。',
+    entries: [{ kind: '配方解锁', channel: 'universal', params: { recipe: '寄生卵兵' } }],
+  },
+  {
+    name: '卡组生态',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description:
+      '你构筑的卡组不再是卡牌的集合，而是一个微缩的生态系统。卡牌之间会自行繁衍、捕食、进化，你需要像"神"一样去维护这个生态的平衡。',
+    entries: [],
+  },
+  {
+    name: '画师',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description:
+      '卡牌的强度不再取决于材料，而取决于你的"画技"。你亲手绘制的卡面越精美、越富神韵，卡牌的最终能力就越强大。你可以随时修改卡面，从而调整卡牌的技能。',
+    entries: [],
+  },
+  {
+    name: '爱',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description:
+      '你制作的第一张伙伴卡不需要任何材料。你制作的第一张伙伴卡是你本人的性转后的姿态。你们共享知识、记忆、能力，当任意一方变强时，另一方都会同步获得相同幅度的强化。',
+    entries: [],
+  },
+  {
+    name: '血伶人',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description:
+      '你可以直接将活物作为素材制作卡牌(无需分解)，而且你可以按照你的想法随意塑造卡牌形状，当你的伙伴卡阵亡之后你可以复活她。',
+    entries: [
+      { kind: '材料限定', channel: 'universal', params: { materialClass: '活体' } },
+      { kind: '配方解锁', channel: 'universal', params: { recipe: '伙伴复活' } },
+    ],
+  },
+  {
+    name: '姬骑士军团',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description: '你在制作姬骑士相关卡牌时必定大成功，且开局自带一张白银级姬骑士伙伴卡。',
+    entries: [{ kind: '成功率加成', channel: 'universal', params: { bonus: 100 } }],
+  },
+  {
+    name: '兔女郎爱好者',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description: '当你在制作有关兔女郎和兔子的卡时必定大成功，并且你可以将其他卡转化为兔女郎。',
+    entries: [
+      { kind: '词条加权', channel: 'universal', params: { keywords: ['兔女郎'], weight: 3 } },
+    ],
+  },
+  {
+    name: '肉体改造师',
+    grade: 'A' as TalentGrade,
+    source: 'universal',
+    description:
+      '在制卡过程中，你可以精细调整女性伙伴卡的肌肉群分布，可以特化【腿部】力量以获得毁灭性的踢技，或特化【背部】力量以增强摔投威力。',
+    entries: [
+      {
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['腿部特化', '背部特化'], weight: 2 },
+      },
+    ],
+  },
+  {
+    name: '太刀虾！',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description:
+      '你无法制作伙伴卡，你无法使用除太刀以外的武器卡。当你使用太刀时，你获得多种炫酷特效，当你制作与进化太刀武器卡时，必定触发【良性突变】。',
+    entries: [
+      { kind: '词条加权', channel: 'universal', params: { keywords: ['太刀'], weight: 3 } },
+    ],
+  },
+  {
+    name: '战意破苍穹',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description:
+      '你获得本源武器装备卡【麒麟殒天弓】，武器与你因果绑定，只有你或你认可的人能够使用。武器技能：当你对敌方造成伤害时，可以选择一个【击伤】效果对所有目标生效直到战斗结束：箭折双臂/击踵断机/矢贯中枢/锋破气海/箭碎天冲。武器技能无法被任何方式无效化，武器本身无法被任何方式抢夺盗取。',
+    entries: [],
+  },
+  {
+    name: '鬼话连篇',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description:
+      '你无法制作【伙伴卡】。当你创作出一个鬼故事或都市传说时，其中的主人公将会成为你的【伙伴卡】，这个过程不会消耗你的MP，伙伴卡的技能会根据故事生成。故事的完成度、逻辑感和恐怖程度都会影响其初始等级。你在每个等阶只能通过此天赋获得至多两个【伙伴卡】。',
+    entries: [],
+  },
+  {
+    name: '冰封王座',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description:
+      '当你在雪天时你和你的所有卡牌获得巨大加成，并且你每天有一次强制降雪一小时的机会。你可以将冰或雪作为素材制卡，冰和雪的素材等级与你当前等级一致。若你在制卡时加入冰或雪作为素材，则此次制卡必定大成功。',
+    entries: [
+      { kind: '材料限定', channel: 'universal', params: { materialClass: '冰雪' } },
+      { kind: '成功率加成', channel: 'universal', params: { bonus: 100 } },
+    ],
+  },
+  {
+    name: '好运之骰',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description:
+      '每天一次机会，投出一个十面骰子，随机从里面的奖项中获取一项：谢谢惠顾/福缘天降/再来一次/红鸾天喜/提升一级/刀刀暴击/制卡顺利/材料秘境/屠龙宝刀/杂鱼杂鱼。',
+    entries: [],
+  },
+  {
+    name: '现代武装',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description:
+      '现在你制作的卡牌，将在制作成功时发生蜕变，根据设计的初衷和词条向现代蜕变：远程装备卡变成未来枪械，伙伴卡机器化或基因超凡化，词条升华升级，不符合现代的词条被抹除。',
+    entries: [
+      { kind: '词条加权', channel: 'universal', params: { keywords: ['现代化'], weight: 3 } },
+    ],
+  },
+  {
+    name: '怪兽制造空间',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description:
+      '拥有一处可以随意开启的空间，空间内部是一个锅炉，可以将素材放入锅炉融合出怪兽，融合出的怪兽根据素材决定品级且必定成功。融合的怪兽分为主体和配件，怪兽之间可以继续融合出合成兽。',
+    entries: [{ kind: '配方解锁', channel: 'universal', params: { recipe: '怪兽融合锅炉' } }],
+  },
+  {
+    name: '千秋证果',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description:
+      '你的属性修正为更高一档的公式，但升级所需经验为标准制卡师的5倍。你与伙伴获得的经验会储存起来，需要手动升级，储存的经验可分享给伙伴卡。',
+    entries: [],
+  },
+  {
+    name: '海神代言人',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description:
+      '你能听懂所有海洋生物的语言，并且可以用精神力向它们下达简单指令。每日可以免费召唤一群低级海洋生物为你侦查、运输或骚扰敌人。制作与海洋生物相关的伙伴卡时，初始忠诚度直接拉满。',
+    entries: [{ kind: '材料限定', channel: 'universal', params: { materialClass: '海洋生物' } }],
+  },
+  {
+    name: '永恒航路',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description:
+      '你的脑海中刻印着一张不断自动更新的完整海图，包括所有已知和未知的暗礁、洋流、沉船位置与魔物巢穴分布。你在海上永远不会迷失方向，且航行速度提升50%。',
+    entries: [],
+  },
+  {
+    name: '黑潮之子',
+    grade: 'SS' as TalentGrade,
+    source: 'universal',
+    description:
+      '你的身体已经适应了深海的极端环境。你在水下不需要呼吸，免疫水压伤害，且在深海环境中敏捷和防御各提升30%。',
+    entries: [],
+  },
+
   // ── 融合独占 ──
   {
     name: '垃圾摩托',
