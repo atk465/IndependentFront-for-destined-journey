@@ -1070,7 +1070,7 @@ export interface CharacterState {
   present: boolean;
 
   // ===== 冒险者等级 =====
-  adventurerRank: string; // '未评级' | 'D' | 'C' | 'B' | 'A' | 'S'
+  /** 冒险者等级已改为声望派生（card-workshop/adventurer-rank），不在角色上存储 */
 
   // ===== 当前行为 =====
   currentAction: string;
@@ -1131,7 +1131,6 @@ export function createDefaultCharacterState(
     money: 0,
     location: '',
     present: true,
-    adventurerRank: '未评级',
     currentAction: '',
     customFields: {},
     ...overrides,

@@ -1575,7 +1575,6 @@ export const useCreateStore = defineStore('create', () => {
       money: money.value,
       location: startLocation.value === '自定义' ? customStartLocation.value : startLocation.value,
       present: true,
-      adventurerRank: '未评级',
       currentAction: '',
       bloodlineIds: [],
       // 正式字段（规范 §2.1；M6 T2 双写退役完成，customFields 只留真扩展数据）

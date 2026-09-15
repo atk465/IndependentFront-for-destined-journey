@@ -66,11 +66,6 @@ export function filterByTier(chars: CharacterState[], tier: number): CharacterSt
   return chars.filter((c) => c.tier === tier);
 }
 
-/** 按冒险者等级过滤 */
-export function filterByRank(chars: CharacterState[], rank: string): CharacterState[] {
-  return chars.filter((c) => c.adventurerRank === rank);
-}
-
 /** 角色是否在场（在主角附近/同场景）。严格 === true 判断。 */
 export function isPresent(c: CharacterState): boolean {
   return c.present === true;
@@ -165,7 +160,6 @@ export const $char = {
   findByName,
   filterByLocation,
   filterByTier,
-  filterByRank,
   isPresent,
   getPresentCharacters,
   summarizeChar,

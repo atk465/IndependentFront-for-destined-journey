@@ -19,10 +19,13 @@ import {
   type TalentTemplate,
 } from '@engine/card-workshop/talent-entry';
 import { cardTierVar } from '../../../lib/quality-colors';
+import { rankForReputation } from '@engine/card-workshop/adventurer-rank';
 
 const game = useGameStore();
 const commissions = getCommissionDefs();
 const reputation = computed(() => (game.saveProfile ? getReputation(game.saveProfile) : 0));
+/** 冒险者等级 = 声望派生（card-workshop/adventurer-rank，不落库自动更新） */
+const rank = computed(() => rankForReputation(reputation.value));
 
 const selectedName = ref<string | null>(null);
 const feedback = ref<{ kind: 'ok' | 'err'; msg: string } | null>(null);
@@ -111,9 +114,9 @@ function rewardsText(rewards: {
 <template>
   <section class="commission-board" aria-label="委托板">
     <header class="board-head">
-      <p class="reputation" title="完成委托可提升公会声望">
+      <p class="reputation" title="完成委托可提升公会声望；声望达标自动晋升冒险者等级">
         <i class="fa-solid fa-star" aria-hidden="true"></i>
-        公会声望 {{ reputation }}
+        公会声望 {{ reputation }} · {{ rank }} 级
       </p>
     </header>
 

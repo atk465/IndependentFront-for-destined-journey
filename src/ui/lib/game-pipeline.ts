@@ -1046,6 +1046,7 @@ export class GamePipeline {
         characters: this.game.characters,
         gameTime: this.game.saveProfile?.gameTime,
         fp: this.game.saveProfile?.fp,
+        reputation: this.game.saveProfile?.reputation ?? 0,
         turn: history.length,
         // 🔴 漂移修复（地图 v1 §5 接线表）：`stat-projection` 一直会写 `stats.世界.天气`，
         //    只是**从来没人供值** —— 于是世界书里每一处 `stats.世界.天气` 都读不到那个键，

@@ -39,7 +39,6 @@ import {
   findByName,
   filterByLocation,
   filterByTier,
-  filterByRank,
   isPresent,
   getPresentCharacters,
   summarizeChar,
@@ -245,20 +244,6 @@ describe('filterByTier', () => {
   });
 });
 
-describe('filterByRank', () => {
-  it('返回匹配冒险者等级的角色', () => {
-    const a = makeChar({ adventurerRank: 'B' });
-    const b = makeChar({ adventurerRank: 'S' });
-    const c = makeChar({ adventurerRank: 'B' });
-    expect(filterByRank([a, b, c], 'B')).toEqual([a, c]);
-  });
-
-  it('无匹配时返回空数组', () => {
-    const chars = [makeChar({ adventurerRank: 'D' })];
-    expect(filterByRank(chars, 'S')).toEqual([]);
-  });
-});
-
 describe('getPresentCharacters', () => {
   const reference = makePlayer({ location: '地下城·第一层' });
 
@@ -446,7 +431,6 @@ describe('$char namespace', () => {
     expect(typeof $char.findByName).toBe('function');
     expect(typeof $char.filterByLocation).toBe('function');
     expect(typeof $char.filterByTier).toBe('function');
-    expect(typeof $char.filterByRank).toBe('function');
     expect(typeof $char.getPresentCharacters).toBe('function');
     expect(typeof $char.summarizeChar).toBe('function');
     expect(typeof $char.summarizeChars).toBe('function');

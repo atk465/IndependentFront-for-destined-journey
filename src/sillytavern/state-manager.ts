@@ -268,11 +268,10 @@ const UPDATE_CHAR_WHITELIST = new Set<string>([
   'maxMp',
   'sp',
   'maxSp',
-  // 经济 / 位置 / 冒险者等级 / 当前行为
+  // 经济 / 位置 / 当前行为
   'money',
   'location',
   'present',
-  'adventurerRank',
   'currentAction',
   // 血脉 / 集群数量 / 叙事字段
   'bloodlineIds',

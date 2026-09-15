@@ -141,7 +141,6 @@ export async function createTestSave(options: { reset?: boolean } = {}): Promise
     maxSp: 150,
     money: 1250,
     location: '中部大陆-边境行省-石桥镇',
-    adventurerRank: 'A',
     currentAction: '',
     bloodlineIds: ['human_imperial'],
     // M2: 装备并入 inventory（equippedSlot 非空 = 已穿戴，规范 §3）

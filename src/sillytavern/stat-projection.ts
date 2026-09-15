@@ -23,6 +23,7 @@
  */
 
 import type { CharacterState } from './types';
+import { rankForReputation } from './card-workshop/adventurer-rank';
 import { formatGameTime, getTimeOfDay, type GameTime } from './time-system';
 
 /** buildStatData 的入参 */
@@ -33,6 +34,8 @@ export interface StatProjectionInput {
   gameTime?: GameTime;
   /** 存档级命运点数（SaveProfile.fp）；缺失时结果不含 `命运点数` 键 */
   fp?: number;
+  /** 存档级声望（SaveProfile.reputation）；冒险者等级 = rankForReputation(声望) 纯派生 */
+  reputation?: number;
   /** 回合号（= 历史长度）；缺失时不含 `世界.回合` */
   turn?: number;
   /** 当前天气；缺失时不含 `世界.天气` */
@@ -129,6 +132,10 @@ export function buildStatData(input: StatProjectionInput): Record<string, any> {
       生命层级: player.tierName,
       累计经验值: player.totalExp,
       升级所需经验: player.expToNext,
+      // 冒险者等级 = 声望派生（card-workshop/adventurer-rank，不落库）
+      ...(input.reputation !== undefined
+        ? { 冒险者等级: rankForReputation(input.reputation) }
+        : {}),
       // 五维 + 未分配点
       属性: {
         力量: attrs?.str ?? 0,

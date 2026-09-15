@@ -68,10 +68,9 @@ describe('createDefaultCharacterState', () => {
     expect(c.statusEffects).toEqual([]);
   });
 
-  it('金钱默认 0，冒险者等级默认未评级', () => {
+  it('金钱默认 0', () => {
     const c = createDefaultCharacterState();
     expect(c.money).toBe(0);
-    expect(c.adventurerRank).toBe('未评级');
   });
 
   it('位置默认空串，present 默认 true', () => {

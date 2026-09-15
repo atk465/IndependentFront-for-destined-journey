@@ -22,6 +22,7 @@ import PlayerPersonaEditorModal from './PlayerPersonaEditorModal.vue';
 // 它的 props/events，不复制一份 —— 复制一份就等于把 D16 不变式、撞位分配、
 // 部分成功口径再实现一遍。
 import AssetCropEditor from '../shared/AssetCropEditor.vue';
+import { rankForReputation } from '@engine/card-workshop/adventurer-rank';
 
 const game = useGameStore();
 const ui = useUIStore();
@@ -124,7 +125,11 @@ const identityFields = computed(() => {
     { label: '身份', value: p.identity?.[0] || '—', cls: '' },
     { label: '职业', value: p.occupation?.[0] || '—', cls: '' },
     { label: '生命层级', value: p.tierName || '—', cls: 'tier-text' },
-    { label: '冒险者等级', value: p.adventurerRank ? `${p.adventurerRank}级` : '—', cls: '' },
+    {
+      label: '冒险者等级',
+      value: rankForReputation(game.saveProfile?.reputation ?? 0),
+      cls: '',
+    },
   ];
 });
 /** 一行放不下时会被省略号截断，完整带标签的版本挂在 title 上，信息不丢 */

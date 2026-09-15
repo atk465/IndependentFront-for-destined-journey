@@ -106,10 +106,6 @@ export function getLevel(char: CharacterState): number {
   return char.level;
 }
 
-export function getAdventurerRank(char: CharacterState): string {
-  return char.adventurerRank;
-}
-
 // ========== 经验值计算 ==========
 
 /**
@@ -228,7 +224,6 @@ export const $resource = {
   getAttribute,
   getTier,
   getLevel,
-  getAdventurerRank,
   expToLevel,
   totalExpForLevel,
   expFromMonster,
