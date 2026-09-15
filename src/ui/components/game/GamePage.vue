@@ -23,7 +23,6 @@ import CardAlbumPanel from './cards/CardAlbumPanel.vue';
 import CommissionBoard from './cards/CommissionBoard.vue';
 import TalentPanel from './cards/TalentPanel.vue';
 import CraftBench from './cards/CraftBench.vue';
-import CombatPanel from './combat/CombatPanel.vue';
 import SkirmishPanel from './combat/SkirmishPanel.vue';
 
 const game = useGameStore();
@@ -197,11 +196,9 @@ onBeforeUnmount(() => {
 
   cancelStreamingPreview();
   game.isGenerating = false;
-  // ⚔️ 结算确认框挂起时离开页面（2026-08-13 需求 D）：裁决不可能发生了，
   //    exitCombat 收掉挂起的 await（resolve(null)）并清确认态——否则 pipeline 的
   //    await 永久悬挂。战斗进行中/就绪态**不清**：切设置页再回来战斗还能接着打
   //    （CombatPanel 重新挂载后 v3ActiveCombat 还在，这是现状下能工作的场景）。
-  if (game.combatSummaryReview) game.exitCombat();
 });
 
 async function handleSend(content: string) {
@@ -283,9 +280,7 @@ function onModalOpenChange(v: boolean) {
     </div>
 
 
-    <!-- M5 战斗面板（isInCombat 驱动，覆盖层） -->
-    <CombatPanel />
-
+    
     <!-- 交锋拍制战斗面板（设计共识 §8；session 驱动，战报审计行走正文流） -->
     <SkirmishPanel />
 

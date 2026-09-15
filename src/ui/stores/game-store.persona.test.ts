@@ -127,7 +127,7 @@ describe('game-store.updatePlayerPersona', () => {
 
   it('战斗中拒绝保存', async () => {
     const store = await seedStore();
-    store.combatReady = { combatType: '遭遇战' };
+    store.skirmishSession = { finished: null } as any;
 
     const result = await store.updatePlayerPersona({
       personality: '不应写入',

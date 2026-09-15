@@ -6,7 +6,7 @@
  * 在战斗终局处于倒下状态（→ 卡损坏，data.damaged）。
  */
 
-import type { DeckCardData } from '../combat-v3/types';
+import type { DeckCardData } from '../types';
 import { cardKindOf } from './card-kind';
 
 /**

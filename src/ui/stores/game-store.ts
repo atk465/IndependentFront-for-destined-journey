@@ -11,8 +11,6 @@ import type {
   PlotEvent,
   PlotOutline,
   CardAlbumState,
-  CombatState,
-  CombatSummaryResult,
   SaveProfile,
   AgentActivityRun,
   AgentActivityStep,
@@ -20,11 +18,7 @@ import type {
   DebugTurnRecord,
 } from '@engine/types';
 export type { DebugAgentEntry, DebugTurnRecord } from '@engine/types';
-import type { CombatView, CombatCommand, DeckCardData } from '@engine/combat-v3';
-import { tryParsePlayCard } from '@engine/combat-v3';
-import { cardKindOf, isConsumableKind } from '@engine/card-workshop/card-kind';
 import { planRepair } from '@engine/card-workshop/repair';
-import { downedSummonCards } from '@engine/card-workshop/contract';
 import { buildDemoCardsPatches, buildDemoDeckPatches } from '@engine/card-workshop/demo';
 import { toPlainCardAlbum } from '@engine/card-workshop/album';
 import { planCommissionDelivery } from '@engine/card-workshop/commission';
@@ -37,7 +31,6 @@ import {
 import { getReputation as getTalentReputation } from '@engine/save-profile';
 import type { SkirmishSession } from '@engine/card-workshop/skirmish-session';
 import type { SkirmishChoice } from '@engine/card-workshop/skirmish';
-import { createDefaultCharacterState } from '@engine/types';
 import {
   getSave,
   getSaves,
@@ -67,7 +60,6 @@ import { invalidatePromptSession } from '@engine/prompt-session-assembler';
 import { allocateAttributePoint } from '@engine/attribute-allocation';
 import type { AllocatableAttr } from '@engine/attribute-allocation';
 import { detach } from './db-write';
-import type { CombatEvent } from '@engine/combat-v2-types';
 import { agentActivityLabel, presentToolActivity } from '../lib/agent-activity';
 // 🆕 重铸（2026-08-24）：单条目重铸的类型 + 注入缝（实现由 GamePage 挂 GamePipeline.rewriteLoadoutItem）
 import type { RewriteTarget } from '@engine/item-gen-chain';
@@ -135,327 +127,11 @@ export const useGameStore = defineStore('game', () => {
   const activePlotEvents = ref<PlotEvent[]>([]);
   const plotOutline = ref<PlotOutline | null>(null);
 
-  // === 战斗 & 制作 ===
-  const activeCombat = ref<CombatState | null>(null);
-
-  // 🆕 v3：独立 v3ActiveCombat ref（CombatView 形状，与 v2 activeCombat 并存）。
-  //   v2 事件写 activeCombat，v3 事件写 v3ActiveCombat；isInCombat 同时看两者。
-  const v3ActiveCombat = ref<CombatView | null>(null);
-
-  // 🆕 F2（2026-08-10）：就绪态 —— combat_trigger 检出后、玩家点「开始战斗」前的
-  //   面板数据（marker 快照）。非 null = 就绪面板显示中（覆盖层锁 UI，战斗还没开）。
-  //   isInCombat 认它；startCombat() 清它并调 coordinator.start() 真开打。
-  const combatReady = ref<{
-    combatType?: string;
-    environment?: string;
-    allies?: string[];
-    enemies?: string[];
-    bodyText?: string;
-    brief?: string;
-  } | null>(null);
-
-  // 🆕 结算确认态（2026-08-13 需求 D）：战斗终局落库后、摘要注入正文前的确认面板。
-  //   非 null = 结算确认面板显示中（数值卡 + 可编辑摘要 textarea）。isInCombat 认它
-  //   —— v3_settlement 已把 phase 置 SettlementCommitted（isInCombat 第三判据本会翻
-  //   false 关面板），确认面板需要面板继续开着，所以它必须进 isInCombat。
-  const combatSummaryReview = ref<{
-    outcome: 'ally_win' | 'enemy_win' | 'draw' | 'fled';
-    totalExp: number;
-    totalFp: number;
-    loot: CombatSummaryResult['loot'];
-    rounds: number;
-    summaryText: string;
-  } | null>(null);
-  /** awaitCombatSummaryReview 挂起的 resolver（confirm/discard/exitCombat 消费） */
-  let summaryReviewResolve: ((text: string | null) => void) | null = null;
-
+  // === 战斗（交锋拍）===
+  /** 交锋进行中判据（委托结算静默等消费方）：会话存在且未终局 */
   const isInCombat = computed(
-    () =>
-      combatReady.value !== null ||
-      combatSummaryReview.value !== null ||
-      (activeCombat.value !== null && activeCombat.value.status !== 'ended') ||
-      (v3ActiveCombat.value !== null && v3ActiveCombat.value.phase !== 'SettlementCommitted'),
+    () => skirmishSession.value !== null && skirmishSession.value.finished === null,
   );
-
-  // === M5 战斗面板状态 ===
-  /** 战斗消息流条目（叙事 + 动作结果卡片 + 回合分隔） */
-  const combatLog = ref<CombatLogEntry[]>([]);
-  /** 当前等玩家输入的我方单位（null = 不在等输入）；v3 扩展 requiredInputKind 供四态 UI 分流 */
-  const combatAwaitingInput = ref<{
-    unit: string;
-    unitId: string;
-    round: number;
-    requiredInputKind?: string;
-  } | null>(null);
-  /** 当前行动者 characterId（turn_started 事件更新，单位卡片高亮用） */
-  const combatCurrentUnitId = ref<string | null>(null);
-  /** 阶段5-闭环：玩家卡组编组快照（1.2 编组制，开战定死；game-pipeline 开战时灌入）。
-   *  双消费：submitCombatIntent 的确定性玩卡快路 + 战斗卡组条四态显示 */
-  const combatDeckSnapshot = ref<DeckCardData[]>([]);
-  /** 编组快照唯一写入口（game-pipeline startCombatV3 开战时调用） */
-  function setCombatDeckSnapshot(cards: DeckCardData[]) {
-    combatDeckSnapshot.value = cards;
-  }
-  /** 阶段5-闭环（1.3 消耗制）：本局消耗账——consumed = 封印破裂待结算；pending = 封印卡已打出等启封结果 */
-  const combatConsumedCards = ref<string[]>([]);
-  const combatPendingConsume = ref<string[]>([]);
-  /** 阶段5-闭环：本局全部确定生效的玩卡（v3_card_played 事件账，卡组条四态显示用） */
-  const combatPlayedCards = ref<{ name: string; cardKind: string; sealed: boolean }[]>([]);
-  /** 🆕 v3：Coordinator 句柄（submitCommand / abandon / 重开），供前端 Command 路由与放弃（C4）
-   *  T16 §3.5：+preSnapshotId（pre-combat 快照，重开战斗 restoreSnapshot 用）与
-   *  +restart（重开战斗回调 —— pipeline 持有 combat marker，重触发归它）。
-   *  F2：+start（就绪期占位句柄只带它 —— 玩家点「开始战斗」→ store.startCombat 调它）。 */
-  const combatCoordinator = ref<{
-    submit?: (cmd: CombatCommand) => Promise<void>;
-    /** 🎭 主持人/DM 模式（2026-08-12）：提交玩家意图文本 → 主持人解析 → Command */
-    submitPlayerIntent?: (text: string) => Promise<void>;
-    abandon?: () => void;
-    waitForCommand?: () => Promise<CombatCommand>;
-    preSnapshotId?: string | null;
-    restart?: () => Promise<void>;
-    start?: () => Promise<void>;
-  } | null>(null);
-
-  /** 战斗开始：清空面板状态（activeCombat 由 combat_started 事件填；v3 清 v3 ref；F2 清就绪态） */
-  function enterCombat() {
-    combatLog.value = [];
-    combatAwaitingInput.value = null;
-    combatCurrentUnitId.value = null;
-    v3ActiveCombat.value = null;
-    combatReady.value = null;
-  }
-
-  /** 应用 runner 事件流 → 更新面板状态（combat_started / action_resolved / 回合事件 / awaiting） */
-  function applyCombatEvent(evt: CombatEvent) {
-    const id = crypto.randomUUID();
-    switch (evt.type) {
-      case 'combat_started':
-        activeCombat.value = evt.state;
-        break;
-      case 'action_resolved':
-        combatLog.value.push({ id, kind: 'action', result: evt.result, toolName: evt.toolName });
-        break;
-      case 'round_narrative':
-        if (evt.text)
-          combatLog.value.push({ id, kind: 'narrative', text: evt.text, round: evt.round });
-        break;
-      case 'round_started':
-        combatLog.value.push({ id, kind: 'round_divider', round: evt.round });
-        break;
-      case 'awaiting_player_input':
-        combatAwaitingInput.value = { unit: evt.unit, unitId: evt.unitId, round: evt.round };
-        break;
-      case 'turn_started':
-        combatCurrentUnitId.value = evt.unitId;
-        break;
-      // ── v3 扩展变体（投影 A 输出，M2）──
-      // 🆕 F2：就绪面板事件（combat_trigger 检出后 pipeline 直接构造，先于
-      //   v3_combat_started 到达）——置 combatReady（isInCombat 据此弹就绪面板）。
-      //   战斗还没开，不动 v3ActiveCombat / combatLog。
-      case 'v3_combat_ready':
-        combatReady.value = {
-          combatType: evt.combatType,
-          environment: evt.environment,
-          allies: evt.allies ? [...evt.allies] : undefined,
-          enemies: evt.enemies ? [...evt.enemies] : undefined,
-          bodyText: evt.bodyText,
-          brief: evt.brief,
-        };
-        break;
-      case 'v3_combat_started':
-        v3ActiveCombat.value = {
-          revision: 0,
-          phase: 'CombatOpen',
-          round: evt.round,
-          combatId: evt.combatId,
-          initiativeOrder: evt.unitNames,
-          currentTurnIndex: 0,
-          // T13：载荷里带 units（其他 emit 源的兼容路径）就一并填，不再留空字典
-          units: evt.units ? { ...evt.units } : {},
-          resourceSnapshots: { FP: 0 },
-        };
-        combatLog.value.push({ id, kind: 'round_divider', round: evt.round });
-        break;
-      // 🆕 T13（设计 2026-08-09 §3.1）：开局单位字典整体快照 → 填充 v3ActiveCombat.units
-      case 'v3_units_snapshot':
-        if (v3ActiveCombat.value) {
-          v3ActiveCombat.value = { ...v3ActiveCombat.value, units: { ...evt.units } };
-        }
-        break;
-      case 'v3_round_started':
-        combatLog.value.push({ id, kind: 'round_divider', round: evt.round });
-        if (v3ActiveCombat.value) {
-          v3ActiveCombat.value = { ...v3ActiveCombat.value, phase: 'RoundOpen', round: evt.round };
-        }
-        break;
-      case 'v3_turn_started':
-        combatCurrentUnitId.value = evt.unitId;
-        break;
-      case 'v3_turn_ended':
-        if (combatCurrentUnitId.value === evt.unitId) combatCurrentUnitId.value = null;
-        break;
-      case 'v3_initiative':
-        if (v3ActiveCombat.value) {
-          v3ActiveCombat.value = { ...v3ActiveCombat.value, initiativeOrder: evt.order };
-        }
-        break;
-      case 'v3_action':
-        combatLog.value.push({ id, kind: 'action', result: evt.result, toolName: evt.toolName });
-        break;
-      case 'v3_narrative':
-        if (evt.text)
-          combatLog.value.push({ id, kind: 'narrative', text: evt.text, round: evt.round });
-        break;
-      // 🆕 2026-08-12（Bug 2 修复）：玩家侧命令被内核 rejection 的友好提示。
-      // 典型：攻击槽/动作槽已耗尽仍再点 → SLOT_EXHAUSTED。此前 coordinator 熔断
-      // abandon 整场（页面闪退根因）；现在只推一条提示行，随后 coordinator 重新 emit
-      // v3_awaiting_player_input 亮「等待输入」，玩家可换动作或点「结束回合」。
-      case 'v3_rejection_notice':
-        combatLog.value.push({
-          id,
-          kind: 'narrative',
-          text: `⚠️ ${evt.message}`,
-          round: undefined,
-        });
-        break;
-      case 'v3_awaiting_player_input':
-        combatAwaitingInput.value = {
-          unit: evt.unit,
-          unitId: evt.unitId,
-          round: evt.round,
-          requiredInputKind: 'PlayerCommand',
-        };
-        break;
-      case 'v3_combat_ended':
-        if (v3ActiveCombat.value) {
-          v3ActiveCombat.value = { ...v3ActiveCombat.value, phase: 'Terminal' };
-        }
-        break;
-      // 阶段5-闭环（名字即契约）：召唤卡的伙伴生成上场 → 契约入库（角色名=卡名）。
-      // 同名已存在 = 已契约（自愈语义：静默跳过）；非卡牌召唤（sourceItem 不在编组）不触发。
-      case 'v3_roster_changed':
-        if (evt.op === 'summoned' && evt.sourceItem) {
-          const isCardSummon = combatDeckSnapshot.value.some((c) => c.name === evt.sourceItem);
-          if (isCardSummon) {
-            const unit = v3ActiveCombat.value?.units?.[evt.unitId];
-            void contractCompanion(evt.sourceItem, {
-              hp: unit?.hp ?? 1,
-              maxHp: unit?.maxHp ?? 1,
-              mp: unit?.mp ?? 0,
-              maxMp: unit?.maxMp ?? 0,
-              sp: unit?.sp ?? 0,
-              maxSp: unit?.maxSp ?? 0,
-            });
-          }
-        }
-        break;
-      case 'v3_settlement':
-        if (v3ActiveCombat.value) {
-          v3ActiveCombat.value = { ...v3ActiveCombat.value, phase: 'SettlementCommitted' };
-        }
-        break;
-      // 阶段5-闭环（1.3 消耗制）：玩卡确定生效 → 消耗卡入待定账（sealed 先挂起等启封结果）
-      case 'v3_card_played':
-        combatPlayedCards.value.push({ name: evt.name, cardKind: evt.kind, sealed: evt.sealed });
-        if (isConsumableKind(evt.kind)) {
-          if (evt.sealed) combatPendingConsume.value.push(evt.name);
-          else combatConsumedCards.value.push(evt.name);
-        }
-        break;
-      // 启封结果定案：哑火 = 封印扛住（卡完好，退出待定账）；破裂 = 落消耗账
-      case 'v3_unseal_judged': {
-        const pending = combatPendingConsume.value;
-        const idx = pending.indexOf(evt.name);
-        if (idx !== -1) {
-          pending.splice(idx, 1);
-          if (evt.outcome !== '哑火') combatConsumedCards.value.push(evt.name);
-        }
-        break;
-      }
-    }
-  }
-
-  /** 阶段5-闭环（1.3）：本局消耗账结算出口——取走并清空（settlement 时由 game-pipeline 调用） */
-  function takeConsumedCards(): string[] {
-    const consumed = [...combatConsumedCards.value];
-    combatConsumedCards.value = [];
-    combatPendingConsume.value = [];
-    return consumed;
-  }
-
-  /** 阶段5-闭环（1.4）：卡组条四态投影（可用/生效中/伙伴在场/本局已耗） */
-  const combatDeckStripStates = computed(() =>
-    combatDeckSnapshot.value.map((card) => {
-      const kind = cardKindOf(card.词条);
-      const played = combatPlayedCards.value.some((p) => p.name === card.name);
-      const consumed =
-        combatConsumedCards.value.includes(card.name) ||
-        combatPendingConsume.value.includes(card.name);
-      let state: '可用' | '生效中' | '伙伴在场' | '本局已耗' = '可用';
-      if (consumed) state = '本局已耗';
-      else if (played && kind === '装备') state = '生效中';
-      else if (played && (kind === '召唤' || kind === '军团')) state = '伙伴在场';
-      return { name: card.name, cardTier: card.cardTier, 词条: card.词条, kind, state };
-    }),
-  );
-
-  /**
-   * 阶段5-闭环（名字即契约）：伙伴契约入库。角色名 = 卡名（契约键）；
-   * 同名角色已存在 = 已契约（自愈语义：静默跳过，不抛）。世界内账本只记存在
-   * 与核心资源，完整战斗数值以召唤时的定义在场生效。
-   */
-  async function contractCompanion(
-    cardName: string,
-    resources: { hp: number; maxHp: number; mp: number; maxMp: number; sp: number; maxSp: number },
-  ): Promise<void> {
-    if (!activeSaveId.value) return;
-    if (characters.value.some((c) => c.name === cardName)) return; // 已契约
-    const companion = createDefaultCharacterState({
-      type: 'summon',
-      name: cardName,
-      hp: Math.max(1, resources.hp),
-      maxHp: Math.max(1, resources.maxHp),
-      mp: resources.mp,
-      maxMp: resources.maxMp,
-      sp: resources.sp,
-      maxSp: resources.maxSp,
-    });
-    const sm = createStateManager(activeSaveId.value);
-    const result = await sm.commitChatState([
-      {
-        op: 'add_character',
-        target: `characters.${cardName}`,
-        value: companion,
-        metadata: { source: 'card_contract' },
-      },
-    ]);
-    if (!result.success) {
-      // 同名冲突 = 已契约（重复事件并发）——静默；其余错误记日志不阻断战斗
-      console.warn('[GameStore] 伙伴契约入库跳过/失败:', result.errors.join('; '));
-    }
-  }
-
-  /**
-   * 阶段5-闭环（3-①a 一击损坏）：终局扫描——召唤/军团卡的伙伴倒下（HP≤0）
-   * → 卡损坏名单（game-pipeline settlement 提交 update_item data.damaged）。
-   */
-  function collectDamagedSummonCards(): {
-    name: string;
-    changes: { data: Record<string, unknown> };
-  }[] {
-    const units = Object.values(v3ActiveCombat.value?.units ?? {}).map((u) => ({
-      name: u.name,
-      hp: u.hp,
-    }));
-    // update_item 的 data 是整体替换——这里合并现有 data，只翻转 damaged 标记
-    return downedSummonCards(combatDeckSnapshot.value, units).map((name) => {
-      const card = player.value?.inventory.find((i) => i.name === name);
-      return {
-        name,
-        changes: { data: { ...(card?.data ?? {}), damaged: true } },
-      };
-    });
-  }
 
   // ══════ 交锋拍制战斗（设计共识 §8）：store 持响应式状态，pipeline 持编排 ══════
   // 架构约束与 v3 同款：store 接触不到 pipeline，pipeline 经 setter 写状态、经
@@ -653,184 +329,6 @@ export const useGameStore = defineStore('game', () => {
     const result = await sm.commitChatState(patches);
     if (result.success) await refreshFromDb();
     return result.success ? { ok: true } : { ok: false, reason: result.errors.join('; ') };
-  }
-
-  /** v3：controller 挂 Coordinator 句柄（game-pipeline 在 coordinator 启动时挂） */
-  function setCombatCoordinator(handle: unknown) {
-    combatCoordinator.value = handle as never;
-  }
-
-  /** v3：玩家提交一条 CombatCommand（自动补 commandId + expectedRevision）→ 转 Coordinator */
-  async function submitCombatCommand(partial: Partial<CombatCommand>): Promise<void> {
-    const coordinator = combatCoordinator.value;
-    if (!coordinator?.submit) return;
-    const rev = v3ActiveCombat.value?.revision ?? 0;
-    const cmd = {
-      commandId: partial.commandId ?? `ui-${crypto.randomUUID()}`,
-      expectedRevision: partial.expectedRevision ?? rev,
-      actorId: partial.actorId ?? '',
-      cost: partial.cost ?? 'none',
-      kind: partial.kind ?? 'PassAttack',
-      payload: partial.payload ?? ({} as Record<string, unknown>),
-    } as CombatCommand;
-    await coordinator.submit(cmd);
-  }
-
-  /** 🎭 主持人/DM 模式（2026-08-12）：玩家提交**意图文本**（拼装格式化文本 / 自由对话）
-   *  → 转 Coordinator → 主持人会话解析 → Command。生产路径替代 submitCombatCommand：
-   *  UI 不再直接产 Command 喂内核，玩家输入一律过主持人理解意图（ADM 模式）。
-   *  老 Command 直连路径保留（submitCombatCommand），供测试/快速直捣兜底。
-   */
-  async function submitCombatIntent(text: string): Promise<void> {
-    const coordinator = combatCoordinator.value;
-    // 阶段5-闭环（1.1 解析器优先）：玩卡意图走确定性快路——玩卡动词 + 卡组快照内
-    // 卡名命中 → 直接产 Command（零 LLM、零延迟、编组闸门内建）。其余意图照旧交
-    // 主持人 AI 理解（叙事演绎不缺位）。
-    const awaiting = combatAwaitingInput.value;
-    if (awaiting && combatDeckSnapshot.value.length > 0) {
-      const card = tryParsePlayCard(text, combatDeckSnapshot.value);
-      if (card) {
-        await submitCombatCommand({
-          kind: 'DeclareAction',
-          actorId: awaiting.unitId,
-          cost: 'action',
-          payload: { actionType: 'item', card },
-        });
-        return;
-      }
-    }
-    if (!coordinator?.submitPlayerIntent) {
-      // 无意图桥（旧 coordinator / 测试）→ 静默忽略（与 submitCombatCommand 无 Coordinator 同口径）
-      return;
-    }
-    await coordinator.submitPlayerIntent(text);
-  }
-
-  /** v3：放弃战斗（C4）——句柄 abandon → 丢弃 session → exitCombat */
-  function abandonCombat() {
-    v3ActiveCombat.value = null;
-    combatLog.value = [];
-    combatAwaitingInput.value = null;
-    combatCurrentUnitId.value = null;
-    combatDeckSnapshot.value = [];
-    combatConsumedCards.value = [];
-    combatPendingConsume.value = [];
-    combatPlayedCards.value = [];
-    combatReady.value = null;
-    const c = combatCoordinator.value;
-    if (c?.abandon) c.abandon();
-  }
-
-  /** v3：跳过战斗（设计 2026-08-09 §3.5）——abandonCombat 的包装。
-   *  战斗被放弃后：session 丢弃、FP 不落库（coordinator abandon 路径）、面板关闭
-   *  （v3ActiveCombat=null → isInCombat=false）。确认弹窗文案由组件负责。 */
-  function skipCombat() {
-    abandonCombat();
-  }
-
-  /** 🆕 F2：玩家点「开始战斗」——立即清就绪态（面板从「就绪」切到「开打中」），
-   *  再调 coordinator.start()（pipeline 的 startCombatV3 真开打：enterCombat →
-   *  participants → pre-combat 快照 → runCombatV3，会重新 setCombatCoordinator
-   *  成完整句柄）。start 抛错也不回填就绪态（开打失败走 exitCombat 收面板）。 */
-  async function startCombat(): Promise<void> {
-    const c = combatCoordinator.value;
-    combatReady.value = null;
-    if (c?.start) {
-      await c.start();
-    }
-  }
-
-  /** v3：重开战斗（设计 2026-08-09 §3.5）——abandonCombat() → restoreSnapshot(pre-combat
-   *  快照) → 重新触发 combat_trigger。
-   *
-   *  流程：① 放弃当前战斗（面板关闭、不落库）② 恢复开战前快照（角色/对话/状态/变量
-   *  整表覆写回开战前，HP 等天然一致）③ 调 coordinator 句柄的 restart 回调重触发 ——
-   *  pipeline 持有 combat marker（本 store 接触不到 pipeline），经它重新走
-   *  handleCombatTriggerV3 重建战斗。确认弹窗文案由组件负责。 */
-  async function restartCombat(): Promise<TimelineRestoreResult> {
-    if (!activeSaveId.value) return { status: 'rejected', error: '无活跃存档' };
-    const coordinator = combatCoordinator.value;
-    const preSnapshotId = coordinator?.preSnapshotId ?? null;
-    const restartFn = coordinator?.restart;
-    if (!preSnapshotId) {
-      return { status: 'rejected', error: '没有 pre-combat 快照，无法重开' };
-    }
-    if (!restartFn) return { status: 'rejected', error: '战斗重开流程未就绪' };
-
-    abandonCombat(); // ① 丢弃 session → 面板关闭 → 不落库
-    // 战斗属于当前 GamePipeline.run，正常情况下 isGenerating 仍为 true；abandon 已明确
-    // 终止这一条战斗分支，所以在进入只接受静止状态的公共恢复 module 前解除该占用。
-    isGenerating.value = false;
-
-    // ② 恢复开战前时间线；失败分类、投影与效果接线统一由公共 module 负责。
-    const result = await restoreTimeline(preSnapshotId);
-    if (result.status !== 'restored' || result.continuation === 'save-switched') return result;
-
-    // ③ 重触发 combat_trigger（pipeline 持 marker；异常不阻断恢复本身）
-    try {
-      await restartFn();
-    } catch (err) {
-      console.warn('[GameStore] 重开战斗重触发失败:', err);
-      return {
-        status: 'restored',
-        continuation: 'same-save',
-        warning: '已回到战斗前，但战斗未能重新开始',
-      };
-    }
-    return result;
-  }
-
-  /** 🆕 结算确认（2026-08-13 需求 D）：pipeline 战斗终局调用 —— 投结算确认面板并
-   *  挂起等玩家裁决。返回 Promise：resolve(编辑后的摘要文本) = 注入正文；
-   *  resolve(null) = 放弃注入（结算数值已落库不可逆，只是叙事不进正文）。
-   *  面板期间 isInCombat 保持 true（combatSummaryReview 进了 isInCombat 判据）。 */
-  function awaitCombatSummaryReview(payload: {
-    outcome: CombatSummaryResult['outcome'];
-    totalExp: number;
-    totalFp: number;
-    loot: CombatSummaryResult['loot'];
-    rounds: number;
-    summaryText: string;
-  }): Promise<string | null> {
-    combatSummaryReview.value = { ...payload, loot: [...payload.loot] };
-    return new Promise((resolve) => {
-      summaryReviewResolve = resolve;
-    });
-  }
-
-  /** 玩家点「注入正文」—— text 为（可能编辑过的）摘要文本 */
-  function confirmCombatSummary(text: string) {
-    combatSummaryReview.value = null;
-    const r = summaryReviewResolve;
-    summaryReviewResolve = null;
-    r?.(text);
-  }
-
-  /** 玩家点「放弃注入」—— resolve(null)，pipeline 只收面板不写正文 */
-  function discardCombatSummary() {
-    combatSummaryReview.value = null;
-    const r = summaryReviewResolve;
-    summaryReviewResolve = null;
-    r?.(null);
-  }
-
-  /** 战斗结束：清空面板（activeCombat=null → isInCombat=false） */
-  function exitCombat() {
-    activeCombat.value = null;
-    combatLog.value = [];
-    combatAwaitingInput.value = null;
-    combatCurrentUnitId.value = null;
-    combatCoordinator.value = null;
-    v3ActiveCombat.value = null;
-    combatReady.value = null;
-    // 结算确认挂起时被 exitCombat（离开页面 / 停止生成 / 战斗失败路径）——
-    // 必须 resolve(null)，否则 pipeline 的 await 永久悬挂。
-    if (summaryReviewResolve) {
-      const r = summaryReviewResolve;
-      summaryReviewResolve = null;
-      combatSummaryReview.value = null;
-      r(null);
-    }
   }
 
   // === 元数据 ===
@@ -1554,8 +1052,6 @@ export const useGameStore = defineStore('game', () => {
     ejsVarsRejections.value = [];
     ejsFallbacks.value = [];
     ejsUiLog.value = [];
-    exitCombat();
-    combatSummaryReview.value = null;
     turnCounter = 0;
   }
 
@@ -2056,26 +1552,10 @@ export const useGameStore = defineStore('game', () => {
     recentMemories,
     activePlotEvents,
     plotOutline,
-    activeCombat,
-    isInCombat,
-    combatLog,
-    combatAwaitingInput,
-    combatCurrentUnitId,
-    v3ActiveCombat,
-    combatReady,
-    combatSummaryReview,
-    combatCoordinator,
-    enterCombat,
-    applyCombatEvent,
-    setCombatCoordinator,
-    submitCombatCommand,
-    submitCombatIntent,
-    setCombatDeckSnapshot,
-    takeConsumedCards,
     repairCard,
-    collectDamagedSummonCards,
     seedDemoCards,
     skirmishSession,
+    isInCombat,
     skirmishBusy,
     setSkirmishSession,
     setSkirmishBusy,
@@ -2090,15 +1570,6 @@ export const useGameStore = defineStore('game', () => {
     setFuseNamingImpl,
     requestFusionNaming,
     getCommissionDefs,
-    combatDeckStripStates,
-    abandonCombat,
-    skipCombat,
-    startCombat,
-    restartCombat,
-    awaitCombatSummaryReview,
-    confirmCombatSummary,
-    discardCombatSummary,
-    exitCombat,
     saveProfile,
     fp,
     gameTime,

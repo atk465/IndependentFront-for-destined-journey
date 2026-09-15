@@ -12,12 +12,231 @@ import { RARITY_LEVELS, type Rarity, type CardTier, type CraftIndustry } from '.
 import type { GameTime } from './time-system';
 // type-only 循环安全：effect-types 反向 import 本文件的 AttributeName/DivinityLevel/DamageType 也是 type-only
 import type { Modifier } from './effect-types';
-// type-only 循环安全：combat-v3/types.ts 反向 import 本文件的 CombatParticipant/StatusEffect 也是 type-only
-// EffectAutomaton 定义在 combat-v3/types.ts（v3 内核 DSL），这里只做类型引用不引入运行时
-import type { EffectAutomaton } from './combat-v3/types';
 // 地图 v1: `AgentContext.mapFlags` 的形状（分册 types-map.ts，口径同上 —— 只 type-only 反向引用）
 // 地图 v1.2: `AgentContext.mapFacts` 的形状（同一分册，同一条 type-only 口径）
 import type { MapFactsFlags, MapSaveFlags } from './types-map';
+
+// ═══════════════════════════════════════════════════════════
+// 效果自动机 DSL 类型（自 combat-v3/types 迁入 —— 卡片词条/物品效果共用；
+// v3 战斗内核已下线，DSL 形状原样保留）
+// ═══════════════════════════════════════════════════════════
+
+export type WindowKey =
+  | 'round.open'
+  | 'round.close'
+  | 'initiative.before'
+  | 'initiative.after'
+  | 'turn.open'
+  | 'turn.close'
+  | 'action.declared'
+  | 'check.intent'
+  | 'check.hit'
+  | 'collect_attacker_mods'
+  | 'collect_defender_mods'
+  | 'damage.preview'
+  | 'damage.compute'
+  | 'damage.after'
+  | 'unit.beforeDown'
+  | 'morale.before'
+  | 'morale.after'
+  | 'settlement.before';
+
+// ActiveEffectIndex（架构 §五 5.3 + §七 7.5）
+
+export type ModifierScope = 'whole_action' | 'per_hit' | 'per_target';
+
+export type ModifierSlot =
+  | 'fixedDamage'
+  | 'damageMult'
+  | 'damageTaken'
+  | 'hitBonus'
+  | 'dodge'
+  | 'initiative'
+  | 'dr'
+  | 'penetration'
+  | 'critThreshold'
+  | 'critDmg'
+  | 'attribute';
+
+export interface ContestInfo {
+  attackerDivinity: number;
+  defenderDivinity: number;
+}
+
+export interface HitPolicy {
+  consumeDice: boolean;
+  advantage?: 'adv' | 'dis' | 'none';
+}
+
+export type EffectIntent =
+  | {
+      kind: 'AddModifier';
+      slot: ModifierSlot;
+      value: number | string;
+      scope: ModifierScope;
+      targetId: string;
+      divinity: number;
+    }
+  | {
+      kind: 'DealDamage';
+      targetId: string;
+      amount: number | string;
+      damageType: 'physical' | 'energy' | 'mental' | 'true';
+      bypass?: ModifierSlot[];
+      isReaction?: boolean;
+      doesNotConsumeSlot?: boolean;
+      rootChainId?: string;
+      /** 反射深度：字面量或表达式串（架构 §九 R1，反伤 depth = 'ctx.depth + 1'） */
+      depth?: number | string;
+      hitPolicy?: HitPolicy;
+    }
+  | {
+      kind: 'Heal';
+      targetId: string;
+      amount: number | string;
+    }
+  | {
+      kind: 'ApplyStatus';
+      targetId: string;
+      statusId: string;
+      duration: number | null;
+      layers?: number;
+      contest?: ContestInfo;
+    }
+  | { kind: 'RemoveStatus'; targetId: string; statusId: string }
+  | {
+      kind: 'SpendResource';
+      targetId: string;
+      resource: 'hp' | 'mp' | 'sp' | 'fp';
+      amount: number;
+    }
+  | {
+      kind: 'PreventDeath';
+      targetId: string;
+      hp: number;
+      slot?: 'death.threshold';
+    }
+  | { kind: 'ConsumeCharge'; amount?: number }
+  | { kind: 'EmitNarrativeCue'; text: string; severity?: number }
+  | {
+      kind: 'OverrideIntent';
+      ruleKey: string;
+      payload: unknown;
+      divinity: number;
+    }
+  | {
+      kind: 'ScheduleIntent';
+      delay: number;
+      intent: EffectIntent;
+    }
+  | {
+      kind: 'SpawnOrDespawnIntent';
+      op: 'spawn' | 'despawn';
+      unitId: string;
+      count?: number;
+      duration?: { rounds: number };
+      joinTiming?: 'this_round_tail' | 'next_round_head';
+      /** 模板引用：命中预生成召唤物池（§6.4）直接实例化，缺省触发 CharGenRequest（A35-1） */
+      templateRef?: string;
+    }
+  | {
+      kind: 'RequestChoiceIntent';
+      choiceId: string;
+      prompt: string;
+      options: readonly string[];
+      cost?: { sp?: number; slot?: 'action' };
+      blockDamageFactor?: number;
+      damageTakenOverrideId?: string;
+    };
+
+
+export interface EffectAutomatonDecl {
+  id: string;
+  name?: string;
+  source?: string;
+  owner?: string;
+  subscribe: WindowKey;
+  trigger: string;
+  priority?: number;
+  divinity?: number;
+  charges?: { max: number; remaining: number };
+  intents: readonly EffectIntent[];
+}
+
+export interface ChargeTracker {
+  max: number;
+  remaining: number;
+}
+
+export interface EffectAutomaton {
+  id: string;
+  name: string;
+  source: string;
+  owner: string;
+  subscribe: WindowKey;
+  trigger: string;
+  priority: number;
+  divinity: number;
+  charges?: ChargeTracker;
+  intents: readonly EffectIntent[];
+}
+
+export interface SummonedUnitDefinition {
+  /** 展示名（逻辑键，铁律 ①；实例化时补唯一 id） */
+  name: string;
+  /** 种族 */
+  race: string;
+  /** 生命层级 1-7 */
+  tier: number;
+  /** 等级 */
+  level: number;
+  /** 五维 */
+  attributes: { str: number; dex: number; con: number; int: number; spi: number };
+  /** HP / MP / SP（当前=最大，入编满状态） */
+  hp: number;
+  mp: number;
+  sp: number;
+  /** 防御 / DR / 穿透 */
+  defense: number;
+  dr: number;
+  penetration: number;
+  /** 命中 / 闪避加值 */
+  hitBonus: number;
+  dodgeBonus: number;
+  /** 武器攻击力 */
+  weaponAtk: number;
+  /** 登神强度 0-8（v2 §四 4.2） */
+  divinity: number;
+  /** 阵营（默认 player，由召唤者阵营推导，构建时选） */
+  side?: 'player' | 'enemy';
+  /** 技能名列表（供攻击 slot 解析能力） */
+  skills?: readonly string[];
+  /** 参战时机（架构 §十 10.2，缺省内核取 next_round_head 保不变量①纯洁） */
+  joinTiming?: 'this_round_tail' | 'next_round_head';
+  /** 定时消失（架构 §十 10.2 / §十 10.3 到期移除） */
+  duration?: { rounds: number };
+  /** 本轮行动预算（架构 §十 10.2：full=1攻1动 / partial=仅动作 / no_action=0） */
+  actionEconomy?: 'full' | 'partial' | 'no_action';
+  /** 召唤物自带的 DSL automaton（走 compileEffectProgram 编译，失败剔除不阻断） */
+  automata?: readonly EffectAutomaton[];
+  /** 静态管线修正（modifiers[] 编译的 push-handler 已进 automata，此处语义保留给 runCharGenForCombat 透传） */
+  modifiers?: readonly unknown[];
+  /** 召唤来源物品/技能（叙事溯源，进 UnitSummoned.sourceItem） */
+  sourceItem?: string;
+}
+
+/**
+ * 玩卡载荷/编组快照的统一形状（自 combat-v3/types 迁入；交锋卡组与契约损坏判定共用）。
+ * 正规来源是会话层从背包解析的真实 CardItem。
+ */
+export interface DeckCardData {
+  name: string;
+  cardTier: string;
+  词条: readonly string[];
+  fusionKind?: '叠加' | '相生' | '相克';
+  sealed?: boolean;
+  automata?: readonly EffectAutomaton[];
+}
 // 随机事件 v1: `AgentContext.randomEventOffer` 的形状。**type-only，不成环** ——
 // `random-event-context.ts` 自己只 import `random-event-scheduler` 与 `types-random-events`，
 // 两者都不 import 本文件。这里刻意不复述那个形状（复述一份就是第二个真源）。

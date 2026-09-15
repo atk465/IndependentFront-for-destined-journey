@@ -307,8 +307,8 @@ describe('分层闸门：引擎不依赖前端', () => {
     expect(files).toContain('content-registry-runtime.ts');
     expect(files).toContain('database.ts');
     expect(files).toContain('media-hash.ts');
-    // 子目录也递归到了
-    expect(files.some((f) => f.startsWith('combat-v3/'))).toBe(true);
+    // 子目录也递归到了（combat-v3/ 已随 v3 战斗下线删除；card-workshop/ 为现存子目录）
+    expect(files.some((f) => f.startsWith('card-workshop/'))).toBe(true);
     // `.test.ts` 一并扫 —— 引擎单测拿前端 store 当夹具正是被收口的一类
     expect(files.some((f) => f.endsWith('.test.ts'))).toBe(true);
   });
