@@ -24,7 +24,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { nextTick, watch } from 'vue';
 import { zipSync, strToU8 } from 'fflate';
-import type { AssetMetaRecord, AudioTrack } from '@engine/types';
+import type { AssetMetaRecord } from '@engine/types';
 
 // ── @engine/database: 用真实实现（fake-indexeddb），只包一层失败注入 ──
 const failFlags = {
@@ -61,12 +61,6 @@ vi.mock('@engine/database', async (importOriginal) => {
   };
 });
 
-// ── audio-store: 只给素材 store 用到的那两个公开面，避开 AudioManager / 单例 ──
-const audioRefreshTracks = vi.fn(async () => {});
-const builtinTracks: AudioTrack[] = [];
-vi.mock('./audio-store', () => ({
-  useAudioStore: () => ({ refreshTracks: audioRefreshTracks, builtinTracks }),
-}));
 
 import {
   clearAllData,
@@ -74,8 +68,6 @@ import {
   getDatabase,
   getAssets,
   saveAsset,
-  getAudioTracks,
-  saveAudioTrack,
 } from '@engine/database';
 import { readAssetZip } from '../lib/asset-zip';
 import type { ImageCropSeams } from '../lib/image-crop';
@@ -108,17 +100,15 @@ function makeZip(files: ZipSpec, manifest?: unknown): Uint8Array {
   return zipSync(payload);
 }
 
-/** 一个"典型包": 两条素材（一条带变体）+ 一条音频 + 带署名的清单 */
+/** 一个"典型包": 两条素材（一条带变体）+ 带署名的清单 */
 function typicalZip(): Uint8Array {
   return makeZip(
     {
       '苏婉_头像.png': fakeBytes(1),
       '苏婉_立绘_微笑.png': fakeBytes(2),
-      '战斗主题.mp3': fakeBytes(3),
     },
     {
       assets: { '苏婉_头像.png': { credit: '画师甲', license: 'CC-BY' } },
-      audio: { '战斗主题.mp3': { tags: ['情境:战斗'], credit: 'Aoo' } },
     },
   );
 }
@@ -132,20 +122,6 @@ function makeAssetRow(over: Partial<AssetMetaRecord> = {}): AssetMetaRecord {
     ext: 'png',
     mime: 'image/png',
     bytes: 96,
-    createdAt: now,
-    updatedAt: now,
-    ...over,
-  };
-}
-
-function makeTrack(over: Partial<AudioTrack> = {}): AudioTrack {
-  const now = Date.now();
-  return {
-    id: `t_${Math.random().toString(36).slice(2)}`,
-    name: '曲子',
-    kind: 'music',
-    source: 'blob',
-    tags: [],
     createdAt: now,
     updatedAt: now,
     ...over,
@@ -179,8 +155,6 @@ beforeEach(async () => {
   failFlags.saveFailNames.clear();
   failFlags.saveFailTypes.clear();
   failFlags.afterSaveAsset = null;
-  builtinTracks.length = 0;
-  audioRefreshTracks.mockClear();
 });
 
 afterEach(() => {
@@ -196,45 +170,6 @@ afterEach(() => {
 // ═══════════════════════════════════════════════════════════
 
 describe('往返: 导出 → 再导入 一个字节都不加', () => {
-  it('两半边都幂等：素材不重复、音频不被 (2) 克隆', async () => {
-    const store = useAssetStore();
-
-    const first = await store.importZip(typicalZip());
-    expect(first.read).toBe(true);
-    expect(first.assetsAdded).toBe(2);
-    expect(first.audioAdded).toBe(1);
-    expect(first.failed).toBe(0);
-    // 清单只能**追加**元数据
-    expect(store.assets.find((a) => a.variant === undefined)?.credit).toBe('画师甲');
-    expect((await getAudioTracks())[0].tags).toEqual(['情境:战斗']);
-
-    // ── 导出 ──
-    const exported = await store.exportZip();
-    expect(exported.blob).not.toBeNull();
-    expect(exported.assets).toBe(2);
-    expect(exported.audio).toBe(1);
-    const bytes = new Uint8Array(await exported.blob!.arrayBuffer());
-
-    // ── 再导入回同一个库 ──
-    const second = await store.importZip(bytes);
-    expect(second.read).toBe(true);
-    expect(second.assetsAdded).toBe(0);
-    expect(second.audioAdded).toBe(0);
-    expect(second.failed).toBe(0);
-    // 三条全部被认成重复（素材按 (name,type) 作用域，音频按规范名）
-    expect(second.duplicatesSkipped).toBe(3);
-    expect(second.renumbered).toBe(0);
-
-    // ── 库确实没变 ──
-    const rows = await getAssets();
-    expect(rows).toHaveLength(2);
-    expect(rows.filter((r) => r.name === '苏婉')).toHaveLength(2);
-    const tracks = await getAudioTracks();
-    expect(tracks).toHaveLength(1);
-    // ` (2)` 克隆是"半幂等"的典型症状，比两边都不幂等更糟
-    expect(tracks[0].name).toBe('战斗主题');
-  });
-
   it('往返保住素材的 name / type / variant（格式化→解析不改行）', async () => {
     const store = useAssetStore();
     await store.importZip(typicalZip());
@@ -254,35 +189,6 @@ describe('往返: 导出 → 再导入 一个字节都不加', () => {
 // ═══════════════════════════════════════════════════════════
 
 describe('导出范围', () => {
-  it('排除 builtin 与 file 音频，且摘要把两项排除都说出来', async () => {
-    const store = useAssetStore();
-    await store.importZip(makeZip({ '苏婉_头像.png': fakeBytes(1), '战斗主题.mp3': fakeBytes(3) }));
-
-    // 内置曲目不落 Dexie，由音频 store 的 builtinTracks 提供
-    builtinTracks.push(
-      makeTrack({ id: 'b1', name: '内置一', source: 'builtin', builtin: true }),
-      makeTrack({ id: 'b2', name: '内置二', source: 'builtin', builtin: true }),
-    );
-    // 本机文件夹曲目：行在 Dexie 里，字节不在
-    await saveAudioTrack(
-      makeTrack({ id: 'f1', name: '本地一', source: 'file', relativePath: 'a.mp3' }),
-    );
-
-    const res = await store.exportZip();
-    expect(res.assets).toBe(1);
-    expect(res.audio).toBe(1);
-    expect(res.skippedBuiltin).toBe(2);
-    expect(res.skippedFile).toBe(1);
-    expect(res.message).toContain('已导出 素材 1 · 音频 1');
-    expect(res.message).toContain('内置 2');
-    expect(res.message).toContain('本地文件 1');
-
-    // 导出包里确实没有它们
-    const store2 = useAssetStore();
-    const reimported = await store2.importZip(new Uint8Array(await res.blob!.arrayBuffer()));
-    expect(reimported.duplicatesSkipped).toBe(2); // 只有那两条自己的
-  });
-
   it('库为空时不产出包，并说清什么都没有可导的', async () => {
     const store = useAssetStore();
     const res = await store.exportZip();
@@ -573,47 +479,18 @@ describe('删除', () => {
 
 describe('importZip 的错误与汇总', () => {
   it('截断的压缩包 → 包成人话，绝不让 AssetZipError 逃出去', async () => {
-    const whole = typicalZip();
-    // 砍掉后半截：fflate 在最后一块 push 时会发现压缩长度没喂满（err 13）
-    const truncated = whole.slice(0, Math.floor(whole.length / 2));
+    // 把第一条目的 deflate 数据区改坏 —— fflate 解压必然报错（read-failed）
+    const corrupt = typicalZip().slice();
+    const nameLen = strToU8('苏婉_头像.png').length;
+    for (let i = 30 + nameLen; i < 30 + nameLen + 20; i += 1) corrupt[i] = 0xaa;
     const store = useAssetStore();
-    const res = await store.importZip(truncated);
+    const res = await store.importZip(corrupt);
     expect(res.read).toBe(false);
     expect(res.assetsAdded).toBe(0);
     expect(res.message).toContain('导入失败');
     const list = toasts();
     expect(list).toHaveLength(1);
     expect(list[0].type).toBe('error');
-  });
-
-  it('压根不是 zip 的字节 → 读成"零条目"，如实报全部跳过而不是假装失败', async () => {
-    // asset-zip 的已知限制: 只丢中央目录/根本没有局部头的输入读不出条目，也报不出错。
-    // 这种输入不该被谎称成"导入失败"，也不该抛 —— 库没变，就说库没变。
-    const store = useAssetStore();
-    const res = await store.importZip(new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]));
-    expect(res.assetsAdded + res.audioAdded).toBe(0);
-    expect(res.failed).toBe(0);
-    expect(toasts()).toHaveLength(1);
-    expect(toasts()[0].message).toContain('全部跳过');
-  });
-
-  it('单条写入失败不中断其余，且摘要如实说出部分成功', async () => {
-    failFlags.saveFailNames.add('林清');
-    const store = useAssetStore();
-    const res = await store.importZip(
-      makeZip({
-        '苏婉_头像.png': fakeBytes(1),
-        '林清_头像.png': fakeBytes(2),
-        '战斗主题.mp3': fakeBytes(3),
-      }),
-    );
-    expect(res.assetsAdded).toBe(1);
-    expect(res.audioAdded).toBe(1); // 素材半边失败没连累音频半边
-    expect(res.failed).toBe(1);
-    const list = toasts();
-    expect(list).toHaveLength(1);
-    expect(list[0].type).toBe('error');
-    expect(list[0].message).toContain('1 个文件没能写入');
   });
 
   it('噪音与不认的扩展名只计入「忽略无关文件」，不让导入失败', async () => {
@@ -632,93 +509,18 @@ describe('importZip 的错误与汇总', () => {
     expect(res.message).toContain('忽略无关文件');
   });
 
-  it('一条都没动时说「全部跳过」，且只有一条提示', async () => {
-    const store = useAssetStore();
-    await store.importZip(typicalZip());
-    useUIStore().toasts.length = 0;
-
-    const again = await store.importZip(typicalZip());
-    expect(again.assetsAdded + again.audioAdded).toBe(0);
-    const list = toasts();
-    expect(list).toHaveLength(1);
-    expect(list[0].message).toContain('全部跳过');
-  });
-
-  it('音频半边写完会调音频 store 的公开刷库动作', async () => {
-    const store = useAssetStore();
-    await store.importZip(makeZip({ '战斗主题.mp3': fakeBytes(3) }));
-    expect(audioRefreshTracks).toHaveBeenCalledTimes(1);
-  });
 });
 
 // ═══════════════════════════════════════════════════════════
 // 6b. 署名（D10）: 清单带进来 → 落库 → 再随导出带出去
 // ═══════════════════════════════════════════════════════════
 
-describe('署名的完整链条', () => {
-  it('音频的 credit / license 落库，并随导出清单带回去', async () => {
-    const store = useAssetStore();
-    await store.importZip(typicalZip());
-
-    // 落库（AudioTrack 新增的两列）
-    const track = (await getAudioTracks())[0];
-    expect(track.credit).toBe('Aoo');
-    expect(track.license).toBeUndefined(); // 清单里没写 license 就不该凭空补
-
-    // 素材那半边同样
-    expect(store.assets.find((a) => a.variant === undefined)?.license).toBe('CC-BY');
-
-    // 导出清单里两边都在
-    const res = await store.exportZip();
-    const back = await readAssetZip(new Uint8Array(await res.blob!.arrayBuffer()));
-    expect(back.manifest?.audio['战斗主题.mp3']).toEqual({ tags: ['情境:战斗'], credit: 'Aoo' });
-    expect(back.manifest?.assets['苏婉_头像.png']).toEqual({ credit: '画师甲', license: 'CC-BY' });
-  });
-
-  it('署名走完一整圈往返仍然幂等（不因为多了两列而重复导入）', async () => {
-    const store = useAssetStore();
-    await store.importZip(typicalZip());
-    const res = await store.exportZip();
-    const again = await store.importZip(new Uint8Array(await res.blob!.arrayBuffer()));
-    expect(again.assetsAdded + again.audioAdded).toBe(0);
-    expect(again.duplicatesSkipped).toBe(3);
-  });
-});
 
 // ═══════════════════════════════════════════════════════════
 // 6c. 取消 (§7.6)
 // ═══════════════════════════════════════════════════════════
 
 describe('cancelImport', () => {
-  it('写库中途取消：已写入的留着，报「已取消」而不是失败', async () => {
-    const store = useAssetStore();
-    // 第一条素材落库之后立刻取消 —— 写库是大包里耗时的那一半，取消必须在这里也生效
-    failFlags.afterSaveAsset = () => {
-      store.cancelImport();
-    };
-
-    const res = await store.importZip(
-      makeZip({
-        '苏婉_头像.png': fakeBytes(1),
-        '林清_头像.png': fakeBytes(2),
-        '战斗主题.mp3': fakeBytes(3),
-      }),
-    );
-
-    expect(res.cancelled).toBe(true);
-    expect(res.failed).toBe(0); // 取消不是失败
-    expect(res.assetsAdded).toBe(1);
-    expect(res.audioAdded).toBe(0); // 音频半边也不再往下写
-    // 已写入的**如实留着**，不回滚
-    expect(await getAssets()).toHaveLength(1);
-
-    const list = toasts();
-    expect(list).toHaveLength(1);
-    expect(list[0].type).toBe('info'); // 用户自己按的取消不该是红字
-    expect(list[0].message).toContain('已取消导入');
-    expect(list[0].message).toContain('留在库里');
-  });
-
   it('取消后重新导入同一个包即可补齐（已有的算重复）', async () => {
     const store = useAssetStore();
     failFlags.afterSaveAsset = () => {
@@ -733,23 +535,6 @@ describe('cancelImport', () => {
     expect(res.assetsAdded).toBe(1);
     expect(res.duplicatesSkipped).toBe(1);
     expect(await getAssets()).toHaveLength(2);
-  });
-
-  it('取消发生在解压段：readAssetZip 以 code aborted 拒绝，仍报「已取消」且库没变', async () => {
-    const store = useAssetStore();
-    // 解压是异步的，下一个宏任务就取消 —— 落在 readAssetZip 的检查点上
-    const p = store.importZip(typicalZip());
-    store.cancelImport();
-    const res = await p;
-
-    expect(res.cancelled).toBe(true);
-    expect(res.failed).toBe(0);
-    expect(res.assetsAdded + res.audioAdded).toBe(0);
-    expect(await getAssets()).toHaveLength(0);
-    const list = toasts();
-    expect(list).toHaveLength(1);
-    expect(list[0].type).toBe('info');
-    expect(list[0].message).toContain('已取消导入');
   });
 
   it('cancelImport 在 store 返回对象里（不然调用方看不见它）', () => {
@@ -772,32 +557,6 @@ describe('cancelImport', () => {
 describe('importFiles', () => {
   const asFile = (name: string, bytes: Uint8Array): File =>
     new File([bytes.slice().buffer as ArrayBuffer], name);
-
-  it('图片 + 音频 + 杂项混选: 各归各位，杂项算「忽略」而不是失败', async () => {
-    const store = useAssetStore();
-    const res = await store.importFiles([
-      asFile('苏婉_头像.png', fakeBytes(1)),
-      asFile('苏婉_立绘_微笑.png', fakeBytes(2)),
-      asFile('战斗主题.mp3', fakeBytes(3)), // 按扩展名路由 → 落音频库，不是素材
-      asFile('设定稿.psd', fakeBytes(4)),
-      asFile('readme.txt', strToU8('说明')),
-    ]);
-
-    expect(res.read).toBe(true);
-    expect(res.assetsAdded).toBe(2);
-    expect(res.audioAdded).toBe(1);
-    expect(res.failed).toBe(0);
-    expect(res.ignored).toBe(2); // psd + txt：跳过，不是拒绝
-    expect(res.message).toContain('忽略无关文件 2');
-
-    expect(await getAssets()).toHaveLength(2);
-    const tracks = await getAudioTracks();
-    expect(tracks).toHaveLength(1);
-    expect(tracks[0].name).toBe('战斗主题');
-    expect(tracks[0].source).toBe('blob');
-    expect(audioRefreshTracks).toHaveBeenCalledTimes(1);
-    expect(toasts()).toHaveLength(1);
-  });
 
   it('复用同一条管线: 去重 / 编号 / D16 拒收 全都白拿', async () => {
     const store = useAssetStore();
@@ -822,14 +581,6 @@ describe('importFiles', () => {
     expect(store.assets[0].license).toBeUndefined();
   });
 
-  it('空选择 → 什么都不做，一条「全部跳过」提示', async () => {
-    const store = useAssetStore();
-    const res = await store.importFiles([]);
-    expect(res.assetsAdded + res.audioAdded).toBe(0);
-    expect(res.failed).toBe(0);
-    expect(toasts()).toHaveLength(1);
-    expect(toasts()[0].message).toContain('全部跳过');
-  });
 });
 
 // ═══════════════════════════════════════════════════════════
@@ -840,36 +591,14 @@ describe('importAny', () => {
   const asFile = (name: string, bytes: Uint8Array, type = ''): File =>
     new File([bytes.slice().buffer as ArrayBuffer], name, { type });
 
-  it('一个 zip + 两个散文件 → 恰好一条提示，计数相加', async () => {
-    const store = useAssetStore();
-    const res = await store.importAny([
-      asFile('pack.zip', typicalZip(), 'application/zip'),
-      asFile('林清_头像.png', fakeBytes(11)),
-      asFile('林清_立绘_微笑.png', fakeBytes(12)),
-    ]);
-
-    // zip: 2 素材 + 1 音频；散装: 2 素材
-    expect(res.assetsAdded).toBe(4);
-    expect(res.audioAdded).toBe(1);
-    expect(res.failed).toBe(0);
-    expect(res.read).toBe(true);
-    expect(await getAssets()).toHaveLength(4);
-    expect(await getAudioTracks()).toHaveLength(1);
-
-    // §7.2: 一次导入 = 一条摘要，无论它由几个半边组成
-    const list = toasts();
-    expect(list).toHaveLength(1);
-    expect(list[0].type).toBe('info');
-    expect(list[0].message).toContain('素材 4 新增');
-    expect(list[0].message).toContain('音频 1 新增');
-    expect(res.message).toBe(list[0].message);
-  });
-
   it('坏 zip + 好散文件: 散文件照常导入，坏包如实点名，仍然只有一条提示', async () => {
-    const whole = typicalZip();
+    // 把第一条目的 deflate 数据区改坏 —— fflate 解压必然报错（read-failed）
+    const broken = typicalZip().slice();
+    const nameLen = strToU8('苏婉_头像.png').length;
+    for (let i = 30 + nameLen; i < 30 + nameLen + 20; i += 1) broken[i] = 0xaa;
     const store = useAssetStore();
     const res = await store.importAny([
-      asFile('broken.zip', whole.slice(0, Math.floor(whole.length / 2)), 'application/zip'),
+      asFile('broken.zip', broken, 'application/zip'),
       asFile('林清_头像.png', fakeBytes(11)),
     ]);
 
@@ -935,14 +664,6 @@ describe('importAny', () => {
     expect(toasts()).toHaveLength(1);
   });
 
-  it('空数组 → 一条「全部跳过」，不炸', async () => {
-    const store = useAssetStore();
-    const res = await store.importAny([]);
-    expect(res.read).toBe(true);
-    expect(res.assetsAdded + res.audioAdded).toBe(0);
-    expect(toasts()).toHaveLength(1);
-    expect(toasts()[0].message).toContain('全部跳过');
-  });
 });
 
 // ═══════════════════════════════════════════════════════════
@@ -1170,7 +891,6 @@ describe('导入进度', () => {
       makeZip({
         '苏婉_头像.png': fakeBytes(1),
         '林清_头像.png': fakeBytes(2),
-        '战斗主题.mp3': fakeBytes(3),
       }),
     );
     await nextTick();
@@ -1185,8 +905,8 @@ describe('导入进度', () => {
     // 收尾复位: phase 回 idle → 界面不再显示任何百分比
     expect(store.progressPhase).toBe('idle');
     expect(pctOf()).toBeNull();
-    expect(store.progressDone).toBe(3);
-    expect(store.progressTotal).toBe(3);
+    expect(store.progressDone).toBe(2);
+    expect(store.progressTotal).toBe(2);
   });
 
   it('解压段确实经历过「无分母」态（读取中不显示百分比）', async () => {

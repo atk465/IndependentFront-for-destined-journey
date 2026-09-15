@@ -128,14 +128,14 @@ describe('splitSceneImageSegments — 三种写法（承 scanLenientTag §3.4）
   });
 
   it('漏写闭合的正文右界是下一个已知标记，不会吞掉它', () => {
-    const text = '<scene_image>雨中的长街<play_audio situation="伤感"/>之后';
+    const text = '<scene_image>雨中的长街<event_trigger name="神秘商人"/>之后';
     const segments = splitSceneImageSegments(text);
 
     const image = segments.find((s) => s.kind === 'image');
     if (image?.kind !== 'image') throw new Error('expected image segment');
     expect(image.marker.bodyText).toBe('雨中的长街');
-    // play_audio 与其后的正文仍留在文本段里，交给下游各自处理
-    expect(joinText(segments)).toBe('<play_audio situation="伤感"/>之后');
+    // event_trigger 与其后的正文仍留在文本段里，交给下游各自处理
+    expect(joinText(segments)).toBe('<event_trigger name="神秘商人"/>之后');
   });
 });
 

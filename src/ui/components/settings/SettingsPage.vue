@@ -5,7 +5,7 @@
  * 14 个分区里 13 个已经是一行子组件；只剩 **Agent 配置**还内联在这里，因为它
  * 要读写 13 张 per-Agent 并行 map（`agentModels` / `agentPrompts` / …），
  * 而那些 map 的形状正是 Q-18 要改的东西 —— 先拆再改等于拆两遍。
- * Q-18 落地后照 `settings/audio/` 的样子拆成 `settings/agent/` 目录。
+ * Q-18 落地后已照原 `settings/audio/` 的样子拆出 `settings/agent/` 目录。
  *
  * 分区共用的外壳样式在 `settings-chrome.css`：本页的 `<style scoped>` 只能命中
  * 自己的模板与子组件的**根节点**，够不到根节点里面，所以那份共用规则由各分区
@@ -29,7 +29,6 @@ import MemorySection from './MemorySection.vue';
 import ThemeSection from './ThemeSection.vue';
 import MessagesSection from './MessagesSection.vue';
 import BeautifierSection from './BeautifierSection.vue';
-import AudioSection from './AudioSection.vue';
 import AssetSection from './AssetSection.vue';
 import ImageSection from './image/ImageSection.vue';
 import DataSection from './DataSection.vue';
@@ -65,7 +64,6 @@ const navItems: { key: Section; label: string; icon: string }[] = [
   { key: 'theme', label: '外观主题', icon: 'fa-solid fa-palette' },
   { key: 'messages', label: '消息显示', icon: 'fa-solid fa-message' },
   { key: 'beautifier', label: '输出美化', icon: 'fa-solid fa-wand-magic-sparkles' },
-  { key: 'audio', label: '音频', icon: 'fa-solid fa-music' },
   // 媒体三分区相邻（音频 / 素材 / 图像生成），数据操作排在它们之后（设计 §7.1）
   { key: 'asset', label: '素材', icon: 'fa-solid fa-image' },
   { key: 'image', label: '图像生成', icon: 'fa-solid fa-wand-sparkles' },
@@ -216,7 +214,6 @@ onMounted(() => {
             <BeautifierSection v-if="activeSection === 'beautifier'" />
 
             <!-- ========== 音频 ========== -->
-            <AudioSection v-if="activeSection === 'audio'" />
 
             <!-- ========== 素材 ========== -->
             <AssetSection v-if="activeSection === 'asset'" />

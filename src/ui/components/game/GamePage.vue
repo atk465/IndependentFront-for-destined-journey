@@ -3,7 +3,6 @@ import { onMounted, onBeforeUnmount, ref, watch } from 'vue';
 import { useGameStore, setRewriteLoadoutImpl } from '../../stores/game-store';
 import { useUIStore } from '../../stores/ui-store';
 import { useSettingsStore } from '../../stores/settings-store';
-import { useAudioStore } from '../../stores/audio-store';
 import { useSceneImageStore } from '../../stores/scene-image-store';
 import { useImagePresetStore } from '../../stores/image-preset-store';
 import { unwireEffectSystem } from '@engine/effect-wiring';
@@ -34,14 +33,12 @@ import CardAlbumPanel from './cards/CardAlbumPanel.vue';
 import CommissionBoard from './cards/CommissionBoard.vue';
 import TalentPanel from './cards/TalentPanel.vue';
 import CraftBench from './cards/CraftBench.vue';
-import MiniPlayer from './MiniPlayer.vue';
 import CombatPanel from './combat/CombatPanel.vue';
 import SkirmishPanel from './combat/SkirmishPanel.vue';
 
 const game = useGameStore();
 const ui = useUIStore();
 const settings = useSettingsStore();
-const audio = useAudioStore();
 const sceneImages = useSceneImageStore();
 const imagePresets = useImagePresetStore();
 /** 角色外貌的会话副本（D56）—— 基线在 imagePresets，这一份随存档走 */
@@ -185,13 +182,6 @@ onMounted(async () => {
           ? pipeline.rewriteLoadoutItem(characterId, target, userDescription)
           : Promise.resolve({ ok: false, reason: '游戏管线还没就绪，稍后再试' }),
       );
-      // 🎵 曲库必须在这里装 —— 此前只有设置页音频分区和迷你播放器会 init()，
-      // 没打开过它们的会话曲库是空的，选曲永远命中不了任何东西。
-      // 装完按当前地点起一次场景配乐（读档回来的第一眼也该有音乐）。
-      void audio
-        .init()
-        .then(() => (ownsPage() ? pipeline?.primeSceneAudio() : undefined))
-        .catch((err) => console.warn('[GamePage] 音频初始化失败（不影响游戏）:', err));
       // 首次加载 → 自动发送开场 Prompt
       loadingSave.value = false;
       if (!game.hasOpeningPromptConsumed && game.openingPrompt) {
@@ -347,17 +337,9 @@ function handleToolClick(id: string) {
     ui.navigate('settings');
     return;
   }
-  // 迷你播放器是浮动卡片，不走 activeModal（§6.2），必须先于 showModal 拦下
-  if (id === 'audio') {
-    showMiniPlayer.value = !showMiniPlayer.value;
-    return;
-  }
   if (id === 'debug' && !s.developerMode) return;
   game.showModal(id);
 }
-
-/** 迷你播放器开合（浮动卡片，非 Modal） */
-const showMiniPlayer = ref(false);
 
 function handleSelectOption(text: string) {
   game.fillInput(text);
@@ -392,7 +374,6 @@ function onModalOpenChange(v: boolean) {
       <StatusHUD />
     </div>
 
-    <MiniPlayer :open="showMiniPlayer" @close="showMiniPlayer = false" />
 
     <!-- M5 战斗面板（isInCombat 驱动，覆盖层） -->
     <CombatPanel />

@@ -29,12 +29,6 @@ import type { RandomEventOfferEntry } from './random-event-context';
 // `start-catalog-mechanics.ts` 是零 import 的叶子模块（机制半边，D24）。
 import type { CatalogItem, BackgroundTemplate } from './start-catalog-mechanics';
 
-// 音频子系统的接口/seam 类型拆分在 types-audio.ts（本文件已逾 800 行）。
-// 从这里统一再导出，「types.ts 是唯一类型来源」这条 import 路径依然成立。
-// 注意: 音频**数据模型**类型 (AudioTrack / AudioPlaylist / ...) 仍定义在本文件下方，
-// 不在 types-audio.ts 里 —— 避免第二个真相来源。
-export * from './types-audio';
-
 // ========== World Book (Lorebook) Types (v3, deprecated) ==========
 // Phase 8 用新 WorldBook 类型替代，旧 Lorebook/LorebookEntry 保留兼容导入
 
@@ -3463,7 +3457,6 @@ export type MarkerType =
   | 'item_gen_request'
   | 'item_update_request' // 物品调度
   | 'craft_gen_request' // 制作调度（统一 _request 后缀）
-  | 'play_audio' // 场景配乐（Story 直接输出，非阻塞）
   | 'scene_image' // 情景插画（图像生成 v1；标记即锚点，图就地插进正文）
   | 'event_trigger'; // 随机事件触发回执（随机事件 v1 §5.2；Story 认领候选池里的一条）
 
@@ -3539,36 +3532,10 @@ export interface CharDetectMarker extends DetectedMarkerBase {
 }
 
 /**
- * <play_audio> 标记 — Story AI 在场景/氛围发生转折时输出，切换 BGM。
- *
- * **地点不由 AI 提供**：位置已经在游戏状态里（`player.location`），让 AI 再写一遍
- * 只会多一处漂移源。AI 只负责它独有的判断——此刻是什么情绪、什么情境。
- *
- * 自闭合与成对写法都认：
- *   `<play_audio situation="战斗" mood="紧张"/>`
- *   `<play_audio>战斗, 紧张</play_audio>`（正文按逗号拆成自由词，喂给情绪与情境两维）
- */
-export interface PlayAudioMarker extends DetectedMarkerBase {
-  type: 'play_audio';
-  /** 情境词（探索/战斗/潜行/仪式…），逗号或顿号分隔 */
-  situation?: string;
-  /** 情绪词（紧张/平静/悲壮…），逗号或顿号分隔 */
-  mood?: string;
-  /** 指定人物主题曲（可选；缺省由调用方按在场角色填） */
-  character?: string;
-  /** 氛围变体 A/B */
-  variant?: string;
-  /** `stop` = 停止当前 BGM，不再选曲 */
-  action?: string;
-  /** 标签内部正文：自由词，逗号分隔 */
-  bodyText?: string;
-}
-
-/**
  * `<event_trigger>` 标记 — Story 认领候选池里的一条随机事件（随机事件 v1 §5.2）。
  *
  * 写法是自闭合、写在回复末尾：`<event_trigger name="神秘商人"/>`。成对与漏写闭合两种
- * 写法也认（`lenientClosing`，同 `scene_image` / `play_audio` 的理由：不认就等于
+ * 写法也认（`lenientClosing`，同 `scene_image` 的理由：不认就等于
  * 「既不生效、也剥不掉」，那行尖括号会漏到玩家眼前）。
  *
  * 🔴 **`name` 是逻辑键，逐字匹配候选池**（铁则 1：AI 永不见 id）。结算侧
@@ -3594,12 +3561,11 @@ export type DetectedMarker =
   | ItemGenRequestMarker
   | ItemUpdateRequestMarker
   | CraftGenRequestMarker
-  | PlayAudioMarker
   // 图像生成 v1：`<scene_image>`。定义住在 types-image.ts（子系统类型集中在那里），
   // 这里只把它接进联合，`marker-protocol.ts` 的 `MarkerOf`/`MarkerFields` 因此对它成立。
   //
   // 🔴 加/删 `MarkerType` 成员与改 `MARKER_SPECS` **必须同一次改动**：那张表是
-  //    `{ [K in Exclude<MarkerType,'play_audio'>]: … }` 的映射类型，只改一边当场缺键、
+  //    `{ [K in Exclude<MarkerType,'scene_image'>]: … }` 的映射类型，只改一边当场缺键、
   //    编译不过（设计 §3.1）。
   | SceneImageMarker
   // 随机事件 v1：`<event_trigger>`（§5.2 写侧）。同上一条 —— 它与 `MARKER_SPECS` 里的
@@ -4171,117 +4137,6 @@ export interface MapMarker {
 }
 
 // ═══════════════════════════════════════════════════════════
-// Audio System — 音频子系统 (Dexie v11)
-// 设计: docs/planning/2026-07-26-audio-system-design.md §2
-// ═══════════════════════════════════════════════════════════
-
-/** Where the audio bytes come from. 'url' was cut from v1 — re-adding it is purely additive. */
-export type AudioSourceKind = 'blob' | 'builtin' | 'file';
-
-/** What the track is for. Drives decode policy; the size guard (§4.4) is the rail when it's wrong. */
-export type AudioTrackKind = 'music' | 'sfx';
-
-/** Track metadata — cheap to list, holds no audio bytes (§3.2) */
-export interface AudioTrack {
-  id: string;
-  name: string;
-  kind: AudioTrackKind;
-  source: AudioSourceKind;
-  url?: string; // source='builtin': the manifest path
-  mimeType?: string;
-  size?: number; // compressed bytes
-  duration?: number; // seconds, backfilled after first load
-  tags: string[]; // scene tags — the AI hook's only addressing scheme (§8)
-  builtin?: boolean; // cannot be deleted, only hidden
-  /** source='file': filename within the library folder. The folder handle is stored separately. */
-  relativePath?: string;
-  /** source='file': the file was gone at last scan. Row is kept so tags/playlist slots survive. */
-  missing?: boolean;
-  /**
-   * sha-256 of the bytes, written by the unified zip importer (D12 / §4.4).
-   *
-   * **Non-indexed property — needs no Dexie version bump.** Only new writes carry it;
-   * rows without it fall through to `uniqueAudioName` exactly as before, and existing
-   * tracks are never rewritten. Absent whenever `crypto.subtle` was unavailable
-   * (insecure context), in which case dedupe is skipped rather than approximated.
-   */
-  hash?: string;
-  /**
-   * Attribution carried by an import pack's `manifest.json` (D10 / §5.2), and the
-   * only place it can survive — a filename cannot express it.
-   *
-   * **Non-indexed properties — no Dexie version bump**, same as `hash` above: only new
-   * writes carry them, rows without them behave exactly as before, and existing tracks
-   * are never rewritten. Absent when the pack shipped no manifest entry for the file.
-   *
-   * The built-in library already models this per track in `public/audio/manifest.json`
-   * (`credit: "Aoo"` / `license: "PLACEHOLDER-PENDING-REVIEW"`); before these columns
-   * existed those values reached no Dexie row at all, so attribution died at the
-   * loader. Retrofitting it onto a shipped library is materially harder than carrying
-   * it from the start (§12).
-   */
-  credit?: string;
-  license?: string;
-  createdAt: number;
-  updatedAt: number;
-}
-
-/** Audio bytes, stored apart from metadata and read only at play time */
-export interface AudioBlobRecord {
-  id: string; // === AudioTrack.id
-  blob: Blob;
-}
-
-/**
- * Persisted File System Access handle for the user's music library folder.
- * Handles are structured-cloneable, so IndexedDB stores them directly —
- * they cannot go in localStorage; they are not JSON.
- */
-export interface AudioHandleRecord {
-  id: string; // 'library-root' — one row today
-  handle: FileSystemDirectoryHandle;
-  addedAt: number;
-}
-
-/** Playlists are a sequencer concept — music tracks only (§4.3) */
-export interface AudioPlaylist {
-  id: string;
-  name: string;
-  trackIds: string[]; // ordered; dangling ids pruned on track delete
-  createdAt: number;
-  updatedAt: number;
-}
-
-export type AudioRepeatMode = 'off' | 'all' | 'one';
-
-/**
- * Discrete playback state. Deliberately excludes position — that is a getter
- * sampled on demand, never broadcast (§6.3).
- */
-export interface AudioPlaybackState {
-  music: {
-    status: 'idle' | 'playing' | 'paused';
-    trackId: string | null;
-    playlistId: string | null;
-    index: number;
-    durationSec: number;
-    volume: number; // 0..1, channel gain
-    muted: boolean;
-    repeat: AudioRepeatMode;
-    shuffle: boolean;
-  };
-  sfx: {
-    volume: number;
-    muted: boolean;
-    liveVoices: number;
-  };
-  masterVolume: number;
-  masterMuted: boolean;
-  /** AudioContext resumed by a user gesture yet (§7) */
-  unlocked: boolean;
-}
-
-// ═══════════════════════════════════════════════════════════
 // Asset System — 素材子系统 (Dexie v13)
 // 设计: docs/planning/2026-07-29-asset-management-system-design.md §2 / §4.1
 // ═══════════════════════════════════════════════════════════
@@ -4292,8 +4147,7 @@ export interface AudioPlaybackState {
  *
  * 为什么住在 types.ts 而不是 field-enums.ts: field-enums.ts 只收 **AI 提名**
  * 的游戏数据枚举（每个都配一个 normalize*()，铁律5 治的是模型输出漂移）。
- * AssetType 由用户在 UI 控件里选，模型永不提名它 —— 与 AudioSourceKind /
- * AudioTrackKind 同级，照音频先例走。
+ * AssetType 由用户在 UI 控件里选，模型永不提名它。
  */
 export type AssetType = '头像' | '立绘' | '立绘bg';
 

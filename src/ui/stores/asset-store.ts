@@ -12,7 +12,6 @@
  * 1. **错误处理照抄音频那套已发货的模式**（§7.6）: 逐条 try/catch、单条失败不中断、
  *    结束后**一条**汇总、如实呈现部分成功。那套模式是音频系统 2026-07-27 审查的
  *    **修复结果**（③⑧⑬），复用它是免费的，重新发明等于把那次审查再走一遍。
- *    批量结果直接复用 {@link AudioBatchResult} 的形状，不另发明第二个批量回执类型（§6.3）。
  * 2. **分配器只有一套**。改名与设为主图撞位时要编号，编号策略必须与导入器**逐位一致**
  *    （max+1 / 换号不嵌套 / 单空格加整数），所以这里**不重写分配器**，而是直接调
  *    引擎导出的 `allocateVariantSlot` —— 一份规则，三个入口（§5.3 "One collision
@@ -41,16 +40,13 @@
 import { defineStore } from 'pinia';
 import { computed, reactive, ref } from 'vue';
 import { ASSET_TYPES } from '@engine/types';
-import type { AssetFraming, AssetMetaRecord, AssetType, AudioTrack } from '@engine/types';
+import type { AssetFraming, AssetMetaRecord, AssetType } from '@engine/types';
 import {
   getAsset,
   getAssets,
   saveAsset,
   deleteAsset as dbDeleteAsset,
   getAssetBlob,
-  getAudioTracks,
-  saveAudioTrack,
-  getAudioBlob,
   getDatabase,
 } from '@engine/database';
 import { allocateVariantSlot, planImport } from '@engine/asset-import-plan';
@@ -82,7 +78,6 @@ import {
   type CropRect,
   type ImageCropSeams,
 } from '../lib/image-crop';
-import { AUDIO_MIME_BY_EXTENSION } from '@engine/audio-names';
 import {
   readAssetZip,
   writeAssetZip,
@@ -101,8 +96,6 @@ import {
   runRemoteAssetSync,
   type RemoteAssetSyncResult,
 } from '../lib/remote-asset-sync';
-import { useAudioStore } from './audio-store';
-import type { AudioBatchResult } from './audio-store';
 import { isQuotaError, notify } from './store-utils';
 import { mutationFail, mutationOk, type MutationResult } from './store-result';
 
@@ -177,9 +170,8 @@ export interface AssetImportSummary {
    */
   cancelled: boolean;
   assetsAdded: number;
-  audioAdded: number;
   duplicatesSkipped: number;
-  /** 自动改号的条数（素材改号 + 音频改名之和，同计划器口径） */
+  /** 自动改号的条数（同计划器口径） */
   renumbered: number;
   namingConflicts: number;
   /** 立绘上的 mp4（D7 媒体规则） */
@@ -199,11 +191,6 @@ export interface AssetExportResult {
   /** 建议下载名；真正的下载归 UI */
   filename: string;
   assets: number;
-  audio: number;
-  /** 内置曲目（占位授权，不可再分发 —— D17） */
-  skippedBuiltin: number;
-  /** 本机音乐文件夹曲目（字节不是本应用的） */
-  skippedFile: number;
   /** 导出名撞车而让路的条数（存量重名行的兜底，不抛错） */
   skippedCollision: number;
   /** 元数据还在、字节读不到的条数 */
@@ -365,32 +352,6 @@ const ASSET_EXTENSION_BY_MIME: Readonly<Record<string, string>> = (() => {
   }
   return out;
 })();
-
-/** MIME → 扩展名的反查表（导出音频要给文件名一个扩展名，路由表是唯一来源） */
-const AUDIO_EXTENSION_BY_MIME: Readonly<Record<string, string>> = (() => {
-  const out: Record<string, string> = {};
-  for (const [ext, mime] of Object.entries(AUDIO_MIME_BY_EXTENSION)) {
-    // 先到先得: `audio/ogg` 反查稳定得到 `ogg` 而不是 `oga`
-    if (!Object.prototype.hasOwnProperty.call(out, mime)) out[mime] = ext;
-  }
-  return out;
-})();
-
-/**
- * 给一条待导出的音轨挑扩展名。
- *
- * 音轨名**不带扩展名**（上传路径 `stripExt` 过），而导入器只按扩展名路由，
- * 所以导出时必须补回一个。顺序: `mimeType` 反查 → Blob 自带的 type 反查 →
- * `mp3` 兜底。兜错也不影响往返身份（去重看 名字 + 哈希，不看 mime），
- * 只是重新导入后 `mimeType` 会变成路由表里的那个值。
- */
-function audioExportExtension(track: AudioTrack, blob: Blob): string {
-  const fromTrack = track.mimeType ? AUDIO_EXTENSION_BY_MIME[track.mimeType] : undefined;
-  if (fromTrack) return fromTrack;
-  const fromBlob = blob.type ? AUDIO_EXTENSION_BY_MIME[blob.type] : undefined;
-  if (fromBlob) return fromBlob;
-  return 'mp3';
-}
 
 /**
  * 这些 MIME 都表示 zip —— 但**扩展名优先**，MIME 只是兜底（见 {@link isZipFile}）。
@@ -848,11 +809,6 @@ export const useAssetStore = defineStore('asset', () => {
 
   // ═══ 导入（一键，两个入口共用一份实现 —— D9）═══════════
 
-  /** `ExistingRows` 的音频半边: 只取计划器真正会看的字段 */
-  function toExistingAudio(tracks: readonly AudioTrack[]): ExistingRows['audio'] {
-    return tracks.map((t) => ({ id: t.id, name: t.name, source: t.source, hash: t.hash }));
-  }
-
   function emptySummary(): AssetImportSummary {
     return {
       read: false,
@@ -860,7 +816,6 @@ export const useAssetStore = defineStore('asset', () => {
       quotaHit: false,
       cancelled: false,
       assetsAdded: 0,
-      audioAdded: 0,
       duplicatesSkipped: 0,
       renumbered: 0,
       namingConflicts: 0,
@@ -886,7 +841,6 @@ export const useAssetStore = defineStore('asset', () => {
       quotaHit: false,
       cancelled: false,
       assetsAdded: 0,
-      audioAdded: 0,
       duplicatesSkipped: plan.summary.duplicatesSkipped,
       renumbered: plan.summary.renumbered,
       namingConflicts: plan.summary.namingConflicts,
@@ -943,7 +897,7 @@ export const useAssetStore = defineStore('asset', () => {
 
   /** 唯一那条汇总文案（§7.2）—— 两个入口、两个半边，都只播报这一行 */
   function buildImportMessage(s: AssetImportSummary): string {
-    const parts = [`素材 ${s.assetsAdded} 新增`, `音频 ${s.audioAdded} 新增`];
+    const parts = [`素材 ${s.assetsAdded} 新增`];
     if (s.duplicatesSkipped > 0) parts.push(`跳过 ${s.duplicatesSkipped} 重复`);
     if (s.renumbered > 0) parts.push(`编号 ${s.renumbered}`);
     if (s.namingConflicts > 0) parts.push(`命名冲突 ${s.namingConflicts}`);
@@ -977,7 +931,7 @@ export const useAssetStore = defineStore('asset', () => {
    */
   function notifyImportSummary(s: AssetImportSummary): AssetImportSummary {
     const counts = buildImportMessage(s);
-    const changed = s.assetsAdded + s.audioAdded > 0;
+    const changed = s.assetsAdded > 0;
     const readErrors = s.readErrors ?? [];
     // 读取失败的尾巴，附在任何分支后面
     const readTail =
@@ -1002,7 +956,7 @@ export const useAssetStore = defineStore('asset', () => {
       type = 'error';
     } else if (s.failed > 0) {
       text =
-        `${counts}。有 ${s.failed} 个文件没能写入（已写入 ${s.assetsAdded + s.audioAdded} 个）。` +
+        `${counts}。有 ${s.failed} 个文件没能写入（已写入 ${s.assetsAdded} 个）。` +
         `已写入的都完整保留，没写入的库里一个字节都没留下。${reimportHint(s)}` +
         (readTail ? ` ${readTail}` : '');
       type = 'error';
@@ -1049,7 +1003,6 @@ export const useAssetStore = defineStore('asset', () => {
       out.cancelled = out.cancelled || p.cancelled;
       out.quotaHit = out.quotaHit === true || p.quotaHit === true;
       out.assetsAdded += p.assetsAdded;
-      out.audioAdded += p.audioAdded;
       out.duplicatesSkipped += p.duplicatesSkipped;
       out.renumbered += p.renumbered;
       out.namingConflicts += p.namingConflicts;
@@ -1089,13 +1042,6 @@ export const useAssetStore = defineStore('asset', () => {
   ): Promise<AssetImportSummary> {
     // ── 攒基准行 ──
     await refreshAssets();
-    let audioRows: AudioTrack[] = [];
-    try {
-      audioRows = await getAudioTracks();
-    } catch {
-      // 音频表读不到 → 当作没有音频行。去重会失效、撞名会编号，但不该整包失败
-      audioRows = [];
-    }
     const existing: ExistingRows = {
       assets: assets.value.map((a) => ({
         id: a.id,
@@ -1104,7 +1050,6 @@ export const useAssetStore = defineStore('asset', () => {
         variant: a.variant,
         hash: a.hash,
       })),
-      audio: toExistingAudio(audioRows),
     };
 
     // ── 定计划（全部决策都在这一行里发生）──
@@ -1118,7 +1063,7 @@ export const useAssetStore = defineStore('asset', () => {
     progressDone.value = progressBase;
     progressTotal.value = progress.indeterminate
       ? 0
-      : progressBase + plan.assets.length + plan.audio.length;
+      : progressBase + plan.assets.length;
     progressPhase.value = 'write';
 
     let quotaHit = false;
@@ -1168,64 +1113,11 @@ export const useAssetStore = defineStore('asset', () => {
       }
     }
 
-    // ── 音频半边（同一个包、同一次导入 —— §7.2）──
-    if (!quotaHit && !summary.cancelled) {
-      for (const planned of plan.audio) {
-        if (signal?.aborted) {
-          summary.cancelled = true;
-          break;
-        }
-        try {
-          const blob = makeBlob(planned.entry.bytes, planned.mime);
-          if (!blob) {
-            summary.failed += 1;
-            continue;
-          }
-          const track: AudioTrack = {
-            id: newId('audio'),
-            name: planned.name,
-            kind: 'music',
-            // 从 zip 进来的字节只能落 IndexedDB：'file' 要目录句柄，'builtin' 是内置清单
-            source: 'blob',
-            mimeType: planned.mime,
-            size: planned.entry.bytes.length,
-            tags: [...planned.tags],
-            createdAt: now,
-            updatedAt: now,
-          };
-          if (planned.entry.hash !== undefined) track.hash = planned.entry.hash;
-          // 署名照原样落库（AudioTrack 新增的 credit / license 两列，非索引属性，
-          // 无需升版）。清单存在的全部理由就是让文件名承载不了的署名活下来（D10）——
-          // 导入时丢掉它，等于让这条链条断在最后一步。
-          if (planned.credit !== undefined) track.credit = planned.credit;
-          if (planned.license !== undefined) track.license = planned.license;
-          await saveAudioTrack(track, blob);
-          summary.audioAdded += 1;
-        } catch (e) {
-          summary.failed += 1;
-          if (isQuotaError(e)) {
-            quotaHit = true;
-            break;
-          }
-        } finally {
-          progressDone.value += 1;
-        }
-      }
-    }
-
-    // ── 刷新两边的库 ──
+    // ── 刷新库 ──
     await refreshAssets();
-    if (summary.audioAdded > 0) {
-      try {
-        // 音频半边写完必须让音频分区看见 —— 调它的**公开动作**，不碰它的内部状态
-        await useAudioStore().refreshTracks();
-      } catch {
-        // 无 Pinia 上下文 / 音频 store 起不来: 素材半边已经落库，不该因此报失败
-      }
-    }
 
     // ── 首次导入成功才请求持久化（§4.5），永不阻塞 ──
-    if (!persistRequested && summary.assetsAdded + summary.audioAdded > 0) {
+    if (!persistRequested && summary.assetsAdded > 0) {
       persistRequested = true;
       await requestPersistence();
     }
@@ -1419,7 +1311,7 @@ export const useAssetStore = defineStore('asset', () => {
         if (signal?.aborted) break;
         const part = await runZipHalf(zip, signal, { base, indeterminate: multi });
         parts.push(part);
-        base += part.assetsAdded + part.audioAdded + part.failed;
+        base += part.assetsAdded + part.failed;
       }
       if (loose.length > 0 && !signal?.aborted) {
         parts.push(await runFilesHalf(loose, signal, { base, indeterminate: multi }));
@@ -1842,9 +1734,6 @@ export const useAssetStore = defineStore('asset', () => {
       blob: null,
       filename: `${EXPORT_FILENAME_PREFIX}_${stamp.getFullYear()}${pad(stamp.getMonth() + 1)}${pad(stamp.getDate())}.zip`,
       assets: 0,
-      audio: 0,
-      skippedBuiltin: 0,
-      skippedFile: 0,
       skippedCollision: 0,
       failed: 0,
       message: '',
@@ -1857,7 +1746,7 @@ export const useAssetStore = defineStore('asset', () => {
     exporting.value = true;
     try {
       const entries: AssetZipWriteEntry[] = [];
-      const manifest: AssetZipManifest = { assets: {}, audio: {} };
+      const manifest: AssetZipManifest = { assets: {} };
       /** zip 的目录是个字典 —— 重名会让 writeAssetZip 抛错，所以这里先让路并如实计数 */
       const used = new Set<string>();
 
@@ -1894,78 +1783,16 @@ export const useAssetStore = defineStore('asset', () => {
         }
       }
 
-      let tracks: AudioTrack[] = [];
-      try {
-        tracks = await getAudioTracks();
-      } catch {
-        tracks = [];
-      }
-
-      /**
-       * 内置曲目**不落 Dexie**（每次启动从 `/audio/manifest.json` 重建），所以
-       * `getAudioTracks()` 里根本没有它们 —— 要数得到那 57 首，只能问音频 store
-       * 的 `builtinTracks`（它的公开状态，不是内部实现）。数不到就报 0，其余照常导出：
-       * 少说一句排除，好过为了一句话让整个导出失败。
-       */
-      const builtinIds = new Set<string>();
-      for (const t of tracks) if (t.source === 'builtin') builtinIds.add(t.id);
-      try {
-        for (const t of useAudioStore().builtinTracks) builtinIds.add(t.id);
-      } catch {
-        // 无 Pinia 上下文 / 音频 store 起不来
-      }
-      result.skippedBuiltin = builtinIds.size;
-
-      for (const track of tracks) {
-        // 'builtin' 已在上面数过；'file' 的字节在用户自己的文件夹里，不是本应用的
-        if (track.source === 'builtin') continue;
-        if (track.source === 'file') {
-          result.skippedFile += 1;
-          continue;
-        }
-        try {
-          const blob = await getAudioBlob(track.id);
-          if (!blob) {
-            result.failed += 1;
-            continue;
-          }
-          const name = `${track.name}.${audioExportExtension(track, blob)}`;
-          if (used.has(name)) {
-            result.skippedCollision += 1;
-            continue;
-          }
-          used.add(name);
-          entries.push({ name, bytes: new Uint8Array(await blob.arrayBuffer()) });
-          result.audio += 1;
-          // 署名与 tags 一样，都是文件名承载不了、只能靠清单带走的东西（D10）
-          const meta: AssetZipManifest['audio'][string] = {};
-          if (track.tags.length > 0) meta.tags = [...track.tags];
-          if (track.credit !== undefined) meta.credit = track.credit;
-          if (track.license !== undefined) meta.license = track.license;
-          if (Object.keys(meta).length > 0) manifest.audio[name] = meta;
-        } catch {
-          result.failed += 1;
-        }
-      }
-
       // 内置曲目是全局共享的，任何一个存档都能看到，所以它必须被说出来 ——
       // 哪怕素材与用户音频都是 0，用户屏幕上仍有 57 首。
       const skipParts: string[] = [];
-      if (result.skippedBuiltin > 0) skipParts.push(`内置 ${result.skippedBuiltin}`);
-      if (result.skippedFile > 0) skipParts.push(`本地文件 ${result.skippedFile}`);
       if (result.skippedCollision > 0) skipParts.push(`同名让路 ${result.skippedCollision}`);
       if (result.failed > 0) skipParts.push(`字节缺失 ${result.failed}`);
       const skipText = skipParts.length > 0 ? ` · 已跳过 ${skipParts.join(' · ')}` : '';
 
       if (entries.length === 0) {
         result.message = `没有可导出的内容${skipText}。`;
-        notify(
-          result.message +
-            (result.skippedBuiltin > 0
-              ? '内置曲目带的是占位授权，不随导出包再分发；本地文件夹里的曲目字节也不属于本应用。'
-              : ''),
-          'info',
-        );
+        notify(result.message, 'info');
         return result;
       }
 
@@ -1981,13 +1808,8 @@ export const useAssetStore = defineStore('asset', () => {
         return result;
       }
 
-      result.message = `已导出 素材 ${result.assets} · 音频 ${result.audio}${skipText}`;
-      notify(
-        result.skippedBuiltin > 0 || result.skippedFile > 0
-          ? `${result.message}。内置曲目带的是占位授权、本地文件夹曲目的字节不属于本应用，两者都刻意不打进包里。`
-          : result.message,
-        result.failed > 0 ? 'error' : 'info',
-      );
+      result.message = `已导出 素材 ${result.assets}${skipText}`;
+      notify(result.message, result.failed > 0 ? 'error' : 'info');
       return result;
     } finally {
       exporting.value = false;
@@ -2296,14 +2118,14 @@ export const useAssetStore = defineStore('asset', () => {
   /**
    * 批量删除（多选）。**尽力做完**: 单条删不掉不连累其余，否则表现成
    * "选了 12 条，删了 3 条就不动了"而且毫无解释。查无此行算 skipped（不适用，不是错）。
-   * 结束后**一条**汇总。回执沿用 {@link AudioBatchResult} 的形状（§6.3）。
+   * 结束后**一条**汇总。
    *
    * 刻意逐条走 `deleteAsset` 而不是 database.ts 的原子 `deleteAssets`: 原子版只有
    * "全删/全不删"两种结局，报不出部分成功，而这条路径上如实呈现部分成功比原子性值钱
    * （每条自己的元数据+字节仍然是原子的）。
    */
-  async function deleteAssetsByIds(ids: readonly string[]): Promise<AudioBatchResult> {
-    const res: AudioBatchResult = { ok: 0, skipped: 0, failed: 0 };
+  async function deleteAssetsByIds(ids: readonly string[]): Promise<{ ok: number; skipped: number; failed: number }> {
+    const res = { ok: 0, skipped: 0, failed: 0 };
     for (const id of ids) {
       const doomed = findAsset(id);
       if (!doomed) {

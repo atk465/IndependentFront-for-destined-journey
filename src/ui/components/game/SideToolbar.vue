@@ -1,15 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useGameStore } from '../../stores/game-store';
-import { useAudioStore } from '../../stores/audio-store';
 import { useSettingsStore } from '../../stores/settings-store';
 
 const game = useGameStore();
-const audio = useAudioStore();
 const settings = useSettingsStore().settings;
-
-/** 播放中给音乐图标一点低幅呼吸（仅 opacity，不碰布局属性） */
-const musicPlaying = computed(() => audio.state.music.status === 'playing');
 
 const emit = defineEmits<{
   toolClick: [id: string];
@@ -27,7 +22,6 @@ const allTools = [
   { id: 'memory', label: '记忆', icon: 'fa-solid fa-brain' },
   { id: 'plot', label: '剧情', icon: 'fa-solid fa-book-open' },
   { id: 'snapshots', label: '快照', icon: 'fa-solid fa-clock-rotate-left' },
-  { id: 'audio', label: '音乐', icon: 'fa-solid fa-music' },
   { id: 'debug', label: '调试', icon: 'fa-solid fa-bug' },
   { id: 'settings', label: '设置', icon: 'fa-solid fa-gear' },
 ];
@@ -52,7 +46,7 @@ function handleClick(id: string) {
       :aria-label="tool.label"
       @click="handleClick(tool.id)"
     >
-      <i :class="[tool.icon, { breathing: tool.id === 'audio' && musicPlaying }]" />
+      <i :class="tool.icon" />
       <span v-show="!game.sidebarCollapsed" class="tool-label">{{ tool.label }}</span>
     </button>
     <button

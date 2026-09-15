@@ -26,7 +26,6 @@ import type {
   WorldBook,
   CraftGenRequestMarker,
   CharGenRequestMarker,
-  PlayAudioMarker,
   MemoryRecord,
   CharacterState,
   ChatMessage,
@@ -118,7 +117,6 @@ import { diffVars, measureDiffSize, EJS_DIFF_SIZE_LIMIT } from '@engine/ejs-vars
 import type { EjsVarsDiff } from '@engine/ejs-vars-diff';
 import type { useGameStore } from '../stores/game-store';
 import type { useSettingsStore } from '../stores/settings-store';
-import { useAudioStore } from '../stores/audio-store';
 import { useWorldBookStore } from '../stores/worldbook-store';
 import { useUIStore } from '../stores/ui-store';
 import type { CombatCommand } from '@engine/combat-v3';
@@ -367,12 +365,10 @@ export class GamePipeline {
    * 🎵 本轮待播的配乐标记。Stage 1 只暂存，等状态落库+回读之后才真正选曲 ——
    * 理由见 run() 末尾。一轮多个标记时后者覆盖前者（以 AI 最后的判断为准）。
    */
-  private pendingAudioMarker: PlayAudioMarker | null = null;
   /**
    * 上次据以选曲的地点。用来判断"地点变没变" —— 没变就不重选，
    * 同一地点里来回走动不该反复触发。空串表示还没选过。
    */
-  private lastAudioLocation = '';
   /**
    * 🖼 本轮 story 刚产出的那条消息（id / turn / 正文）。
    *
@@ -555,7 +551,6 @@ export class GamePipeline {
       const endpoints = this.buildEndpoints();
       this.currentContext = context;
       this.pendingPlotTasks = [];
-      this.pendingAudioMarker = null;
       this.lastStoryMessage = null;
       await this.loadPlotData(context);
       // 🧵 主线细化层：pre 开始前先求本轮闸门（on 时供值；失败静默 over）
@@ -688,7 +683,6 @@ export class GamePipeline {
       // 还是上一轮的值 —— 它们要等 Stage 2 的 request_dispatcher / vars_update 落库、
       // 再经这里的 refreshFromDb 才更新。而**转场恰恰是唯一真正该换歌的时刻**：
       // 在 Stage 1 播，正文已经进了熔火裂谷，BGM 还在放上一座城的曲子。
-      if (this.ownsActiveSave) this.flushPendingAudio();
       if (activityRunId) {
         this.game.finishAgentActivityRun(activityRunId, activityOutcome, activityMessage);
         this.game.finishAgentLogTurn(activityRunId, activityOutcome);
@@ -709,83 +703,6 @@ export class GamePipeline {
         if (this.ownsActiveSave) this.game.isGenerating = false;
         this.abortController = null;
       }
-    }
-  }
-
-  /**
-   * 🎵 本轮配乐的唯一出口。两条来源，**AI 标记优先**:
-   *
-   * 1. story 写了 `<play_audio>` —— 它知道这一刻的戏剧意图（要打起来了 / 气氛转冷），
-   *    比"地点变了"这个纯事实更准；
-   * 2. 否则看地点有没有变 —— 这是场景配乐的主路径，绝大多数换歌都由它触发。
-   *
-   * 地点**没变就不动音乐**：同一个地点里来回走动、翻面板不该反复重选曲子。
-   * （即便重选出同一首，store 那层的"同曲不重播"也会挡住，这里只是不做无用功。）
-   *
-   * 不 await —— 配乐是旁路氛围，出问题不该影响这一轮。管线被 abort / 报错时同样
-   * 会走到这里：正文可能已经产出，该换的歌照换。
-   */
-  private flushPendingAudio(): void {
-    const marker = this.pendingAudioMarker;
-    this.pendingAudioMarker = null;
-
-    // 用户关掉了场景配乐 → 两条来源都不生效，音乐完全交回给用户
-    if (this.settings.settings.audioSceneAutoPlay === false) {
-      this.lastAudioLocation = this.game.player?.location ?? '';
-      return;
-    }
-
-    if (marker) {
-      this.lastAudioLocation = this.game.player?.location ?? '';
-      void this.handlePlayAudio(marker).catch((err) => {
-        console.warn('[GamePipeline] 场景配乐失败（不阻塞本轮）:', err);
-      });
-      return;
-    }
-
-    const location = this.game.player?.location ?? '';
-    if (!location || location === this.lastAudioLocation) return;
-    this.lastAudioLocation = location;
-    void this.playForLocation(location).catch((err) => {
-      console.warn('[GamePipeline] 场景配乐失败（不阻塞本轮）:', err);
-    });
-  }
-
-  /**
-   * 按当前地点选曲。在场角色一并带上 —— 有专属主题曲的角色在场时，
-   * 打分器会在"地点已经泛到势力一级"时让人物主题接管（见说明书第八节的权重表）。
-   */
-  private async playForLocation(location: string): Promise<void> {
-    const audio = useAudioStore();
-    await audio.playByScene({
-      location,
-      characters: this.presentCharacterNames(),
-    });
-  }
-
-  /** 在场 NPC 的名字（player 不算） */
-  private presentCharacterNames(): string[] {
-    return this.game.characters
-      .filter((c) => c.type !== 'player' && c.present === true)
-      .map((c) => c.name);
-  }
-
-  /**
-   * 🎵 进场配乐。装好存档、进入游戏页时调一次 —— 「进入某个地点就该响起它的曲子」
-   * 对读档回来的第一眼同样成立，不该非要等玩家先说一句话。
-   *
-   * 同时把 lastAudioLocation 定下来，于是紧接着的第一轮不会为同一个地点再选一次。
-   * 曲库装载（init）由调用方负责，这里只管选曲。
-   */
-  async primeSceneAudio(): Promise<void> {
-    if (this.settings.settings.audioSceneAutoPlay === false) return;
-    const location = this.game.player?.location ?? '';
-    if (!location || location === this.lastAudioLocation) return;
-    this.lastAudioLocation = location;
-    try {
-      await this.playForLocation(location);
-    } catch (err) {
-      console.warn('[GamePipeline] 进场配乐失败（不阻塞）:', err);
     }
   }
 
@@ -1653,48 +1570,6 @@ export class GamePipeline {
   }
 
   /**
-   * 🎵 <play_audio> → 场景选曲。
-   *
-   * **地点与在场角色不从标记读，从游戏状态读** —— 它们已经是状态里的事实
-   * （`player.location` / `character.present`），让 AI 再写一遍只会多一处漂移源。
-   * 标记只提供 AI 独有的判断：此刻是什么情绪、什么情境。
-   *
-   * 整条路径不抛错：配乐是旁路氛围，音频出问题不该影响这一轮叙事。
-   */
-  private async handlePlayAudio(marker: PlayAudioMarker): Promise<void> {
-    const audio = useAudioStore();
-
-    if ((marker.action ?? '').trim().toLowerCase() === 'stop') {
-      audio.stop();
-      return;
-    }
-
-    // 逗号 / 顿号 / 空白分隔的自由词
-    const words = (raw?: string): string[] =>
-      (raw ?? '')
-        .split(/[,，、;；\s]+/)
-        .map((w) => w.trim())
-        .filter(Boolean);
-
-    // 正文里的自由词不知道属于哪一维，情绪与情境都试一遍（与"无类型标签"同理）
-    const body = words(marker.bodyText);
-    const situations = [...words(marker.situation), ...body];
-    const moods = [...words(marker.mood), ...body];
-
-    const characters = marker.character ? words(marker.character) : this.presentCharacterNames();
-
-    const variant = marker.variant?.trim().toUpperCase();
-
-    await audio.playByScene({
-      location: this.game.player?.location || undefined,
-      characters,
-      moods,
-      situations,
-      variant: variant === 'A' || variant === 'B' ? variant : undefined,
-    });
-  }
-
-  /**
    * 🖼 `<scene_image>` → 三档分流（设计 §8）。
    *
    * ```
@@ -1778,11 +1653,6 @@ export class GamePipeline {
   private buildEventHandlers(runActivityId?: string): OrchestratorEvents {
     const debugTurnId = runActivityId ?? this.activeRunId ?? 'detached';
     return {
-      // 🎵 配乐：只暂存，**不在 Stage 1 就播** —— 见 run() 末尾的说明
-      onPlayAudio: (marker) => {
-        this.pendingAudioMarker = marker;
-      },
-
       // 🖼 情景插画：三档分流。不 await —— 出图 5–60 秒，不该进管线时序
       onSceneImage: (markers) => {
         void this.handleSceneImages(markers).catch((err) => {

@@ -47,7 +47,7 @@ describe('buildImagePromptInput', () => {
     const text = [
       '篝火噼啪作响。',
       '<scene_image title="篝火夜话" characters="苏婉">苏婉在篝火边说起家乡</scene_image>',
-      '<play_audio situation="日常"/>',
+      '<event_trigger name="神秘商人"/>',
       '<combat_trigger>山贼三人</combat_trigger>',
       '她把手伸向火堆。',
     ].join('\n');
@@ -57,7 +57,7 @@ describe('buildImagePromptInput', () => {
     expect(req.narrative).not.toContain('<');
     expect(req.narrative).not.toContain('scene_image');
     expect(req.narrative).not.toContain('combat_trigger');
-    expect(req.narrative).not.toContain('play_audio');
+    expect(req.narrative).not.toContain('event_trigger');
     // 标记里的正文（"山贼三人"）也一并没了 —— 剥的是整块，不是只剥标签
     expect(req.narrative).not.toContain('山贼三人');
     expect(req.narrative).toContain('篝火噼啪作响。');

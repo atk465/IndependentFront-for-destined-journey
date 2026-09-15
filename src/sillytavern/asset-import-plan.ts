@@ -35,8 +35,7 @@
 import { explainAssetFilename } from './asset-filename';
 import { basenameOf, normalizeSlashes, normalizedExtensionOf } from './asset-path';
 import { clampAssetFraming, mimeForAssetExtension } from './asset-types';
-import { AUDIO_MIME_BY_EXTENSION, normalizeAudioName, uniqueAudioName } from './audio-names';
-import type { AssetFraming, AssetMetaRecord, AssetType, AudioTrack } from './types';
+import type { AssetFraming, AssetMetaRecord, AssetType } from './types';
 
 // ═══════════════════════════════════════════════════════════
 // 输入形状
@@ -65,7 +64,6 @@ export interface DecodedEntry {
  */
 export interface ExistingRows {
   assets: Pick<AssetMetaRecord, 'id' | 'name' | 'type' | 'variant' | 'hash'>[];
-  audio: (Pick<AudioTrack, 'id' | 'name' | 'source'> & { hash?: string })[];
 }
 
 /** 清单里单条的元数据 —— **只能追加**文件名承载不了的东西（D10 / §5.2） */
@@ -100,7 +98,6 @@ export interface ImportManifestMeta {
  */
 export interface ImportManifest {
   assets?: Record<string, ImportManifestMeta>;
-  audio?: Record<string, ImportManifestMeta>;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -137,19 +134,6 @@ export interface PlannedAsset {
   renumberedFrom?: string;
 }
 
-/** 计划落成一条音轨 */
-export interface PlannedAudio {
-  kind: 'audio';
-  entry: DecodedEntry;
-  /** 已过 `uniqueAudioName` 的终值（不含扩展名，同 audio-store 的上传口径） */
-  name: string;
-  mime: string;
-  tags: string[];
-  credit?: string;
-  license?: string;
-  renamedFrom?: string;
-}
-
 /**
  * 跳过的条目及理由。
  *
@@ -182,19 +166,12 @@ export type ImportWarning =
 
 export interface ImportPlan {
   assets: PlannedAsset[];
-  audio: PlannedAudio[];
   skips: PlannedSkip[];
   warnings: ImportWarning[];
   summary: {
     assetsAdded: number;
-    audioAdded: number;
     duplicatesSkipped: number;
-    /**
-     * 被自动改号的条数 —— **素材改号 + 音频改名之和**。
-     *
-     * 一个导入器只对用户播报一行摘要（§7.2 的 `编号 2`），所以这个计数覆盖
-     * 两半边；两半边各自的明细在 `renumberedFrom` / `renamedFrom` 上。
-     */
+    /** 被自动改号的条数（明细在 `renumberedFrom` 上）。 */
     renumbered: number;
     namingConflicts: number;
     noise: number;
@@ -228,12 +205,6 @@ function isNoisePath(path: string): boolean {
   const base = segments[segments.length - 1];
   if (!base) return true;
   return base.startsWith('.');
-}
-
-/** 去掉真尾缀（同 audio-store 上传路径的 `stripExt`，音轨名不带扩展名） */
-function stripExtension(basename: string): string {
-  const dot = basename.lastIndexOf('.');
-  return dot > 0 ? basename.slice(0, dot) : basename;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -460,7 +431,6 @@ export function planImport(
   manifest?: ImportManifest,
 ): ImportPlan {
   const assets: PlannedAsset[] = [];
-  const audio: PlannedAudio[] = [];
   const skips: PlannedSkip[] = [];
   const warnings = new Set<ImportWarning>();
 
@@ -482,19 +452,6 @@ export function planImport(
     knownAssetNames.add(row.name);
   }
 
-  // ── 音频工作集: 名字池（给 uniqueAudioName）+ 规范名 → 已占哈希 ──
-  const audioPool: { id: string; name: string }[] = (existing.audio ?? []).map((row) => ({
-    id: row.id,
-    name: row.name,
-  }));
-  const audioHashes = new Map<string, Set<string>>();
-  for (const row of existing.audio ?? []) {
-    if (row.hash === undefined || row.hash === '') continue;
-    rememberHash(audioHashes, normalizeAudioName(row.name), row.hash);
-  }
-
-  let plannedAudioSeq = 0;
-
   for (const entry of entries ?? []) {
     const rawPath = entry?.path ?? '';
     const basename = basenameOf(rawPath);
@@ -506,66 +463,7 @@ export function planImport(
     }
 
     // ── 路由: 按扩展名，判在拍平后的 basename 上（§5.1）──
-    // 音频表先查（D8: `webm` 已被 `audio/webm` 占用，改判是回退）。两张表
-    // 都从引擎层唯一来源 import，本模块不复制任何一份路由表。
     const ext = normalizedExtensionOf(basename);
-    const audioMime = AUDIO_MIME_BY_EXTENSION[ext];
-
-    if (audioMime !== undefined) {
-      // ══ 音频 ══
-      if (entry.hash === undefined || entry.hash === '') warnings.add('hash-unavailable');
-
-      const desired = stripExtension(basename);
-      const normalized = normalizeAudioName(desired);
-
-      // 去重: 同规范名下哈希命中即跳（§4.4）。没哈希则**完全跳过去重**，
-      // 直落编号路径 —— 绝不换第二种哈希空间。
-      if (entry.hash !== undefined && entry.hash !== '') {
-        if (audioHashes.get(normalized)?.has(entry.hash)) {
-          skips.push({ kind: 'skip', path: basename, reason: 'duplicate' });
-          continue;
-        }
-      }
-
-      // 非同一字节的撞名照 `uniqueAudioName` 出厂设置走 —— D12 对音频唯一的
-      // 改动就是上面那次哈希去重，编号规则一个字没动。
-      const name = uniqueAudioName(audioPool, desired);
-      const meta = readManifestMeta(manifest?.audio, basename);
-
-      const planned: PlannedAudio = {
-        kind: 'audio',
-        entry,
-        name,
-        mime: audioMime,
-        tags: meta.tags ?? [],
-      };
-      if (meta.credit !== undefined) planned.credit = meta.credit;
-      if (meta.license !== undefined) planned.license = meta.license;
-      if (name !== desired) planned.renamedFrom = desired;
-      audio.push(planned);
-
-      // 占位: 名字池与哈希集都随计划增长，于是整批分配成立
-      plannedAudioSeq += 1;
-      audioPool.push({ id: `\u0000planned:${plannedAudioSeq}`, name });
-      if (entry.hash !== undefined && entry.hash !== '') {
-        // 🔴 **两个键都要记**，而且两个都在防真事，不是图省事各记一份:
-        //
-        // - **desired**（改名前）: 库里已有一条**无哈希**的 `song` 时，本批第一个
-        //   `song.mp3` 会被改名成 `song (2)`。若只记终名，第二个**字节相同**的
-        //   `song.mp3` 去 `song` 底下查什么也查不到，于是落成 `song (3)` ——
-        //   两份一模一样的字节落成两行，正是 D12 要防的半幂等。后来者请求的是
-        //   同一个名字、同一份字节，那它就是重复，与先来者被改成什么无关。
-        // - **终名**（改名后）: 本批里 `song.mp3` 变成 `song (2)` 之后，再来一个
-        //   字节相同的 `song (2).mp3`，它请求的正是那一行 —— 同样是重复。
-        //
-        // 不会误杀: 命中要求**哈希也相等**，而「同名 + 同字节 = 重复」就是 D12 的
-        // 定义本身。没改名时两个键相等，退化成一次 Set 写入。
-        rememberHash(audioHashes, normalized, entry.hash);
-        rememberHash(audioHashes, normalizeAudioName(name), entry.hash);
-      }
-      continue;
-    }
-
     const assetMime = mimeForAssetExtension(ext);
     if (assetMime === undefined) {
       skips.push({ kind: 'skip', path: basename, reason: 'unknown-extension' });
@@ -652,16 +550,13 @@ export function planImport(
 
   let renumbered = 0;
   for (const planned of assets) if (planned.renumberedFrom !== undefined) renumbered += 1;
-  for (const planned of audio) if (planned.renamedFrom !== undefined) renumbered += 1;
 
   return {
     assets,
-    audio,
     skips,
     warnings: WARNING_ORDER.filter((w) => warnings.has(w)),
     summary: {
       assetsAdded: assets.length,
-      audioAdded: audio.length,
       duplicatesSkipped,
       renumbered,
       namingConflicts,

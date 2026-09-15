@@ -6,7 +6,7 @@
  * both while streaming and after completion.
  */
 
-import { scanEventTriggers, stripPlayAudioMarkers } from './marker-protocol';
+import { scanEventTriggers } from './marker-protocol';
 
 export interface StoryProjection {
   content: string;
@@ -24,7 +24,7 @@ const STREAM_CONTROL_TAGS = ['maintext', 'play_audio', 'event_trigger', ...CONTR
 /**
  * 剥掉 `<event_trigger>` 触发回执（随机事件 v1 / 设计 §5.2）。
  *
- * 与 `play_audio` 同一类：**零渲染意义的回执标记**，漏出去就是玩家眼前的一行尖括号。
+ * 这是**零渲染意义的回执标记**，漏出去就是玩家眼前的一行尖括号。
  * 结算侧（orchestrator Stage 1 → `confirmRandomEventTrigger`）读的是**未投影的原始输出**，
  * 所以这里剥干净不会让事件漏结算 —— 两条路各看各的文本。
  *
@@ -32,6 +32,9 @@ const STREAM_CONTROL_TAGS = ['maintext', 'play_audio', 'event_trigger', ...CONTR
  *    而那三种写法（自闭合 / 成对 / 漏写闭合）的容忍度全在 marker-protocol 那一处定义。
  *    抄一条只认成对写法的正则，症状是「结算了、但标记还留在正文里」。
  */
+/** 音频系统下线后残留的 <play_audio> 标记照旧剥干净（旧存档的消息里可能有） */
+const LEGACY_PLAY_AUDIO = /<play_audio[^>]*\/>|<play_audio[^>]*>[\s\S]*?<\/play_audio\s*>|<play_audio[^>]*>/gi;
+
 function stripEventTriggerMarkers(text: string): string {
   const markers = scanEventTriggers(text);
   let out = text;
@@ -137,7 +140,8 @@ function project(raw: string, partial: boolean): StoryProjection {
 
   if (partial) content = stripTrailingPartialControlTag(content);
 
-  content = stripEventTriggerMarkers(stripPlayAudioMarkers(content))
+  content = stripEventTriggerMarkers(content)
+    .replace(LEGACY_PLAY_AUDIO, '')
     .replace(/<\/?maintext\b[^>]*>/gi, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim();

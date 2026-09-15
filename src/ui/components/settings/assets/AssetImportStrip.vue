@@ -28,7 +28,7 @@ import {
   type AssetImportSummary,
   type AssetStorageEstimate,
 } from '../../../stores/asset-store';
-import { fmtBytes } from '../audio/format';
+import { fmtBytes } from '../../../lib/format-bytes';
 import { createProgressTracker } from './progress';
 
 const emit = defineEmits<{
@@ -217,7 +217,6 @@ const summaryChips = computed<{ label: string; value: number; tone: 'ok' | 'note
     if (!s) return [];
     const all: { label: string; value: number; tone: 'ok' | 'note' | 'warn' }[] = [
       { label: '素材新增', value: s.assetsAdded, tone: 'ok' },
-      { label: '音频新增', value: s.audioAdded, tone: 'ok' },
       { label: '跳过重复', value: s.duplicatesSkipped, tone: 'note' },
       { label: '自动编号', value: s.renumbered, tone: 'note' },
       { label: '命名冲突', value: s.namingConflicts, tone: 'warn' },
@@ -258,7 +257,7 @@ const readErrors = computed<string[]>(() => summary.value?.readErrors ?? []);
 /** 一条都没动过的导入也要说出来，否则界面看起来像什么都没发生 */
 const nothingChanged = computed(() => {
   const s = summary.value;
-  return !!s && s.assetsAdded === 0 && s.audioAdded === 0 && readErrors.value.length === 0;
+  return !!s && s.assetsAdded === 0 && readErrors.value.length === 0;
 });
 
 // ═══ 配额 ═════════════════════════════════════════════════

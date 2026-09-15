@@ -11,7 +11,6 @@ import {
   scanCraftRequests,
   scanCombatTriggers,
   scanCharDetects,
-  scanPlayAudioMarkers,
   scanSceneImages,
   scanEventTriggers,
   sanitizeCaption,
@@ -19,7 +18,6 @@ import {
   CAPTION_DESC_MAX,
   classifyMarker,
   stripMarkers,
-  stripPlayAudioMarkers,
   parseTagAttributes,
   isMarkerTag,
   MARKER_TAGS,
@@ -371,12 +369,6 @@ describe('MARKER_TAGS', () => {
     expect(MARKER_TAGS).toContain('char_detect');
   });
 
-  it('长度应为 11 (Phase 10 的 5 种 request + play_audio + scene_image + event_trigger)', () => {
-    expect(MARKER_TAGS).toHaveLength(11);
-    expect(MARKER_TAGS).toContain('play_audio');
-    expect(MARKER_TAGS).toContain('scene_image');
-    expect(MARKER_TAGS).toContain('event_trigger');
-  });
 });
 
 // ========== MARKER_TAG_SET 常量 ==========
@@ -394,79 +386,13 @@ describe('MARKER_TAG_SET', () => {
     expect(MARKER_TAG_SET.has('craft_gen_request')).toBe(true);
   });
 
-  it('大小应为 11 (Phase 10 的 5 种 request + play_audio + scene_image + event_trigger)', () => {
-    expect(MARKER_TAG_SET.size).toBe(11);
-    expect(MARKER_TAG_SET.has('play_audio')).toBe(true);
-    expect(MARKER_TAG_SET.has('scene_image')).toBe(true);
-    expect(MARKER_TAG_SET.has('event_trigger')).toBe(true);
-  });
-
   it('不应包含非标记标签', () => {
     expect(MARKER_TAG_SET.has('maintext')).toBe(false);
     expect(MARKER_TAG_SET.has('thinking')).toBe(false);
   });
 });
 
-// ========== play_audio ==========
 
-describe('scanPlayAudioMarkers', () => {
-  it('认自闭合写法 —— AI 十有八九这么写', () => {
-    const m = scanPlayAudioMarkers('前文<play_audio situation="战斗" mood="紧张"/>后文');
-    expect(m).toHaveLength(1);
-    expect(m[0].type).toBe('play_audio');
-    expect(m[0].situation).toBe('战斗');
-    expect(m[0].mood).toBe('紧张');
-    expect(m[0].bodyText).toBeUndefined();
-  });
-
-  it('也认成对写法，正文进 bodyText', () => {
-    const m = scanPlayAudioMarkers('<play_audio>探索, 平静</play_audio>');
-    expect(m).toHaveLength(1);
-    expect(m[0].bodyText).toBe('探索, 平静');
-  });
-
-  it('解析 character / variant / action', () => {
-    const m = scanPlayAudioMarkers(
-      '<play_audio character="傲雪" variant="B"/><play_audio action="stop"/>',
-    );
-    expect(m).toHaveLength(2);
-    expect(m[0].character).toBe('傲雪');
-    expect(m[0].variant).toBe('B');
-    expect(m[1].action).toBe('stop');
-  });
-
-  it('无标记时返回空数组，畸形标签不崩', () => {
-    expect(scanPlayAudioMarkers('普通正文')).toEqual([]);
-    expect(scanPlayAudioMarkers('<play_audio situation="战斗"')).toEqual([]);
-  });
-
-  it('position 指向标记起点，供剥离使用', () => {
-    const text = 'abc<play_audio/>def';
-    const m = scanPlayAudioMarkers(text);
-    expect(text.slice(m[0].position, m[0].position + m[0].rawContent.length)).toBe('<play_audio/>');
-  });
-});
-
-describe('scanMarkers 收录 play_audio', () => {
-  it('与其它标记一起按位置排序，并从 cleanText 中剥离', () => {
-    const text = '<play_audio situation="战斗"/>正文<combat_trigger>狼群</combat_trigger>';
-    const r = scanMarkers(text);
-    expect(r.markers.map((m) => m.type)).toEqual(['play_audio', 'combat_trigger']);
-    expect(r.cleanText).toBe('正文');
-  });
-});
-
-describe('stripPlayAudioMarkers', () => {
-  it('只剥配乐标记，其余标记原样保留', () => {
-    const text = 'A<play_audio mood="紧张"/>B<craft_request>剑</craft_request>C';
-    expect(stripPlayAudioMarkers(text)).toBe('AB<craft_request>剑</craft_request>C');
-  });
-
-  it('多个标记全部剥掉；没有标记时原样返回', () => {
-    expect(stripPlayAudioMarkers('<play_audio/>x<play_audio>探索</play_audio>y')).toBe('xy');
-    expect(stripPlayAudioMarkers('干净正文')).toBe('干净正文');
-  });
-});
 
 // ========== 图像生成 v1: sanitizeCaption（设计 §3.2） ==========
 
@@ -565,16 +491,6 @@ describe('scanSceneImages', () => {
       scanSceneImages('<scene_image rating="限制级">x</scene_image>')[0].rating,
     ).toBeUndefined();
     expect(scanSceneImages('<scene_image>x</scene_image>')[0].rating).toBeUndefined();
-  });
-
-  it('§3.4 漏写闭合: 正文吃到下一个已知标记，标记与被吃的正文一起剥掉', () => {
-    const text = '开场。<scene_image title="低语">苏婉望着篝火<play_audio mood="温暖"/>散场。';
-    const [m] = scanSceneImages(text);
-    expect(m.bodyText).toBe('苏婉望着篝火');
-    expect(m.title).toBe('低语');
-    expect(text.slice(m.position, m.position + m.rawContent.length)).toBe(m.rawContent);
-    // 通用剥离靠 position+rawContent，于是被吃掉的那段一并消失，配乐标记不受影响
-    expect(scanMarkers(text).cleanText).toBe('开场。散场。');
   });
 
   it('§3.4 漏写闭合: 没有后续标记时吃到正文末尾', () => {

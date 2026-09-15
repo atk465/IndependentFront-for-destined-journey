@@ -24,7 +24,7 @@
  * - 正则扫描而非 StreamTagParser — 标记检测在已完成文本上进行
  * - 嵌套标记不支持（文档化约束）
  * - **加标记只动 `MARKER_SPECS`**：扫描器、`MARKER_TAGS` 与 `scanMarkers` 的合并
- *   都由这张表推导（Q-05）。`play_audio` 是唯一例外，它的正则形态本质不同。
+ *   都由这张表推导（Q-05）。
  */
 
 import type {
@@ -38,7 +38,6 @@ import type {
   ItemGenRequestMarker,
   ItemUpdateRequestMarker,
   CraftGenRequestMarker,
-  PlayAudioMarker,
   EventTriggerMarker,
   MarkerScanResult,
 } from './types';
@@ -49,12 +48,9 @@ import type { ImageRating, SceneImageMarker } from './types-image';
 // ========== Constants ==========
 
 /**
- * 走成对 `<tag …>body</tag>` 通用骨架的标记（= 除 `play_audio` 外的全部）。
- *
- * `play_audio` 不在此列：它还要认自闭合与漏写闭合两种写法，正则形态本质不同，
- * 见 `scanPlayAudioMarkers`。
+ * 走成对 `<tag …>body</tag>` 通用骨架的标记。
  */
-type BlockMarkerType = Exclude<MarkerType, 'play_audio'>;
+type BlockMarkerType = MarkerType;
 
 /** 由标记类型取回对应的具体标记接口 */
 type MarkerOf<K extends MarkerType> = Extract<DetectedMarker, { type: K }>;
@@ -76,7 +72,7 @@ interface MarkerSpec<M extends DetectedMarker> {
   emptyBody: M['bodyText'];
   /**
    * 除成对写法外，还认「自闭合」与「只有开标签」两种写法（设计 §3.4）——
-   * `scanPlayAudioMarkers` 是先例，理由相同: AI 漏写闭合标签是常事，不认它就等于
+   * AI 漏写闭合标签是常事，不认它就等于
    * 「既不生效、也剥不掉」，那行尖括号会直接漏到玩家眼前。
    *
    * 只有开标签时，正文吃到**下一个已知标记或正文末尾**（右界见 `findNextMarkerStart`），
@@ -256,7 +252,7 @@ const MARKER_SPECS: { [K in BlockMarkerType]: MarkerSpec<MarkerOf<K>> } = {
 const BLOCK_MARKER_TYPES = Object.keys(MARKER_SPECS) as BlockMarkerType[];
 
 /** 所有已知标记标签名（表推导，不再手抄一份） */
-export const MARKER_TAGS: readonly MarkerType[] = [...BLOCK_MARKER_TYPES, 'play_audio'] as const;
+export const MARKER_TAGS: readonly MarkerType[] = [...BLOCK_MARKER_TYPES] as const;
 
 /** 标记标签名 Set (O(1) 成员检查) */
 export const MARKER_TAG_SET: ReadonlySet<string> = new Set(MARKER_TAGS);
@@ -306,7 +302,7 @@ function scanLenientTag<K extends BlockMarkerType>(
 ): MarkerOf<K>[] {
   const t = escapeRegex(type);
   // 属性段用 `"…"|'…'|[^>"']` 逐段吞，于是属性值里的 `>` `/` 不会被当成标签结束；
-  // `i` 标志兼容 AI 写成大写的情况（与 scanPlayAudioMarkers 同口径）。
+  // `i` 标志兼容 AI 写成大写的情况。
   const attrs = `((?:"[^"]*"|'[^']*'|[^>"'])*?)`;
   const regex = new RegExp(
     `<${t}${attrs}\\/>|<${t}${attrs}>([\\s\\S]*?)<\\/${t}\\s*>|<${t}${attrs}>`,
@@ -490,59 +486,6 @@ export function scanEventTriggers(text: string): EventTriggerMarker[] {
 }
 
 /**
- * 扫描文本中的 <play_audio> 标记。
- *
- * 与其它标记不同，这里**自闭合与成对写法都要认**: 配乐标记没有必须包裹的正文，
- * AI 十有八九会写成 `<play_audio situation="战斗"/>`。只认成对写法的话，自闭合
- * 的那些既不会触发播放、也不会被 stripMarkers 清掉——直接漏进正文给玩家看见。
- */
-export function scanPlayAudioMarkers(text: string): PlayAudioMarker[] {
-  const markers: PlayAudioMarker[] = [];
-  // 三种写法都认，按此顺序尝试:
-  //   ① 自闭合 `<play_audio .../>`
-  //   ② 成对   `<play_audio ...>body</play_audio>`
-  //   ③ 只有开标签、没写闭合 —— AI 漏写闭合标签是常事，不认它就等于
-  //      「既不换歌、也剥不掉」，那行尖括号会直接漏到玩家眼前
-  // 属性段用 `"…"|'…'|[^>"']` 逐段吞，于是属性值里的 `>` 不会被当成标签结束；
-  // `i` 标志兼容 AI 写成大写的情况。
-  const regex =
-    /<play_audio((?:"[^"]*"|'[^']*'|[^>"'])*?)\/>|<play_audio((?:"[^"]*"|'[^']*'|[^>"'])*?)>([\s\S]*?)<\/play_audio\s*>|<play_audio((?:"[^"]*"|'[^']*'|[^>"'])*?)>/gi;
-  let match: RegExpExecArray | null;
-  while ((match = regex.exec(text)) !== null) {
-    const attrs = parseTagAttributes(match[1] ?? match[2] ?? match[4] ?? '');
-    markers.push({
-      type: 'play_audio',
-      rawContent: match[0],
-      position: match.index,
-      situation: attrs['situation'],
-      mood: attrs['mood'],
-      character: attrs['character'],
-      variant: attrs['variant'],
-      action: attrs['action'],
-      bodyText: match[3]?.trim() || undefined,
-    });
-  }
-  return markers;
-}
-
-/**
- * 只剥 `<play_audio>` 标记，其余标记原样保留。
- *
- * 为什么不用 `stripMarkers`: 正文渲染路径目前**刻意**保留 craft/combat 等标记
- * （美化规则与下游链路都还在读它们），一把全剥会改掉这些既有行为。配乐标记
- * 没有任何渲染意义，漏出去就是玩家眼前的一行尖括号，所以单独剥它。
- */
-export function stripPlayAudioMarkers(text: string): string {
-  const markers = scanPlayAudioMarkers(text);
-  let out = text;
-  for (let i = markers.length - 1; i >= 0; i -= 1) {
-    const m = markers[i];
-    out = out.slice(0, m.position) + out.slice(m.position + m.rawContent.length);
-  }
-  return out;
-}
-
-/**
  * 主入口: 扫描文本中的全部标记（种类以 `MARKER_TAGS` 为准）。
  *
  * 返回:
@@ -557,7 +500,6 @@ export function scanMarkers(text: string): MarkerScanResult {
   // 两处清单必须同步，且原注释写「全部 8 种」而实际已有 9 种 —— 正是漏扫的温床）
   const allMarkers: DetectedMarker[] = [
     ...BLOCK_MARKER_TYPES.flatMap<DetectedMarker>((type) => scanByTag(text, type)),
-    ...scanPlayAudioMarkers(text),
   ].sort((a, b) => a.position - b.position);
 
   // 生成 cleanText: 按位置倒序替换 (从后往前避免偏移)

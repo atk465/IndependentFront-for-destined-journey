@@ -20,7 +20,6 @@ import type {
   CraftRequestMarker,
   CombatTriggerMarker,
   CombatSummaryResult,
-  PlayAudioMarker,
   CharGenRequestMarker,
   ItemGenRequestMarker,
   ItemUpdateRequestMarker,
@@ -113,15 +112,6 @@ export interface OrchestratorEvents {
     marker: CombatTriggerMarker,
     storyOutput: string,
   ) => Promise<CombatSummaryResult | null>;
-
-  /**
-   * 🎵 Play Audio: Stage 1 正文中检测到 <play_audio> 后触发，切换 BGM。
-   *
-   * **不 await、不阻塞管线** —— 配乐是旁路氛围，换不换歌都不该影响这一轮叙事
-   * 的产出；抛错也只吞掉。多个标记时**只取最后一个**（AI 一轮里改主意了，
-   * 以它最后的判断为准；连着切两首歌只会听见后一首的开头）。
-   */
-  onPlayAudio?: (marker: PlayAudioMarker, storyOutput: string) => void | Promise<void>;
 
   /**
    * 🖼 Scene Image: Stage 1 正文中检测到 `<scene_image>` 后触发（图像生成 §8）。
@@ -1063,19 +1053,6 @@ export class AgentOrchestrator {
       }
 
       // M5.1: combat_trigger 改由 request_dispatcher 输出（Stage 2 扫描），story 不再输出战斗标记
-
-      // 🎵 play_audio: 就地触发，不暂存也不 await —— 配乐是旁路，不进管线时序
-      const audioMarkers = scanResult.markers.filter(
-        (m): m is PlayAudioMarker => m.type === 'play_audio',
-      );
-      const lastAudio = audioMarkers[audioMarkers.length - 1];
-      if (lastAudio && this.events.onPlayAudio) {
-        try {
-          void Promise.resolve(this.events.onPlayAudio(lastAudio, storyOutput)).catch(() => {});
-        } catch {
-          // 换歌失败不该让这一轮叙事失败
-        }
-      }
 
       // 🖼 scene_image: 就地触发，不 await —— 出图是旁路，5–60 秒的等待不进管线时序。
       // 🔴 **只在这里触发一次**，历史消息永不重扫（D15，见 onSceneImage 的文档）。

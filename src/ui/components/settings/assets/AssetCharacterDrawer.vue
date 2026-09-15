@@ -27,7 +27,7 @@ import AppModal from '../../shared/AppModal.vue';
 import AssetCropEditor from '../../shared/AssetCropEditor.vue';
 import { assetDialogsKey } from './dialogs';
 import { useAssetThumbs } from './thumbs';
-import { fmtBytes } from '../audio/format';
+import { fmtBytes } from '../../../lib/format-bytes';
 
 const props = defineProps<{
   /** 分组名（即 `AssetMetaRecord.name`）；null 表示抽屉关着 */

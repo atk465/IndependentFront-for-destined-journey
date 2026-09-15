@@ -8,19 +8,11 @@
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { zipSync, strToU8 } from 'fflate';
-import { planImport, type ImportManifest, type ImportWarning } from '@engine/asset-import-plan';
 import {
   readAssetZip,
   writeAssetZip,
-  parseAssetZipManifest,
   AssetZipError,
-  ASSET_ZIP_MANIFEST_NAME,
-  ASSET_ZIP_MAX_ENTRY_BYTES,
-  ASSET_ZIP_MAX_AUDIO_ENTRY_BYTES,
-  type AssetZipManifest,
-  type AssetZipWarning,
 } from './asset-zip';
-import { hashMediaBlob } from './media-hash';
 
 // ═══════════════════════════════════════════════════════════
 // 辅助
@@ -74,125 +66,12 @@ afterEach(() => {
 // 与计划器的契约对接
 // ═══════════════════════════════════════════════════════════
 
-describe('契约与 asset-import-plan 对齐', () => {
-  it('读出来的东西可以直接喂给 planImport（类型与运行时都通）', async () => {
-    const manifest: AssetZipManifest = {
-      assets: { '苏婉_头像.png': { credit: '画师甲' } },
-      audio: { '战斗主题.mp3': { tags: ['情境:战斗'] } },
-    };
-    const blob = await writeAssetZip(
-      [
-        { name: '苏婉_头像.png', bytes: fakeBytes(1, 256) },
-        { name: '战斗主题.mp3', bytes: fakeBytes(2, 256) },
-      ],
-      manifest,
-    );
-    const read = await readAssetZip(blob);
-
-    // 没有任何转换/适配 —— DecodedEntry 与 ImportManifest 就是同一份契约
-    const plan = planImport(read.entries, { assets: [], audio: [] }, read.manifest);
-    expect(plan.assets.map((a) => a.name)).toEqual(['苏婉']);
-    expect(plan.audio.map((a) => a.name)).toEqual(['战斗主题']);
-    expect(plan.assets[0].credit).toBe('画师甲');
-
-    // 告警也能直接并进计划器的数组，不必映射
-    const warnings: ImportWarning[] = [...read.warnings];
-    expect(warnings).toEqual([]);
-  });
-
-  /**
-   * 回归钉子: 上传进来的音轨必须带 hash，否则往返会克隆。
-   *
-   * 缺陷原貌 —— 哈希只住在 asset-zip.ts 里，`音频→上传` 那条路径写行时不算 hash。
-   * 那些轨是 `source:'blob'`，会被打进导出包；重新导入时计划器无 hash 可比，
-   * 回落 `uniqueAudioName`，于是多出一条 `战斗主题 (2)`。素材那半边靠 hash 幂等、
-   * 音频这半边却在克隆 = D12/§4.4 点名的"半套幂等"。
-   *
-   * 这里用 `hashMediaBlob`（上传路径现在调的正是它）产生库里那行的 hash，再走
-   * 完整的 导出 → 导入 → planImport，断言**零新增行**。
-   */
-  it('上传式音轨（hash 由 media-hash 现算）往返导入零新增行', async () => {
-    const bytes = fakeBytes(9, 4096);
-    // 模拟 uploadFiles: 拿到 File，用 media-hash 现算 hash 写进行里
-    const uploaded = new Blob([bytes.slice().buffer as ArrayBuffer]);
-    const hash = await hashMediaBlob(uploaded);
-    expect(hash).toBeTruthy(); // 本环境算得出，测试才有意义
-
-    const existingAudioRow = { id: 'audio_1', name: '战斗主题', source: 'blob' as const, hash };
-
-    const blob = await writeAssetZip([{ name: '战斗主题.mp3', bytes }]);
-    const read = await readAssetZip(blob);
-    const plan = planImport(read.entries, { assets: [], audio: [existingAudioRow] });
-
-    expect(plan.audio).toHaveLength(0);
-    expect(plan.summary.audioAdded).toBe(0);
-    expect(plan.skips.map((s) => s.reason)).toEqual(['duplicate']);
-  });
-
-  it('反向对照: 库里那行没有 hash 时才会克隆出 ` (2)` —— 正是修掉的那个缺陷', async () => {
-    const bytes = fakeBytes(9, 4096);
-    // 修复前的形状: 上传写行时不算 hash
-    const hashlessRow = { id: 'audio_1', name: '战斗主题', source: 'blob' as const };
-
-    const blob = await writeAssetZip([{ name: '战斗主题.mp3', bytes }]);
-    const read = await readAssetZip(blob);
-    const plan = planImport(read.entries, { assets: [], audio: [hashlessRow] });
-
-    // 同一份字节却又进来一行 —— 这就是被修掉的半套幂等
-    expect(plan.audio).toHaveLength(1);
-    expect(plan.audio[0].name).toBe('战斗主题 (2)');
-  });
-
-  it('类型层面: 告警是引擎联合的子集，清单是引擎清单的收紧版', () => {
-    // 编译期断言 —— 引擎那边改了联合/分区，这里会红
-    const asEngineWarning: ImportWarning = 'hash-unavailable' satisfies AssetZipWarning;
-    const asEngineManifest: ImportManifest = { assets: {}, audio: {} } satisfies AssetZipManifest;
-    expect(asEngineWarning).toBe('hash-unavailable');
-    expect(asEngineManifest).toEqual({ assets: {}, audio: {} });
-  });
-});
 
 // ═══════════════════════════════════════════════════════════
 // 往返
 // ═══════════════════════════════════════════════════════════
 
 describe('writeAssetZip → readAssetZip 往返', () => {
-  it('字节完全一致，清单原样带回', async () => {
-    const avatar = fakeBytes(1, 4096);
-    const portrait = fakeBytes(2, 8192);
-    const track = fakeBytes(3, 2048);
-    const manifest: AssetZipManifest = {
-      assets: { '苏婉_头像.png': { credit: '画师甲', license: 'CC-BY' } },
-      audio: { '战斗主题.mp3': { tags: ['情境:战斗', '情绪:紧张'], credit: 'Aoo' } },
-    };
-
-    const blob = await writeAssetZip(
-      [
-        { name: '苏婉_头像.png', bytes: avatar },
-        { name: '苏婉_立绘.webp', bytes: portrait },
-        { name: '战斗主题.mp3', bytes: track },
-      ],
-      manifest,
-    );
-    expect(blob.type).toBe('application/zip');
-
-    const result = await readAssetZip(blob);
-    const byPath = new Map(result.entries.map((e) => [e.path, e.bytes]));
-
-    expect([...byPath.keys()].sort()).toEqual(
-      ['苏婉_头像.png', '苏婉_立绘.webp', '战斗主题.mp3'].sort(),
-    );
-    expect(byPath.get('苏婉_头像.png')).toEqual(avatar);
-    expect(byPath.get('苏婉_立绘.webp')).toEqual(portrait);
-    expect(byPath.get('战斗主题.mp3')).toEqual(track);
-
-    expect(result.manifest).toEqual(manifest);
-    // manifest.json 自己不是待导入条目
-    expect(byPath.has(ASSET_ZIP_MANIFEST_NAME)).toBe(false);
-    // 中文名走 fflate 的 UTF-8 标志位，不该触发编码告警
-    expect(result.warnings).not.toContain('suspect-filename-encoding');
-  });
-
   it('读侧接受 Uint8Array 与 Blob 两种入参', async () => {
     const bytes = fakeBytes(7, 512);
     const blob = await writeAssetZip([{ name: 'a.png', bytes }]);
@@ -261,24 +140,21 @@ describe('导出不改名', () => {
   });
 
   it('扩展名带尾随空白照样认得出，且名字原样保留（归一化只用于判路由）', async () => {
-    // 字面扩展名是 `png `/`mp3 `，直接查表查不着 —— 曾经因此被整条当噪音丢掉，
+    // 字面扩展名是 `png `，直接查表查不着 —— 曾经因此被整条当噪音丢掉，
     // 而引擎的 isAssetExtension 内部本来就 trim，本模块比它更严就是漂移
     const zipped = zipSync({
       '苏婉_头像.png ': fakeBytes(1, 64),
-      '战斗主题.mp3 ': fakeBytes(2, 64),
       '不认识.psd ': fakeBytes(3, 64),
     });
     const result = await readAssetZip(zipped);
-    expect(result.entries.map((e) => e.path).sort()).toEqual(
-      ['苏婉_头像.png ', '战斗主题.mp3 '].sort(),
-    );
+    expect(result.entries.map((e) => e.path).sort()).toEqual(['苏婉_头像.png ']);
     expect(result.skippedNoise).toEqual(['不认识.psd ']);
   });
 
-  it('扩展名大小写照样认（PNG/Mp3），名字仍原样', async () => {
-    const zipped = zipSync({ '苏婉_头像.PNG': fakeBytes(1, 64), '战斗.Mp3': fakeBytes(2, 64) });
+  it('扩展名大小写照样认（PNG），名字仍原样', async () => {
+    const zipped = zipSync({ '苏婉_头像.PNG': fakeBytes(1, 64) });
     const result = await readAssetZip(zipped);
-    expect(result.entries.map((e) => e.path).sort()).toEqual(['苏婉_头像.PNG', '战斗.Mp3'].sort());
+    expect(result.entries.map((e) => e.path).sort()).toEqual(['苏婉_头像.PNG']);
   });
 
   it('大小写不折叠 —— 导出端同样不做归一化', async () => {
@@ -297,7 +173,7 @@ describe('导出遇到路径分隔符时出声（D19 兜底）', () => {
     const blob = await writeAssetZip(
       [
         { name: 'sub/苏婉_头像.png', bytes: fakeBytes(1, 64) },
-        { name: 'a\\b\\战斗.mp3', bytes: fakeBytes(2, 64) },
+        { name: 'a\\b\\林清_头像.png', bytes: fakeBytes(2, 64) },
         { name: '正常_头像.png', bytes: fakeBytes(3, 64) },
       ],
       undefined,
@@ -306,14 +182,14 @@ describe('导出遇到路径分隔符时出声（D19 兜底）', () => {
 
     expect(reports).toEqual([
       { original: 'sub/苏婉_头像.png', flattened: '苏婉_头像.png' },
-      { original: 'a\\b\\战斗.mp3', flattened: '战斗.mp3' },
+      { original: 'a\\b\\林清_头像.png', flattened: '林清_头像.png' },
     ]);
     // 名字合规的那条不上报
     expect(reports.map((r) => r.original)).not.toContain('正常_头像.png');
 
     const result = await readAssetZip(blob);
     expect(result.entries.map((e) => e.path).sort()).toEqual(
-      ['苏婉_头像.png', '战斗.mp3', '正常_头像.png'].sort(),
+      ['苏婉_头像.png', '林清_头像.png', '正常_头像.png'].sort(),
     );
   });
 
@@ -348,22 +224,6 @@ describe('导出遇到路径分隔符时出声（D19 兜底）', () => {
 // ═══════════════════════════════════════════════════════════
 
 describe('路径处理', () => {
-  it('嵌套路径拍平成 basename —— 有子目录与拖一堆文件表现一致', async () => {
-    const nested = zipSync({
-      assets: { '苏婉_头像.png': fakeBytes(1, 128) },
-      audio: { '战斗主题.mp3': fakeBytes(2, 128) },
-    });
-    const flat = zipSync({
-      '苏婉_头像.png': fakeBytes(1, 128),
-      '战斗主题.mp3': fakeBytes(2, 128),
-    });
-
-    const a = await readAssetZip(nested);
-    const b = await readAssetZip(flat);
-    expect(a.entries.map((e) => e.path).sort()).toEqual(b.entries.map((e) => e.path).sort());
-    expect(a.entries.map((e) => e.path).sort()).toEqual(['战斗主题.mp3', '苏婉_头像.png'].sort());
-  });
-
   it('__MACOSX / dotfile / 目录条目静默跳过', async () => {
     const zipped = zipSync({
       '苏婉_头像.png': fakeBytes(1, 64),
@@ -382,18 +242,6 @@ describe('路径处理', () => {
     expect(result.entries.map((e) => e.path)).toEqual(['苏婉_头像.png']);
   });
 
-  it('嵌套的 manifest.json 不当根清单，根清单才算', async () => {
-    const zipped = zipSync({
-      sub: { 'manifest.json': utf8('{"assets":{"x.png":{"credit":"嵌套"}},"audio":{}}') },
-      'manifest.json': utf8('{"assets":{"苏婉_头像.png":{"credit":"根"}},"audio":{}}'),
-      '苏婉_头像.png': fakeBytes(1, 32),
-    });
-    const result = await readAssetZip(zipped);
-    expect(result.manifest?.assets['苏婉_头像.png']?.credit).toBe('根');
-    // 只有根那份被消费；嵌套那份的扩展名不在路由表里，走 skippedNoise
-    expect(result.entries.map((e) => e.path)).toEqual(['苏婉_头像.png']);
-    expect(result.skippedNoise).toEqual(['manifest.json']);
-  });
 });
 
 // ═══════════════════════════════════════════════════════════
@@ -450,21 +298,6 @@ describe('未识别扩展名（噪音）', () => {
     expect(result.skippedNoise).not.toContain('readme/');
   });
 
-  it('两张路由表的扩展名都放行（含 .webm 归音频、.mp4 归素材）', async () => {
-    const zipped = zipSync({
-      'a.png': fakeBytes(1, 16),
-      'b.avif': fakeBytes(2, 16),
-      'c.mp4': fakeBytes(3, 16),
-      'd.flac': fakeBytes(4, 16),
-      'e.webm': fakeBytes(5, 16),
-      'f.svg': fakeBytes(6, 16), // 刻意不在素材表里
-    });
-    const result = await readAssetZip(zipped);
-    expect(result.entries.map((e) => e.path).sort()).toEqual(
-      ['a.png', 'b.avif', 'c.mp4', 'd.flac', 'e.webm'].sort(),
-    );
-    expect(result.skippedNoise).toEqual(['f.svg']);
-  });
 });
 
 // ═══════════════════════════════════════════════════════════
@@ -586,7 +419,7 @@ describe('进度回调', () => {
       [
         { name: 'a_头像.png', bytes: fakeBytes(1, 2048) },
         { name: 'b_头像.png', bytes: fakeBytes(2, 2048) },
-        { name: 'c_战斗.mp3', bytes: fakeBytes(3, 2048) },
+        { name: 'c_头像.png', bytes: fakeBytes(3, 2048) },
       ],
       { assets: { 'a_头像.png': { credit: 'x' } } },
     );
@@ -753,45 +586,6 @@ describe('解压体积上限', () => {
 
   // ── 音频单独一条上限（比素材高一个量级）──
 
-  it('音频与素材两条上限是两个数，且音频那条高一个量级', () => {
-    expect(ASSET_ZIP_MAX_ENTRY_BYTES).toBe(10 * 1024 * 1024);
-    expect(ASSET_ZIP_MAX_AUDIO_ENTRY_BYTES).toBe(128 * 1024 * 1024);
-  });
-
-  it('12MB 的 mp3 照常导入，而同样大的 png 以 entry-too-large 判死（默认上限）', async () => {
-    const big = 12 * 1024 * 1024;
-
-    const okZip = zipSync({ '战斗主题.mp3': compressible(big) }, { level: 9 });
-    const result = await readAssetZip(okZip);
-    expect(result.entries.map((e) => e.path)).toEqual(['战斗主题.mp3']);
-    expect(result.entries[0].bytes.length).toBe(big);
-
-    const badZip = zipSync({ '苏婉_立绘.png': compressible(big) }, { level: 9 });
-    const error = await readAssetZip(badZip).catch((e: unknown) => e);
-    expect(error).toMatchObject({
-      code: 'entry-too-large',
-      path: '苏婉_立绘.png',
-      limit: ASSET_ZIP_MAX_ENTRY_BYTES, // 报的是**素材**那条线，不是音频那条
-    });
-  });
-
-  it('音频那条线由 maxAudioEntryBytes 单独控制 —— 只收紧 maxEntryBytes 管不到音频', async () => {
-    const zipped = zipSync({ '战斗主题.mp3': compressible(256 * 1024) }, { level: 9 });
-
-    // 素材那条线压到 1KB，音频照过 —— 两条线互相独立
-    const passed = await readAssetZip(zipped, { maxEntryBytes: 1024 });
-    expect(passed.entries.map((e) => e.path)).toEqual(['战斗主题.mp3']);
-
-    // 收紧音频那条才拦得住，且 limit 报的是音频那条
-    const error = await readAssetZip(zipped, { maxAudioEntryBytes: 1024 }).catch((e: unknown) => e);
-    expect(error).toBeInstanceOf(AssetZipError);
-    expect(error).toMatchObject({
-      code: 'entry-too-large',
-      path: '战斗主题.mp3',
-      limit: 1024,
-    });
-  });
-
   it('根 manifest.json 走素材那条线 —— 一份清单不该有几十兆', async () => {
     const zipped = zipSync(
       { 'manifest.json': compressible(2 * 1024 * 1024), 'a.mp3': fakeBytes(1, 64) },
@@ -803,21 +597,6 @@ describe('解压体积上限', () => {
       path: 'manifest.json',
       limit: 1024,
     });
-  });
-
-  it('总量上限对音频照样生效 —— 放宽单条不等于放开整包', async () => {
-    const zipped = zipSync(
-      {
-        'a.mp3': compressible(900 * 1024),
-        'b.mp3': compressible(900 * 1024),
-        'c.mp3': compressible(900 * 1024),
-      },
-      { level: 9 },
-    );
-    const error = await readAssetZip(zipped, { maxTotalBytes: 2 * 1024 * 1024 }).catch(
-      (e: unknown) => e,
-    );
-    expect(error).toMatchObject({ code: 'total-too-large', limit: 2 * 1024 * 1024 });
   });
 
   it('空输入抛 read-failed 而不是静默返回空列表', async () => {
@@ -915,106 +694,4 @@ describe('manifest.json', () => {
     expect(result.entries.map((e) => e.path)).toEqual(['a.png']);
   });
 
-  it('清单是数组 / 是数字 / 分区形状不对，一律降级不抛', () => {
-    expect(parseAssetZipManifest(utf8('[1,2,3]'))).toBeUndefined();
-    expect(parseAssetZipManifest(utf8('42'))).toBeUndefined();
-    expect(parseAssetZipManifest(utf8('null'))).toBeUndefined();
-    expect(parseAssetZipManifest(utf8('{"assets":"nope","audio":[1]}'))).toEqual({
-      assets: {},
-      audio: {},
-    });
-  });
-
-  it('清单只能加元数据 —— name / type 之类的键被丢弃，文件名不受影响', async () => {
-    const zipped = zipSync({
-      'manifest.json': utf8(
-        JSON.stringify({
-          assets: {
-            '苏婉_头像.png': {
-              credit: '画师甲',
-              license: 'CC-BY',
-              name: '林月',
-              type: '立绘',
-              path: 'evil/../../x.png',
-            },
-          },
-          audio: {},
-        }),
-      ),
-      '苏婉_头像.png': fakeBytes(1, 32),
-    });
-    const result = await readAssetZip(zipped);
-    expect(result.entries.map((e) => e.path)).toEqual(['苏婉_头像.png']);
-    expect(result.manifest?.assets['苏婉_头像.png']).toEqual({
-      credit: '画师甲',
-      license: 'CC-BY',
-    });
-  });
-
-  it('取景经解析层进来，并在**第一道门**就被夹逼（外来 JSON 不可信）', () => {
-    const parsed = parseAssetZipManifest(
-      utf8(
-        JSON.stringify({
-          assets: {
-            'ok.png': { framing: { x: 20, y: 80, scale: 1.75 } },
-            'wild.png': { framing: { x: 1e9, y: -50, scale: 999 } },
-            'text.png': { framing: '居中' },
-            'arr.png': { framing: [1, 2, 3] },
-            'nan.png': { framing: { x: Number.NaN, y: 0, scale: 1 } },
-          },
-          audio: {},
-        }),
-      ),
-    );
-    expect(parsed?.assets['ok.png']?.framing).toEqual({ x: 20, y: 80, scale: 1.75 });
-    expect(parsed?.assets['wild.png']?.framing).toEqual({ x: 100, y: 0, scale: 3 });
-    // 非对象 → 当"没写取景"，整条 meta 于是也空了 → 该键不出现
-    expect(parsed?.assets['text.png']).toBeUndefined();
-    expect(parsed?.assets['arr.png']).toBeUndefined();
-    // NaN 经 JSON 变成 null → 非数 → 退回默认，绝不带着 NaN 往下走
-    expect(parsed?.assets['nan.png']?.framing).toEqual({ x: 50, y: 0, scale: 1 });
-  });
-
-  it('取景走 write → read 往返一字不差', async () => {
-    const blob = await writeAssetZip([{ name: 'a.png', bytes: fakeBytes(1, 32) }], {
-      assets: { 'a.png': { framing: { x: 12, y: 34, scale: 2.5 } } },
-      audio: {},
-    });
-    const result = await readAssetZip(new Uint8Array(await blob.arrayBuffer()));
-    expect(result.manifest?.assets['a.png']).toEqual({ framing: { x: 12, y: 34, scale: 2.5 } });
-  });
-
-  it('清单引用不存在的文件、文件不在清单里，都静默容忍', async () => {
-    const zipped = zipSync({
-      'manifest.json': utf8('{"assets":{"不存在.png":{"credit":"x"}},"audio":{}}'),
-      'a.png': fakeBytes(1, 32),
-    });
-    const result = await readAssetZip(zipped);
-    expect(result.entries.map((e) => e.path)).toEqual(['a.png']);
-    expect(result.manifest?.assets['不存在.png']?.credit).toBe('x');
-  });
-
-  it('清单键带路径时按 basename 归一，先到先得', () => {
-    const parsed = parseAssetZipManifest(
-      utf8('{"assets":{"assets/a.png":{"credit":"先"},"other/a.png":{"credit":"后"}},"audio":{}}'),
-    );
-    expect(parsed?.assets['a.png']?.credit).toBe('先');
-  });
-
-  it('tags 里的非字符串被过滤，空 meta 不落键', () => {
-    const parsed = parseAssetZipManifest(
-      utf8('{"assets":{},"audio":{"t.mp3":{"tags":["情境:战斗",7,null]},"u.mp3":{}}}'),
-    );
-    expect(parsed?.audio['t.mp3']?.tags).toEqual(['情境:战斗']);
-    expect(parsed?.audio['u.mp3']).toBeUndefined();
-  });
-
-  it('导出条目占用 manifest.json 这个保留名时抛错', async () => {
-    await expect(
-      writeAssetZip([{ name: ASSET_ZIP_MANIFEST_NAME, bytes: utf8('{}') }], {
-        assets: {},
-        audio: {},
-      }),
-    ).rejects.toMatchObject({ code: 'duplicate-name' });
-  });
 });

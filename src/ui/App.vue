@@ -1,18 +1,15 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, watch } from 'vue';
 import { useUIStore } from './stores/ui-store';
-import { useAudioStore } from './stores/audio-store';
 import { useAssetStore } from './stores/asset-store';
 import { useSettingsStore } from './stores/settings-store';
 import { useWorldBookStore } from './stores/worldbook-store';
 import { useBeautifierStore } from './stores/beautifier-store';
-import { queryForView } from './lib/view-audio';
 import { applyReducedMotion } from './lib/reduced-motion';
 import ToastContainer from './components/shared/ToastContainer.vue';
 import ApiRateLimitWaitPopup from './components/shared/ApiRateLimitWaitPopup.vue';
 
 const ui = useUIStore();
-const audio = useAudioStore();
 const assets = useAssetStore();
 const settings = useSettingsStore();
 const worldbooks = useWorldBookStore();
@@ -71,14 +68,6 @@ watch(
   { immediate: true },
 );
 
-// ═══ 界面级场景配乐 ═══════════════════════════════════════
-//
-// 曲库在这里装（幂等）—— 首页也要出声，不能等进了游戏页才装库。
-// GamePage 仍会再调一次 init()，那时直接空转。
-void audio.init().catch(() => {
-  /* 音频装不起来不该影响应用启动 */
-});
-
 // ═══ 素材库 ═══════════════════════════════════════════════
 //
 // 与曲库同一个理由、同一个位置: 素材要在**游戏页与捏人页**里渲染，而那两处
@@ -89,19 +78,6 @@ void assets.init().catch(() => {
   /* 素材库装不起来不该影响应用启动 */
 });
 
-watch(
-  () => ui.currentView,
-  (view) => {
-    // 与地点配乐共用同一个开关 —— 一个开关关掉全部自动换歌，不设第二个
-    if (settings.settings.audioSceneAutoPlay === false) return;
-    const query = queryForView(view);
-    if (!query) return; // 游戏页 / 设置页 / 工坊：不动音乐，理由见 view-audio.ts
-    void audio.playByScene(query).catch(() => {
-      /* 配乐是旁路，出错不影响导航 */
-    });
-  },
-  { immediate: true },
-);
 
 // 懒加载所有页面（和原来 router 一样的异步加载）
 const HomePage = defineAsyncComponent(() => import('./components/home/HomePage.vue'));
