@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
-  collectSelectedSystemCoreWorkshopBookIds,
   EndpointBindingError,
   extractStoryOptions,
   GamePipeline,
@@ -376,24 +375,6 @@ describe('buildAgentConfigs — selected system core visibility', () => {
     },
   );
 
-  it('grants selected system/core workshop books to story and char_gen only', () => {
-    const pipeline = makePipeline();
-    const settings = (pipeline as any).settings.settings;
-    for (const agentId of ['story', 'char_gen', 'request_dispatcher']) {
-      patchAgentSettings(settings, agentId, {
-        worldBookEnabled: true,
-        worldBookIds: ['world_setting'],
-      });
-    }
-
-    const configs = (pipeline as any).buildAgentConfigs({}, undefined, ['workshop:core-project']);
-    const byId = (agentId: string) =>
-      configs.find((config: any) => config.agentId === agentId).worldBookIds;
-
-    expect(byId('story')).toContain('workshop:core-project');
-    expect(byId('char_gen')).toContain('workshop:core-project');
-    expect(byId('request_dispatcher')).not.toContain('workshop:core-project');
-  });
 });
 
 describe('buildAgentConfigs — combat_v3 侧链装配', () => {
@@ -491,49 +472,6 @@ describe('buildAgentConfigs / buildEndpoints —— Delta 会话两个配置面�
 
     expect(invalidatePromptSessionSpy).toHaveBeenCalledTimes(1);
     expect(invalidatePromptSessionSpy).toHaveBeenCalledWith('save-T4');
-  });
-});
-
-describe('collectSelectedSystemCoreWorkshopBookIds', () => {
-  it('returns only selected, enabled workshop books whose project has the system/core tag', () => {
-    const entry = (projectId: string, uid: number, enabled = true) => ({
-      uid,
-      name: projectId,
-      content: projectId,
-      enabled,
-      key: [],
-      keysecondary: [],
-      selectiveLogic: 0,
-      order: 0,
-      position: 0,
-      extra: { workshop: { projectId } },
-    });
-    const books = [
-      {
-        id: 'workshop:core-project',
-        partition: 'creative_workshop',
-        entries: [entry('core-project', 100)],
-      },
-      {
-        id: 'workshop:regular-project',
-        partition: 'creative_workshop',
-        entries: [entry('regular-project', 101)],
-      },
-      {
-        id: 'workshop:disabled-core',
-        partition: 'creative_workshop',
-        entries: [entry('disabled-core', 102, false)],
-      },
-    ] as any;
-    const projects = [
-      { id: 'core-project', tags: ['System/Core'] },
-      { id: 'regular-project', tags: ['character'] },
-      { id: 'disabled-core', tags: ['system/core'] },
-    ] as any;
-
-    expect(collectSelectedSystemCoreWorkshopBookIds(books, projects)).toEqual([
-      'workshop:core-project',
-    ]);
   });
 });
 

@@ -20,10 +20,8 @@ describe('queryForView', () => {
     expect(queryForView('game')).toBeNull();
   });
 
-  it('设置页 / 扩展管理 / 工坊返回 null —— 用户在这儿调东西，换歌只会碍事', () => {
+  it('设置页返回 null —— 用户在这儿调东西，换歌只会碍事', () => {
     expect(queryForView('settings')).toBeNull();
-    expect(queryForView('extensions')).toBeNull();
-    expect(queryForView('workshop')).toBeNull();
   });
 
   it('查询里不带地点 —— 界面不是地点，混进去会污染地点维打分', () => {

@@ -27,7 +27,8 @@ import {
 } from './content-pack-plan';
 import type { CurrentLibrary } from './content-pack-plan';
 import { hashWorldBook, PLACEHOLDER_UID_RESERVED_BASE } from './content-source';
-import type { WorldBook, WorldBookEntry, WorkshopNote } from './types';
+import type { WorldBook, WorldBookEntry } from './types';
+import type { WorkshopNote } from './types-content';
 
 // ── fixtures ──
 

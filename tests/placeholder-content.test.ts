@@ -189,9 +189,8 @@ describe('占位内容 · 注册表八面能被生产解析器吃下', () => {
     expect(branding.plotTemplate.length).toBeGreaterThan(0);
     // 品牌面不该整份掉回中性默认值 —— 那说明字段名写错了（解析器只做逐字段回落，不报错）
     expect(branding.worldSummary.title).not.toBe(NEUTRAL_BRANDING.worldSummary.title);
-    // 🔴 公开仓没有任何图源，工坊也未配置：两者都必须是「未配置」而不是某个地址
+    // 🔴 公开仓没有任何图源：必须是「未配置」而不是某个地址
     expect((brandingRaw as { mapSources: unknown[] }).mapSources).toEqual([]);
-    expect(branding.workshopApiBase).toBe('');
   });
 
   it('imageDialects：两条内置方言解析得出，且 danbooru 档 = 图像 v1 的行为（C5）', () => {

@@ -39,6 +39,7 @@ import type {
   PackInstallPlan,
   PackSaveUidMigration,
   PackSectionPlan,
+  WorkshopNote,
 } from './types-content';
 import type {
   BeautifierRule,
@@ -48,7 +49,6 @@ import type {
   MapMarker,
   WorldBook,
   WorldBookPartition,
-  WorkshopNote,
 } from './types';
 
 // ═══════════════════════════════════════════════════════════

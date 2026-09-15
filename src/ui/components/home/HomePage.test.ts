@@ -130,20 +130,8 @@ describe('HomePage 主存档按钮', () => {
   });
 });
 
-describe('HomePage 扩展管理入口', () => {
-  it('使用“扩展管理”命名并进入扩展管理页', async () => {
-    const home = await mountHome();
-    const button = home.get('.btn-extensions');
-
-    expect(button.text().replace(/\s/g, '')).toBe('扩展管理');
-    await button.trigger('click');
-
-    expect(mocks.ui.navigate).toHaveBeenCalledWith('extensions');
-  });
-});
-
 describe('HomePage 次级入口布局', () => {
-  it('设置是扩展管理下方的完整按钮，关于与退出占据原双按钮行', async () => {
+  it('主按钮列顺序：新建存档 / 存档管理 / 设置，关于与退出占据双按钮行', async () => {
     const home = await mountHome();
     const column = home.get('.btn-column');
     const buttons = column.findAll('button');
@@ -151,7 +139,6 @@ describe('HomePage 次级入口布局', () => {
     expect(buttons.map((button) => button.text().replace(/\s/g, ''))).toEqual([
       '✦新建存档',
       '存档管理',
-      '扩展管理',
       '设置',
       '关于',
       '退出',

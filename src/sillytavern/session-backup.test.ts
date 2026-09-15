@@ -27,7 +27,6 @@ import type {
   PlotEvent,
   PlotOutline,
   WorldBook,
-  WorkshopProject,
   ChatPreset,
 } from './types';
 import type { SceneImageRecord, CharacterSessionAppearance, ImagePreset } from './types-image';
@@ -65,12 +64,8 @@ function makeWorldBook(overrides: Partial<WorldBook> = {}): WorldBook {
   };
 }
 
-/** 世界书条目夹具；`workshop` 传了就写进 `extra.workshop`（跨机身份的来源） */
-function makeEntry(
-  uid: number,
-  name: string,
-  workshop?: { projectId: string; projectName: string; sourceUid: string | number },
-): WorldBook['entries'][number] {
+/** 世界书条目夹具 */
+function makeEntry(uid: number, name: string): WorldBook['entries'][number] {
   return {
     uid,
     name,
@@ -81,36 +76,9 @@ function makeEntry(
     selectiveLogic: 0,
     order: 0,
     position: 0,
-    ...(workshop
-      ? {
-          extra: {
-            workshop: { ...workshop, sourceComment: name, sourceHash: 'hash' },
-          },
-        }
-      : {}),
   };
 }
 
-function makeWorkshopProject(overrides: Partial<WorkshopProject> = {}): WorkshopProject {
-  return {
-    id: 'proj_uuid_1',
-    rootProjectId: 'root_1',
-    name: '测试工坊项目',
-    description: '测试用二创项目',
-    version: '2.0.0',
-    authorName: '测试作者',
-    tags: ['系统'],
-    downloadUrl: 'https://example.invalid/pkg.json',
-    fileSize: 1024,
-    installState: 'installed',
-    installedVersion: '1.5.0',
-    installedAt: Date.now(),
-    fetchedAt: Date.now(),
-    uidRange: { start: 900000, end: 900999 },
-    updatedAt: Date.now(),
-    ...overrides,
-  };
-}
 
 /**
  * 内容包夹具 —— 默认**拥有 `book_core`**，而存档启用了 `system_core:100`，
@@ -277,7 +245,7 @@ async function seedSave(): Promise<void> {
       userName: '玩家',
       gameStartTime: '001-01-01',
       totalTurns: 2,
-      enabledWorldBookEntries: ['system_core:100', 'creative_workshop:900001', 'dlc:777'],
+      enabledWorldBookEntries: ['system_core:100', 'dlc:777'],
     },
   };
 
@@ -342,25 +310,12 @@ async function seedContent(): Promise<void> {
       entries: [makeEntry(100, '命定核心')],
     }),
     makeWorldBook({
-      id: 'book_workshop',
-      name: '测试工坊项目',
-      partition: 'creative_workshop',
-      entries: [
-        makeEntry(900001, '二创条目', {
-          projectId: 'proj_uuid_1',
-          projectName: '测试工坊项目',
-          sourceUid: 1,
-        }),
-      ],
-    }),
-    makeWorldBook({
       id: 'book_dlc',
       name: '扩展内容',
       partition: 'dlc',
       entries: [makeEntry(777, '隐藏副本')],
     }),
   ]);
-  await db.workshopProjects.put(makeWorkshopProject());
   await db.contentPacks.put(makePackRecord());
   await db.presets.put({
     id: 'preset_story',
@@ -450,35 +405,13 @@ describe('exportSessionSave', () => {
     const backup = await exportSessionSave(SAVE_ID);
     const entries = backup.dependencies.worldBookEntries;
 
-    expect(entries).toHaveLength(3);
+    expect(entries).toHaveLength(2);
     expect(entries[0]).toEqual({
       token: 'system_core:100',
       bookName: '核心设定',
       entryTitle: '命定核心',
     });
-    expect(entries[2]).toEqual({ token: 'dlc:777' });
-  });
-
-  it('依赖清单：工坊项目走条目溯源，版本取 installedVersion', async () => {
-    await seedSave();
-    await seedContent();
-
-    const backup = await exportSessionSave(SAVE_ID);
-    expect(backup.dependencies.workshopProjects).toEqual([
-      { id: 'proj_uuid_1', name: '测试工坊项目', version: '1.5.0' },
-    ]);
-  });
-
-  it('依赖清单：条目无溯源时回退 uidRange 匹配', async () => {
-    await seedSave();
-    await seedContent();
-    const db = getDatabase();
-    const book = await db.worldBooks.get('book_workshop');
-    book!.entries[0].extra = undefined;
-    await db.worldBooks.put(book!);
-
-    const backup = await exportSessionSave(SAVE_ID);
-    expect(backup.dependencies.workshopProjects.map((p) => p.id)).toEqual(['proj_uuid_1']);
+    expect(entries[1]).toEqual({ token: 'dlc:777' });
   });
 
   it('依赖清单：内容包与 story 预设原样收录', async () => {
@@ -999,7 +932,7 @@ describe('checkSessionSaveDependencies', () => {
     const before = await db.saves.count();
     await checkSessionSaveDependencies(backup);
     expect(await db.saves.count()).toBe(before);
-    expect(await db.worldBooks.count()).toBe(2);
+    expect(await db.worldBooks.count()).toBe(1);
     expect(await db.presets.get('preset_story')).toBeDefined();
   });
 
@@ -1008,107 +941,6 @@ describe('checkSessionSaveDependencies', () => {
     const check = await checkSessionSaveDependencies(bare);
     expect(check.ok).toBe(true);
     expect(check.missingEntries).toEqual([]);
-  });
-});
-
-// ========== 工坊条目跨机身份（Finding 1/2）==========
-//
-// 工坊 uid 由**本机分区级单调游标**发号，同一个项目在另一台机器上按不同安装顺序
-// 拿到的 uid 完全不同。裸 token 比对的两种败法都不报错：假通过（uid 撞上别的项目）
-// 与假缺失（同项目不同号）。这一组把两种都钉住。
-
-describe('工坊条目按身份而非 uid 比对', () => {
-  /** 把收件人库里的工坊书换成「同一项目、不同本机 uid」 */
-  async function reinstallWorkshopAt(uid: number, projectId = 'proj_uuid_1'): Promise<void> {
-    await getDatabase().worldBooks.put(
-      makeWorldBook({
-        id: 'book_workshop',
-        name: '测试工坊项目',
-        partition: 'creative_workshop',
-        entries: [
-          makeEntry(uid, '二创条目', { projectId, projectName: '测试工坊项目', sourceUid: 1 }),
-        ],
-      }),
-    );
-  }
-
-  it('导出清单给工坊条目带上跨机身份（项目 id + 上游 uid）', async () => {
-    await seedSave();
-    await seedContent();
-
-    const backup = await exportSessionSave(SAVE_ID);
-    const workshopRef = backup.dependencies.worldBookEntries.find((e) =>
-      e.token.startsWith('creative_workshop:'),
-    )!;
-    expect(workshopRef.workshopProjectId).toBe('proj_uuid_1');
-    expect(workshopRef.workshopSourceUid).toBe(1);
-    // 非工坊条目不带身份（那些 uid 是内容仓固定编号，本来就跨机稳定）
-    const coreRef = backup.dependencies.worldBookEntries.find(
-      (e) => e.token === 'system_core:100',
-    )!;
-    expect(coreRef.workshopProjectId).toBeUndefined();
-  });
-
-  it('(a) 同项目、收件人本机 uid 不同 → 不报缺失，且导入时 token 被改写成本机 uid', async () => {
-    await seedSave();
-    await seedContent();
-    const backup = await exportSessionSave(SAVE_ID);
-
-    // 收件人那边这个项目装在 900500（安装顺序不同），而备份里写的是 900001
-    await reinstallWorkshopAt(900500);
-
-    const check = await checkSessionSaveDependencies(backup);
-    expect(check.missingEntries).toEqual([]);
-    expect(check.ok).toBe(true);
-
-    const { saveId } = await importSessionSave(backup);
-    const tokens = (await getDatabase().saves.get(saveId))!.metadata.enabledWorldBookEntries!;
-    expect(tokens).toContain('creative_workshop:900500');
-    expect(tokens).not.toContain('creative_workshop:900001');
-    // 非工坊 token 一个字节不动
-    expect(tokens).toContain('system_core:100');
-    expect(tokens).toContain('dlc:777');
-  });
-
-  it('(b) 同一个 uid 被**另一个项目**占着 → 照报缺失（裸 token 比对会在这里假通过）', async () => {
-    await seedSave();
-    await seedContent();
-    const backup = await exportSessionSave(SAVE_ID);
-
-    await reinstallWorkshopAt(900001, 'proj_uuid_OTHER');
-
-    const check = await checkSessionSaveDependencies(backup);
-    expect(check.ok).toBe(false);
-    expect(check.missingEntries.map((e) => e.token)).toEqual(['creative_workshop:900001']);
-
-    // 导入不去硬凑：认不出身份就原样留着，绝不指向别的项目的条目
-    const { saveId } = await importSessionSave(backup);
-    const tokens = (await getDatabase().saves.get(saveId))!.metadata.enabledWorldBookEntries!;
-    expect(tokens).toContain('creative_workshop:900001');
-  });
-
-  it('(c) 清单项没有身份（老备份 / 手工条目）→ 退回裸 token 比对', async () => {
-    await seedSave();
-    await seedContent();
-    // 导出**之前**抹掉溯源 → 清单里这一条不带身份
-    const db = getDatabase();
-    const book = (await db.worldBooks.get('book_workshop'))!;
-    book.entries[0].extra = undefined;
-    await db.worldBooks.put(book);
-
-    const backup = await exportSessionSave(SAVE_ID);
-    expect(backup.dependencies.worldBookEntries.every((e) => !e.workshopProjectId)).toBe(true);
-
-    // token 还在 → 齐全
-    expect((await checkSessionSaveDependencies(backup)).ok).toBe(true);
-
-    // token 换个号 → 报缺失（没有身份可依，只能按号比）
-    await reinstallWorkshopAt(900500);
-    const book2 = (await db.worldBooks.get('book_workshop'))!;
-    book2.entries[0].extra = undefined;
-    await db.worldBooks.put(book2);
-    const check = await checkSessionSaveDependencies(backup);
-    expect(check.missingEntries.map((e) => e.token)).toEqual(['creative_workshop:900001']);
   });
 });
 
@@ -1261,7 +1093,6 @@ describe('importSessionSave — 不碰全局表', () => {
       presets: await db.presets.count(),
       imagePresets: await db.imagePresets.count(),
       contentPacks: await db.contentPacks.count(),
-      workshopProjects: await db.workshopProjects.count(),
     };
 
     await importSessionSave(backup);
@@ -1271,7 +1102,6 @@ describe('importSessionSave — 不碰全局表', () => {
       presets: await db.presets.count(),
       imagePresets: await db.imagePresets.count(),
       contentPacks: await db.contentPacks.count(),
-      workshopProjects: await db.workshopProjects.count(),
     }).toEqual(before);
     expect((await db.imagePresets.get('character:莉薇娅'))?.dialects.danbooru?.positive).toBe(
       'elf',

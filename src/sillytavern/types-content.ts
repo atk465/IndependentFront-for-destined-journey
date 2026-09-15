@@ -23,7 +23,6 @@ import type {
   ChatPreset,
   LocationNode,
   MapMarker,
-  WorkshopNote,
   WorldBook,
   WorldBookPartition,
 } from './types';
@@ -366,7 +365,18 @@ export interface ContentPack {
 // 校验产出（§5.2：validate 先于任何写入）
 // ═══════════════════════════════════════════════════════════
 
-/** 校验产出的问题级别（参考 WorkshopNote 的三分类语气，但语义独立） */
+/**
+ * 带类别的处置记录 —— **「丢了」和「装上了但会这样」不是一回事**：
+ * - `dropped` —— 该条内容在当前显示路径**确实丢了**（宿主不支持的改写等）
+ * - `degraded` —— **装了**，但受隔离契约限制（宏原样输出、存储不开放等）
+ * - `sideEffect` —— **装了**，且有**规则自身之外**的副作用
+ */
+export interface WorkshopNote {
+  kind: 'dropped' | 'degraded' | 'sideEffect';
+  text: string;
+}
+
+/** 校验产出的问题级别（与 WorkshopNote 的三分类语气相近，但语义独立） */
 export type PackValidationLevel = 'error' | 'warning';
 
 /**

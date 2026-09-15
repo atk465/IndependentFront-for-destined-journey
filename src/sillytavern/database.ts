@@ -32,7 +32,6 @@ import type {
   AssetMetaRecord,
   AssetBlobRecord,
   WorldBook,
-  WorkshopProject,
   BeautifierRule,
   RegexStorageRecord,
   CreatePreset,
@@ -104,7 +103,7 @@ const DB_NAME = 'SillyTavernWebDB';
  * 而 `database.test.ts` 里那条断言跟着写了 17，于是漂移被测试**固定**下来而不是拦下来。
  * 升版时这两处一起改。
  */
-export const DB_VERSION = 24;
+export const DB_VERSION = 25;
 
 // ═══════════════════════════════════════════════════════════
 // Schema 声明（Q-26）
@@ -161,7 +160,6 @@ const SCHEMA_V13: SchemaSpec = withSchema(SCHEMA_V12, {
 
 const SCHEMA_V14: SchemaSpec = withSchema(SCHEMA_V13, {
   worldBooks: 'id, partition, updatedAt',
-  workshopProjects: 'id, installedAt, updatedAt',
 });
 
 const SCHEMA_V15: SchemaSpec = withSchema(SCHEMA_V14, {
@@ -216,11 +214,9 @@ class AppDatabase extends Dexie {
   assetMeta!: Table<AssetMetaRecord>;
   assetBlobs!: Table<AssetBlobRecord>;
 
-  // v14 new tables (创意工坊 / 世界书迁出 localStorage) — 设计 D3
-  //   worldBooks: 全部世界书（内置 / 导入 / 工坊）唯一一张表
-  //   workshopProjects: 仅项目生命周期元数据（WorldBook 没有字段位的那些）
+  // v14 new table (世界书迁出 localStorage) — 设计 D3
+  //   worldBooks: 全部世界书（内置 / 导入）唯一一张表
   worldBooks!: Table<WorldBook>;
-  workshopProjects!: Table<WorkshopProject>;
 
   // v15 new table (美化规则迁出 localStorage) — Phase 0b
   //   仅**用户规则**。内置 22 条预设规则（~378 KB）是 loadPresetRules() 从
@@ -543,22 +539,19 @@ class AppDatabase extends Dexie {
       }),
     );
 
-    // v14: 世界书迁出 localStorage + 创意工坊 — 新增 worldBooks / workshopProjects 两表
+    // v14: 世界书迁出 localStorage — 新增 worldBooks 表
     //      （纯增量，无 upgrade 回调；迁移例程在 UI 层单独跑，见设计 D4）
     //
-    // 照本文件惯例重述全部 19 张旧表（约定，非 Dexie 硬要求，见 v13 注释）。
+    // 照本文件惯例重述全部旧表（约定，非 Dexie 硬要求，见 v13 注释）。
     //
     // 🔴 刻意**不写** `lorebooks: null` / `settings: null`（设计 D3）:
     //    这两张是 v1–v3 遗留死表、生产零读写，但删表会永久抹掉长期用户可能仍存有的旧行。
     //    放着不花钱，导出也只是空数组。删除是独立的、需要明确决定的动作，不是本次迁移的附带损伤。
     //
-    // 索引取舍:
-    //   · worldBooks.partition —— 工坊过滤（按分区整体识别/开关/排除）是一等访问模式，保留。
-    //   · workshopProjects 不建 rootProjectId / installState 索引 —— 项目量级是几十条，全表扫即可。
+    // 索引取舍: worldBooks.partition —— 按分区整体识别/开关/排除是一等访问模式，保留。
     this.version(14).stores(
       withSchema(SCHEMA_V13, {
         worldBooks: 'id, partition, updatedAt',
-        workshopProjects: 'id, installedAt, updatedAt',
       }),
     );
 
@@ -666,6 +659,11 @@ class AppDatabase extends Dexie {
 
     this.version(23).stores({ apiRateLimitPolicies: 'credentialId, updatedAt' });
     this.version(24).stores({ debugTurns: 'id, saveId, [saveId+startedAt]' });
+
+    // v25: 创意工坊下线 —— 显式删表（`表名: null`，Dexie 官方删表语法）。
+    //      社交工坊（浏览/安装社区项目）已从产品里移除，workshopProjects 表随之无人读写；
+    //      项目装进来的世界书仍留在 worldBooks 里（普通数据，用户可在设置页自行删）。
+    this.version(25).stores({ workshopProjects: null });
   }
 }
 
@@ -742,9 +740,8 @@ export interface FullBackup {
   createPresets: CreatePresetRecord[];
   // v8 Phase 10h
   messages: ChatMessage[];
-  // v14 创意工坊 / 世界书迁出 localStorage（设计 D5）—— 旧备份缺这两个字段，导入侧必须容忍
+  // v14 世界书迁出 localStorage（设计 D5）—— 旧备份缺这个字段，导入侧必须容忍
   worldBooks: WorldBook[];
-  workshopProjects: WorkshopProject[];
   // v15 美化规则迁出 localStorage（Phase 0b）—— 同样是「旧备份缺字段」的三态语义。
   // 只含**用户规则**；内置预设规则是派生缓存，不进备份（导入方启动时自己从磁盘算）。
   beautifierRules: BeautifierRule[];
@@ -788,7 +785,6 @@ export async function exportAllData(): Promise<FullBackup> {
     createPresets,
     messages,
     worldBooks,
-    workshopProjects,
     beautifierRules,
     regexStorage,
     sceneImages,
@@ -809,7 +805,6 @@ export async function exportAllData(): Promise<FullBackup> {
     db.createPresets.toArray(),
     db.messages.toArray(),
     db.worldBooks.toArray(),
-    db.workshopProjects.toArray(),
     db.beautifierRules.toArray(),
     db.regexStorage.toArray(),
     db.sceneImages.toArray(),
@@ -833,7 +828,6 @@ export async function exportAllData(): Promise<FullBackup> {
     createPresets,
     messages,
     worldBooks,
-    workshopProjects,
     beautifierRules,
     regexStorage,
     sceneImages,
@@ -893,9 +887,8 @@ function validateBackupOrThrow(backup: any): asserts backup is FullBackup {
     'saveProfiles',
     'createPresets',
     'messages',
-    // v14 新增 —— 此循环只在字段**存在且非数组**时报错，旧备份缺这两个字段照常通过
+    // v14 新增 —— 此循环只在字段**存在且非数组**时报错，旧备份缺这个字段照常通过
     'worldBooks',
-    'workshopProjects',
     'beautifierRules',
     'regexStorage',
     'sceneImages',
@@ -1043,15 +1036,10 @@ async function doImportAllData(
   // 因此按字段**存在与否**分流，两者必须区分，不可用 `?? []` 把 undefined 抹平成 []:
   //   · undefined（字段缺席，pre-v14 备份）→ 整张表原样不动，连 clear 都不执行
   //   · []（字段存在但为空，v14+ 备份）    → 合法的「用户确实没有世界书」，照常 clear
-  await db.transaction('rw', db.worldBooks, db.workshopProjects, async () => {
+  await db.transaction('rw', db.worldBooks, async () => {
     if (backup.worldBooks !== undefined) {
       await db.worldBooks.clear();
       if (Array.isArray(backup.worldBooks)) await db.worldBooks.bulkPut(backup.worldBooks);
-    }
-    if (backup.workshopProjects !== undefined) {
-      await db.workshopProjects.clear();
-      if (Array.isArray(backup.workshopProjects))
-        await db.workshopProjects.bulkPut(backup.workshopProjects);
     }
   });
 

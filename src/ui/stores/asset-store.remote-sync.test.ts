@@ -35,9 +35,7 @@ vi.mock('./worldbook-store', () => ({
   useWorldBookStore: () => ({ init: worldbookInit, books: worldbookBooks }),
 }));
 
-const workshopInit = vi.fn(async () => {});
 vi.mock('./workshop-store', () => ({
-  useWorkshopStore: () => ({ init: workshopInit }),
 }));
 
 /** 注册表那一面的当前值 + 一个可以人为拖住的加载门（单飞用例靠它制造重叠窗口） */
@@ -115,7 +113,6 @@ beforeEach(async () => {
   registryFace = [];
   registryGate = null;
   worldbookInit.mockClear();
-  workshopInit.mockClear();
   ensureContentRegistryLoaded.mockClear();
 });
 
@@ -178,7 +175,6 @@ describe('syncRemoteAssets —— 单飞', () => {
     //    两次跑出来的会是两个不同的对象，所以这条断言真的能红。
     expect(ra).toBe(rb);
     expect(ensureContentRegistryLoaded).toHaveBeenCalledTimes(1);
-    expect(workshopInit).toHaveBeenCalledTimes(1);
     expect(store.remoteSync.running).toBe(false);
   });
 

@@ -28,7 +28,6 @@ import type {
   CharGenRequestMarker,
   PlayAudioMarker,
   MemoryRecord,
-  WorkshopProject,
   CharacterState,
   ChatMessage,
   SystemEvent,
@@ -261,32 +260,6 @@ function buildDebugEntry(input: DebugEntryInput): DebugAgentEntry {
 /** 兼容旧调用名；正文、控制区块与 `<option(s)>` 统一由 story-output 投影。 */
 export function extractStoryOptions(raw: string): { content: string; options: string[] } {
   return projectStoryOutput(raw);
-}
-
-/** Resolve selected workshop books that explicitly declare system-core semantics. */
-export function collectSelectedSystemCoreWorkshopBookIds(
-  worldBooks: WorldBook[],
-  projects: WorkshopProject[],
-): string[] {
-  const coreProjectIds = new Set(
-    projects
-      .filter((project) => project.tags?.some((tag) => tag.trim().toLowerCase() === 'system/core'))
-      .map((project) => project.id),
-  );
-  if (coreProjectIds.size === 0) return [];
-
-  return worldBooks
-    .filter(
-      (book) =>
-        book.partition === 'creative_workshop' &&
-        book.entries.some(
-          (entry) =>
-            entry.enabled &&
-            Boolean(entry.extra?.workshop?.projectId) &&
-            coreProjectIds.has(entry.extra!.workshop!.projectId),
-        ),
-    )
-    .map((book) => book.id);
 }
 
 /** 各 Agent 的中文标签（供调试日志 / DebugPanel 显示） */
@@ -591,14 +564,9 @@ export class GamePipeline {
       // 2.5 加载预设和世界书（自 fetch agent-config.json，不依赖 store 异步初始化）
       const { presets, agentDefaults } = await this.loadPresets();
       const worldBooks = await this.loadActiveWorldBooks();
-      const systemCoreWorkshopBookIds = await this.loadSystemCoreWorkshopBookIds(worldBooks);
 
       // 2.6 构建 Agent 配置（用已加载的 agentDefaults 替代 projectAgentDefaults）
-      const agentConfigs = this.buildAgentConfigs(
-        agentDefaults,
-        onStoryChunk,
-        systemCoreWorkshopBookIds,
-      );
+      const agentConfigs = this.buildAgentConfigs(agentDefaults, onStoryChunk);
 
       // 真机修(2026-07-17): 侧链 (char/item/craft) 调用 buildAgentMessages 时需要
       // configs/worldBooks/presets 才能拿到完整 systemPrompt + 世界书上下文，
@@ -919,7 +887,6 @@ export class GamePipeline {
   private buildAgentConfigs(
     agentDefaults: Record<string, Record<string, unknown>>,
     onStoryChunk?: StoryChunkCallback,
-    systemCoreWorkshopBookIds: string[] = [],
   ): AgentConfig[] {
     const s = this.settings.settings;
 
@@ -1044,9 +1011,7 @@ export class GamePipeline {
       // Selected core lore is authoritative save data. Story and char_gen both
       // need the source entry; the other agents keep their configured partitions.
       const isCoreLoreAgent = agentId === 'story' || agentId === 'char_gen';
-      const coreBookIds = isCoreLoreAgent
-        ? [...(selectedSystemCore ? ['system_core'] : []), ...systemCoreWorkshopBookIds]
-        : [];
+      const coreBookIds = isCoreLoreAgent && selectedSystemCore ? ['system_core'] : [];
       const worldBookIds =
         worldBookEnabled && coreBookIds.length > 0
           ? [...new Set([...configuredWorldBookIds, ...coreBookIds])]
@@ -1374,21 +1339,6 @@ export class GamePipeline {
       const enabledEntries = this.game.activeSave?.metadata?.enabledWorldBookEntries ?? [];
       return filterBooksByEnabledEntries(all, enabledEntries);
     } catch {
-      return [];
-    }
-  }
-
-  /** Match selected workshop entries to project-level `system/core` tags. */
-  private async loadSystemCoreWorkshopBookIds(worldBooks: WorldBook[]): Promise<string[]> {
-    if (!worldBooks.some((book) => book.partition === 'creative_workshop' && book.entries.length)) {
-      return [];
-    }
-    try {
-      const { getDatabase } = await import('@engine/database');
-      const projects = await getDatabase().workshopProjects.toArray();
-      return collectSelectedSystemCoreWorkshopBookIds(worldBooks, projects);
-    } catch (err) {
-      console.warn('[GamePipeline] 工坊 system/core 标签读取失败（不阻塞本轮）:', err);
       return [];
     }
   }
@@ -3424,12 +3374,7 @@ export class GamePipeline {
     if (this.chainData) return this.chainData;
     const { presets, agentDefaults } = await this.loadPresets();
     const worldBooks = await this.loadActiveWorldBooks();
-    const systemCoreWorkshopBookIds = await this.loadSystemCoreWorkshopBookIds(worldBooks);
-    const agentConfigs = this.buildAgentConfigs(
-      agentDefaults,
-      undefined,
-      systemCoreWorkshopBookIds,
-    );
+    const agentConfigs = this.buildAgentConfigs(agentDefaults);
     this.chainData = { agentConfigs, worldBooks, presets, agentDefaults };
     return this.chainData;
   }

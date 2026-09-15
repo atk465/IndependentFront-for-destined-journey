@@ -2198,14 +2198,12 @@ export const useAssetStore = defineStore('asset', () => {
       if (settings.remoteAssetsEnabled === false) return null;
 
       // ── 前置：声明的两个来源与落库面都得先就位 ──
-      const [{ useWorldBookStore }, { useWorkshopStore }, content] = await Promise.all([
+      const [{ useWorldBookStore }, content] = await Promise.all([
         import('./worldbook-store'),
-        import('./workshop-store'),
         import('./content-store'),
       ]);
       const wb = useWorldBookStore();
       await wb.init();
-      await useWorkshopStore().init();
       await content.ensureContentRegistryLoaded();
       await init();
 

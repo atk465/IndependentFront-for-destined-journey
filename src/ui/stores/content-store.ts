@@ -44,7 +44,8 @@ import { detach } from './db-write';
 import type { ContentStatus } from '@engine/types-content';
 // 占位基线清单：随引擎打包的静态资源（设计 §6），**不是**内容树的一部分。
 import placeholderHashesRaw from '@engine/placeholder-hashes.json';
-import type { ChatPreset, SaveSlot, WorkshopNote, WorldBook } from '@engine/types';
+import type { ChatPreset, SaveSlot, WorldBook } from '@engine/types';
+import type { WorkshopNote } from '@engine/types-content';
 import type {
   ContentPack,
   PackBaseline,

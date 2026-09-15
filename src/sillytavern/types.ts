@@ -55,8 +55,7 @@ export type WorldBookPartition =
   | 'quick_feature' // 快捷功能 — 命运抽卡/盲盒/FP扩展
   | 'extra_setting' // 额外设定 — 数值表/战斗/制作/旅行/状态
   | 'cot' // COT — Chain-of-Thought 推理模板
-  | 'dlc' // DLC — 可开关扩展内容
-  | 'creative_workshop'; // 创意工坊 — 社区二创内容
+  | 'dlc'; // DLC — 可开关扩展内容
 
 export interface WorldBookEntry {
   uid: number; // 唯一标识（来自原版世界书 UID）
@@ -69,18 +68,10 @@ export interface WorldBookEntry {
   order: number; // 排序（越大越靠后）
   position: number; // 世界书内位置分组（ST 兼容保留）
   /**
-   * 条目溯源（D14）—— 仅由安装/更新流程写入，正常编辑不碰。
-   * 目前只有创意工坊一种来源；未来其它来源在此并列加字段，不改 WorldBookEntry 顶层形状。
+   * 条目溯源 —— 预留给「由安装/更新流程写入」的来源信息，正常编辑不碰。
+   * 未来有新来源在此并列加字段，不改 WorldBookEntry 顶层形状。
    */
-  extra?: {
-    workshop?: {
-      projectId: string;
-      projectName: string;
-      sourceUid: string | number; // 上游原始 uid，仅溯源
-      sourceComment: string; // 上游 comment（= 本引擎的 name）
-      sourceHash: string; // 安装时正文哈希 —— 供 D15 精确判定是否被改过
-    };
-  };
+  extra?: Record<string, unknown>;
 }
 
 export interface WorldBook {
@@ -97,78 +88,6 @@ export interface WorldBook {
    * 在每次落库时盖戳。Dexie 索引容忍缺值行（该行不进 updatedAt 索引，主键查询不受影响）。
    */
   updatedAt?: number;
-}
-
-// ========== Creative Workshop Types (D13) ==========
-
-/**
- * 一条处置记录的类别 —— **「丢了」和「装上了但会这样」不是一回事**。
- *
- * 首版把两者合流成一个 `string[]`，UI 统一按「N 项内容未导入」报数，于是一条
- * 装好了、也启用了、只是执行环境受限的正则，会被算进「未导入」——
- * 用户读到的是安装失败，实际内容装得好好的。类别就是为了让 UI 不再说这个谎。
- *
- * - `dropped` —— 上游语义在当前显示路径**确实丢了**（`promptOnly`、不含 AI 输出
- *   位置 2 的规则、`trimStrings`、可达的 findRegex 宏替换；`markdownOnly=false`
- *   的提示词侧改写也只保留显示侧）
- * - `degraded` —— **装了**，但受隔离契约限制（parent/宿主 API 不开放、sessionStorage
- *   仅当前 frame 有效、IndexedDB 不开放、`{{...}}` 宏原样输出；共享 localStorage/
- *   regexStorage、远程资源与网络 API 已开放）
- * - `sideEffect` —— **装了**，且有**规则自身之外**的副作用。富 replacement 进入独立
- *   iframe 后，现行 mapper 不再为 `<style>` 产生这类记录；类型保留以兼容历史行。
- */
-export type WorkshopNoteKind = 'dropped' | 'degraded' | 'sideEffect';
-
-/** 带类别的处置记录 */
-export interface WorkshopNote {
-  kind: WorkshopNoteKind;
-  text: string;
-}
-
-/**
- * 落库形态 —— **裸字符串是历史数据**。
- *
- * P1 首版把 `droppedNotes` 写成了 `string[]`，用户库里已经有这种行了。读侧一律
- * 经 `normalizeWorkshopNotes()` 归一（裸串按 `dropped` 处理，与旧文案语气一致），
- * 不做迁移脚本：这是纯展示字段，为它扫全表升级不划算，就地兼容即可。
- */
-export type WorkshopNoteLike = string | WorkshopNote;
-
-/**
- * 创意工坊项目元数据。
- *
- * 一个项目对应一本 `partition: 'creative_workshop'` 的 WorldBook（D7），
- * 本类型只承载 WorldBook 没有字段位的项目生命周期数据。
- * 上游 `project` 响应有 34 字段，此处只落自己要的 —— 原始响应不整包存库（否则即第二真相来源，违反铁律4）。
- */
-export interface WorkshopProject {
-  id: string; // 上游 uuid，跨版本稳定
-  rootProjectId: string; // 版本族系根
-  name: string;
-  description: string;
-  version: string; // 上游自由填，本引擎只做串比对不解析
-  authorName: string; // authorGlobalName 优先，回退 authorName
-  tags: string[]; // 展示/筛选；保留标签 system/core 会授予核心叙事 Agent 可见性
-  coverUrl?: string;
-  downloadUrl: string;
-  fileSize: number;
-
-  // ===== 本地状态 =====
-  installState: 'installed' | 'update_available' | 'broken';
-  installedVersion: string;
-  installedAt: number;
-  fetchedAt: number; // 上次拉取上游元数据时间（TTL 判定）
-  uidRange: { start: number; end: number };
-  /**
-   * 安装时的处置记录，供 UI 提示。
-   *
-   * ⚠️ 元素类型是 `string | WorkshopNote` 的联合而不只是 `WorkshopNote`：老行里
-   * 存的是裸字符串（P1 首版），读侧必须过 `normalizeWorkshopNotes()`。新写入一律
-   * 是结构化的。
-   */
-  droppedNotes?: WorkshopNoteLike[];
-  /** 最后写入时间（v14 索引字段），每次落库盖戳 */
-  updatedAt: number;
 }
 
 // ========== World Book (Lorebook) Types (v3, deprecated) ==========

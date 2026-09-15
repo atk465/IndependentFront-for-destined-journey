@@ -348,10 +348,6 @@ function handleToolClick(id: string) {
     ui.navigate('settings');
     return;
   }
-  if (id === 'extensions') {
-    ui.navigate('extensions');
-    return;
-  }
   // 迷你播放器是浮动卡片，不走 activeModal（§6.2），必须先于 showModal 拦下
   if (id === 'audio') {
     showMiniPlayer.value = !showMiniPlayer.value;

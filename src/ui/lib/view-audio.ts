@@ -32,8 +32,6 @@ export function queryForView(view: AppView): SceneTagQuery | null {
       return { situations: ['仪式'], moods: ['庄严', '神圣'] };
     case 'game':
     case 'settings':
-    case 'extensions':
-    case 'workshop':
       return null;
     default:
       return null;

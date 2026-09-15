@@ -105,7 +105,6 @@ import type {
   AudioPlaylist,
   AudioHandleRecord,
   AssetMetaRecord,
-  WorkshopProject,
   WorldBook,
   DebugTurnRecord,
 } from './types';
@@ -135,27 +134,6 @@ function makeMemory(overrides: Partial<MemoryRecord> = {}): MemoryRecord {
     keywords: ['测试', '记忆'],
     relatedCharacterIds: ['char_1'],
     importance: 5,
-    ...overrides,
-  };
-}
-
-function makeWorkshopProject(overrides: Partial<WorkshopProject> = {}): WorkshopProject {
-  return {
-    id: crypto.randomUUID(),
-    rootProjectId: 'root_1',
-    name: '测试工坊项目',
-    description: '测试用二创项目',
-    version: '1.0.0',
-    authorName: '测试作者',
-    tags: ['系统', '外挂'],
-    downloadUrl: 'https://example.invalid/pkg.json',
-    fileSize: 1024,
-    installState: 'installed',
-    installedVersion: '1.0.0',
-    installedAt: Date.now(),
-    fetchedAt: Date.now(),
-    uidRange: { start: 900000, end: 900999 },
-    updatedAt: Date.now(),
     ...overrides,
   };
 }
@@ -1132,7 +1110,7 @@ describe('exportAllData / importAllData', () => {
     // v21：地图字节本地缓存 mapBlobs（2026-08-07，D23 补强；字节同不进备份）。
     // v22：快照拆表（snapshots 只留元数据 + snapshotPayloads 存整档载荷，两者都进备份）。
     // v23：API 凭据级 RPM 策略表。
-    expect(backup.version).toBe(24);
+    expect(backup.version).toBe(25);
     expect(Array.isArray(backup.lorebooks)).toBe(true);
     expect(Array.isArray(backup.presets)).toBe(true);
     // SEC-01：settings 死表与 apiEndpoints 都可能含明文 Key，只留在本机，不进普通备份。
@@ -1151,7 +1129,6 @@ describe('exportAllData / importAllData', () => {
     expect(Array.isArray(backup.createPresets)).toBe(true);
     expect(Array.isArray(backup.messages)).toBe(true);
     expect(Array.isArray(backup.worldBooks)).toBe(true);
-    expect(Array.isArray(backup.workshopProjects)).toBe(true);
     expect(Array.isArray(backup.regexStorage)).toBe(true);
     // v17 —— 元数据进备份，字节（sceneImageBlobs）刻意不进（设计 §7.3）
     expect(Array.isArray(backup.sceneImages)).toBe(true);
@@ -1510,21 +1487,12 @@ describe('exportAllData / importAllData', () => {
    * 「恢复一份旧备份」就会静默抹掉用户全部世界书。以下六条把三态逐一钉死。
    */
   describe('importAllData × v14 新表三态语义', () => {
-    /** 预置：worldBooks 两行 + workshopProjects 两行 */
+    /** 预置：worldBooks 两行 */
     async function seedV14Tables() {
       const db = getDatabase();
       await db.worldBooks.bulkPut([
         { id: 'wb_user', name: '用户自建书', partition: 'extra_setting', entries: [] },
-        {
-          id: 'workshop:proj_seed',
-          name: '工坊书',
-          partition: 'creative_workshop',
-          entries: [],
-        },
-      ]);
-      await db.workshopProjects.bulkPut([
-        makeWorkshopProject({ id: 'proj_seed', name: '种子项目' }),
-        makeWorkshopProject({ id: 'proj_seed2', name: '种子项目2' }),
+        { id: 'wb_dlc', name: '扩展书', partition: 'dlc', entries: [] },
       ]);
     }
 
@@ -1540,7 +1508,7 @@ describe('exportAllData / importAllData', () => {
       const db = getDatabase();
       expect(await db.worldBooks.count()).toBe(2);
       expect((await db.worldBooks.get('wb_user'))!.name).toBe('用户自建书');
-      expect((await db.worldBooks.get('workshop:proj_seed'))!.partition).toBe('creative_workshop');
+      expect((await db.worldBooks.get('wb_dlc'))!.name).toBe('扩展书');
     });
 
     it('worldBooks: [] （字段存在但为空）：表被清空', async () => {
@@ -1568,57 +1536,17 @@ describe('exportAllData / importAllData', () => {
       expect(await db.worldBooks.get('wb_user')).toBeUndefined();
     });
 
-    it('缺 workshopProjects 字段（pre-v14 备份）：整张表逐行原样保留', async () => {
-      await seedV14Tables();
-      const legacyBackup: any = await exportAllData();
-      delete legacyBackup.workshopProjects;
-      legacyBackup.version = 13;
-      expect('workshopProjects' in legacyBackup).toBe(false);
-
-      await expect(importAllData(legacyBackup)).resolves.toBeDefined();
-
-      const db = getDatabase();
-      expect(await db.workshopProjects.count()).toBe(2);
-      expect((await db.workshopProjects.get('proj_seed'))!.name).toBe('种子项目');
-      expect((await db.workshopProjects.get('proj_seed2'))!.name).toBe('种子项目2');
-    });
-
-    it('workshopProjects: [] （字段存在但为空）：表被清空', async () => {
-      await seedV14Tables();
-      const backup = await exportAllData();
-      backup.workshopProjects = [];
-
-      await importAllData(backup);
-
-      expect(await getDatabase().workshopProjects.count()).toBe(0);
-    });
-
-    it('workshopProjects 含数据：正常覆盖', async () => {
-      await seedV14Tables();
-      const backup = await exportAllData();
-      backup.workshopProjects = [makeWorkshopProject({ id: 'proj_from_backup', name: '备份项目' })];
-
-      await importAllData(backup);
-
-      const db = getDatabase();
-      expect(await db.workshopProjects.count()).toBe(1);
-      expect((await db.workshopProjects.get('proj_from_backup'))!.name).toBe('备份项目');
-      expect(await db.workshopProjects.get('proj_seed')).toBeUndefined();
-    });
-
-    it('两个字段同时缺席（真实 pre-v14 备份形状）：两张表都原样保留，其它表照常导入', async () => {
+    it('字段缺席（真实 pre-v14 备份形状）：整张表原样保留，其它表照常导入', async () => {
       await seedV14Tables();
       await saveApiEndpoint(makeApiEndpoint({ id: 'api_before' }));
       const legacyBackup: any = await exportAllData();
       delete legacyBackup.worldBooks;
-      delete legacyBackup.workshopProjects;
       legacyBackup.version = 13;
 
       await expect(importAllData(legacyBackup)).resolves.toBeDefined();
 
       const db = getDatabase();
       expect(await db.worldBooks.count()).toBe(2);
-      expect(await db.workshopProjects.count()).toBe(2);
       // 其它表仍按整库替换语义正常导入
       expect((await getApiEndpoints()).map((e) => e.id)).toContain('api_before');
       expect(await db.presets.count()).toBeGreaterThan(0);
@@ -1859,52 +1787,6 @@ describe('exportAllData / importAllData', () => {
     });
   });
 
-  it('exportAllData / importAllData 往返应保留 worldBooks 与 workshopProjects', async () => {
-    const db = getDatabase();
-    await db.worldBooks.put({
-      id: 'workshop:proj_1',
-      name: '工坊书',
-      partition: 'creative_workshop',
-      builtIn: false,
-      entries: [
-        {
-          uid: 900001,
-          name: '工坊条目',
-          content: '正文',
-          enabled: true,
-          key: [],
-          keysecondary: [],
-          selectiveLogic: 0,
-          order: 100,
-          position: 0,
-          extra: {
-            workshop: {
-              projectId: 'proj_1',
-              projectName: '测试项目',
-              sourceUid: 42,
-              sourceComment: '上游注释',
-              sourceHash: 'deadbeef',
-            },
-          },
-        },
-      ],
-    });
-    await db.workshopProjects.put(makeWorkshopProject({ id: 'proj_1' }));
-
-    const backup = await exportAllData();
-    await clearAllData();
-    await initializeDatabase();
-    await importAllData(backup);
-
-    const db2 = getDatabase();
-    const book = await db2.worldBooks.get('workshop:proj_1');
-    expect(book).toBeDefined();
-    expect(book!.partition).toBe('creative_workshop');
-    expect(book!.entries[0].extra?.workshop?.sourceHash).toBe('deadbeef');
-    const proj = await db2.workshopProjects.get('proj_1');
-    expect(proj).toBeDefined();
-    expect(proj!.uidRange).toEqual({ start: 900000, end: 900999 });
-  });
 });
 
 // ========== v20 contentPacks 表 + 恢复对账（D18 / §5.7） ==========
@@ -2936,20 +2818,21 @@ describe('Asset CRUD (v13)', () => {
     // ---- 以当前版 (AppDatabase) 打开：触发升版 ----
     await initializeDatabase();
     const db = getDatabase();
-    // v20=D18 contentPacks; v21=地图字节; v22=快照拆表; v23=API RPM; v24=调试历史
-    expect(db.verno).toBe(24);
+    // v20=D18 contentPacks; v21=地图字节; v22=快照拆表; v23=API RPM; v24=调试历史;
+    // v25=创意工坊下线（删 workshopProjects 表）
+    expect(db.verno).toBe(25);
 
-    // 表册齐全: v12 的 17 张 + 素材两张 + 工坊两张 + 美化规则一张 + 正则 KV 一张
+    // 表册齐全: v12 的 17 张 + 素材两张 + 美化规则一张 + 正则 KV 一张
     //           + 图像生成三张 + 角色外貌会话副本一张（v19/D56）
     //           + contentPacks 一张（v20/D18）+ mapBlobs 一张（v21）
     //           + snapshotPayloads 一张（v22）+ apiRateLimitPolicies 一张（v23），一个不少
     //（误写 `表名: null` 或漏声明会在这里炸 —— 尤其 lorebooks/settings 两张死表按 D3 必须保留）
+    // v25 起工坊下线，workshopProjects 表删除，不在清单里。
     const EXPECTED_TABLES = [
       ...Object.keys(V12_STORES),
       'assetMeta',
       'assetBlobs',
       'worldBooks',
-      'workshopProjects',
       'beautifierRules',
       'regexStorage',
       'sceneImages',
@@ -2977,7 +2860,6 @@ describe('Asset CRUD (v13)', () => {
     expect(await getAssets()).toHaveLength(0);
     expect(await db.assetBlobs.count()).toBe(0);
     expect(await db.worldBooks.count()).toBe(0);
-    expect(await db.workshopProjects.count()).toBe(0);
     expect(await db.beautifierRules.count()).toBe(0);
     expect(await db.regexStorage.count()).toBe(0);
     expect(await db.sceneImages.count()).toBe(0);
