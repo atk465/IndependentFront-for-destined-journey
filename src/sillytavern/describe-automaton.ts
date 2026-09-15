@@ -120,7 +120,7 @@ function translateTrigger(trigger: string): string {
 }
 
 /** 一个 automaton → 中文行数组（每 intent 一行，行首带窗口+条件） */
-export function describeAutomaton(a: EffectAutomatonDecl): string[] {
+function describeAutomaton(a: EffectAutomatonDecl): string[] {
   const windowCN = WINDOW_CN[a.subscribe] ?? a.subscribe;
   const cond = translateTrigger(a.trigger);
   const prefix = cond ? `${windowCN}[${cond}]：` : `${windowCN}：`;

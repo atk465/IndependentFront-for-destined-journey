@@ -372,7 +372,7 @@ export function validateItemOutput(output: {
  * 判据是「`combat-v3/phases/` 或 `reducer.ts` 里有 `runWindow(...)` 调用点」，
  * 不是「架构文档列了它」。
  */
-export const V3_WINDOW_KEYS_LIVE: ReadonlySet<string> = new Set([
+const V3_WINDOW_KEYS_LIVE: ReadonlySet<string> = new Set([
   'round.open',
   'round.close',
   'turn.open',
@@ -399,7 +399,7 @@ export const V3_WINDOW_KEYS_LIVE: ReadonlySet<string> = new Set([
  * 已存档里订阅这 6 个窗口的 automaton 会开始被拒（它们本来也从未生效，
  * 区别只是从「静默不跑」变成「明确报错」）。接上求值器时把 key 挪进 LIVE 即可。
  */
-export const V3_WINDOW_KEYS_RESERVED: ReadonlySet<string> = new Set([
+const V3_WINDOW_KEYS_RESERVED: ReadonlySet<string> = new Set([
   'initiative.before',
   'initiative.after',
   'turn.close',
@@ -409,13 +409,13 @@ export const V3_WINDOW_KEYS_RESERVED: ReadonlySet<string> = new Set([
 ]);
 
 /** 18 个 ReactionWindow 清单（架构 §五 5.1）= LIVE ∪ RESERVED */
-export const V3_WINDOW_KEYS: ReadonlySet<string> = new Set([
+const V3_WINDOW_KEYS: ReadonlySet<string> = new Set([
   ...V3_WINDOW_KEYS_LIVE,
   ...V3_WINDOW_KEYS_RESERVED,
 ]);
 
 /** 8 大类 EffectIntent kind + Outcome 子类（架构 §六 6.1） */
-export const V3_INTENT_KINDS: ReadonlySet<string> = new Set([
+const V3_INTENT_KINDS: ReadonlySet<string> = new Set([
   'AddModifier',
   'DealDamage',
   'Heal',
@@ -432,7 +432,7 @@ export const V3_INTENT_KINDS: ReadonlySet<string> = new Set([
 ]);
 
 /** closed RuleKey 白名单（架构 §八 8.2） */
-export const V3_RULE_KEYS: ReadonlySet<string> = new Set([
+const V3_RULE_KEYS: ReadonlySet<string> = new Set([
   'morale.forceState',
   'terminal.forceTerminal',
   'action.freezeSlot',

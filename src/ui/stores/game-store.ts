@@ -87,18 +87,6 @@ export function setRewriteLoadoutImpl(impl: RewriteLoadoutImpl): void {
   rewriteLoadoutImpl = impl;
 }
 
-/** 战斗消息流条目（CombatMessageFlow 渲染） */
-export interface CombatLogEntry {
-  id: string;
-  kind: 'round_divider' | 'narrative' | 'action';
-  round?: number;
-  /** narrative 文本 */
-  text?: string;
-  /** action: 工具返回结果（CombatActionResult 或其他动作工具） */
-  result?: Record<string, any>;
-  toolName?: string;
-}
-
 export const useGameStore = defineStore('game', () => {
   // === 存档 ===
   const saves = ref<SaveSlot[]>([]);
