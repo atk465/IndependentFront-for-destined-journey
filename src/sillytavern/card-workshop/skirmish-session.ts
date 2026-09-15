@@ -133,6 +133,8 @@ export interface BeatOptions {
   recoil?: number;
   /** 本拍破封的卡名 → 记入 unsealedCards（结算持久化 sealed:false） */
   sealBroke?: string;
+  /** 倒也可斩（每场限一次，一次性大招） */
+  nuke?: boolean;
 }
 
 /** 打一拍：拍结算 + 记账 + 终局判定（只按 HP 归零终局；拍数不限，招式轮换）。
@@ -146,6 +148,9 @@ export function playBeat(
   const intent = currentIntent(s);
   if (!intent) return s;
   const activate = opts?.activate;
+
+  // 倒也可斩：一次性大威力攻击（50% 敌方当前 HP），消耗 90% 玩家 HP/MP
+  const nukeDamage = opts?.nuke === true ? Math.max(1, Math.round(s.enemyHp * 0.5)) : 0;
 
   // 在场战技：眩晕（敌方本拍放弃行动）/ 减速（威胁降低），只在剩余拍数内生效
   const live = s.activeEffects.filter((e) => e.beatsLeft === undefined || e.beatsLeft > 0);
@@ -195,6 +200,12 @@ export function playBeat(
     lines.push(`▸ 在场持续：敌方 −${dotTotal}（${result.enemyHp} → ${enemyHpAfterDot}）`);
   }
 
+  // 倒也可斩 nuke 伤害（拍末追加，可收人头）
+  const afterNuke = nukeDamage > 0 ? Math.max(0, enemyHpAfterDot - nukeDamage) : enemyHpAfterDot;
+  if (nukeDamage > 0) {
+    lines.push(`▸ 倒也可斩：敌方 −${nukeDamage}（${enemyHpAfterDot} → ${afterNuke}）`);
+  }
+
   // 暴走/反噬反冲（启封失败的代价）：拍末玩家扣血，可致死
   const recoil = opts?.recoil ?? 0;
   const playerHpAfterRecoil = Math.max(0, result.playerHp - Math.max(0, Math.round(recoil)));
@@ -239,7 +250,7 @@ export function playBeat(
     ...s,
     beat: s.beat + 1,
     playerHp: playerHpAfterRecoil,
-    enemyHp: enemyHpAfterDot,
+    enemyHp: afterNuke,
     log: [...s.log, ...lines],
     playedCards:
       action.cardName && !s.playedCards.includes(action.cardName)
