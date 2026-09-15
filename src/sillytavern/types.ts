@@ -7,7 +7,7 @@
 // Q-11：本文件唯一的**运行时** import。field-enums 自己零 import（叶子模块），
 // 所以这条边不成环。品质集合是铁律 5 指定的中文枚举 SSOT，`QualityLevel` /
 // `QUALITY_RANK` / `QUALITY_BY_RANK` 一律从它派生，不再手抄第二份。
-import { RARITY_LEVELS, type Rarity } from './field-enums';
+import { RARITY_LEVELS, type Rarity, type CardTier, type CraftIndustry } from './field-enums';
 
 import type { GameTime } from './time-system';
 // type-only 循环安全：effect-types 反向 import 本文件的 AttributeName/DivinityLevel/DamageType 也是 type-only
@@ -1000,6 +1000,53 @@ export interface InventoryItem {
   automata?: EffectAutomaton[];
 }
 
+/**
+ * 卡牌 = InventoryItem 子类型（type:'卡牌'）。复用 material/effects/automata/modifiers/rarity。
+ * 卡牌数值由 card-workshop/card-fusion.ts 确定性产出，AI 不自由生成数字（数据字段规范铁律3）。
+ * 逻辑键=name（铁律1）；卡册只存名字，不存 id。
+ */
+export interface CardItem extends InventoryItem {
+  type: '卡牌';
+  /** 卡牌品质（5 级，独立于 7 级装备品质） */
+  cardTier: CardTier;
+  /** 词条名列表（元素/形态/效果/稀有 四类，由 card-fusion 确定性推导，非 AI 自由文本） */
+  词条: string[];
+  /** 融合配方（确定性内核 card-fusion.ts 的输入/输出快照） */
+  recipe: FusionRecipe;
+  /** 是否未启封（高阶卡封印物；启封判定见后续阶段，复用 dice-tape 确定性骰带） */
+  sealed: boolean;
+  /** 卡牌经验（交锋拍制：参战卡分得玩家战斗经验 50%，见 card-workshop/skirmish.ts）。旧存档可缺 */
+  cardExp?: number;
+  /** 战斗成长累计的卡面战力加成（cardExp 每攒满一管 +1 清空重攒；缺省 0）。旧存档可缺 */
+  cardPowerBonus?: number;
+}
+
+/** 融合配方（确定性内核 card-fusion.ts 的输入/输出） */
+export interface FusionRecipe {
+  /** 主素材名（逻辑键=名字） */
+  mainMaterial: string;
+  /** 副素材名（0~2，逻辑键=名字） */
+  subMaterials: string[];
+  /** 产出品质 */
+  tier: CardTier;
+  /** 融合类型：叠加（同类升级）/ 相生（复合）/ 相克（不稳定，造价×0.7） */
+  fusionKind: '叠加' | '相生' | '相克';
+  /** 造价（GC）= Σ素材售价 × 稀有度系数 × 相克折扣 */
+  cost: number;
+  /** 制作评级（可能失败；最终成败由引擎骰带在 rollCraftRating 中裁定） */
+  rating: CraftRating;
+}
+
+/** 卡册状态（CharacterState 内嵌，遵循「物品无 id、逻辑键=名字」铁律） */
+export interface CardAlbumState {
+  /** 已拥有卡牌名（逻辑键） */
+  owned: string[];
+  /** 当前卡组（同名≤2，遵循铁律） */
+  deck: string[];
+  /** 卡册容量 */
+  capacity: number;
+}
+
 /** 状态效果 */
 export interface StatusEffect {
   /** @deprecated 逻辑键=name（规范铁律1）。M2 起引擎不再读写，M3 后翻译层不再生成，仅为旧存档数据兼容保留字段位 */
@@ -1135,6 +1182,23 @@ export interface CharacterState {
   skills: Skill[];
   inventory: InventoryItem[];
   statusEffects: StatusEffect[];
+
+  // ===== 卡牌工坊（卡兰大陆世界观 MVP） =====
+  /** 卡册状态：owned=已拥有卡牌名，deck=当前卡组，capacity=容量。逻辑键=名字，无 id */
+  cardAlbum?: CardAlbumState;
+  /** 天赋（设计 §4-天赋，访谈共识 T1~T8 / docs/planning/2026-09-14-talent-system-design.md）：
+   *  只有玩家主角有天赋。两层：name/description = AI 表现层（起名写文案），
+   *  entries = 骨架条目（card-workshop/talent-entry 池内预设，state-manager 写入门禁
+   *  校验——AI 零编数）。列表 + 容量，同名唯一；缺省 = 旧档/伙伴无天赋（既定语义）。 */
+  talents?: {
+    capacity: number;
+    list: Array<{
+      name: string;
+      description?: string;
+      source: import('./card-workshop/talent-entry').TalentChannel;
+      entries: import('./card-workshop/talent-entry').TalentEntry[];
+    }>;
+  };
 
   // ===== 经济 =====
   money: number; // G
@@ -1765,6 +1829,25 @@ export interface AgentContext {
    * 🔴 缺席 / 空数组 = 池空 → 整段不出（零 token）。
    */
   randomEventOffer?: RandomEventOfferEntry[];
+
+  /**
+   * 委托板（卡牌工坊）：当前生效的委托清单快照（内容注册表第 15 面经
+   * `commission-runtime` 缝的派生值）。
+   *
+   * 🔴 供值在 game-pipeline 的 `buildContext`（与 `randomEventOffer` 同一条铁律）；
+   *    措辞（`<commissions>` 外壳与指令段）在 `PLACEHOLDER_REGISTRY.COMMISSIONS` 的
+   *    resolver 里。缺席 / 空数组 = 无委托 → 整段不出（零 token）。
+   */
+  commissionDefs?: readonly import('./card-workshop/commission').CommissionDef[];
+
+  /**
+   * 天赋（卡牌工坊 §4-天赋）：玩家当前的 `CharacterState.talents` 快照。
+   * `{{TALENT}}` 注入块的数据源（game-pipeline buildContext 供值，同 randomEventOffer
+   * 铁律）；resolver 据此渲染 现有天赋/容量/可授条目池/融合提示。
+   * 缺席或 list 空 = 玩家还没有任何天赋 → 整段不出（零 token；出身天赋为必选，
+   * 正常流程下建档即有第一条）。
+   */
+  talents?: CharacterState['talents'];
   /**
    * 随机事件总开关的当前值（`engine-settings.randomEventsEnabled`）。
    *
@@ -2796,16 +2879,9 @@ export const QUALITY_BY_RANK: QualityLevel[] = [...RARITY_LEVELS];
 
 // ========== Craft Industry & Stage ==========
 
-/** 制作行业类型 (对齐世界书: 4 种) */
-export type CraftIndustry = '锻造' | '炼金' | '烹饪' | '裁缝';
-
-/** 行业→核心属性映射 */
-export const CRAFT_INDUSTRY_ATTRIBUTE: Record<CraftIndustry, string> = {
-  锻造: '力量',
-  炼金: '智力',
-  烹饪: '精神',
-  裁缝: '敏捷',
-};
+/** 制作行业类型 — 定义已收口到 field-enums.ts（铁律5），此处 re-export 保住既有 import 面 */
+export type { CraftIndustry } from './field-enums';
+export { CRAFT_INDUSTRY_ATTRIBUTE } from './field-enums';
 
 /** 制作阶段 (对齐世界书: 3 级加工) */
 export type CraftStage = '基础加工' | '半成品' | '成品';
@@ -3208,6 +3284,10 @@ export interface SaveProfile {
   experienceMode: ExperienceMode;
   fp: number;
   fpHistory: FPTransaction[];
+  /** 🆕 委托声望（卡牌工坊 单一数值；旧档缺失读侧 `?? 0` 兜底。AI 零写路径——
+   *  唯一变更是 delta_variable profile.reputation 且 metadata.source='commission'
+   *  的引擎委托结算，stat-projection 只读投影） */
+  reputation: number;
   contracts: FateContract[];
   achievements: Achievement[];
   news: NewsItem[];

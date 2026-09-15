@@ -17,6 +17,10 @@ const emit = defineEmits<{
 
 const allTools = [
   { id: 'items', label: '背包', icon: 'fa-solid fa-box' },
+  { id: 'cardAlbum', label: '卡册', icon: 'fa-solid fa-clone' },
+  { id: 'commissionBoard', label: '委托', icon: 'fa-solid fa-bullhorn' },
+  { id: 'talentPanel', label: '天赋', icon: 'fa-solid fa-fingerprint' },
+  { id: 'craftBench', label: '制台', icon: 'fa-solid fa-wand-magic-sparkles' },
   { id: 'characters', label: '角色', icon: 'fa-solid fa-users' },
   { id: 'quests', label: '任务', icon: 'fa-solid fa-scroll' },
   { id: 'map', label: '地图', icon: 'fa-solid fa-map' },

@@ -46,7 +46,9 @@ import type {
   CombatDefinitionBundle,
   CombatSession,
   CombatUnitView,
+  DeckCardData,
   DomainEvent,
+  EffectAutomaton,
   ProposedAdjudication,
   RequiredInput,
   SummonedUnitDefinition,
@@ -1031,7 +1033,7 @@ async function openCombatScene(
   const client = handle.client;
   if (!client || typeof client.chatWithTools !== 'function') return;
 
-  const panel = projectToAgent(session.snapshot());
+  const panel = projectToAgent(session.snapshot(), { deckCards: session.deckCards });
   if (ctx.onPanel) ctx.onPanel(panel);
 
   const messages = handle.messages;
@@ -1114,7 +1116,7 @@ export async function routeHostCommand(
   ctx: RouteCtx,
   buildUserContent: (panel: string, firstDecision: boolean) => string,
 ): Promise<{ commands: CombatCommand[]; narration: string }> {
-  const panel = projectToAgent(session.snapshot());
+  const panel = projectToAgent(session.snapshot(), { deckCards: session.deckCards });
   if (ctx.onPanel) ctx.onPanel(panel);
 
   const handle = ctx.combatSession ?? { messages: [], client: null };
@@ -1787,7 +1789,20 @@ async function toolCallToCommand(
   actorId: string,
   session: CombatSession,
 ): Promise<CombatCommand> {
-  return toolCallToCommandSync(name, args, revision, actorId, makeUnitNameResolver(session));
+  // 阶段5-闭环：AI 只提名卡名，Code 按编组快照装配完整载荷（解析 miss = 无卡效果）
+  const deck = session.deckCards;
+  const resolveCard =
+    deck && deck.length > 0
+      ? (cardName: string) => deck.find((c) => c.name === cardName)
+      : undefined;
+  return toolCallToCommandSync(
+    name,
+    args,
+    revision,
+    actorId,
+    makeUnitNameResolver(session),
+    resolveCard,
+  );
 }
 
 function toolCallToCommandSync(
@@ -1796,6 +1811,7 @@ function toolCallToCommandSync(
   revision: number,
   actorId: string,
   resolveUnitId?: (name: string) => string,
+  resolveCard?: (name: string) => DeckCardData | undefined,
 ): CombatCommand {
   const id = nextCmdId(`tool-${name}`);
   // 名字 → id 解析（铁律 ①：AI 报名字，Code 解析成 id）。不传解析器（直捣测试 /
@@ -1835,7 +1851,16 @@ function toolCallToCommandSync(
         kind: 'DeclareAction',
         actorId: resolve(args.actorName) ?? actorId,
         cost: 'action',
-        payload: { actionType: mapActionType(t), description: undefined },
+        payload: {
+          actionType: mapActionType(t),
+          description: undefined,
+          // 阶段5 玩卡通道：AI 只提名（string 卡名 / {name}），Code 按编组快照装配
+          //（解析器在场 = 编组闸门，miss = 无卡效果）；无解析器（直捣/测试）回退
+          // 形状收敛的完整载荷。
+          card: resolveCard
+            ? resolveCardPayload(args.payload, resolveCard)
+            : coerceCardPayload(args.payload),
+        },
       };
     }
     case 'pass_slot':
@@ -1934,6 +1959,59 @@ function mapActionType(t: string): 'item' | 'move' | 'focus' | 'defend' {
     default:
       return 'defend';
   }
+}
+
+/**
+ * 阶段5-闭环：declare_action 工具载荷 → 按编组快照解析卡（AI 只提名，永不抛）。
+ * 载荷里 card 可以是卡名（string）或 {name} 形状；名字查不到 = 无卡效果。
+ */
+function resolveCardPayload(
+  raw: unknown,
+  resolveCard: (name: string) => DeckCardData | undefined,
+): DeckCardData | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const card = (raw as Record<string, unknown>)['card'];
+  let name: unknown;
+  if (typeof card === 'string') name = card;
+  else if (card && typeof card === 'object') name = (card as Record<string, unknown>)['name'];
+  if (typeof name !== 'string' || name.length === 0) return undefined;
+  return resolveCard(name);
+}
+
+/**
+ * 阶段5：declare_action 工具载荷 → 玩卡 payload（形状收敛，永不抛）。
+ * 正规来源是会话层从制卡师背包解析出的真实 CardItem（phase5 设计 §2 信任模型）；
+ * 这里只做形状校验：name 非串 / 词条非数组 → 整体丢弃（= 无卡效果，不炸命令）。
+ * 🔴 仅在无编组解析器的场合作兜底（直捣调用/测试）——有解析器时编组快照是唯一闸门。
+ */
+function coerceCardPayload(raw: unknown):
+  | {
+      name: string;
+      cardTier: string;
+      词条: readonly string[];
+      fusionKind?: '叠加' | '相生' | '相克';
+      sealed?: boolean;
+      automata?: readonly EffectAutomaton[];
+    }
+  | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const card = (raw as Record<string, unknown>)['card'];
+  if (!card || typeof card !== 'object') return undefined;
+  const c = card as Record<string, unknown>;
+  if (typeof c['name'] !== 'string' || c['name'].length === 0) return undefined;
+  if (!Array.isArray(c['词条'])) return undefined;
+  const words = c['词条'].filter((w): w is string => typeof w === 'string');
+  const fusion = c['fusionKind'];
+  return {
+    name: c['name'],
+    cardTier: typeof c['cardTier'] === 'string' ? c['cardTier'] : '白铁',
+    词条: words,
+    fusionKind: fusion === '叠加' || fusion === '相生' || fusion === '相克' ? fusion : undefined,
+    sealed: typeof c['sealed'] === 'boolean' ? c['sealed'] : undefined,
+    automata: Array.isArray(c['automata'])
+      ? (c['automata'] as readonly EffectAutomaton[])
+      : undefined,
+  };
 }
 
 /**

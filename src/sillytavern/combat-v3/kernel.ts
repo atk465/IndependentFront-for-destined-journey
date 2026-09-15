@@ -82,6 +82,8 @@ export function createSession(
     dispatch,
     snapshot,
     history,
+    // 阶段5-闭环：编组快照透出（AI 通道按名解析 declare_action 的卡载荷）
+    deckCards: bundle.deckCards,
     // Q-22: 曾经是 `const completed = …` —— 在 createSession 那一刻算一次的**快照**，
     // 此后无论打多少轮都恒为 false。两个消费者因此都绕开它自己读 phase。
     // 现在是活 getter，且口径收窄到 SettlementCommitted（不含 Terminal）——

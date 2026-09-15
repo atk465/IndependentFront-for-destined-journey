@@ -22,6 +22,7 @@
 import type {
   AgentContext,
   ApiEndpoint,
+  CardItem,
   CraftRequestMarker,
   CraftGenRequestMarker,
   ItemGenOutput,
@@ -33,7 +34,13 @@ import type {
 } from './types';
 import { buildAgentMessagesAsync } from './agent-templates';
 import { getToolsForAgent, executeToolCall } from './agent-tools';
-import { normalizeSlot, normalizeItemType } from './field-enums';
+import { normalizeSlot, normalizeItemType, normalizeCraftIndustry } from './field-enums';
+// 阶段3b 制卡桥：industry=制卡 的主产物由融合内核确定性组装（数值归 Code，ADR-11）
+import {
+  buildCardItem,
+  parseMaterialNames,
+  resolveMaterialSpecs,
+} from './card-workshop/craft-card';
 import type { ToolExecutionContext } from './types';
 // Q-05：XML / JSON 解析的唯一工具面（参数顺序一律 (source, tag)）
 import { tagInner, tagBlock, parseAttrsStr } from './agent-xml';
@@ -51,6 +58,8 @@ export interface CraftGenRequest {
   configs?: import('./types').AgentConfig[];
   worldBooks?: import('./types').WorldBook[];
   presets?: import('./types').AgentPreset[];
+  /** 天赋生成倾向段（卡牌工坊 T-S2 路线图实装；无天赋缺省，注入零成本） */
+  talentBias?: string;
 }
 
 /** Helper: extract attributes from old or new marker shape */
@@ -190,8 +199,15 @@ export async function callCraftGenAgent(
     agentOutputs: new Map([['story', markerContext]]),
   };
 
+  // 天赋生成倾向段（词条加权/形态转化/配方解锁）——置于请求体之前，AI 优先读
+  const talentBiasBlock = request.talentBias
+    ? `<制卡师天赋倾向>
+${request.talentBias}
+</制卡师天赋倾向>
+`
+    : '';
   const craftLocalParams: Record<string, string> = {
-    CRAFT_REQUEST: markerBody || request.storyOutput,
+    CRAFT_REQUEST: talentBiasBlock + (markerBody || request.storyOutput),
   };
 
   // 真机修(2026-07-17): configs/worldBooks/presets 透传
@@ -403,7 +419,7 @@ export function parseCraftResultXML(xml: string): CraftGenOutput {
         itemRequests: parseItemRequestsJSON(parsed),
         narrative: parsed.narrative ?? '',
         craftParams: {
-          industry: (parsed.industry ?? '锻造') as CraftIndustry,
+          industry: normalizeCraftIndustry(parsed.industry ?? '') ?? '锻造',
           targetQuality: (parsed.target_quality ?? parsed.targetQuality ?? '普通') as QualityLevel,
           stage: parsed.stage ?? '成品',
           quantity: parsed.quantity ?? 1,
@@ -434,30 +450,41 @@ export function buildCraftPatches(
   craftOutput: CraftGenOutput,
   itemOutput: ItemGenOutput | null,
   characterId: string,
+  cardProduct?: CardItem,
 ): StatePatch[] {
   const patches: StatePatch[] = [];
 
   const productName = craftOutput.productName;
 
   // 1. 主产物写入背包 (add_item) — 仅成功产出完整制品
+  // 阶段3b 制卡桥：industry=制卡 的主产物由调用方（runCraftGenChain）用融合内核
+  // 组装好传入 —— tier/词条/造价/封印是 Code 算的，这里原样落库。
   // M3: item_gen equipment 已细化同名产物时跳过 — 以 item_gen 的完整数据为准
   // 不再两步落库；stats/durability/maxDurability 直写 value（#7）
   // S4d（2026-08-01 失败品链路）：失败时跳过主产物——失败品由 item_gen 以 <item_requests> 产出（下方第 2 步）
   if (craftOutput.success) {
-    const productElaboratedByItemGen =
-      itemOutput?.equipment.some((e) => e.name === productName) ?? false;
-    if (!productElaboratedByItemGen) {
+    if (cardProduct) {
       patches.push({
         op: 'add_item',
         target: `characters.${characterId}`,
-        value: {
-          name: productName,
-          description: craftOutput.checkSummary,
-          quantity: craftOutput.craftParams.quantity,
-          type: normalizeItemType('equipment') ?? '装备',
-          rarity: craftOutput.quality,
-        },
+        value: cardProduct,
       });
+    } else {
+      const productElaboratedByItemGen =
+        itemOutput?.equipment.some((e) => e.name === productName) ?? false;
+      if (!productElaboratedByItemGen) {
+        patches.push({
+          op: 'add_item',
+          target: `characters.${characterId}`,
+          value: {
+            name: productName,
+            description: craftOutput.checkSummary,
+            quantity: craftOutput.craftParams.quantity,
+            type: normalizeItemType('equipment') ?? '装备',
+            rarity: craftOutput.quality,
+          },
+        });
+      }
     }
   }
 
@@ -466,6 +493,8 @@ export function buildCraftPatches(
   //   ——失败品不 auto-equip（剥离 equippedSlot），也不进装备槽，仅背包可见
   if (itemOutput) {
     for (const equip of itemOutput.equipment) {
+      // 阶段3b：卡牌主产物已按名占位，item_gen 同名条目跳过防双份
+      if (cardProduct && equip.name === cardProduct.name) continue;
       patches.push({
         op: 'add_item',
         target: `characters.${characterId}`,
@@ -494,6 +523,8 @@ export function buildCraftPatches(
 
     // 库存品 → add_item
     for (const inv of itemOutput.inventory) {
+      // 阶段3b：卡牌主产物已按名占位，item_gen 同名条目跳过防双份
+      if (cardProduct && inv.name === cardProduct.name) continue;
       patches.push({
         op: 'add_item',
         target: `characters.${characterId}`,
@@ -580,9 +611,30 @@ export async function runCraftGenChain(
     console.warn('[craft-gen-chain] 无 owner 且无玩家角色，craft patches 将跳过角色目标');
     return { narrative: craftOutput.narrative, patches: [], craftOutput, itemOutput };
   }
+
+  // 阶段3b 制卡桥：industry=制卡 且成功时，主产物由融合内核确定性组装 ——
+  // AI 提名素材（craftParams.materials 名单，按背包解析成 MaterialSpec）并给卡起名；
+  // tier / 词条 / 造价 / 封印全部 Code 算。名单解析查不到的素材静默跳过（宁可
+  // 元素少一张卡，不让一次拼写失误炸掉制作链）。
+  let cardProduct: CardItem | undefined;
+  if (craftOutput.craftParams.industry === '制卡' && craftOutput.success) {
+    const owner = request.context.characters?.find((c) => c.name === characterId);
+    cardProduct = buildCardItem({
+      productName: craftOutput.productName,
+      description: craftOutput.checkSummary,
+      quantity: craftOutput.craftParams.quantity,
+      quality: craftOutput.quality,
+      rating: craftOutput.rating,
+      materialSpecs: resolveMaterialSpecs(
+        parseMaterialNames(craftOutput.craftParams.materials),
+        owner?.inventory ?? [],
+      ),
+    });
+  }
+
   const patches = [
     ...(craftOutput.settlementPatches ?? []),
-    ...buildCraftPatches(craftOutput, itemOutput, characterId),
+    ...buildCraftPatches(craftOutput, itemOutput, characterId, cardProduct),
   ];
 
   // Step 4: optional persistence
@@ -673,7 +725,7 @@ function parseItemRequestsJSON(parsed: any): ItemRequest[] {
  */
 function parseCraftParams(xml: string): CraftGenOutput['craftParams'] {
   return {
-    industry: (tagInner(xml, 'industry')?.trim() ?? '锻造') as CraftIndustry,
+    industry: normalizeCraftIndustry(tagInner(xml, 'industry') ?? '') ?? '锻造',
     targetQuality: (tagInner(xml, 'target_quality')?.trim() ?? '普通') as QualityLevel,
     stage: tagInner(xml, 'stage')?.trim() ?? '成品',
     quantity: parseInt(tagInner(xml, 'quantity')?.trim() ?? '1', 10) || 1,

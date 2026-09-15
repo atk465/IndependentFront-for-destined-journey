@@ -18,7 +18,7 @@
  * 长名」匹配（避免「骷髅兵」误配「骷髅兵队长」这类短名前缀坑）。
  */
 
-import type { CombatCommand } from './types';
+import type { CombatCommand, DeckCardData } from './types';
 import { parseIntentionFromInput } from '../combat-intention';
 
 /** 解析器认识的在场单位（前端从 v3ActiveCombat 投影后传入） */
@@ -30,7 +30,7 @@ export interface PlayerParseUnit {
   side: 'player' | 'enemy';
 }
 
-/** 解析上下文：当前行动者 + 在场单位 + （可选）技能/道具名单 */
+/** 解析上下文：当前行动者 + 在场单位 + （可选）技能/道具/卡组名单 */
 export interface PlayerParseCtx {
   /** 当前轮到我方行动的单位（v3：awaiting.unitId） */
   actorId: string;
@@ -40,6 +40,8 @@ export interface PlayerParseCtx {
   skills?: ReadonlyArray<string>;
   /** 我方背包可用道具名（消耗品/材料），用于「使用X」识别 */
   items?: ReadonlyArray<string>;
+  /** 阶段5-闭环：我方卡组编组快照（bundle.deckCards），用于「打出X」识别 */
+  cards?: ReadonlyArray<DeckCardData>;
 }
 
 /**
@@ -80,6 +82,29 @@ const ATTACK_VERB_RE = /攻击|砍|劈|打|揍|挥|击|射|刺|斩|踢|扑|撞|�
 
 /** 道具使用的动词信号：光有道具名不够（「挥舞铁剑」是攻击不是用道具），必须带使用动词 */
 const USE_ITEM_RE = /使用|服用|喝下|喝掉|吃下|饮用|涂抹/;
+
+/** 玩卡动词信号（阶段5-闭环）：卡名必须搭配玩卡动词，裸提卡名不触发（防误吞攻击描述） */
+const PLAY_CARD_RE = /打出|发动|铺开|激活|使用|释放/;
+
+/**
+ * 阶段5-闭环：从文本中识别「想打出的卡」（纯函数）。
+ * 判据 = 玩卡动词 + 卡组快照内的卡名（firstMention 同位取长）。
+ * 返回 undefined = 本次文本不是玩卡意图。
+ */
+export function tryParsePlayCard(
+  text: string,
+  cards: ReadonlyArray<DeckCardData> | undefined,
+): DeckCardData | undefined {
+  const t = (text ?? '').trim();
+  if (!t || !cards?.length) return undefined;
+  if (!PLAY_CARD_RE.test(t)) return undefined;
+  const name = firstMention(
+    t,
+    cards.map((c) => c.name),
+  );
+  if (name === undefined) return undefined;
+  return cards.find((c) => c.name === name);
+}
 
 /**
  * 文本中出现位置最靠前的候选名（同位置取长名）。
@@ -173,6 +198,21 @@ export function parsePlayerInput(text: string, ctx: PlayerParseCtx): PlayerComma
 
   if (PASS_RE.test(t)) {
     return { ok: true, command: { ...base, cost: 'attack', kind: 'PassAttack', payload: {} } };
+  }
+
+  // 阶段5-闭环：玩卡（玩卡动词 + 卡组快照内卡名）→ DeclareAction(item, card)。
+  // 排在道具分支前——「使用」动词两处共用，名字命中卡组快照的按卡结算。
+  const played = tryParsePlayCard(t, ctx.cards);
+  if (played) {
+    return {
+      ok: true,
+      command: {
+        ...base,
+        cost: 'action',
+        kind: 'DeclareAction',
+        payload: { actionType: 'item', card: played },
+      },
+    };
   }
 
   const item = ctx.items?.length ? firstMention(t, ctx.items) : undefined;

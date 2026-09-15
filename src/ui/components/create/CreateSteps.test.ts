@@ -7,12 +7,12 @@ import { mount } from '@vue/test-utils';
 import CreateSteps from './CreateSteps.vue';
 
 describe('CreateSteps', () => {
-  it('渲染 8 个步骤按钮', () => {
+  it('渲染 9 个步骤按钮', () => {
     const wrapper = mount(CreateSteps, {
       props: { current: 0 },
     });
     const dots = wrapper.findAll('.step-dot');
-    expect(dots).toHaveLength(8);
+    expect(dots).toHaveLength(9);
   });
 
   it('当前步骤有 active class', () => {
@@ -45,6 +45,7 @@ describe('CreateSteps', () => {
     expect(labels[2].text()).toBe('命定核心');
     expect(labels[3].text()).toBe('角色启用');
     expect(labels[6].text()).toBe('剧情规划');
-    expect(labels[7].text()).toBe('确认提交');
+    expect(labels[7].text()).toBe('出身天赋');
+    expect(labels[8].text()).toBe('确认提交');
   });
 });

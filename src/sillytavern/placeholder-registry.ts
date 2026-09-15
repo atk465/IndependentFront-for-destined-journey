@@ -21,6 +21,8 @@
  *   角色状态实际由 CHARACTER_STATE / INVENTORY / SKILL_STATE 各自的内联实现产出）
  */
 
+import type { CommissionDef } from './card-workshop/commission';
+import { TALENT_ENTRY_POOL, type TalentEntry } from './card-workshop/talent-entry';
 import type {
   AgentContext,
   AgentConfig,
@@ -600,6 +602,130 @@ function renderMapContextBlock(snapshot: MapSnapshot, gameTime: GameTime | undef
 }
 
 // ═══════════════════════════════════════════════════════════
+// COMMISSIONS 渲染（卡牌工坊 委托板 —— 与 RANDOM_EVENTS 同款分工）
+// ═══════════════════════════════════════════════════════════
+
+/** 单条委托的行内摘要：折叠空白（一条委托恒占一行，照 flattenOfferText 同款纪律） */
+function flattenCommissionText(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+/** 需求摘要（minTier / formEntry / elements / exactName 全可选，只摘有值的） */
+function renderCommissionRequirement(req: CommissionDef['requireCard']): string {
+  const parts: string[] = [];
+  if (req.exactName) parts.push(`指定卡「${req.exactName}」`);
+  if (req.minTier) parts.push(`品质不低于${req.minTier}`);
+  if (req.formEntry) parts.push(`${req.formEntry}类`);
+  if (req.elements && req.elements.length > 0) parts.push(`含${req.elements.join('、')}元素`);
+  return parts.length > 0 ? parts.join('，') : '不限';
+}
+
+/** 奖励摘要（gc / reputation / materials 只摘有值的） */
+function renderCommissionRewards(req: CommissionDef['rewards']): string {
+  const parts: string[] = [];
+  if (req.gc) parts.push(`赏金 ${req.gc}G`);
+  if (req.reputation) parts.push(`声望 +${req.reputation}`);
+  if (req.materials && req.materials.length > 0) {
+    parts.push(`素材 ${req.materials.map((m) => `${m.name}×${m.quantity}`).join('、')}`);
+  }
+  return parts.length > 0 ? parts.join('，') : '面议';
+}
+
+/** 委托清单 → `<commissions>` 块（一条一行：名称｜描述｜收卡要求｜报酬） */
+function renderCommissionsBlock(defs: readonly CommissionDef[]): string {
+  const lines = defs.map((d) => {
+    const desc = d.description ? `：${flattenCommissionText(d.description)}` : '';
+    const line = `「${d.name}」${desc} ｜ 收卡：${renderCommissionRequirement(d.requireCard)} ｜ 报酬：${renderCommissionRewards(d.rewards)}`;
+    return flattenCommissionText(line);
+  });
+  return [
+    '<commissions>',
+    '以下是冒险者公会当前的委托板。玩家询问委托或想接活时，从下列条目中向其介绍；',
+    '玩家明确接取某条委托时，用既有 quest 机制立一个与委托**同名**的任务（模板名逐字一致，不得改写）；',
+    '玩家交卡时只做叙事确认，验收与发奖由引擎结算——你不得自行宣布委托完成或发放奖励。',
+    '---',
+    ...lines,
+    '</commissions>',
+  ].join('\n');
+}
+
+// ═══════════════════════════════════════════════════════════
+// TALENT 渲染（卡牌工坊 天赋系统 —— 与 COMMISSIONS 同款分工）
+// ═══════════════════════════════════════════════════════════
+
+/** 单条骨架条目的行内摘要（kind + 关键参数） */
+function renderTalentEntryLine(e: TalentEntry): string {
+  const p = e.params;
+  switch (e.kind) {
+    case '材料限定':
+      return `材料限定（${p.materialClass ?? '不限'}）：成功率+30%`;
+    case '成品限定':
+      return `成品限定（${p.productClass ?? '不限'}）`;
+    case '成功率加成':
+      return `成功率+${p.bonus ?? 0}%`;
+    case '品质锁定':
+      return `品质${p.direction ?? ''}：${p.tier ?? '普通'}`;
+    case '品质突破':
+      return `品质越一级（域：${p.productClass ?? p.materialClass ?? '不限'}）`;
+    case '启封加值':
+      return `启封判定+${p.amount ?? 0}`;
+    case '行动值加成':
+      return `行动值+${p.amount ?? 0}`;
+    case '防御加值':
+      return `防御+${p.amount ?? 0}`;
+    default:
+      return e.kind;
+  }
+}
+
+/** 独占渠道的中文名 */
+const TALENT_CHANNEL_LABEL: Record<string, string> = {
+  creation: '出身独占',
+  story: '剧情独占',
+  exchange: '兑换独占',
+  fusion: '融合独占',
+  universal: '通用',
+};
+
+/**
+ * 玩家天赋快照 + 条目池 → `<talents>` 块：
+ * 第一段 = 玩家现有天赋（名字/描述/条目/来源）；第二段 = 可授予条目池；
+ * 第三段 = 授予与融合纪律。
+ */
+function renderTalentsBlock(
+  talents: NonNullable<import('./types').CharacterState['talents']>,
+): string {
+  const lines: string[] = ['<talents>'];
+  lines.push(
+    `玩家现有天赋（${talents.list.length}/${talents.capacity}）：`,
+    ...talents.list.map((t) => {
+      const entries = t.entries.map(renderTalentEntryLine).join('，');
+      const desc = t.description ? `——${t.description.replace(/\s+/g, ' ')}` : '';
+      return `·【${t.name}】${desc}（${entries}）`;
+    }),
+    '',
+    '可授予的骨架条目池（授予时按此组合，数值不得自创）：',
+    ...TALENT_ENTRY_POOL.map((e) => {
+      const exclusive =
+        e.channel === 'universal' ? '' : `（${TALENT_CHANNEL_LABEL[e.channel] ?? e.channel}）`;
+      return `· ${e.kind}${exclusive}：${renderTalentEntryLine(e)}`;
+    }),
+    '· 融合独占产物示例：【垃圾摩托】【封印斗士】——只能由融合产生。',
+  );
+  lines.push(
+    talents.list.length >= talents.capacity
+      ? '⚠ 玩家天赋已满员——如需授予新天赋，请先在叙事中引导玩家遗忘或融合（见天赋面板）。'
+      : '玩家有空的天赋位——遇到重大里程碑（突破/大事件/完成高难委托）可在叙事中授予一个新天赋。',
+  );
+  lines.push(
+    '授予纪律：天赋名与描述由你创作（贴合故事风味），骨架条目必须从上面的条目池逐字组合；',
+    '写路径为 update_character 的 talents 字段（整列表替换，含玩家已有天赋）。',
+    '</talents>',
+  );
+  return lines.join('\n');
+}
+
+// ═══════════════════════════════════════════════════════════
 // RANDOM_EVENTS 渲染（随机事件 v1 §5.1 —— 与 MAP_CONTEXT 同款分工）
 // ═══════════════════════════════════════════════════════════
 
@@ -886,6 +1012,41 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
     const offer = ctx.randomEventOffer ?? [];
     if (offer.length === 0) return '';
     return renderRandomEventsBlock(offer, (ctx.plotSettings?.mode ?? 'off') !== 'off');
+  },
+
+  /**
+   * {{COMMISSIONS}} — 冒险者公会当前的委托板（卡牌工坊 委托接线）。
+   *
+   * 数据来自 `ctx.commissionDefs`（内容注册表第 15 面经 `commission-runtime` 缝、
+   * game-pipeline `buildContext` 供值——与 randomEventOffer 同一条铁律）。
+   *
+   * 🔴 **两条空串出口**：① 没装内容包或清单为空（引擎仓零内置委托，常态）；
+   *    ② **战斗会话活跃**（combatActive，照随机事件 §13-2 同款静默）。
+   *    块自带 XML 外壳，模板里不要再包一层中文标签。
+   * 🔴 只给名字/描述/收卡要求/报酬：验收过滤器和奖励发放是引擎的活
+   *    （`matchesCommission` / `buildDeliveryPatches`），讲给 AI 只会诱导它自行宣判交付。
+   */
+  COMMISSIONS: (ctx, _config, _params) => {
+    if (ctx.combatActive === true) return '';
+    const defs = ctx.commissionDefs ?? [];
+    if (defs.length === 0) return '';
+    return renderCommissionsBlock(defs);
+  },
+
+  /**
+   * {{TALENT}} — 玩家天赋快照与授予纪律（卡牌工坊 天赋系统，访谈共识 T1~T8）。
+   *
+   * 数据来自 `ctx.talents`（game-pipeline buildContext 供玩家 CharacterState.talents）。
+   * 出口：① 玩家无任何天赋或未建档 → 空串（零 token；出身天赋为必选，建档即有）；
+   * ② 战斗会话活跃 → 空串（§13-2 同款静默）。
+   * 块内容 = 现有天赋 + 容量 + 可授予条目池 + 授予/融合纪律——AI 授予走
+   * update_character talents（写入门禁在 state-manager：AI 零编数）。
+   */
+  TALENT: (ctx, _config, _params) => {
+    if (ctx.combatActive === true) return '';
+    const talents = ctx.talents;
+    if (!talents || !Array.isArray(talents.list) || talents.list.length === 0) return '';
+    return renderTalentsBlock(talents);
   },
 
   /**

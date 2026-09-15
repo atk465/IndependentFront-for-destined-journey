@@ -1802,6 +1802,9 @@ describe('T16 combat_v3 玩家输入桥时序 + pre-combat 快照', () => {
     const gameStore = makeGameStore({
       characters: [playerCharStub()],
       enterCombat: vi.fn(),
+      setCombatDeckSnapshot: vi.fn(),
+      takeConsumedCards: vi.fn(() => []),
+      collectDamagedSummonCards: vi.fn(() => []),
       exitCombat: vi.fn(),
       applyCombatEvent: vi.fn(),
       updateAgentStatus: vi.fn(),
@@ -1842,7 +1845,7 @@ describe('T16 combat_v3 玩家输入桥时序 + pre-combat 快照', () => {
     });
 
     // ① combat_trigger 检出 → 只弹就绪面板：v3_combat_ready 投进 store、**不 runCombatV3**
-    const readyResult = await (pipeline as any).handleCombatTrigger(
+    const readyResult = await (pipeline as any).handleCombatTriggerV3(
       { combatType: '标准', allies: '理查德', enemies: '骷髅' } as never,
       '',
     );
@@ -1879,6 +1882,9 @@ describe('T16 combat_v3 玩家输入桥时序 + pre-combat 快照', () => {
     const gameStore = makeGameStore({
       characters: [playerCharStub()],
       enterCombat: vi.fn(),
+      setCombatDeckSnapshot: vi.fn(),
+      takeConsumedCards: vi.fn(() => []),
+      collectDamagedSummonCards: vi.fn(() => []),
       exitCombat: vi.fn(),
       applyCombatEvent: vi.fn(),
       updateAgentStatus: vi.fn(),
@@ -1902,7 +1908,7 @@ describe('T16 combat_v3 玩家输入桥时序 + pre-combat 快照', () => {
       saveId: 'save-test',
     });
 
-    await (pipeline as any).handleCombatTrigger(
+    await (pipeline as any).handleCombatTriggerV3(
       { combatType: '标准', allies: '理查德', enemies: '骷髅' } as never,
       '',
     );
@@ -1914,7 +1920,7 @@ describe('T16 combat_v3 玩家输入桥时序 + pre-combat 快照', () => {
 
     // COR-02：存档已切走时不回读（给别人的存档跑刷新没有意义）
     (gameStore.refreshFromDb as ReturnType<typeof vi.fn>).mockClear();
-    await (pipeline as any).handleCombatTrigger(
+    await (pipeline as any).handleCombatTriggerV3(
       { combatType: '标准', allies: '理查德', enemies: '骷髅' } as never,
       '',
     );
@@ -1928,6 +1934,9 @@ describe('T16 combat_v3 玩家输入桥时序 + pre-combat 快照', () => {
     const gameStore = makeGameStore({
       characters: [playerCharStub()],
       enterCombat: vi.fn(),
+      setCombatDeckSnapshot: vi.fn(),
+      takeConsumedCards: vi.fn(() => []),
+      collectDamagedSummonCards: vi.fn(() => []),
       exitCombat: vi.fn(),
       applyCombatEvent: vi.fn(),
       updateAgentStatus: vi.fn(),
@@ -1959,7 +1968,7 @@ describe('T16 combat_v3 玩家输入桥时序 + pre-combat 快照', () => {
       rounds: 2,
       outcome: 'ally_win',
     });
-    await (pipeline as any).handleCombatTrigger(
+    await (pipeline as any).handleCombatTriggerV3(
       { combatType: '标准', allies: '理查德', enemies: '骷髅' } as never,
       '',
     );
@@ -1995,7 +2004,7 @@ describe('T16 combat_v3 玩家输入桥时序 + pre-combat 快照', () => {
       outcome: 'draw',
       aborted: true,
     });
-    await (pipeline as any).handleCombatTrigger(
+    await (pipeline as any).handleCombatTriggerV3(
       { combatType: '标准', allies: '理查德', enemies: '骷髅' } as never,
       '',
     );
@@ -2011,6 +2020,9 @@ describe('T16 combat_v3 玩家输入桥时序 + pre-combat 快照', () => {
     const gameStore = makeGameStore({
       characters: [playerCharStub()],
       enterCombat: vi.fn(),
+      setCombatDeckSnapshot: vi.fn(),
+      takeConsumedCards: vi.fn(() => []),
+      collectDamagedSummonCards: vi.fn(() => []),
       exitCombat: vi.fn(),
       applyCombatEvent: vi.fn(),
       updateAgentStatus: vi.fn(),
@@ -2032,7 +2044,7 @@ describe('T16 combat_v3 玩家输入桥时序 + pre-combat 快照', () => {
       outcome: 'ally_win',
     });
 
-    await (pipeline as any).handleCombatTrigger(
+    await (pipeline as any).handleCombatTriggerV3(
       { combatType: '标准', allies: '理查德', enemies: '骷髅' } as never,
       '',
     );
@@ -2073,6 +2085,9 @@ describe('T2 combat_v3 模板系统上下文传参', () => {
     return makeGameStore({
       characters: [playerCharStub()],
       enterCombat: vi.fn(),
+      setCombatDeckSnapshot: vi.fn(),
+      takeConsumedCards: vi.fn(() => []),
+      collectDamagedSummonCards: vi.fn(() => []),
       exitCombat: vi.fn(),
       applyCombatEvent: vi.fn(),
       updateAgentStatus: vi.fn(),
@@ -2135,7 +2150,7 @@ describe('T2 combat_v3 模板系统上下文传参', () => {
     });
 
     // F2：检出只弹就绪 → 点开始（holder.handle.start）才真开打（storyOutput 经就绪闭包传入）
-    await (pipeline as any).handleCombatTrigger(
+    await (pipeline as any).handleCombatTriggerV3(
       {
         combatType: '死斗',
         environment: '竞技场',
@@ -2187,7 +2202,7 @@ describe('T2 combat_v3 模板系统上下文传参', () => {
       };
     });
 
-    await (pipeline as any).handleCombatTrigger(
+    await (pipeline as any).handleCombatTriggerV3(
       { combatType: '标准', allies: '理查德', enemies: '骷髅' } as never,
       '',
     );
@@ -2224,7 +2239,7 @@ describe('T2 combat_v3 模板系统上下文传参', () => {
       };
     });
 
-    await (pipeline as any).handleCombatTrigger({ combatType: '标准' } as never, '');
+    await (pipeline as any).handleCombatTriggerV3({ combatType: '标准' } as never, '');
     await holder.handle!.start!();
 
     expect(captured).not.toBeNull();
@@ -2282,7 +2297,7 @@ describe('T2 combat_v3 模板系统上下文传参', () => {
     });
 
     // F2：检出 → 就绪面板（v3_combat_ready 带名单数组）→ 点开始 → 真开打
-    await (pipeline as any).handleCombatTrigger(
+    await (pipeline as any).handleCombatTriggerV3(
       { combatType: '标准', allies: '妲丽安', enemies: '沼泥潜兽' } as never,
       '',
     );
@@ -2328,7 +2343,7 @@ describe('T2 combat_v3 模板系统上下文传参', () => {
       };
     });
 
-    await (pipeline as any).handleCombatTrigger({ combatType: '标准' } as never, '');
+    await (pipeline as any).handleCombatTriggerV3({ combatType: '标准' } as never, '');
     // 无名单 → v3_combat_ready 不带 allies/enemies（缺省缺席）
     expect(gameStore.applyCombatEvent).toHaveBeenCalledWith(
       expect.not.objectContaining({ allies: expect.anything() }) as never,
@@ -2596,4 +2611,114 @@ it('Stop then same-save remount cannot start a run before old cleanup drains', a
   gate.resolve();
   await Promise.all([running, next]);
   expect(admittedBeforeCleanup).toBe(0);
+});
+
+// ══════ 战斗形态改版（设计共识 §8）：combat_trigger 路由交锋拍 ══════
+
+describe('combat_trigger 路由交锋拍（SKIRMISH_DEFAULT，2026-09-12 主人裁定）', () => {
+  it('默认不再弹 v3 就绪面板，改走交锋拍编排（无玩家角色时明示失败，不抛）', async () => {
+    const setSkirmishSession = vi.fn();
+    const pipeline = makePipeline({ setSkirmishSession });
+    const result = await (pipeline as any).handleCombatTrigger(
+      { combatType: '标准', enemies: '骷髅', environment: '墓穴' } as never,
+      '',
+    );
+    expect(result).toBeNull(); // 交锋拍内联结算，不经 CombatSummary
+    expect(setSkirmishSession).not.toHaveBeenCalled(); // mock store 无玩家 → 评估前即失败
+  });
+
+  it('combat_trigger 走交锋拍时 enemyHint 由 marker 敌方名单+环境装配', async () => {
+    // 间接验证：有玩家角色 + 无 endpoint → runSkirmishEncounter 返回明示原因
+    const pipeline = makePipeline({
+      player: {
+        name: '理查德',
+        level: 9,
+        attributes: { str: 14, con: 14, dex: 12 },
+        hp: 100,
+        maxHp: 100,
+      },
+    });
+    const result = await (pipeline as any).handleCombatTrigger(
+      { combatType: '死斗', enemies: '骷髅兵,食尸鬼', environment: '墓穴' } as never,
+      '',
+    );
+    expect(result).toBeNull(); // getEndpointForAgent 在测试环境下解析不到 → 明示失败路径，不抛
+  });
+});
+
+// ══════ 封印卡启封流（积压 2026-09-14）：pipeline 组合链验证 ══════
+
+describe('submitSkirmishCounter —— 封印卡启封流', () => {
+  const 封印会话 = () => ({
+    enemyName: '岩爪兽',
+    enemyLevel: 12,
+    intents: [{ move: '咬', threat: 10, counters: ['防御'] }],
+    beat: 0,
+    playerHp: 155,
+    playerMaxHp: 155,
+    enemyHp: 200,
+    enemyMaxHp: 200,
+    guard: 10,
+    log: [],
+    playedCards: [],
+    counteredBeats: 0,
+    activeEffects: [],
+    unsealedCards: [],
+    finished: null,
+  });
+  const 封印玩家 = (cardTier: string) => ({
+    name: '莱恩',
+    level: 9,
+    attributes: { str: 14, con: 14, dex: 12, int: 10, spi: 10 },
+    hp: 155,
+    maxHp: 155,
+    totalExp: 0,
+    inventory: [
+      {
+        name: '封印试卡',
+        type: '卡牌',
+        quantity: 1,
+        cardTier,
+        词条: ['技能', '火'],
+        sealed: true,
+        recipe: { fusionKind: '叠加' },
+      },
+    ],
+  });
+
+  it('nat20 → 必启封：效果发动 + 破封账 + 参战卡账', async () => {
+    const setSkirmishSession = vi.fn();
+    const pipeline = makePipeline({
+      player: 封印玩家('白铁'), // 白铁 DC8：20+0 必启封
+      skirmishSession: 封印会话(),
+      setSkirmishSession,
+    });
+    (pipeline as any).rollD20 = vi.fn(() => 20);
+    await (pipeline as any).submitSkirmishCounter({ kind: '卡', name: '封印试卡' });
+
+    const s = setSkirmishSession.mock.calls[setSkirmishSession.mock.calls.length - 1][0];
+    expect(s.log.join('\n')).toContain('启封判定：d20=20+意志0 vs DC8 → 启封');
+    expect(s.unsealedCards).toEqual(['封印试卡']);
+    expect(s.playedCards).toEqual(['封印试卡']);
+    expect(s.finished).toBeNull();
+  });
+
+  it('nat1 + 星辉 → 反噬：效果炸空 + 全额反冲，不记已用账', async () => {
+    const setSkirmishSession = vi.fn();
+    const pipeline = makePipeline({
+      player: 封印玩家('星辉'), // DC20：1+0-20 = -19 → 反噬，反冲 20
+      skirmishSession: 封印会话(),
+      setSkirmishSession,
+    });
+    (pipeline as any).rollD20 = vi.fn(() => 1);
+    await (pipeline as any).submitSkirmishCounter({ kind: '卡', name: '封印试卡' });
+
+    const s = setSkirmishSession.mock.calls[setSkirmishSession.mock.calls.length - 1][0];
+    expect(s.log.join('\n')).toContain('→ 反噬');
+    expect(s.log.join('\n')).toContain('失控反冲：玩家 −20');
+    expect(s.unsealedCards).toEqual(['封印试卡']); // 封印破了
+    expect(s.playedCards).toEqual([]); // 但效果炸空，不算参战
+    // 反制失败（行动值0）吃威胁 10 − 防御减免5 = 5，再吃反冲 20：155−5−20 = 130
+    expect(s.playerHp).toBe(130);
+  });
 });

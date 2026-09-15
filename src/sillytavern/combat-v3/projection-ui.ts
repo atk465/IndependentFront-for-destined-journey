@@ -54,6 +54,31 @@ export function projectToUi(
       }
       continue;
     }
+    // 阶段5-闭环：玩卡/启封双发——结构化事件（store 记账：消耗结算与重打拒绝）先落，
+    // 叙事版本随后（面板可读）。
+    if (evt.kind === 'UnsealJudged') {
+      out.push({
+        type: 'v3_unseal_judged',
+        unitId: evt.unitId,
+        name: evt.name,
+        outcome: evt.outcome,
+        roll: evt.roll,
+        dc: evt.dc,
+        margin: evt.margin,
+      });
+      const flavor: Record<string, string> = {
+        启封: '封印受控破裂',
+        哑火: '封印扛住了这次启封——卡面黯淡下去',
+        暴走: '封印脱控，力量逸出掌控',
+        反噬: '封印物反扑启封者',
+      };
+      out.push({
+        type: 'v3_narrative',
+        text: `启封【${evt.name}】：d20=${evt.roll} vs DC${evt.dc} —— ${flavor[evt.outcome] ?? evt.outcome}`,
+        round: 0,
+      });
+      continue;
+    }
     out.push(mapEvent(evt));
     // v3_combat_started 先落 store（创建 v3ActiveCombat），快照随后填充 units —— 顺序不可换
     if (evt.kind === 'CombatOpened' && opts?.units) {
@@ -247,6 +272,7 @@ function mapEvent(evt: DomainEvent): CombatEvent {
         op: 'summoned',
         unitId: evt.unitId,
         unitName: evt.unitId,
+        sourceItem: evt.sourceItem,
       };
     case 'UnitDespawned':
       return {
@@ -287,6 +313,39 @@ function mapEvent(evt: DomainEvent): CombatEvent {
       return { type: 'v3_effect_rejected', code: evt.code, detail: evt.detail };
     case 'DiceEpochBegan':
       return { type: 'v3_dice_epoch', outputId: evt.outputId };
+    case 'CardPlayed':
+      // 阶段5-闭环：结构化记账事件（消耗结算/重打拒绝）——projectToUi 循环已先行
+      // 特判并 continue，此处仅为穷尽性兜底；展示由 handleAction 的 NarrativeCue 承担
+      return {
+        type: 'v3_card_played',
+        unitId: evt.unitId,
+        name: evt.name,
+        kind: evt.cardKind,
+        sealed: evt.sealed,
+      };
+    case 'LandscapeSet':
+      // 阶段4：地景更迭走叙事事件（当前地景的常驻展示在 view.landscape，面板消费）
+      return {
+        type: 'v3_narrative',
+        text: evt.replaced
+          ? `地景更迭：【${evt.replaced}】退去，【${evt.name}】铺开`
+          : `地景【${evt.name}】铺开`,
+        round: 0,
+      };
+    case 'UnsealJudged': {
+      // 阶段5：启封判定结果（数值细节在事件里，面板文案只报档）
+      const flavor: Record<string, string> = {
+        启封: '封印受控破裂',
+        哑火: '封印扛住了这次启封',
+        暴走: '封印脱控，力量逸出',
+        反噬: '封印物反扑启封者',
+      };
+      return {
+        type: 'v3_narrative',
+        text: `启封【${evt.name}】：d20=${evt.roll} vs DC${evt.dc} —— ${flavor[evt.outcome] ?? evt.outcome}`,
+        round: 0,
+      };
+    }
 
     default: {
       // 穷尽兜底（R6 / A2-6）：新增 DomainEvent 未接映射必须编译报错。

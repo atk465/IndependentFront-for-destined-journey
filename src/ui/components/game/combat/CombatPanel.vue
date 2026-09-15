@@ -7,6 +7,7 @@ import CombatHeader from './CombatHeader.vue';
 import CombatUnitCard from './CombatUnitCard.vue';
 import CombatMessageFlow from './CombatMessageFlow.vue';
 import CombatActionBar from './CombatActionBar.vue';
+import CombatDeckStrip from './CombatDeckStrip.vue';
 import AppModal from '../../shared/AppModal.vue';
 import AppButton from '../../shared/AppButton.vue';
 
@@ -267,6 +268,8 @@ const isCombatThinking = computed(() => {
                 </div>
               </section>
             </main>
+
+            <CombatDeckStrip />
 
             <CombatActionBar />
 

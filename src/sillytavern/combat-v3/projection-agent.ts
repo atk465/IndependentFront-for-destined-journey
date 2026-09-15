@@ -15,7 +15,7 @@
  * 铁律（plan §1.3）：本文件零 Math.random / new Function / eval；纯函数 + 不可变。
  */
 
-import type { CombatView } from './types';
+import type { CombatView, DeckCardData } from './types';
 
 /**
  * 把 v3 CombatView 投影为战斗 Agent 的文本面板（战况总览 + 行动顺序）。
@@ -23,8 +23,14 @@ import type { CombatView } from './types';
  * 数据源：CombatView（session.snapshot() 返回的只读投影）——coordinator 边界只能
  * 拿到 view，拿不到内部 CombatState（内核把 state 藏在闭包里）。供 coordinator
  * 组装 Agent prompt 上下文（§4.3 敌方 PlayerCommand 路由用）。
+ *
+ * 阶段5-闭环：opts.deckCards（会话编组快照）→ 追加「我方卡组」区——主持人看到
+ * 玩家能打出什么卡，才会正确提名/演绎（按名提名，Code 按编组快照装配）。
  */
-export function projectToAgent(view: Readonly<CombatView>): string {
+export function projectToAgent(
+  view: Readonly<CombatView>,
+  opts?: { deckCards?: readonly DeckCardData[] },
+): string {
   const lines: string[] = [];
   lines.push('<action_info>');
   lines.push(`  {战况总览}`);
@@ -61,6 +67,21 @@ export function projectToAgent(view: Readonly<CombatView>): string {
   const fp = view.resourceSnapshots?.FP;
   if (fp !== undefined) {
     lines.push(`  | FP: ${fp} |`);
+  }
+
+  // 阶段4：当前地景（战斗主持人需要知道环境）
+  if (view.landscape) {
+    const words = view.landscape.词条.length > 0 ? view.landscape.词条.join('/') : '—';
+    lines.push(`  | 地景: ${view.landscape.name}（${view.landscape.cardTier} | ${words}） |`);
+  }
+
+  // 阶段5-闭环：我方卡组（玩家可打出的牌面清单）
+  if (opts?.deckCards?.length) {
+    lines.push('  {我方卡组}');
+    for (const c of opts.deckCards) {
+      const words = c.词条.length > 0 ? c.词条.join('/') : '—';
+      lines.push(`  | ${c.name}（${c.cardTier} | ${words}${c.sealed ? ' | 未启封' : ''}） |`);
+    }
   }
 
   lines.push('</action_info>');

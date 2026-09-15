@@ -568,6 +568,23 @@ export interface FrozenSlot {
  * 所有战斗变化（HP/MP/SP/状态/槽位/先攻）只存在于这一个对象内；终局一次落库。
  * revision 单调递增（架构 §三 3.2）；applyPending 是唯一写入函数（state.ts）。
  */
+/**
+ * 地景事实（阶段4 地景卡）。cardTier 用 string：v3 类型零 import 父级
+ * （不引 field-enums 的 CardTier），品质在内核只是展示面数据。
+ */
+export interface LandscapeFacts {
+  /** 地景卡名（逻辑键=名字） */
+  name: string;
+  /** 卡牌品质（展示面，白铁…星辉） */
+  cardTier: string;
+  /** 词条（含「地景」形态词条与元素/复合词条） */
+  词条: readonly string[];
+  /** 铺开者单位 id */
+  setByUnitId: string;
+  /** 铺开回合（1-based，取自 state.round，零时钟） */
+  setInRound: number;
+}
+
 export interface CombatState {
   /** 战斗 id */
   combatId: string;
@@ -595,6 +612,14 @@ export interface CombatState {
    * 大多数战斗/既有 state 无冻结，缺省 undefined（不破坏既有构造）。
    */
   frozenSlots?: readonly FrozenSlot[];
+  /**
+   * 当前地景（阶段4 地景卡：山川河流封入卡牌）。可选字段——不开地景的战斗
+   * 缺省 undefined（不破坏既有构造与回放；夹具只存 bundle/commands，逐字节不变）。
+   * 至多一份：再铺替换旧的（LandscapeSet.replaced 记录被替换者）。
+   * 🔴 这是**事实**不是效果：地景的数值面走卡牌自带 automata DSL（既有 18 窗口），
+   *    内核零硬编码内容数（世界观数值归世界书/卡牌，Code 只管结算）。
+   */
+  landscape?: LandscapeFacts;
   /** 中断续跑帧（ResolveChoice / BeginOutput 用） */
   resolution?: ResolutionFrame;
   /** 只追加变更日志（架构 §三 3.4） */
@@ -624,6 +649,8 @@ export interface CombatView {
   currentTurnIndex: number;
   units: Readonly<Record<string, CombatUnitView>>;
   resourceSnapshots: { FP: number };
+  /** 当前地景（阶段4；不开地景的战斗缺席） */
+  landscape?: { name: string; cardTier: string; 词条: readonly string[] };
   terminal?: { reason: TerminalReason; winner?: string };
 }
 
@@ -673,6 +700,8 @@ export type PendingChangeSet = {
   turnOpenSlots?: { actorId: string; attacks: number; actions: number }[];
   /** 槽位冻结补丁（A4-3 action.freezeSlot）：applyPending 合并进 state.frozenSlots（max_rounds） */
   freezeSlotPatches?: FrozenSlot[];
+  /** 地景补丁（阶段4）：applyPending 替换进 state.landscape（同 Command 末尾一次原子提交） */
+  landscapePatch?: LandscapeFacts;
   /** 终局触发（checkTerminal 在 phases/terminal.ts 内应用） */
   terminal?: { reason: TerminalReason; winner?: string };
 };
@@ -773,6 +802,8 @@ export type RequiredInput =
         role?: string;
         sourceItem: string;
         summonerIntent: string;
+        /** 阶段5-闭环（名字即契约）：召唤卡打出时约束生成角色名 = 卡名 */
+        name?: string;
       };
       constraints: {
         divinityCap: number;
@@ -926,7 +957,20 @@ export type CombatCommand =
       kind: 'DeclareAction';
       actorId: string;
       cost: 'action';
-      payload: { actionType: 'item' | 'move' | 'focus' | 'defend'; description?: string };
+      payload: {
+        actionType: 'item' | 'move' | 'focus' | 'defend';
+        description?: string;
+        /**
+         * 阶段5 玩卡通道（阶段4 的 payload.landscape 更名扩形，设计 phase5 §2）：
+         * actionType='item' 时可携带（其他 actionType 携带则忽略）。
+         * 🔴 正规来源是**会话层**从制卡师背包解析出的真实 CardItem（与
+         *    SupplyUnit.definition 同一信任模型：内核信任调用方的结构化数据）。
+         *    词条含「地景」→ 设 state.landscape + automata 全部持久注册（环境常驻）；
+         *    其余卡 → action.declared 订阅者打出即发动，其余窗口持久注册（光环）。
+         *    sealed=true 先过启封判定（intentCheck 通道抽骰，judgeUnseal）。
+         */
+        card?: DeckCardData;
+      };
     }
   | {
       commandId: string;
@@ -1037,7 +1081,12 @@ export type CombatCommand =
 export interface CommandRejection {
   /** 拒绝码 */
   code:
-    'INVALID_PHASE' | 'STALE_REVISION' | 'TARGET_NOT_PRESENT' | 'SLOT_EXHAUSTED' | 'UNKNOWN_KIND';
+    | 'INVALID_PHASE'
+    | 'STALE_REVISION'
+    | 'TARGET_NOT_PRESENT'
+    | 'SLOT_EXHAUSTED'
+    | 'UNKNOWN_KIND'
+    | 'CARD_ALREADY_ACTIVE';
   /** 人类可读原因 */
   message: string;
 }
@@ -1086,6 +1135,8 @@ export interface CombatSession {
   snapshot(): Readonly<CombatView>;
   readonly history: readonly CombatTransition[];
   readonly completed: boolean;
+  /** 阶段5-闭环：玩家卡组编组快照（AI 通道按名解析 declare_action 载荷用；未编组缺席） */
+  readonly deckCards?: readonly DeckCardData[];
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1111,6 +1162,26 @@ export interface CombatDefinitionBundle {
   rulesetRevision: string;
   /** 战斗开始时的 FP 快照（架构 §十二 12.2） */
   resourceSnapshots: { FP: number };
+  /**
+   * 阶段5-闭环：玩家卡组编组快照（1.2 编组制：deck ∩ 背包实物，开战定死）。
+   * 会话层（game-pipeline）从 CharacterState 组装；双通道共用：
+   * - AI 通道：coordinator 按名解析 declare_action 载荷（AI 只提名，Code 装配）
+   * - 玩家通道：player-input 解析器的玩卡分支数据源
+   */
+  deckCards?: readonly DeckCardData[];
+}
+
+/**
+ * 玩卡载荷/编组快照的统一形状（阶段5-闭环）。
+ * 正规来源是会话层从背包解析的真实 CardItem（信任模型同 SupplyUnit.definition）。
+ */
+export interface DeckCardData {
+  name: string;
+  cardTier: string;
+  词条: readonly string[];
+  fusionKind?: '叠加' | '相生' | '相克';
+  sealed?: boolean;
+  automata?: readonly EffectAutomaton[];
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1258,6 +1329,33 @@ export type DomainEvent =
       unitId: string;
       /** 'fled'（Bug C 修复，2026-08-12）：逃跑成功离场，与召唤物到期同走移除语义 */
       reason?: 'expired' | 'active' | 'summoner_down' | 'fled';
+    }
+  | {
+      kind: 'LandscapeSet';
+      unitId: string;
+      name: string;
+      /** 被替换的旧地景名；首铺为 null */
+      replaced: string | null;
+    }
+  | {
+      /** 阶段5-闭环：一次确定生效的玩卡（拒绝/哑火/反噬路径不产此事件）。
+       *  消耗结算与会话临时账的单一事实来源。 */
+      kind: 'CardPlayed';
+      unitId: string;
+      name: string;
+      /** 形态词条类型（card-workshop/card-kind 八类）——不叫 kind：与事件判别符撞名 */
+      cardKind: string;
+      sealed: boolean;
+    }
+  | {
+      /** 阶段5：启封判定结果（意志对抗，骰值来自 intentCheck 通道 → 可回放） */
+      kind: 'UnsealJudged';
+      unitId: string;
+      name: string;
+      outcome: '启封' | '哑火' | '暴走' | '反噬';
+      roll: number;
+      dc: number;
+      margin: number;
     }
   | { kind: 'DamagePrevented'; unitId: string; amount: number; keptHp: number }
   | {

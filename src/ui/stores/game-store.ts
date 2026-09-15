@@ -4,9 +4,13 @@ import type {
   SaveSlot,
   CharacterState,
   ChatMessage,
+  CardItem,
+  InventoryItem,
+  StatePatch,
   MemoryRecord,
   PlotEvent,
   PlotOutline,
+  CardAlbumState,
   CombatState,
   CombatSummaryResult,
   SaveProfile,
@@ -16,7 +20,24 @@ import type {
   DebugTurnRecord,
 } from '@engine/types';
 export type { DebugAgentEntry, DebugTurnRecord } from '@engine/types';
-import type { CombatView, CombatCommand } from '@engine/combat-v3';
+import type { CombatView, CombatCommand, DeckCardData } from '@engine/combat-v3';
+import { tryParsePlayCard } from '@engine/combat-v3';
+import { cardKindOf, isConsumableKind } from '@engine/card-workshop/card-kind';
+import { planRepair } from '@engine/card-workshop/repair';
+import { downedSummonCards } from '@engine/card-workshop/contract';
+import { buildDemoCardsPatches, buildDemoDeckPatches } from '@engine/card-workshop/demo';
+import { toPlainCardAlbum } from '@engine/card-workshop/album';
+import { planCommissionDelivery } from '@engine/card-workshop/commission';
+import { getCommissionDefs } from '@engine/commission-runtime';
+import {
+  fuseEntrySets,
+  getExchangeCatalog,
+  talentExchangePrice,
+} from '@engine/card-workshop/talent-entry';
+import { getReputation as getTalentReputation } from '@engine/save-profile';
+import type { SkirmishSession } from '@engine/card-workshop/skirmish-session';
+import type { SkirmishChoice } from '@engine/card-workshop/skirmish';
+import { createDefaultCharacterState } from '@engine/types';
 import {
   getSave,
   getSaves,
@@ -168,6 +189,18 @@ export const useGameStore = defineStore('game', () => {
   } | null>(null);
   /** 当前行动者 characterId（turn_started 事件更新，单位卡片高亮用） */
   const combatCurrentUnitId = ref<string | null>(null);
+  /** 阶段5-闭环：玩家卡组编组快照（1.2 编组制，开战定死；game-pipeline 开战时灌入）。
+   *  双消费：submitCombatIntent 的确定性玩卡快路 + 战斗卡组条四态显示 */
+  const combatDeckSnapshot = ref<DeckCardData[]>([]);
+  /** 编组快照唯一写入口（game-pipeline startCombatV3 开战时调用） */
+  function setCombatDeckSnapshot(cards: DeckCardData[]) {
+    combatDeckSnapshot.value = cards;
+  }
+  /** 阶段5-闭环（1.3 消耗制）：本局消耗账——consumed = 封印破裂待结算；pending = 封印卡已打出等启封结果 */
+  const combatConsumedCards = ref<string[]>([]);
+  const combatPendingConsume = ref<string[]>([]);
+  /** 阶段5-闭环：本局全部确定生效的玩卡（v3_card_played 事件账，卡组条四态显示用） */
+  const combatPlayedCards = ref<{ name: string; cardKind: string; sealed: boolean }[]>([]);
   /** 🆕 v3：Coordinator 句柄（submitCommand / abandon / 重开），供前端 Command 路由与放弃（C4）
    *  T16 §3.5：+preSnapshotId（pre-combat 快照，重开战斗 restoreSnapshot 用）与
    *  +restart（重开战斗回调 —— pipeline 持有 combat marker，重触发归它）。
@@ -298,12 +331,328 @@ export const useGameStore = defineStore('game', () => {
           v3ActiveCombat.value = { ...v3ActiveCombat.value, phase: 'Terminal' };
         }
         break;
+      // 阶段5-闭环（名字即契约）：召唤卡的伙伴生成上场 → 契约入库（角色名=卡名）。
+      // 同名已存在 = 已契约（自愈语义：静默跳过）；非卡牌召唤（sourceItem 不在编组）不触发。
+      case 'v3_roster_changed':
+        if (evt.op === 'summoned' && evt.sourceItem) {
+          const isCardSummon = combatDeckSnapshot.value.some((c) => c.name === evt.sourceItem);
+          if (isCardSummon) {
+            const unit = v3ActiveCombat.value?.units?.[evt.unitId];
+            void contractCompanion(evt.sourceItem, {
+              hp: unit?.hp ?? 1,
+              maxHp: unit?.maxHp ?? 1,
+              mp: unit?.mp ?? 0,
+              maxMp: unit?.maxMp ?? 0,
+              sp: unit?.sp ?? 0,
+              maxSp: unit?.maxSp ?? 0,
+            });
+          }
+        }
+        break;
       case 'v3_settlement':
         if (v3ActiveCombat.value) {
           v3ActiveCombat.value = { ...v3ActiveCombat.value, phase: 'SettlementCommitted' };
         }
         break;
+      // 阶段5-闭环（1.3 消耗制）：玩卡确定生效 → 消耗卡入待定账（sealed 先挂起等启封结果）
+      case 'v3_card_played':
+        combatPlayedCards.value.push({ name: evt.name, cardKind: evt.kind, sealed: evt.sealed });
+        if (isConsumableKind(evt.kind)) {
+          if (evt.sealed) combatPendingConsume.value.push(evt.name);
+          else combatConsumedCards.value.push(evt.name);
+        }
+        break;
+      // 启封结果定案：哑火 = 封印扛住（卡完好，退出待定账）；破裂 = 落消耗账
+      case 'v3_unseal_judged': {
+        const pending = combatPendingConsume.value;
+        const idx = pending.indexOf(evt.name);
+        if (idx !== -1) {
+          pending.splice(idx, 1);
+          if (evt.outcome !== '哑火') combatConsumedCards.value.push(evt.name);
+        }
+        break;
+      }
     }
+  }
+
+  /** 阶段5-闭环（1.3）：本局消耗账结算出口——取走并清空（settlement 时由 game-pipeline 调用） */
+  function takeConsumedCards(): string[] {
+    const consumed = [...combatConsumedCards.value];
+    combatConsumedCards.value = [];
+    combatPendingConsume.value = [];
+    return consumed;
+  }
+
+  /** 阶段5-闭环（1.4）：卡组条四态投影（可用/生效中/伙伴在场/本局已耗） */
+  const combatDeckStripStates = computed(() =>
+    combatDeckSnapshot.value.map((card) => {
+      const kind = cardKindOf(card.词条);
+      const played = combatPlayedCards.value.some((p) => p.name === card.name);
+      const consumed =
+        combatConsumedCards.value.includes(card.name) ||
+        combatPendingConsume.value.includes(card.name);
+      let state: '可用' | '生效中' | '伙伴在场' | '本局已耗' = '可用';
+      if (consumed) state = '本局已耗';
+      else if (played && kind === '装备') state = '生效中';
+      else if (played && (kind === '召唤' || kind === '军团')) state = '伙伴在场';
+      return { name: card.name, cardTier: card.cardTier, 词条: card.词条, kind, state };
+    }),
+  );
+
+  /**
+   * 阶段5-闭环（名字即契约）：伙伴契约入库。角色名 = 卡名（契约键）；
+   * 同名角色已存在 = 已契约（自愈语义：静默跳过，不抛）。世界内账本只记存在
+   * 与核心资源，完整战斗数值以召唤时的定义在场生效。
+   */
+  async function contractCompanion(
+    cardName: string,
+    resources: { hp: number; maxHp: number; mp: number; maxMp: number; sp: number; maxSp: number },
+  ): Promise<void> {
+    if (!activeSaveId.value) return;
+    if (characters.value.some((c) => c.name === cardName)) return; // 已契约
+    const companion = createDefaultCharacterState({
+      type: 'summon',
+      name: cardName,
+      hp: Math.max(1, resources.hp),
+      maxHp: Math.max(1, resources.maxHp),
+      mp: resources.mp,
+      maxMp: resources.maxMp,
+      sp: resources.sp,
+      maxSp: resources.maxSp,
+    });
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState([
+      {
+        op: 'add_character',
+        target: `characters.${cardName}`,
+        value: companion,
+        metadata: { source: 'card_contract' },
+      },
+    ]);
+    if (!result.success) {
+      // 同名冲突 = 已契约（重复事件并发）——静默；其余错误记日志不阻断战斗
+      console.warn('[GameStore] 伙伴契约入库跳过/失败:', result.errors.join('; '));
+    }
+  }
+
+  /**
+   * 阶段5-闭环（3-①a 一击损坏）：终局扫描——召唤/军团卡的伙伴倒下（HP≤0）
+   * → 卡损坏名单（game-pipeline settlement 提交 update_item data.damaged）。
+   */
+  function collectDamagedSummonCards(): {
+    name: string;
+    changes: { data: Record<string, unknown> };
+  }[] {
+    const units = Object.values(v3ActiveCombat.value?.units ?? {}).map((u) => ({
+      name: u.name,
+      hp: u.hp,
+    }));
+    // update_item 的 data 是整体替换——这里合并现有 data，只翻转 damaged 标记
+    return downedSummonCards(combatDeckSnapshot.value, units).map((name) => {
+      const card = player.value?.inventory.find((i) => i.name === name);
+      return {
+        name,
+        changes: { data: { ...(card?.data ?? {}), damaged: true } },
+      };
+    });
+  }
+
+  // ══════ 交锋拍制战斗（设计共识 §8）：store 持响应式状态，pipeline 持编排 ══════
+  // 架构约束与 v3 同款：store 接触不到 pipeline，pipeline 经 setter 写状态、经
+  // controller 句柄挂编排（同 combatCoordinator 先例）；UI 只调本区块的三个入口。
+
+  /** 交锋拍会话账本（game-pipeline 唯一写入口；null = 无交锋进行中） */
+  const skirmishSession = ref<SkirmishSession | null>(null);
+  /** AI 评估/演绎或结算提交进行中（反制按钮禁用依据，防并发拍） */
+  const skirmishBusy = ref(false);
+
+  function setSkirmishSession(s: SkirmishSession | null) {
+    skirmishSession.value = s;
+  }
+  function setSkirmishBusy(b: boolean) {
+    skirmishBusy.value = b;
+  }
+
+  /** pipeline 挂进来的交锋编排句柄 */
+  const skirmishController = ref<{
+    start: (enemyHint?: string, sceneHint?: string) => Promise<{ ok: boolean; reason?: string }>;
+    counter: (choice: SkirmishChoice) => Promise<void>;
+    flee: (endReason?: string) => Promise<void>;
+  } | null>(null);
+
+  /** controller 未就绪时点下的开战请求（attach 后自动补发——消灭「点了没反应」的时序窗） */
+  let pendingSkirmishStart: { enemyHint?: string; sceneHint?: string } | null = null;
+
+  function setSkirmishController(
+    c: {
+      start: (enemyHint?: string, sceneHint?: string) => Promise<{ ok: boolean; reason?: string }>;
+      counter: (choice: SkirmishChoice) => Promise<void>;
+      flee: (endReason?: string) => Promise<void>;
+    } | null,
+  ) {
+    skirmishController.value = c;
+    if (c && pendingSkirmishStart) {
+      const p = pendingSkirmishStart;
+      pendingSkirmishStart = null;
+      void startSkirmish(p.enemyHint, p.sceneHint);
+    }
+  }
+
+  /** UI 入口：开战（敌情评估预提交整场意图）。busy 防双击；结果明示，不静默 */
+  async function startSkirmish(
+    enemyHint?: string,
+    sceneHint?: string,
+  ): Promise<{ ok: boolean; reason?: string }> {
+    if (skirmishBusy.value) return { ok: false, reason: '上一场交锋还在处理中，稍候片刻' };
+    const c = skirmishController.value;
+    if (!c) {
+      // 编排未就绪（存档还在加载）——记下请求，setSkirmishController 就绪后自动补发
+      pendingSkirmishStart = { enemyHint, sceneHint };
+      return { ok: false, reason: '战斗编排尚未就绪（存档加载中）——已记下，就绪后自动开战' };
+    }
+    skirmishBusy.value = true;
+    try {
+      return await c.start(enemyHint, sceneHint);
+    } finally {
+      skirmishBusy.value = false;
+    }
+  }
+
+  /** UI 入口：一拍反制（出卡或基础应对）。交锋中且静止时才受理 */
+  async function submitSkirmishCounter(choice: SkirmishChoice): Promise<void> {
+    if (skirmishBusy.value) return;
+    if (!skirmishSession.value || skirmishSession.value.finished !== null) return;
+    const c = skirmishController.value;
+    if (!c) return;
+    skirmishBusy.value = true;
+    try {
+      await c.counter(choice);
+    } finally {
+      skirmishBusy.value = false;
+    }
+  }
+
+  /**
+   * 委托交付（卡牌工坊 委托接线 切片 C）：清点（委托存在 / 卡可交付 / matchesCommission
+   * 验收）→ buildDeliveryPatches（上交 + 赏金 + 声望 + 素材）一次 commitChatState 原子提交。
+   * 委托清单来自 commission-runtime 注入缝（内容包第 15 面）；接取由 AI 按委托名立 quest。
+   */
+  async function deliverCommission(
+    commissionName: string,
+    cardName: string,
+  ): Promise<{ ok: boolean; reason?: string }> {
+    if (!activeSaveId.value) return { ok: false, reason: '无活跃存档' };
+    const playerChar = player.value;
+    if (!playerChar) return { ok: false, reason: '无玩家角色' };
+    const commissions = getCommissionDefs();
+    if (commissions.length === 0)
+      return { ok: false, reason: '当前没有委托板（未装含委托的内容包）' };
+    const found = playerChar.inventory.find((i) => i.name === cardName);
+    const card = found?.type === '卡牌' ? (found as never as CardItem) : undefined;
+    if (card && card.data?.damaged === true) {
+      return { ok: false, reason: `【${cardName}】已损坏，先去制卡台修复再交付` };
+    }
+    const plan = planCommissionDelivery({
+      commissions,
+      commissionName,
+      card,
+      playerName: playerChar.name,
+    });
+    if (!plan.ok) return { ok: false, reason: plan.reason };
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState(plan.patches);
+    if (!result.success) return { ok: false, reason: result.errors.join('; ') };
+    await refreshFromDb();
+    return { ok: true };
+  }
+
+  /** UI 入口：结束战斗（主人裁定 2026-09-13：附结束理由，供终局记叙参考；评价 C） */
+  async function fleeSkirmish(endReason?: string): Promise<void> {
+    if (skirmishBusy.value || !skirmishSession.value) return;
+    const c = skirmishController.value;
+    if (!c) return;
+    skirmishBusy.value = true;
+    try {
+      await c.flee(endReason);
+    } finally {
+      skirmishBusy.value = false;
+    }
+  }
+
+  /**
+   * 演示卡注入（仅 dev 模式可调——生产构建会因 import.meta.env.DEV=false 而保留
+   * 函数本身但调用入口在 UI 守卫，生产 bundle 不渲染按钮）。给玩家背包塞 4 张
+   * 各类型演示卡 + 3 份常用素材，并重置卡组为演示卡全集——主人进战斗即可看
+   * 玩卡链路（卡组条 → 单击出牌 → 启封判定 → 召唤/地景/装备/技能效果）。
+   */
+  async function seedDemoCards(): Promise<{ ok: boolean; reason?: string }> {
+    if (!activeSaveId.value || !player.value) return { ok: false, reason: '无活跃存档' };
+    const playerName = player.value.name;
+    const sm = createStateManager(activeSaveId.value);
+    const patches = [...buildDemoCardsPatches(playerName), ...buildDemoDeckPatches(playerName)];
+    const result = await sm.commitChatState(patches);
+    if (result.success) await refreshFromDb();
+    return result.success ? { ok: true } : { ok: false, reason: result.errors.join('; ') };
+  }
+
+  /**
+   * 修复损坏的卡（契约召唤 C' 制，卡牌工坊可玩闭环 4/9）。
+   * 双轨制：模板素材承担修复（必成功）；额外素材强化（元素并入 + 相生复合），
+   * 素材品质高于卡品质 → 品质跃迁（卡 cardTier 与角色 tier 同一次提交双写 + 属性包）。
+   * 规则校验全在引擎 card-workshop/repair.ts 纯函数，这里只装配 patches 提交。
+   */
+  async function repairCard(
+    cardName: string,
+    templateMaterialNames: string[],
+    extraMaterialNames: string[],
+  ): Promise<{ ok: boolean; reason?: string }> {
+    const playerChar = player.value;
+    if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
+    const resolve = (names: string[]): InventoryItem[] =>
+      names
+        .map((n) => playerChar.inventory.find((i) => i.name === n))
+        .filter((i): i is InventoryItem => !!i);
+    const card = playerChar.inventory.find(
+      (i): i is CardItem => i.name === cardName && i.type === '卡牌',
+    );
+    if (!card) return { ok: false, reason: '找不到该卡' };
+
+    const templateMaterials = resolve(templateMaterialNames);
+    const extraMaterials = resolve(extraMaterialNames);
+    const { ok, reason, plan } = planRepair(card, templateMaterials, extraMaterials);
+    if (!ok) return { ok: false, reason };
+
+    const patches: StatePatch[] = [
+      {
+        op: 'update_item',
+        target: `characters.${playerChar.name}`,
+        value: {
+          name: cardName,
+          changes: {
+            data: { ...(card.data ?? {}), ...plan.cardData },
+            ...(plan.upgraded ? { cardTier: plan.newTier } : {}),
+          },
+        },
+      },
+      ...[...templateMaterialNames, ...extraMaterialNames].map((name) => ({
+        op: 'remove_item' as const,
+        target: `characters.${playerChar.name}`,
+        value: { name, quantity: 1 },
+      })),
+    ];
+    if (plan.upgraded) {
+      // 品质跃迁双写（世界内投影）：角色 tier +1（delta）+ 属性包
+      patches.push({
+        op: 'update_character',
+        target: `characters.${playerChar.name}`,
+        value: { tier: 1, attributes: plan.attributeDelta },
+        metadata: { delta: true, source: 'card_repair' },
+      } as StatePatch);
+    }
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState(patches);
+    if (result.success) await refreshFromDb();
+    return result.success ? { ok: true } : { ok: false, reason: result.errors.join('; ') };
   }
 
   /** v3：controller 挂 Coordinator 句柄（game-pipeline 在 coordinator 启动时挂） */
@@ -334,6 +683,22 @@ export const useGameStore = defineStore('game', () => {
    */
   async function submitCombatIntent(text: string): Promise<void> {
     const coordinator = combatCoordinator.value;
+    // 阶段5-闭环（1.1 解析器优先）：玩卡意图走确定性快路——玩卡动词 + 卡组快照内
+    // 卡名命中 → 直接产 Command（零 LLM、零延迟、编组闸门内建）。其余意图照旧交
+    // 主持人 AI 理解（叙事演绎不缺位）。
+    const awaiting = combatAwaitingInput.value;
+    if (awaiting && combatDeckSnapshot.value.length > 0) {
+      const card = tryParsePlayCard(text, combatDeckSnapshot.value);
+      if (card) {
+        await submitCombatCommand({
+          kind: 'DeclareAction',
+          actorId: awaiting.unitId,
+          cost: 'action',
+          payload: { actionType: 'item', card },
+        });
+        return;
+      }
+    }
     if (!coordinator?.submitPlayerIntent) {
       // 无意图桥（旧 coordinator / 测试）→ 静默忽略（与 submitCombatCommand 无 Coordinator 同口径）
       return;
@@ -347,6 +712,10 @@ export const useGameStore = defineStore('game', () => {
     combatLog.value = [];
     combatAwaitingInput.value = null;
     combatCurrentUnitId.value = null;
+    combatDeckSnapshot.value = [];
+    combatConsumedCards.value = [];
+    combatPendingConsume.value = [];
+    combatPlayedCards.value = [];
     combatReady.value = null;
     const c = combatCoordinator.value;
     if (c?.abandon) c.abandon();
@@ -1407,6 +1776,191 @@ export const useGameStore = defineStore('game', () => {
   }
 
   /**
+   * 卡册唯一写入口（卡牌工坊 MVP）：整份 CardAlbumState 经 update_character 落库。
+   * 规则校验（同名≤2 / 容量）在引擎 card-workshop/album.ts，UI 先过纯函数再交这里；
+   * 这里不做规则判断，只负责「提交 → 回读」。
+   */
+  async function updateCardAlbum(album: CardAlbumState): Promise<{ ok: boolean; error?: string }> {
+    if (!activeSaveId.value) return { ok: false, error: '无活跃存档' };
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState([
+      {
+        op: 'update_character',
+        target: `characters.${player.value?.name ?? ''}`,
+        // 🔴 真机 DataCloneError：面板传来的 album 携带 Pinia 响应式数组（Proxy），
+        // IDB 结构化克隆拒收——落库前深净化成普通数组
+        value: { cardAlbum: toPlainCardAlbum(album) },
+      },
+    ]);
+    if (result.success) await refreshFromDb();
+    return result.success ? { ok: true } : { ok: false, error: result.errors.join('; ') };
+  }
+
+  /**
+   * 声望兑换天赋（卡牌工坊 切片 T-S2b）：查兑换目录 → 同名唯一/容量/互斥由
+   * state-manager 门禁终审 → 声望扣费（delta_variable profile.reputation，
+   * source='talent-exchange'）+ 天赋列表追加，同一次 commitChatState 原子提交。
+   */
+  async function exchangeTalent(talentName: string): Promise<{ ok: boolean; reason?: string }> {
+    if (!activeSaveId.value) return { ok: false, reason: '无活跃存档' };
+    const playerChar = player.value;
+    if (!playerChar) return { ok: false, reason: '无玩家角色' };
+    const template = getExchangeCatalog().find((t) => t.name === talentName);
+    if (!template) return { ok: false, reason: '兑换清单里没有这个天赋' };
+    const profile = saveProfile.value;
+    const reputation = profile ? getTalentReputation(profile) : 0;
+    const price = talentExchangePrice(template);
+    if (reputation < price) {
+      return { ok: false, reason: `声望不足（需要 ${price}，当前 ${reputation}）` };
+    }
+    const current = playerChar.talents ?? { capacity: 3, list: [] };
+    if (current.list.some((t) => t.name === template.name)) {
+      return { ok: false, reason: '同名天赋不可重复习得' };
+    }
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState([
+      {
+        op: 'update_character',
+        target: `characters.${playerChar.name}`,
+        value: {
+          talents: {
+            capacity: current.capacity ?? 3,
+            list: [
+              ...current.list.map((t) => ({ ...t })),
+              {
+                name: template.name,
+                description: template.description,
+                source: 'exchange' as const,
+                entries: template.entries.map((e) => ({ ...e })),
+              },
+            ],
+          },
+        },
+      },
+      {
+        op: 'delta_variable',
+        target: 'profile.reputation',
+        amount: -price,
+        metadata: { source: 'talent-exchange' },
+      },
+    ]);
+    if (!result.success) return { ok: false, reason: result.errors.join('; ') };
+    await refreshFromDb();
+    return { ok: true };
+  }
+
+  /** 遗忘天赋（T-S3）：腾出容量位，无返还（二次确认由面板负责）。 */
+  async function forgetTalent(talentName: string): Promise<{ ok: boolean; reason?: string }> {
+    if (!activeSaveId.value) return { ok: false, reason: '无活跃存档' };
+    const playerChar = player.value;
+    const current = playerChar?.talents;
+    if (!playerChar || !current) return { ok: false, reason: '无玩家角色' };
+    if (!current.list.some((t) => t.name === talentName)) {
+      return { ok: false, reason: `没有天赋【${talentName}】` };
+    }
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState([
+      {
+        op: 'update_character',
+        target: `characters.${playerChar.name}`,
+        value: {
+          talents: {
+            capacity: current.capacity,
+            list: current.list.filter((t) => t.name !== talentName),
+          },
+        },
+      },
+    ]);
+    if (!result.success) return { ok: false, reason: result.errors.join('; ') };
+    await refreshFromDb();
+    return { ok: true };
+  }
+
+  /**
+   * 天赋融合（T-S3 融合工作台）：两源天赋条目化学反应（fuseEntrySets：品质保底+
+   * 上限对消成品质突破，其余叠加去重、互斥过滤）→ 产物占用 1 格。
+   * 名字/描述由面板提供（T8-② 裁定：AI 起名为主、玩家自填兜底）；提交带
+   * metadata source='talent-fusion'，写入门禁据此放行品质突破条目。
+   */
+  async function fuseTalents(
+    sourceAName: string,
+    sourceBName: string,
+    productName: string,
+    productDescription?: string,
+  ): Promise<{ ok: boolean; reason?: string }> {
+    if (!activeSaveId.value) return { ok: false, reason: '无活跃存档' };
+    const playerChar = player.value;
+    const current = playerChar?.talents;
+    if (!playerChar || !current) return { ok: false, reason: '无玩家角色' };
+    if (sourceAName === sourceBName) return { ok: false, reason: '不能拿同一个天赋融合自己' };
+    const a = current.list.find((t) => t.name === sourceAName);
+    const b = current.list.find((t) => t.name === sourceBName);
+    if (!a || !b) return { ok: false, reason: '源天赋不存在' };
+    const name = productName.trim();
+    if (!name) return { ok: false, reason: '融合产物需要一个名字' };
+    const mergedEntries = fuseEntrySets(a.entries, b.entries);
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState([
+      {
+        op: 'update_character',
+        target: `characters.${playerChar.name}`,
+        value: {
+          talents: {
+            capacity: current.capacity,
+            list: [
+              ...current.list.filter((t) => t.name !== sourceAName && t.name !== sourceBName),
+              {
+                name,
+                ...(productDescription?.trim() ? { description: productDescription.trim() } : {}),
+                source: 'fusion' as const,
+                entries: mergedEntries,
+              },
+            ],
+          },
+        },
+        metadata: { source: 'talent-fusion' },
+      },
+    ]);
+    if (!result.success) return { ok: false, reason: result.errors.join('; ') };
+    await refreshFromDb();
+    return { ok: true };
+  }
+
+  /** 融合起名缝（game-pipeline 注入；T8-② 裁定 B：AI 起名为主，玩家自填兜底） */
+  let fuseNamingImpl:
+    | ((
+        sourceA: string,
+        sourceB: string,
+        entryLines: string[],
+      ) => Promise<{ name: string; description: string }>)
+    | null = null;
+  function setFuseNamingImpl(
+    impl: (
+      sourceA: string,
+      sourceB: string,
+      entryLines: string[],
+    ) => Promise<{ name: string; description: string }>,
+  ): void {
+    fuseNamingImpl = impl;
+  }
+  async function requestFusionNaming(
+    sourceA: string,
+    sourceB: string,
+    entryLines: string[],
+  ): Promise<{ ok: boolean; name?: string; description?: string; reason?: string }> {
+    if (!fuseNamingImpl) return { ok: false, reason: 'AI 起名未接入' };
+    try {
+      const r = await fuseNamingImpl(sourceA, sourceB, entryLines);
+      return { ok: true, name: r.name, description: r.description };
+    } catch (err) {
+      return {
+        ok: false,
+        reason: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
+
+  /**
    * 单条目重铸（2026-08-24）：把某角色的一条技能/装备/物品交给 item_gen 重写。
    *
    * 🔴 实现走注入缝（GamePipeline.rewriteLoadoutItem），store 不直接碰引擎装配；
@@ -1516,6 +2070,27 @@ export const useGameStore = defineStore('game', () => {
     setCombatCoordinator,
     submitCombatCommand,
     submitCombatIntent,
+    setCombatDeckSnapshot,
+    takeConsumedCards,
+    repairCard,
+    collectDamagedSummonCards,
+    seedDemoCards,
+    skirmishSession,
+    skirmishBusy,
+    setSkirmishSession,
+    setSkirmishBusy,
+    setSkirmishController,
+    startSkirmish,
+    submitSkirmishCounter,
+    fleeSkirmish,
+    deliverCommission,
+    exchangeTalent,
+    forgetTalent,
+    fuseTalents,
+    setFuseNamingImpl,
+    requestFusionNaming,
+    getCommissionDefs,
+    combatDeckStripStates,
     abandonCombat,
     skipCombat,
     startCombat,
@@ -1589,6 +2164,7 @@ export const useGameStore = defineStore('game', () => {
     restoreToSnapshot,
     removeItem,
     removeSkill,
+    updateCardAlbum,
     removeCharacter,
     setPlayerLocation,
     rewriteLoadoutItem,

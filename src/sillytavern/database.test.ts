@@ -1426,6 +1426,7 @@ describe('exportAllData / importAllData', () => {
       saveId: 'save_legacy',
       fp: 0,
       fpHistory: [],
+      reputation: 0,
       contracts: [],
       achievements: [],
       news: [],

@@ -5,7 +5,7 @@
  * 这条缝存在的全部理由是让引擎不再反向 import 前端 store，而它的四个消费方
  * （agent-tools 品牌面 / random-tables 名字池 / bloodlines 血脉集 / location-db 地点集）
  * 在**注册表还没灌注**的那一段时间里也会被调用。所以真正要钉住的是：
- *   · 没装过时是十面俱全的空骨架，不是 `undefined`、不是 `null`、不抛
+ *   · 没装过时是十一面俱全（第 15 面 commissions 加入）的空骨架，不是 `undefined`、不是 `null`、不抛
  *   · 空骨架每次是**新对象**（被下游改一格不会污染此后所有兜底调用）
  *   · 读取按调用时刻现取（重装之后立刻可见），不是某次读数的快照
  *
@@ -44,13 +44,14 @@ afterEach(() => {
 });
 
 describe('兜底：没人装过时的空骨架', () => {
-  it('十面俱全且全为 undefined（消费方走的是它们本来就有的空值路径）', () => {
+  it('十一面俱全（第 15 面 commissions 加入）且全为 undefined（消费方走的是它们本来就有的空值路径）', () => {
     const reg = getContentRegistry();
     expect(Object.keys(reg).sort()).toEqual(
       [
         'bloodlines',
         'branding',
         'catalog',
+        'commissions',
         'imageDialects',
         'locations',
         'mapPack',

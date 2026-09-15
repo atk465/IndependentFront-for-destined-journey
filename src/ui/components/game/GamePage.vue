@@ -31,8 +31,13 @@ import SnapshotPanel from './SnapshotPanel.vue';
 import CgGalleryPanel from './CgGalleryPanel.vue';
 import MapPanel from './MapPanel.vue';
 import DebugPanel from './DebugPanel.vue';
+import CardAlbumPanel from './cards/CardAlbumPanel.vue';
+import CommissionBoard from './cards/CommissionBoard.vue';
+import TalentPanel from './cards/TalentPanel.vue';
+import CraftBench from './cards/CraftBench.vue';
 import MiniPlayer from './MiniPlayer.vue';
 import CombatPanel from './combat/CombatPanel.vue';
+import SkirmishPanel from './combat/SkirmishPanel.vue';
 
 const game = useGameStore();
 const ui = useUIStore();
@@ -303,13 +308,30 @@ onBeforeUnmount(() => {
 });
 
 async function handleSend(content: string) {
-  if (game.isGenerating || !pipeline) return;
+  // 🔴 2026-09-13 真机：这两个守卫原先**静默 return** —— 一旦某个请求长时间不返回
+  //（上游 60s 超时/重试中），玩家看到的就是「按什么都没反应」，无从判断是卡死还是
+  // 在生成。改为明说原因：生成中提示可点停止；管线缺失提示重进存档。
+  if (!pipeline) {
+    ui.toast('游戏管线未就绪，请退出存档后重新进入', 'error');
+    return;
+  }
+  if (game.isGenerating) {
+    ui.toast('本回合生成中：可点「停止」中断，或等待其结束', 'info');
+    return;
+  }
   cancelStreamingPreview();
   await pipeline.run(content, handleStoryChunk);
 }
 
 async function handleRetry(messageId: string) {
-  if (game.isGenerating || !pipeline) return;
+  if (!pipeline) {
+    ui.toast('游戏管线未就绪，请退出存档后重新进入', 'error');
+    return;
+  }
+  if (game.isGenerating) {
+    ui.toast('本回合生成中：可点「停止」中断，或等待其结束', 'info');
+    return;
+  }
   const message = game.messages.find((entry) => entry.id === messageId && entry.role === 'user');
   if (!message) return;
   cancelStreamingPreview();
@@ -379,6 +401,9 @@ function onModalOpenChange(v: boolean) {
 
     <!-- M5 战斗面板（isInCombat 驱动，覆盖层） -->
     <CombatPanel />
+
+    <!-- 交锋拍制战斗面板（设计共识 §8；session 驱动，战报审计行走正文流） -->
+    <SkirmishPanel />
 
     <AppModal
       title="背包 / 装备 / 技能"
@@ -469,6 +494,46 @@ function onModalOpenChange(v: boolean) {
       @update:open="onModalOpenChange"
     >
       <DebugPanel />
+    </AppModal>
+    <AppModal
+      title="卡册 · 卡兰大陆"
+      :open="game.activeModal === 'cardAlbum'"
+      size="xl"
+      closable
+      @close="game.closeModal()"
+      @update:open="onModalOpenChange"
+    >
+      <CardAlbumPanel />
+    </AppModal>
+    <AppModal
+      title="公会委托板 · 卡兰大陆"
+      :open="game.activeModal === 'commissionBoard'"
+      size="lg"
+      closable
+      @close="game.closeModal()"
+      @update:open="onModalOpenChange"
+    >
+      <CommissionBoard />
+    </AppModal>
+    <AppModal
+      title="天赋 · 卡兰大陆"
+      :open="game.activeModal === 'talentPanel'"
+      size="lg"
+      closable
+      @close="game.closeModal()"
+      @update:open="onModalOpenChange"
+    >
+      <TalentPanel />
+    </AppModal>
+    <AppModal
+      title="制卡工作台"
+      :open="game.activeModal === 'craftBench'"
+      size="xl"
+      closable
+      @close="game.closeModal()"
+      @update:open="onModalOpenChange"
+    >
+      <CraftBench />
     </AppModal>
 
     <!-- 调试面板 (Alt+Shift+D) -->

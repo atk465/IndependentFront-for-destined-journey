@@ -119,13 +119,38 @@ export type CombatEvent =
     }
   | { type: 'v3_status_changed'; unitId: string; statusId: string; op: 'applied' | 'removed' }
   | { type: 'v3_morale_changed'; unitId: string; state: string }
-  | { type: 'v3_roster_changed'; op: 'summoned' | 'despawned'; unitId: string; unitName: string }
+  | {
+      type: 'v3_roster_changed';
+      op: 'summoned' | 'despawned';
+      unitId: string;
+      unitName: string;
+      /** 阶段5-闭环：召唤来源（召唤卡名 = 契约键；会话层据它做伙伴契约入库） */
+      sourceItem?: string;
+    }
   | { type: 'v3_special_damage'; targetId: string; final: number; kind: string }
   | { type: 'v3_rule_override'; effectDescription: string; reason?: string }
   | { type: 'v3_effect_rejected'; code: string; detail: string }
   | { type: 'v3_dice_epoch'; outputId: string }
   | { type: 'v3_settlement'; fpDelta: number; reason: string; winner?: string }
   | { type: 'v3_narrative'; text: string; round: number }
+  | {
+      /** 阶段5-闭环：一次确定生效的玩卡（消耗结算与会话临时账的单一事实来源） */
+      type: 'v3_card_played';
+      unitId: string;
+      name: string;
+      kind: string;
+      sealed: boolean;
+    }
+  | {
+      /** 阶段5-闭环：启封判定结果（哑火不耗、破裂即耗的结算判据） */
+      type: 'v3_unseal_judged';
+      unitId: string;
+      name: string;
+      outcome: '启封' | '哑火' | '暴走' | '反噬';
+      roll: number;
+      dc: number;
+      margin: number;
+    }
   | { type: 'v3_awaiting_player_input'; unit: string; unitId: string; round: number }
   | {
       /**

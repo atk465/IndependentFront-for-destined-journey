@@ -22,8 +22,25 @@ export const EQUIP_SLOTS = [
 export type EquipSlot = (typeof EQUIP_SLOTS)[number];
 
 /** 物品类型 */
-export const ITEM_TYPES = ['装备', '消耗品', '材料', '任务物品', '特殊'] as const;
+export const ITEM_TYPES = ['装备', '消耗品', '材料', '任务物品', '特殊', '卡牌'] as const;
 export type ItemType = (typeof ITEM_TYPES)[number];
+
+/** 卡牌品质（制卡系统 5 级，独立于 7 级装备品质；卡兰大陆世界观） */
+export const CARD_TIERS = ['白铁', '青铜', '白银', '鎏金', '星辉'] as const;
+export type CardTier = (typeof CARD_TIERS)[number];
+
+/** 制作行业（对齐世界书 4 种 + 制卡；2026-09-12 自 types.ts 收口，铁律5） */
+export const CRAFT_INDUSTRIES = ['锻造', '炼金', '烹饪', '裁缝', '制卡'] as const;
+export type CraftIndustry = (typeof CRAFT_INDUSTRIES)[number];
+
+/** 行业 → 核心属性映射（随行业枚举同址收口） */
+export const CRAFT_INDUSTRY_ATTRIBUTE: Record<CraftIndustry, string> = {
+  锻造: '力量',
+  炼金: '智力',
+  烹饪: '精神',
+  裁缝: '敏捷',
+  制卡: '灵感',
+};
 
 /** 7 级品质（世界书 #417617 品质体系） */
 export const RARITY_LEVELS = ['普通', '优良', '稀有', '史诗', '传说', '神话', '唯一'] as const;
@@ -79,6 +96,7 @@ const ITEM_TYPE_ALIASES = Object.assign(Object.create(null) as Record<string, It
   quest: '任务物品',
   special: '特殊',
   道具: '特殊',
+  card: '卡牌',
 } satisfies Record<string, ItemType>);
 
 /** 归一化物品类型。无法识别返回 undefined（type 为可选字段） */
@@ -144,4 +162,11 @@ export function normalizeStatusCategory(raw: string): StatusCategory {
   const s = (raw ?? '').trim();
   if ((STATUS_CATEGORIES as readonly string[]).includes(s)) return s as StatusCategory;
   return STATUS_CATEGORY_ALIASES[s.toLowerCase()] ?? '特殊';
+}
+
+/** 归一化制作行业。无法识别返回 undefined（调用方按既有约定兜底 '锻造'） */
+export function normalizeCraftIndustry(raw: string): CraftIndustry | undefined {
+  const s = (raw ?? '').trim();
+  if ((CRAFT_INDUSTRIES as readonly string[]).includes(s)) return s as CraftIndustry;
+  return undefined;
 }

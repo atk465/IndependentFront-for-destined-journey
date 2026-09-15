@@ -54,6 +54,7 @@ const hasApi = computed(() => s.apiPool.length > 0);
 // ============================================================
 type Section = SettingsSection;
 const activeSection = ref<Section>(ui.consumeSettingsSectionRequest() ?? 'api');
+const isDev = import.meta.env.DEV;
 
 const navItems: { key: Section; label: string; icon: string }[] = [
   { key: 'api', label: 'API 配置', icon: 'fa-solid fa-plug' },
@@ -244,7 +245,7 @@ onMounted(() => {
             <DataSection v-if="activeSection === 'data'" />
 
             <!-- ========== 开发者模式 ========== -->
-            <DeveloperSection v-if="activeSection === 'developer'" />
+            <DeveloperSection v-if="activeSection === 'developer'" :dev-mode="isDev" />
 
             <!-- ========== 关于 ========== -->
             <AboutSection v-if="activeSection === 'about'" />

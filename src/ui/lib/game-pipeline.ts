@@ -19,6 +19,7 @@ import type {
   ApiEndpoint,
   AgentResult,
   AgentPreset,
+  CardItem,
   CombatTriggerMarker,
   CombatSummaryResult,
   RecentCombatInfo,
@@ -34,6 +35,34 @@ import type {
   DebugAgentEntry,
   PlotEvent,
 } from '@engine/types';
+import { isPlayableCard } from '@engine/card-workshop/card-kind';
+import { isDamaged } from '@engine/card-workshop/repair';
+import {
+  judgeCrush,
+  type SkirmishAction,
+  type SkirmishChoice,
+} from '@engine/card-workshop/skirmish';
+import {
+  cardPlayPlan,
+  sealedCardPlay,
+  type CardInPlayEffect,
+} from '@engine/card-workshop/entry-combat';
+import { willModifierOf } from '@engine/card-workshop/unsealing';
+import { getCommissionDefs } from '@engine/commission-runtime';
+import { buildCraftBiasLines } from '@engine/card-workshop/talent-entry';
+import { runTalentFusionNaming } from '@engine/card-workshop/talent-naming';
+import { basicCounterAction, deriveCombatStats } from '@engine/card-workshop/derived-stats';
+import {
+  crushFinish,
+  fleeSkirmish,
+  playBeat,
+  settleSkirmish,
+  startSkirmish,
+  type SkirmishSession,
+} from '@engine/card-workshop/skirmish-session';
+import { buildSkirmishSettlementPatches } from '@engine/card-workshop/skirmish-settlement';
+import { runSkirmishAssessment, runSkirmishChronicle } from '@engine/card-workshop/skirmish-agent';
+import type { DeckCardData } from '@engine/combat-v3';
 import type {
   ImageGenFailure,
   ImagePromptOutput,
@@ -118,6 +147,26 @@ export type StoryChunkCallback = (chunk: string, isComplete: boolean) => void;
  */
 function isAbortError(err: unknown): boolean {
   return (err as { name?: string } | null | undefined)?.name === 'AbortError';
+}
+
+/**
+ * 阶段5-闭环（1.2 编组制）：玩家卡组快照 = cardAlbum.deck ∩ 背包实物卡牌（按名），
+ * 素材卡排除（不可战斗打出）。开战时调用一次、战斗期间固定。
+ * 双通道共用：bundle.deckCards（AI 通道按名解析）+ store 快照（玩家文本确定性快路）。
+ */
+function buildDeckCardSnapshot(player: CharacterState): DeckCardData[] {
+  return (player.cardAlbum?.deck ?? [])
+    .map((name) => player.inventory.find((i) => i.name === name && i.type === '卡牌'))
+    .filter((i): i is CardItem => !!i)
+    .filter((card) => isPlayableCard(card) && !isDamaged(card))
+    .map((card) => ({
+      name: card.name,
+      cardTier: card.cardTier,
+      词条: card.词条 ?? [],
+      fusionKind: card.recipe?.fusionKind,
+      sealed: card.sealed ?? false,
+      automata: card.automata,
+    }));
 }
 
 /**
@@ -416,6 +465,13 @@ export class GamePipeline {
     this.game = deps.gameStore;
     this.settings = deps.settingsStore;
     this.saveId = deps.saveId;
+    this.attachSkirmishController();
+    // 融合起名缝（AI 零编数：只起名写描述；mock store 无此方法则跳过）
+    this.game.setFuseNamingImpl?.(async (sourceA, sourceB, entryLines) => {
+      const r = await this.runTalentFusionNaming(sourceA, sourceB, entryLines);
+      if (!r.ok || !r.name) throw new Error(r.reason ?? 'AI 起名失败');
+      return { name: r.name, description: r.description ?? '' };
+    });
   }
 
   // 🪦 Q-06：`syncSnapshotSettings` 已删。它把 settings-store 的两个字段每轮抄进
@@ -1131,6 +1187,12 @@ export class GamePipeline {
       //    漏供任一格的症状都不是报错，是那个块静默消失或永远静默（blurByDefault 的教训），
       //    故 placeholder-registry.random-events.test.ts 有一条源码断言盯着这三行。
       randomEventOffer: this.buildRandomEventOffer(),
+      // 委托板（卡牌工坊）：内容注册表第 15 面经 commission-runtime 缝的派生清单。
+      // 漏供的症状同样不是报错，是委托块静默消失。战斗静默由 resolver 判 combatActive。
+      commissionDefs: getCommissionDefs(),
+      // 天赋（卡牌工坊）：玩家 CharacterState.talents 快照（{{TALENT}} 数据源；
+      // 玩家无天赋时为 undefined → 块静默，出身必选保证建档即有）。
+      talents: this.game.player?.talents,
       randomEventsEnabled: getEngineSettings().randomEventsEnabled,
       combatActive: this.game.isInCombat,
       // 🔴 2026-08-02 修: 初始技能走 item_gen 链路 —— request_dispatcher 的 {{SKILL_STATE}}
@@ -2340,15 +2402,25 @@ export class GamePipeline {
     marker: CombatTriggerMarker,
     storyOutput: string,
   ): Promise<CombatSummaryResult | null> {
-    // feature flag（架构 §十四 14.5）：分支点唯一。v3 走 coordinator；打回 'v2' 走优雅退役提示。
+    // feature flag（架构 §十四 14.5）：分支点唯一。
+    // 🔀 战斗形态改版（设计共识 §8 问题 28，主人裁定「不使用战斗页面」2026-09-12）：
+    // combat_trigger 统一改走**交锋拍**——正文流战报 + 数值约束结算，v3 战斗页退役待收。
+    // 回滚开关：SKIRMISH_DEFAULT 改回 false 即恢复 v3 战斗页（引擎代码保留 dormant）。
+    const SKIRMISH_DEFAULT = true;
     const engineVersion = this.settings?.settings?.combatEngineVersion ?? 'v3';
-    if (engineVersion === 'v3') {
+    if (!SKIRMISH_DEFAULT && engineVersion === 'v3') {
       return this.handleCombatTriggerV3(marker, storyOutput);
+    }
+    if (SKIRMISH_DEFAULT && engineVersion !== 'v2') {
+      // 交锋拍内联结算 + 终局演绎，不经 v3 的 CombatSummary 确认框
+      await this.handleCombatTriggerSkirmish(marker);
+      return null;
     }
     // ⚠️ v2 战斗运行时已于 M5 真正退役删除（combat-runner/pipeline/resolver/settlement）。
     //    打回 'v2' 不再真实开局战斗——改为优雅退役提示，避免悬空 import 与编译错误。
+    //    （交锋拍分支的提前 return 在上方；走到这里 = 显式打回 'v2'。）
     const message =
-      '【系统】v2 战斗引擎已退役删除。若非显式切换，战斗请走 v3（当前 AppSettings.combatEngineVersion）' +
+      '【系统】v2 战斗引擎已退役删除。若非显式切换，战斗请走交锋拍（当前 AppSettings.combatEngineVersion）' +
       `。当前设置被显式打回 'v2'，本场战斗不执行。`;
     console.warn('[GamePipeline] combat v2 分支已退役，返回优雅提示而非真实开局');
     this.emitMessage(message, 'assistant');
@@ -2361,6 +2433,24 @@ export class GamePipeline {
       rounds: 1,
       outcome: 'draw',
     };
+  }
+
+  /**
+   * 交锋拍分支：marker 里的敌情线索 → 敌情评估预提交 → 正文流交锋。
+   * 结算与演绎都在 runSkirmishEncounter/settleAndNarrate 内联完成（含落库），
+   * 这里只负责把 dispatcher 的战斗意图翻译成敌方线索。
+   */
+  private async handleCombatTriggerSkirmish(marker: CombatTriggerMarker): Promise<void> {
+    const enemies = (marker.enemies ?? '')
+      .split(/[,，、]/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const enemyHint =
+      [enemies.join('、'), marker.environment].filter(Boolean).join('｜') || undefined;
+    const result = await this.runSkirmishEncounter(enemyHint, marker.environment || undefined);
+    if (!result.ok) {
+      console.warn('[GamePipeline] 交锋拍开局失败:', result.reason);
+    }
   }
 
   /**
@@ -2491,19 +2581,25 @@ export class GamePipeline {
           return inRoster(c);
         })
         .map((c) => characterToCombatParticipant(c, sideOf(c)));
+      if (participants.length === 0 || !playerC) {
+        this.game.exitCombat();
+        this.game.clearAgentStatus('combat_v3');
+        return null;
+      }
       const fpSnapshot = this.game.fp ?? 0;
+      // 阶段5-闭环（1.2 编组制）：玩家卡组快照 = deck ∩ 背包实物（素材卡排除），
+      // 开战定死、战斗期间不变。双通道共用：bundle（AI 通道按名解析）+ store 快照
+      //（玩家自由文本的确定性快路）。
+      const deckCards = buildDeckCardSnapshot(playerC);
       const bundle = {
         combatId: `v3-${Date.now()}-${this.saveId}`,
         combatType: (marker.combatType ?? '标准') as '标准',
         participants,
         rulesetRevision: 'v3-2026-07-31',
         resourceSnapshots: { FP: fpSnapshot },
+        ...(deckCards.length > 0 ? { deckCards } : {}),
       };
-      if (participants.length === 0 || !playerC) {
-        this.game.exitCombat();
-        this.game.clearAgentStatus('combat_v3');
-        return null;
-      }
+      this.game.setCombatDeckSnapshot(deckCards);
 
       // T16 §3.5：_lastCombatMarker 已由就绪版 handleCombatTriggerV3 存档
       //（重开战斗 restart 回调与二次开始都复用它），这里不再重复赋值。
@@ -2649,6 +2745,38 @@ export class GamePipeline {
       });
 
       this.game.clearAgentStatus('combat_v3');
+      // 阶段5-闭环（1.3 消耗制）：本局封印破裂的消耗卡随战斗结果同窗结算（remove_item）。
+      // 哑火不耗（未进消耗账）、放弃不耗（abandon 清账）；同名多张按打出次数逐张扣。
+      const consumedCards = this.game.takeConsumedCards();
+      if (consumedCards.length > 0 && this.ownsActiveSave) {
+        const sm = createStateManager(this.saveId);
+        const result = await sm.commitChatState(
+          consumedCards.map((name) => ({
+            op: 'remove_item' as const,
+            target: `characters.${playerC.name}`,
+            value: { name, quantity: 1 },
+          })),
+        );
+        if (result.errors.length > 0) {
+          console.warn('[GamePipeline] 消耗卡结算部分失败:', result.errors);
+        }
+      }
+      // 阶段5-闭环（3-①a 一击损坏）：伙伴被打倒的召唤/军团卡 → data.damaged 标记。
+      // 损坏卡在下次开战快照中被排除（修复前不可再召）；修复走制卡台修复模式。
+      const damagedCards = this.game.collectDamagedSummonCards();
+      if (damagedCards.length > 0 && this.ownsActiveSave) {
+        const sm = createStateManager(this.saveId);
+        const result = await sm.commitChatState(
+          damagedCards.map((item) => ({
+            op: 'update_item' as const,
+            target: `characters.${playerC.name}`,
+            value: { name: item.name, changes: item.changes },
+          })),
+        );
+        if (result.errors.length > 0) {
+          console.warn('[GamePipeline] 损坏标记结算部分失败:', result.errors);
+        }
+      }
       // 🔴 2026-08-13 真机 debug：战斗终局的 commitChatState 只写 Dexie，而本条链路
       //（store.startCombat → coordinator.start → startCombatV3）不经过 run() 的
       // finally —— store 从不回读，HUD 一直是开战前的血量/经验（满血假象）。
@@ -2712,6 +2840,310 @@ export class GamePipeline {
     }
   }
 
+  // ══════ 交锋拍制战斗（设计共识 §8，问题 28~31）══════
+  // 编排在本层（store 接触不到 pipeline）：AI 评估/演绎 + Code 拍结算 + 同窗原子落库。
+  // UI 经 game-store 三入口（startSkirmish/submitSkirmishCounter/fleeSkirmish）进来，
+  // busy 守卫在 store 入口，本层不再自行判忙。
+
+  /** d20 —— 骰值调用方供给（内核零随机）。MVP 用真随机；接 v3 骰带回放体系为后续工作 */
+  private rollD20(): number {
+    return 1 + Math.floor(Math.random() * 20);
+  }
+
+  /** 构造时挂交锋编排句柄（UI 的三个入口经 store 委托到这里）。
+   *  可选调用：单测的精简 mock store 没有此方法，静默跳过；真实 store 必有。 */
+  attachSkirmishController(): void {
+    this.game.setSkirmishController?.({
+      start: (enemyHint, sceneHint) => this.runSkirmishEncounter(enemyHint, sceneHint),
+      counter: (choice) => this.submitSkirmishCounter(choice),
+      flee: (endReason) => this.fleeSkirmishEncounter(endReason),
+    });
+  }
+
+  /** 开战：敌情评估预提交整场意图 → 会话入账 → 战报开场注入正文流。
+   *  返回结果供调用方明示反馈（dev 按钮/触发方）——评估失败不开战，绝不静默。 */
+  private async runSkirmishEncounter(
+    enemyHint?: string,
+    sceneHint?: string,
+  ): Promise<{ ok: boolean; reason?: string }> {
+    const playerC = this.game.player;
+    if (!playerC) return { ok: false, reason: '没有玩家角色（存档未就绪）' };
+    const endpoint = this.getEndpointForAgent('skirmish_eval');
+    if (!endpoint) {
+      this.emitMessage(
+        '【交锋】敌情评估不可用：请到设置 → Agent 配置为「skirmish_eval」选择 API 池。',
+        'assistant',
+      );
+      return { ok: false, reason: 'skirmish_eval 未解析到 API 池（设置 → Agent 配置）' };
+    }
+    const stats = deriveCombatStats({ attributes: playerC.attributes, level: playerC.level });
+    try {
+      const assessment = await runSkirmishAssessment(
+        {
+          saveId: this.saveId,
+          endpoint,
+          enemyHint,
+          sceneHint,
+          playerLevel: playerC.level,
+          playerPower: stats.atk,
+          playerTotalPower: stats.atk + stats.guard + stats.agi,
+        },
+        { clientFactory: this.getClientFactory() },
+      );
+      const base = startSkirmish({
+        enemyName: assessment.enemyName,
+        enemyLevel: assessment.enemyLevel,
+        intents: assessment.intents,
+        playerHp: playerC.hp,
+        playerMaxHp: playerC.maxHp,
+        enemyHp: assessment.enemyHp,
+        guard: stats.guard,
+      });
+      const session = judgeCrush(stats.atk + stats.guard + stats.agi, assessment.enemyPower)
+        ? crushFinish(base)
+        : base;
+      this.game.setSkirmishSession(session);
+      this.emitMessage(session.log.join('\n'), 'assistant');
+      if (session.finished) await this.settleAndNarrate(session);
+      return { ok: true };
+    } catch (err) {
+      console.warn('[GamePipeline] 敌情评估失败:', err);
+      this.emitMessage('【交锋】敌情评估失败，战斗未能开始（可再试一次）。', 'assistant');
+      return {
+        ok: false,
+        reason: `敌情评估失败：${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  }
+
+  /** 一拍反制：出卡走八类语义矩阵（直击/在场/禁打），基础应对 = 派生值 + 同名标签 */
+  private async submitSkirmishCounter(choice: SkirmishChoice): Promise<void> {
+    const session = this.game.skirmishSession;
+    const playerC = this.game.player;
+    if (!session || session.finished !== null || !playerC) return;
+
+    // 连战递增（天赋）：每多打一拍行动值 +条目量（第一拍无加成）
+    let escalate = 0;
+    for (const t of playerC.talents?.list ?? []) {
+      for (const e of t.entries) {
+        if (e.kind === '连战递增') escalate += Math.max(0, Math.round(e.params.amount ?? 0));
+      }
+    }
+
+    let action: SkirmishAction;
+    let activate: CardInPlayEffect | undefined;
+    let prepend: string[] | undefined;
+    let recoil: number | undefined;
+    let sealBroke: string | undefined;
+    if (choice.kind === '卡') {
+      // 会话临时账（真机裁定 2026-09-13）：同一张卡一场只能打出一次
+      if (session.playedCards.includes(choice.name)) {
+        this.emitMessage(
+          `【交锋】【${choice.name}】本局已经用过了——同一张牌一场只能打出一次。`,
+          'assistant',
+        );
+        return;
+      }
+      // InventoryItem.type 是宽松 string，这里做一次卡牌收窄（脏存档的 type 异常按查无卡处理）
+      const found = playerC.inventory.find((i) => i.name === choice.name);
+      const card = found?.type === '卡牌' ? (found as CardItem) : undefined;
+      if (!card) {
+        this.emitMessage(`【交锋】卡里没有【${choice.name}】。`, 'assistant');
+        return;
+      }
+      // 封印卡：这一拍的行动就是启封判定（阶段 2 内核分级：启封/哑火/暴走/反噬）
+      if (card.sealed) {
+        const res = sealedCardPlay(
+          card,
+          deriveCombatStats({ attributes: playerC.attributes, level: playerC.level }),
+          this.rollD20(),
+          willModifierOf(playerC.attributes),
+        );
+        const beatDice = this.rollD20();
+        const escalateBeat = escalate > 0 && session.beat > 0 ? escalate * session.beat : 0;
+        action =
+          escalateBeat > 0 && res.action.power > 0
+            ? { ...res.action, power: res.action.power + escalateBeat }
+            : res.action;
+        activate = res.activate;
+        prepend = [
+          ...res.prepend,
+          ...(escalateBeat > 0
+            ? [`▸ 连战递增：行动值 +${escalateBeat}（第 ${session.beat + 1} 拍）`]
+            : []),
+        ];
+        recoil = res.recoil;
+        sealBroke = res.sealBroke;
+        const next = playBeat(session, action, beatDice, {
+          activate,
+          prepend,
+          recoil,
+          sealBroke,
+        });
+        this.game.setSkirmishSession(next);
+        this.emitMessage(next.log.slice(session.log.length).join('\n'), 'assistant');
+        if (next.finished) await this.settleAndNarrate(next);
+        return;
+      }
+      const plan = cardPlayPlan(
+        card,
+        deriveCombatStats({ attributes: playerC.attributes, level: playerC.level }),
+      );
+      if (plan.mode === '禁打') {
+        this.emitMessage(`【交锋】${plan.reason}。`, 'assistant');
+        return;
+      }
+      action = plan.action;
+      if (plan.mode === '在场') {
+        activate = { name: card.name, type: plan.effect.type, amount: plan.effect.amount };
+      }
+      // 出卡宣言（主人裁定：纯叙事素材，数值照常结算；置于拍审计之前的「意图」行）
+      if (choice.intent && choice.intent.trim()) {
+        action = { ...action, note: choice.intent.trim().slice(0, 200) };
+      }
+    } else {
+      action = basicCounterAction(
+        choice.move,
+        deriveCombatStats({ attributes: playerC.attributes, level: playerC.level }),
+      );
+    }
+
+    if (escalate > 0 && session.beat > 0) {
+      action = { ...action, power: action.power + escalate * session.beat };
+      prepend = [`▸ 连战递增：行动值 +${escalate * session.beat}（第 ${session.beat + 1} 拍）`];
+    }
+    const next = playBeat(
+      session,
+      action,
+      this.rollD20(),
+      prepend || activate ? { activate, prepend } : undefined,
+    );
+    this.game.setSkirmishSession(next);
+    this.emitMessage(next.log.slice(session.log.length).join('\n'), 'assistant');
+    if (next.finished) await this.settleAndNarrate(next);
+  }
+
+  /** 撤退：终局 C 档，脱离接触 */
+  private async fleeSkirmishEncounter(endReason?: string): Promise<void> {
+    const session = this.game.skirmishSession;
+    if (!session || session.finished !== null) return;
+    const next = fleeSkirmish(session, endReason);
+    this.game.setSkirmishSession(next);
+    this.emitMessage(next.log.slice(session.log.length).join('\n'), 'assistant');
+    await this.settleAndNarrate(next);
+  }
+
+  /**
+   * 终局收尾（主人裁定 2026-09-13：终局要 AI 写战斗过程，抒发情绪）：
+   * ① 战斗记叙——AI 对着逐拍审计链写过程叙事（先故事）；② 结算审计链（后账本）；
+   * ③ 同窗原子落库（玩家 EXP/HP + 参战卡经验/消耗，一次 commitChatState）→ 落库后
+   * 回读（否则 HUD 是开战前血量假象）。整场战斗 AI 调用恒为 2 次（评估 + 记叙），
+   * 拍内零 AI——拖沓的病根不回归。记叙失败静默降级（账本照发）。
+   */
+  private async settleAndNarrate(session: SkirmishSession): Promise<void> {
+    if (!session.finished) return;
+    const playerC = this.game.player;
+    if (!playerC) return;
+    const settlement = settleSkirmish(session, playerC.level);
+    if (!settlement) return;
+
+    // ① 战斗记叙（一次 AI 调用，只演绎不算数）
+    const endpoint = this.getEndpointForAgent('skirmish_epilogue');
+    if (endpoint) {
+      try {
+        const text = await runSkirmishChronicle(
+          {
+            saveId: this.saveId,
+            endpoint,
+            enemyName: session.enemyName,
+            log: session.log,
+            finish: session.finished,
+            endReason: session.endReason,
+          },
+          { clientFactory: this.getClientFactory() },
+        );
+        this.emitMessage(`【战斗记叙】\n${text}`, 'assistant');
+      } catch (err) {
+        console.warn('[GamePipeline] 战斗记叙失败:', err);
+      }
+    }
+
+    // ② 结算审计链（先故事后账本）
+    this.emitMessage(settlement.expLines.join('\n'), 'assistant');
+
+    // ③ 同窗原子落库 + 回读 + 防重触发记录
+    if (this.ownsActiveSave) {
+      const sm = createStateManager(this.saveId);
+      const settlementPatches = buildSkirmishSettlementPatches({
+        playerName: playerC.name,
+        playerTotalExp: playerC.totalExp,
+        session,
+        settlement,
+        cardOf: (name) => {
+          const found = playerC.inventory.find((i) => i.name === name);
+          return found?.type === '卡牌' ? (found as CardItem) : undefined;
+        },
+      });
+      // 击杀掠取（天赋）：胜利/碾压时按条目缴获赏金（delta 入账）
+      let killGc = 0;
+      if (session.finished === '胜利' || session.finished === '碾压') {
+        for (const t of playerC.talents?.list ?? []) {
+          for (const e of t.entries) {
+            if (e.kind === '击杀掠取') killGc += Math.max(0, Math.round(e.params.gold ?? 0));
+          }
+        }
+      }
+      if (killGc > 0) {
+        settlementPatches.push({
+          op: 'update_character',
+          target: `characters.${playerC.name}`,
+          value: { money: killGc },
+          metadata: { delta: true, source: 'skirmish-kill' },
+        });
+        this.emitMessage(`▸ 击杀掠取：缴获 ${killGc} G`, 'assistant');
+      }
+      const result = await sm.commitChatState(settlementPatches);
+      if (result.errors.length > 0) {
+        console.warn('[GamePipeline] 交锋结算部分失败:', result.errors);
+      }
+      await this.game.refreshFromDb(this.saveId);
+      // 记录「最近已结算战斗」防 dispatcher 对已结算战斗再发 combat_trigger（v3 同款语义）
+      this._recentCombat = {
+        allies: [playerC.name],
+        enemies: [session.enemyName],
+        outcome:
+          session.finished === '撤退'
+            ? 'fled'
+            : session.finished === '败北'
+              ? 'enemy_win'
+              : 'ally_win',
+        endedAtTurn: this.game.activeSave?.metadata?.totalTurns ?? 0,
+      };
+    }
+  }
+
+  /**
+   * 融合起名（T8-② 裁定 B）：把两源天赋与产物骨架条目交给 AI 起名写描述。
+   * 只演绎不算数——条目数值由 Code 化学反应定案；失败走玩家自填兜底。
+   */
+  private async runTalentFusionNaming(
+    sourceA: string,
+    sourceB: string,
+    entryLines: string[],
+  ): Promise<{ ok: boolean; name?: string; description?: string; reason?: string }> {
+    const endpoint = this.getEndpointForAgent('talent-naming');
+    if (!endpoint) return { ok: false, reason: 'talent-naming 未解析到 API 池' };
+    try {
+      const r = await runTalentFusionNaming(
+        { saveId: this.saveId, endpoint, sourceA, sourceB, productEntryLines: entryLines },
+        { clientFactory: this.getClientFactory() },
+      );
+      return { ok: true, name: r.name, description: r.description };
+    } catch (err) {
+      return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
   /** 处理制作生成链 */
   private async handleCraftGen(
     markers: CraftGenRequestMarker[],
@@ -2732,6 +3164,8 @@ export class GamePipeline {
     for (const marker of markers) {
       try {
         this.updateAgentActivityStatus('craft_gen', runActivityId);
+        const playerTalentList = this.game.player?.talents?.list ?? [];
+        const talentBias = buildCraftBiasLines(playerTalentList).join('\n');
         const request = {
           saveId: this.saveId,
           marker,
@@ -2741,6 +3175,7 @@ export class GamePipeline {
           configs: this.chainData?.agentConfigs,
           worldBooks: this.chainData?.worldBooks,
           presets: this.chainData?.presets,
+          talentBias,
         } as any;
         const result = await runCraftGenChain(request, {
           clientFactory,

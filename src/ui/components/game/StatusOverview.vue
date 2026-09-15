@@ -506,6 +506,24 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
         </Transition>
       </div>
 
+      <!-- ═══════ 天赋（卡牌工坊：只有玩家主角有） ═══════ -->
+      <div v-if="player.talents?.list?.length" class="section">
+        <div class="section-header">
+          <span class="section-title">天赋</span>
+        </div>
+        <div class="talent-chips">
+          <span
+            v-for="t in player.talents.list"
+            :key="t.name"
+            class="talent-chip"
+            :title="t.description ?? t.name"
+          >
+            <i class="fa-solid fa-fingerprint" aria-hidden="true"></i>
+            {{ t.name }}
+          </span>
+        </div>
+      </div>
+
       <!-- ═══════ 状态效果 ═══════ -->
       <!-- 徽章与标题同处一行：flex-wrap 让前几个自然排在标题右侧，放不下的往下折 -->
       <div v-if="player.statusEffects?.length" class="section">
@@ -1390,5 +1408,23 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
   .collapse-leave-active {
     transition: none;
   }
+}
+
+.talent-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 2px;
+}
+.talent-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--theme-card-border, #72502d);
+  background: var(--theme-surface-muted, #1a130d);
+  color: var(--theme-text-primary, #eadcc5);
+  font-size: 0.8125rem;
 }
 </style>

@@ -58,12 +58,13 @@ export type {
 export type { CombatV3Result, RunCombatV3Opts } from './coordinator';
 
 /** 玩家自由文本 → Command 的规则解析入口（T14，设计 2026-08-09 §3.2）。
- *  前端 CombatActionBar 的自由文本框走它转 Command，禁止把自由文本直接当 Command
- *  喂内核；拼装路径（能直接定 Command）不经过这里。 */
-export { parsePlayerInput } from './player-input';
+ *  阶段5-闭环：tryParsePlayCard 是玩卡意图的手术式识别（只认玩卡动词+卡名），
+ *  供战斗文本入口做「解析器优先」快路；parsePlayerInput 是全量解析器（既有）。 */
+export { parsePlayerInput, tryParsePlayCard } from './player-input';
 export type {
   PlayerCommand,
   PlayerCommandResult,
   PlayerParseCtx,
   PlayerParseUnit,
 } from './player-input';
+export type { DeckCardData } from './types';

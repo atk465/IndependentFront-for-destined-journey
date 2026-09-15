@@ -70,6 +70,8 @@ import { installMapPack } from '@engine/map-runtime';
 // 第 13 面 randomEvents 的收窄口（永不抛）+ 引擎侧随机事件缝（见 `setContentRegistry`）
 import { coerceRandomEventPack } from '@engine/random-event-pack';
 import { installRandomEventPack } from '@engine/random-event-runtime';
+import { installCommissionPack } from '@engine/commission-runtime';
+import { coerceCommissions } from '@engine/card-workshop/commission';
 // 注册表本体的引擎侧注入缝（见 `setContentRegistry` / `getContentRegistry`）
 import {
   createEmptyContentRegistry,
@@ -363,6 +365,11 @@ export function setContentRegistry(next: ContentRegistry): void {
   //    「当前装着哪一份事件包」那一个模块级事实，不是本注册表。漏掉这一行的症状同样不是
   //    报错，而是**沿着上一份事件包掷骰**（换包后旧事件继续入池、新事件永不出现）。
   installRandomEventPack(coerceRandomEventPack(next.randomEvents));
+  // 🔴 第 15 面同理（委托板接线）：引擎侧读的是 `commission-runtime` 里「当前装着
+  //    哪一份委托清单」，漏装的症状是委托板空转 / 沿上一份清单出委托。
+  installCommissionPack(
+    coerceCommissions((next.commissions as { defs?: unknown } | undefined)?.defs),
+  );
 }
 
 /**
@@ -407,6 +414,7 @@ export const CONTENT_REGISTRY_SOURCES: ReadonlyArray<{
   { face: 'imageDialects', url: '/data/content/image-dialects.json' },
   { face: 'mapPack', url: '/data/content/map-pack.json' },
   { face: 'randomEvents', url: '/data/content/random-events.json' },
+  { face: 'commissions', url: '/data/content/commissions.json' },
   { face: 'remoteAssets', url: '/data/content/remote-assets.json' },
   { face: 'markers', url: '/data/defaults/map-marker-presets.json' },
 ];
@@ -967,6 +975,7 @@ export const useContentStore = defineStore('content', () => {
       imageDialects: resolveSection(packFaces.imageDialects, reg.imageDialects),
       mapPack: resolveSection(packFaces.mapPack, reg.mapPack),
       randomEvents: resolveSection(packFaces.randomEvents, reg.randomEvents),
+      commissions: resolveSection(packFaces.commissions, reg.commissions),
       remoteAssets: resolveSection(packFaces.remoteAssets, reg.remoteAssets),
     });
 

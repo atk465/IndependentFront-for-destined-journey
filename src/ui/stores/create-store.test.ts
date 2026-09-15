@@ -125,6 +125,7 @@ function seedFixtureRegistry() {
     branding: { era: FIXTURE_ERA },
     imageDialects: undefined,
     randomEvents: undefined,
+    commissions: undefined,
     remoteAssets: undefined,
     mapPack: undefined,
   });
@@ -261,6 +262,7 @@ describe('内容加载门 —— 目录来自注册表而不是编译期常量',
       imageDialects: undefined,
       mapPack: undefined,
       randomEvents: undefined,
+      commissions: undefined,
       remoteAssets: undefined,
     });
     return useCreateStore();
@@ -918,14 +920,17 @@ describe('stepValid 步骤验证', () => {
     expect(store.stepValid[2]).toBe(true);
   });
 
-  it('Steps 3-6 始终有效；Step 7 仍须满足属性分配不变量', () => {
+  it('Steps 3-6 始终有效；Step 7 出身天赋必选；Step 8 仍须满足属性分配不变量', () => {
     expect(store.stepValid[3]).toBe(true);
     expect(store.stepValid[4]).toBe(true);
     expect(store.stepValid[5]).toBe(true);
     expect(store.stepValid[6]).toBe(true);
-    expect(store.stepValid[7]).toBe(false);
-    allocateBasePoints(store);
+    expect(store.stepValid[7]).toBe(false); // 出身天赋未选
+    store.selectedCreationTalent = '封印亲和';
     expect(store.stepValid[7]).toBe(true);
+    expect(store.stepValid[8]).toBe(false);
+    allocateBasePoints(store);
+    expect(store.stepValid[8]).toBe(true);
   });
 });
 
@@ -1100,6 +1105,7 @@ describe('buildOpeningPrompt', () => {
       imageDialects: undefined,
       mapPack: undefined,
       randomEvents: undefined,
+      commissions: undefined,
       remoteAssets: undefined,
     });
     setActivePinia(createPinia());

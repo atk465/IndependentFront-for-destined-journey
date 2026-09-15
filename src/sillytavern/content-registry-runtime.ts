@@ -81,6 +81,13 @@ export interface ContentRegistry {
    */
   randomEvents: unknown;
   /**
+   * 委托板（卡牌工坊）：`commissions.json` 的原始 JSON（`{ defs }` 整节）。
+   *
+   * 🔴 与 `mapPack` / `randomEvents` 同款：消费方读的是 `commission-runtime`
+   *    的 coerce 派生包，不是这一面原值。
+   */
+  commissions: unknown;
+  /**
    * 远程素材声明（远程素材 v1）：`remote-assets.json` 的原始 JSON（裸数组）。
    *
    * 🔴 与 `mapPack` / `randomEvents` **不同：没有为它派生的第二条缝**。那两面装进
@@ -114,6 +121,7 @@ export function createEmptyContentRegistry(): ContentRegistry {
     imageDialects: undefined,
     mapPack: undefined,
     randomEvents: undefined,
+    commissions: undefined,
     remoteAssets: undefined,
   };
 }

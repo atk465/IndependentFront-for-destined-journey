@@ -17,7 +17,7 @@
 
 import { describe, it, expect } from 'vitest';
 
-import type { ContentPack, PackBaseline } from './types-content';
+import type { ContentPack, PackBaseline, PackCommissionsSection } from './types-content';
 import {
   planPackInstall,
   planSaveUidMigration,
@@ -544,5 +544,51 @@ describe('planPackInstall — randomEvents 分节（三态 + 整节替换）', (
 describe('SINGLE_SELECT_PINNED_PARTITIONS', () => {
   it('单选钉选分区恰好是 system_core + character', () => {
     expect(SINGLE_SELECT_PINNED_PARTITIONS).toEqual(['system_core', 'character']);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 第 15 分节 commissions（委托板接线 / 卡牌工坊）
+// ═══════════════════════════════════════════════════════════
+
+describe('planPackInstall — commissions 分节（三态 + 整节替换）', () => {
+  /** 一节最小的委托分节（形状 = 落盘的 commissions.json，没有外层 `data` 壳） */
+  function commissionsSection(names: string[]): PackCommissionsSection {
+    return {
+      defs: names.map((name) => ({
+        name,
+        requireCard: { minTier: '白铁' },
+        rewards: { gc: 50, reputation: 5 },
+      })),
+    };
+  }
+
+  it('absent（pack 没声明这一节）→ sections.commissions 不出现（语义 = 别动）', () => {
+    const plan = planPackInstall(minimalPack());
+    expect(plan.sections.commissions).toBeUndefined();
+    expect('commissions' in plan.sections).toBe(false);
+  });
+
+  it('rows（声明了定义）→ 整节进 updated（执行器整块覆盖，不做逐条 diff）', () => {
+    const section = commissionsSection(['清剿矿坑魔物', '寻回失窃的传家卡']);
+    const plan = planPackInstall({ ...minimalPack(), commissions: section });
+    expect(plan.sections.commissions?.updated).toEqual([section]);
+    expect(plan.sections.commissions?.added).toEqual([]);
+    expect(plan.sections.commissions?.removed).toEqual([]);
+    expect(plan.sections.commissions?.conflicted).toEqual([]);
+  });
+
+  it('刻意清空（defs: []）→ 这一节仍然出现（present ≠ absent）', () => {
+    const empty = { defs: [] };
+    const plan = planPackInstall({ ...minimalPack(), commissions: empty });
+    expect(plan.sections.commissions).toBeDefined();
+    expect(plan.sections.commissions?.updated).toEqual([empty]);
+  });
+
+  it('透传原对象（planner 不解释结构、不复制、不收窄）', () => {
+    const section = commissionsSection(['清剿矿坑魔物']);
+    const plan = planPackInstall({ ...minimalPack(), commissions: section });
+    // 引用相等：坏定义的剔除是 coerceCommissions 的活，planner 一个字段都不该碰
+    expect(plan.sections.commissions?.updated[0]).toBe(section);
   });
 });
