@@ -101,7 +101,7 @@ const UI_SOURCES: Record<string, string> = import.meta.glob('@ui/lib/game-pipeli
 describe('AgentContext 供值', () => {
   it('🔴 game-pipeline 的 buildContext 真的供了 commissionDefs（漏供 = 委托块静默消失）', () => {
     const source = Object.values(UI_SOURCES)[0] ?? '';
-    expect(source).toContain('commissionDefs: getCommissionDefs()');
+    expect(source).toContain('commissionDefs: this.commissionDefsForAI()');
   });
 
   it('🔴 占位符白名单放行 COMMISSIONS（未注册会被当 unknown 原样留在正文）', () => {

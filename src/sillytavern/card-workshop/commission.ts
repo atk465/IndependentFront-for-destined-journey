@@ -42,6 +42,31 @@ export interface CommissionDef {
   };
 }
 
+// ═══════════════════════════════════════════════════════════
+// 事件委托（随机事件 × 委托板融合，2026-09-16）
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 事件委托模板 —— 随机事件定义（`RandomEventDef.commission`）里声明的委托形状。
+ * = 委托定义 + 有效期；被 AI 认领事件结算时实例化进存档（`worldFlags.randomEvents.eventCommissions`）。
+ */
+export interface EventCommissionTemplate extends CommissionDef {
+  /** 有效期（gameDay）；缺省 7 天。过期自动清理（`pruneEventCommissions`） */
+  ttlDays?: number;
+}
+
+/** 已实例化的动态委托（每存档，落在 `worldFlags.randomEvents.eventCommissions`） */
+export interface EventCommission {
+  /** 委托定义本体（交付/注入直接吃它，与静态委托同形状） */
+  def: CommissionDef;
+  /** 来源事件名（溯源与同名去重） */
+  sourceEvent: string;
+  /** 触发日（gameDay） */
+  armedDay: number;
+  /** 过期日（gameDay；armedDay + ttlDays） */
+  expiresDay: number;
+}
+
 /**
  * 容错解析委托清单（照 random-event-pack 口径：非数组 → []；
  * name 非串 / requireCard 非对象的条目逐条丢，永不抛）。

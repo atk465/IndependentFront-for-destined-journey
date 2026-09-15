@@ -29,6 +29,7 @@
  * 设计全文: `docs/planning/2026-08-15-random-event-system-design.md`。
  */
 
+import { coerceCommissions } from './card-workshop/commission';
 import type {
   EventCondition,
   RandomEventConfig,
@@ -267,6 +268,21 @@ function coerceDef(raw: unknown, index: number): RandomEventDef | null {
 
   const slots = coerceSlots(raw.slots, name);
   if (Object.keys(slots).length > 0) def.slots = slots;
+
+  // 事件委托（随机事件 × 委托板融合）：复用委托引擎的容错解析（单条包数组取一）。
+  // 解析失败只 warn 不拒绝整条事件 —— 事件本身照常可触发，只是不带委托。
+  if (isRecord(raw.commission)) {
+    const [tpl] = coerceCommissions([raw.commission]);
+    if (tpl) {
+      const ttl = readNumber(raw.commission.ttlDays);
+      def.commission = {
+        ...tpl,
+        ...(ttl !== null && ttl > 0 ? { ttlDays: Math.floor(ttl) } : {}),
+      };
+    } else {
+      warn(`${LOG_TAG} def "${name}": commission is unusable, ignored.`);
+    }
+  }
 
   return def;
 }

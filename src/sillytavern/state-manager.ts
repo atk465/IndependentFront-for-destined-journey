@@ -83,7 +83,7 @@ import {
   setRandomEventFlagsInPlace,
 } from './save-profile';
 import { clampAffection } from './affection-system';
-import { advanceTime, getSeason, toEpochMinutes } from './time-system';
+import { advanceTime, getSeason, toEpochMinutes, MINUTES_PER_GAME_DAY } from './time-system';
 // 地图 v1 接线（设计 §5 接线表）：落位 / 天气断言 / 在途旗三条钩子的依赖。
 // 全是纯函数叶 + 一条注入缝（`map-runtime`），没有一个会读注册表或碰 Dexie ——
 // 静态 import 因此不成环（map-* 一律不 import 本模块）。
@@ -132,6 +132,10 @@ import {
   rollRandomEvents,
   settleRandomEventTrigger,
 } from './random-event-scheduler';
+import {
+  buildEventCommission,
+  pruneEventCommissions,
+} from './card-workshop/event-commission';
 // 地点键与上下文快照的**唯一**实现（写侧与读侧共用，见该模块文件头）
 import { buildRandomEventRollContext } from './random-event-snapshot';
 import {
@@ -2878,6 +2882,23 @@ export class StateManager {
           console.warn(`[StateManager] 随机事件不在候选池中，忽略触发回执: ${name}`);
           return null;
         }
+
+        // ── 事件委托（随机事件 × 委托板融合）：事件定义带 commission 模板时，
+        //    结算即实例化一条动态委托进 flags（过期由 prune 统一清理）。
+        //    同名事件委托已存在 → 刷新有效期（重新触发 = 委托重新来过）。
+        const def = getRandomEventPack().defs.find((d) => d?.name === name);
+        const tpl = def?.commission;
+        if (tpl) {
+          const fresh = buildEventCommission(tpl, name, currentDay);
+          if (fresh) {
+            const kept = pruneEventCommissions(
+              settled.flags.eventCommissions,
+              currentDay,
+            ).filter((ec) => ec.def.name !== tpl.name || ec.sourceEvent !== name);
+            settled.flags.eventCommissions = [...kept, fresh];
+          }
+        }
+
         await updateRandomEventFlags(profile, settled.flags);
         return { settled, currentDay };
       });
@@ -3208,7 +3229,6 @@ export function findByName<T extends { name: string }>(list: T[], name: string):
 // ═══════════════════════════════════════════════════════════
 
 /** 一游戏日 = 1440 分钟（`time-system` 的同一个常量，那边没导出） */
-const MINUTES_PER_GAME_DAY = 1440;
 
 /** 引擎断言的天气标签落在这条变量路径（§7：**只写标签串**，不写结构体） */
 const WEATHER_VAR_PATH = 'sys.天气';

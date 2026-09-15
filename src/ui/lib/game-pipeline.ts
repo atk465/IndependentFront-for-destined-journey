@@ -81,7 +81,6 @@ import type { RandomEventOfferEntry } from '@engine/random-event-context';
 import { buildRandomEventRollContext } from '@engine/random-event-snapshot';
 import { getRandomEventPack } from '@engine/random-event-runtime';
 import { getEngineSettings } from '@engine/engine-settings';
-import { toEpochMinutes } from '@engine/time-system';
 // 🧵 主线细化层（2026-09-09 接线）：闸门/快照/投影响应都在 game-pipeline 供值（buildContext 铁律）
 import { getPlotThreadFlags, commitPlotThreadTurn } from '@engine/save-profile';
 import {
@@ -100,11 +99,12 @@ import { countAcceptableTriggers } from '@engine/plot-engine';
 // 🆕 Delta 会话（T4）：存档切换/销毁时清理该存档的 prompt session（string 入参 = 清整个 saveId）
 import { invalidatePromptSession } from '@engine/prompt-session-assembler';
 import { resolveSceneWeather } from './scene-weather';
+import { eventCommissionDefs } from '@engine/card-workshop/event-commission';
+import { toEpochMinutes, MINUTES_PER_GAME_DAY } from '@engine/time-system';
 // 🆕 重铸（2026-08-24）：单条目重铸的引擎侧类型（RewriteTarget = 要重写的技能/装备/物品三选一）
 import type { RewriteTarget } from '@engine/item-gen-chain';
+import type { CommissionDef } from '@engine/card-workshop/commission';
 
-/** 一个游戏日的分钟数（口径同 `state-manager` 的 `MINUTES_PER_GAME_DAY`，那份未导出） */
-const MINUTES_PER_GAME_DAY = 1440;
 
 /** EJS `ui.log` 环形缓冲上限（能力面 §6.2） */
 import { diffVars, measureDiffSize, EJS_DIFF_SIZE_LIMIT } from '@engine/ejs-vars-diff';
@@ -1000,9 +1000,9 @@ export class GamePipeline {
       //    漏供任一格的症状都不是报错，是那个块静默消失或永远静默（blurByDefault 的教训），
       //    故 placeholder-registry.random-events.test.ts 有一条源码断言盯着这三行。
       randomEventOffer: this.buildRandomEventOffer(),
-      // 委托板（卡牌工坊）：内容注册表第 15 面经 commission-runtime 缝的派生清单。
-      // 漏供的症状同样不是报错，是委托块静默消失。战斗静默由 resolver 判 combatActive。
-      commissionDefs: getCommissionDefs(),
+      // 委托板（卡牌工坊）：静态（内容包第 15 面）+ 动态（事件委托：随机事件触发生成，
+      // 按 gameTime 折算 gameDay 过滤过期）。漏供的症状同样不是报错，是委托块静默消失。
+      commissionDefs: this.commissionDefsForAI(),
       // 天赋（卡牌工坊）：玩家 CharacterState.talents 快照（{{TALENT}} 数据源；
       // 玩家无天赋时为 undefined → 块静默，出身必选保证建档即有）。
       talents: this.game.player?.talents,
@@ -2059,6 +2059,23 @@ export class GamePipeline {
       apiKey: ep.apiKey,
       defaultModel: s.embeddingModel || ep.defaultModel,
     };
+  }
+
+  /**
+   * {{COMMISSIONS}} 的数据源：静态内容包委托 + 动态事件委托（随机事件 × 委托板融合）。
+   * 动态部分按存档 gameTime 折算 gameDay 过滤过期（与委托板 UI / 交付同一公式）。
+   */
+  private commissionDefsForAI(): CommissionDef[] {
+    const staticDefs = getCommissionDefs();
+    const flags = (this.game.saveProfile?.worldFlags as Record<string, any> | undefined)?.[
+      'randomEvents'
+    ];
+    const list = Array.isArray(flags?.eventCommissions) ? flags.eventCommissions : [];
+    const gt = this.game.saveProfile?.gameTime;
+    const day = gt ? Math.floor(toEpochMinutes(gt) / MINUTES_PER_GAME_DAY) : 0;
+    const dynamicDefs = eventCommissionDefs(list, day);
+    const dynamicNames = new Set(dynamicDefs.map((d) => d.name));
+    return [...dynamicDefs, ...staticDefs.filter((d) => !dynamicNames.has(d.name))];
   }
 
   /** 处理战斗触发 — 统一走交锋拍（v3 战斗页已随 combat-v3 下线删除） */

@@ -23,6 +23,9 @@ import { buildDemoCardsPatches, buildDemoDeckPatches } from '@engine/card-worksh
 import { toPlainCardAlbum } from '@engine/card-workshop/album';
 import { planCommissionDelivery } from '@engine/card-workshop/commission';
 import { getCommissionDefs } from '@engine/commission-runtime';
+import { isEventCommissionActive } from '@engine/card-workshop/event-commission';
+import type { CommissionDef } from '@engine/card-workshop/commission';
+import { toEpochMinutes, MINUTES_PER_GAME_DAY } from '@engine/time-system';
 import {
   fuseEntrySets,
   getExchangeCatalog,
@@ -208,27 +211,76 @@ export const useGameStore = defineStore('game', () => {
     if (!activeSaveId.value) return { ok: false, reason: '无活跃存档' };
     const playerChar = player.value;
     if (!playerChar) return { ok: false, reason: '无玩家角色' };
-    const commissions = getCommissionDefs();
-    if (commissions.length === 0)
-      return { ok: false, reason: '当前没有委托板（未装含委托的内容包）' };
+    // 委托清单 = 静态（内容包第 15 面）+ 动态（事件委托，随机事件 × 委托板融合）。
+    // 动态委托从存档 flags 读（gameDay 过滤过期），交付时**一次性移除**。
+    const dynamic = activeEventCommissions.value;
+    const dynamicDef = dynamic.find((ec) => ec.def.name === commissionName);
+    const staticDef = getCommissionDefs().find((d) => d.name === commissionName);
+    // 同名时动态优先（事件是「正在发生的事」，覆盖常驻委托）
+    const def = dynamicDef?.def ?? staticDef;
+    if (!def) {
+      return dynamic.length === 0
+        ? { ok: false, reason: '当前没有委托板（未装含委托的内容包）' }
+        : { ok: false, reason: `委托板上没有名为【${commissionName}】的委托` };
+    }
     const found = playerChar.inventory.find((i) => i.name === cardName);
     const card = found?.type === '卡牌' ? (found as never as CardItem) : undefined;
     if (card && card.data?.damaged === true) {
       return { ok: false, reason: `【${cardName}】已损坏，先去制卡台修复再交付` };
     }
     const plan = planCommissionDelivery({
-      commissions,
+      commissions: [def],
       commissionName,
       card,
       playerName: playerChar.name,
     });
     if (!plan.ok) return { ok: false, reason: plan.reason };
     const sm = createStateManager(activeSaveId.value);
-    const result = await sm.commitChatState(plan.patches);
+    // 动态委托是一次性的：交付与移除同一次原子提交（防「交付了还能再交」的刷取窗口）
+    const patches =
+      dynamicDef !== undefined
+        ? [
+            ...plan.patches,
+            {
+              op: 'set_variable' as const,
+              target: 'worldFlags.randomEvents.eventCommissions',
+              value: dynamic
+                .filter((ec) => ec.def.name !== commissionName)
+                .map((ec) => ({ ...ec })),
+            },
+          ]
+        : plan.patches;
+    const result = await sm.commitChatState(patches);
     if (!result.success) return { ok: false, reason: result.errors.join('; ') };
     await refreshFromDb();
     return { ok: true };
   }
+
+  /** 当前 gameDay（存档 gameTime → 整数天；与 state-manager.gameDayOf 同一公式） */
+  function currentGameDay(): number {
+    const gt = saveProfile.value?.gameTime;
+    if (!gt) return 0;
+    return Math.floor(toEpochMinutes(gt) / MINUTES_PER_GAME_DAY);
+  }
+
+  /**
+   * 事件委托（随机事件 × 委托板融合）：当前存档里**仍然有效**的动态委托清单。
+   * 数据源 = `worldFlags.randomEvents.eventCommissions`（state-manager 事件结算时写入），
+   * 过期过滤按存档 gameTime 折算的 gameDay。
+   */
+  const eventCommissions = computed(() => {
+    const flags = (saveProfile.value?.worldFlags as Record<string, any> | undefined)?.randomEvents;
+    const list = flags?.eventCommissions;
+    if (!Array.isArray(list)) return [];
+    const day = currentGameDay();
+    return list.filter((ec) => isEventCommissionActive(ec, day)).map((ec: any) => ({
+      def: ec.def as CommissionDef,
+      sourceEvent: String(ec.sourceEvent ?? ''),
+      armedDay: Number(ec.armedDay ?? 0),
+      expiresDay: Number(ec.expiresDay ?? 0),
+    }));
+  });
+  const activeEventCommissions = computed(() => eventCommissions.value);
 
   /** UI 入口：结束战斗（主人裁定 2026-09-13：附结束理由，供终局记叙参考；评价 C） */
   async function fleeSkirmish(endReason?: string): Promise<void> {
@@ -1552,6 +1604,7 @@ export const useGameStore = defineStore('game', () => {
     submitSkirmishCounter,
     fleeSkirmish,
     deliverCommission,
+    eventCommissions,
     exchangeTalent,
     forgetTalent,
     fuseTalents,

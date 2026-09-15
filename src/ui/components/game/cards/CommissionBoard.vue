@@ -22,7 +22,19 @@ import { cardTierVar } from '../../../lib/quality-colors';
 import { rankForReputation } from '@engine/card-workshop/adventurer-rank';
 
 const game = useGameStore();
-const commissions = getCommissionDefs();
+const staticCommissions = getCommissionDefs();
+/** 动态事件委托（随机事件 × 委托板融合）：存档 flags 里仍有效的部分 */
+const eventCommissions = computed(() => game.eventCommissions ?? []);
+/** 合并清单：动态在前（正在发生的事优先），同名时动态覆盖静态 */
+const commissions = computed(() => {
+  const dynamicNames = new Set(eventCommissions.value.map((ec) => ec.def.name));
+  return [
+    ...eventCommissions.value.map((ec) => ec.def),
+    ...staticCommissions.filter((d) => !dynamicNames.has(d.name)),
+  ];
+});
+/** 委托名 → 是否事件委托（模板标记用） */
+const eventNames = computed(() => new Set(eventCommissions.value.map((ec) => ec.def.name)));
 const reputation = computed(() => (game.saveProfile ? getReputation(game.saveProfile) : 0));
 /** 冒险者等级 = 声望派生（card-workshop/adventurer-rank，不落库自动更新） */
 const rank = computed(() => rankForReputation(reputation.value));
@@ -31,7 +43,7 @@ const selectedName = ref<string | null>(null);
 const feedback = ref<{ kind: 'ok' | 'err'; msg: string } | null>(null);
 const busy = ref(false);
 
-const selected = computed(() => commissions.find((c) => c.name === selectedName.value) ?? null);
+const selected = computed(() => commissions.value.find((c) => c.name === selectedName.value) ?? null);
 
 /** 所选委托的可交付卡：类型/品质/元素验收通过且未损坏的背包卡 */
 const deliverableCards = computed(() => {
@@ -133,6 +145,12 @@ function rewardsText(rewards: {
       >
         <button type="button" class="commission-head" @click="pick(c.name)">
           <span class="c-name">{{ c.name }}</span>
+          <span
+            v-if="eventNames.has(c.name)"
+            class="c-event-tag"
+            title="由随机事件触发——交付后即消失"
+            >事件</span
+          >
           <span v-if="c.description" class="c-desc">{{ c.description }}</span>
           <span class="c-meta">
             收卡：{{ requirementText(c.requireCard) }} ｜ 报酬：{{ rewardsText(c.rewards) }}
@@ -245,6 +263,15 @@ function rewardsText(rewards: {
 .c-name {
   font-weight: 600;
   color: var(--theme-text-primary, #eadcc5);
+}
+
+.c-event-tag {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border: 1px solid color-mix(in srgb, var(--theme-quality-epic, #b8860b) 50%, transparent);
+  border-radius: 4px;
+  font-size: 0.7rem;
+  color: var(--theme-quality-epic, #b8860b);
 }
 .c-desc {
   font-size: 0.8125rem;

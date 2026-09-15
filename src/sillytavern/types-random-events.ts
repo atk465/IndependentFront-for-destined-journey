@@ -1,3 +1,4 @@
+import type { EventCommission, EventCommissionTemplate } from './card-workshop/commission';
 /**
  * types-random-events.ts — 随机事件子系统的类型分册（随机事件系统 v1，设计 2026-08-15 §3）
  *
@@ -159,6 +160,12 @@ export interface RandomEventDef {
   weights?: WeightModifier[];
   /** 组装槽位：入池时种子化采样并固化进 brief */
   slots?: Record<string, SlotTable>;
+  /**
+   * 🆕 事件委托（随机事件 × 委托板融合，2026-09-16）：事件被 AI 认领结算时，
+   *    委托板动态出现这条委托（玩家炼卡交付 → 奖励到账 → 委托消失）。
+   *    形状 = 委托定义 + 有效期（`ttlDays`，gameDay；缺省 7 天）。
+   */
+  commission?: EventCommissionTemplate;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -204,6 +211,8 @@ export interface RandomEventSaveFlags {
   visited?: string[];
   /** 触发档案（`once` 与个体冷却的依据） */
   fired?: Record<string, { count: number; lastDay: number }>;
+  /** 事件委托（随机事件 × 委托板融合）：事件触发生成的动态委托，交付即移除、过期自动清理 */
+  eventCommissions?: EventCommission[];
 }
 
 // ═══════════════════════════════════════════════════════════
