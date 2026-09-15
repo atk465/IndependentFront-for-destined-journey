@@ -28,7 +28,6 @@ import QuestsPanel from './QuestsPanel.vue';
 import PlotPanel from './PlotPanel.vue';
 import MemoryPanel from './MemoryPanel.vue';
 import SnapshotPanel from './SnapshotPanel.vue';
-import CgGalleryPanel from './CgGalleryPanel.vue';
 import MapPanel from './MapPanel.vue';
 import DebugPanel from './DebugPanel.vue';
 import CardAlbumPanel from './cards/CardAlbumPanel.vue';
@@ -460,16 +459,6 @@ function onModalOpenChange(v: boolean) {
       @update:open="onModalOpenChange"
     >
       <SnapshotPanel />
-    </AppModal>
-    <AppModal
-      title="CG 图鉴"
-      :open="game.activeModal === 'gallery'"
-      size="xxl"
-      closable
-      @close="game.closeModal()"
-      @update:open="onModalOpenChange"
-    >
-      <CgGalleryPanel />
     </AppModal>
     <AppModal
       title="地图"
