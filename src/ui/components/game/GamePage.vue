@@ -217,21 +217,6 @@ async function handleSend(content: string) {
   await pipeline.run(content, handleStoryChunk);
 }
 
-async function handleRetry(messageId: string) {
-  if (!pipeline) {
-    ui.toast('游戏管线未就绪，请退出存档后重新进入', 'error');
-    return;
-  }
-  if (game.isGenerating) {
-    ui.toast('本回合生成中：可点「停止」中断，或等待其结束', 'info');
-    return;
-  }
-  const message = game.messages.find((entry) => entry.id === messageId && entry.role === 'user');
-  if (!message) return;
-  cancelStreamingPreview();
-  await pipeline.run(message.content, handleStoryChunk, false, message.id);
-}
-
 function handleStop() {
   pipeline?.abort();
   cancelStreamingPreview();
@@ -274,7 +259,6 @@ function onModalOpenChange(v: boolean) {
         @send="handleSend"
         @select-option="handleSelectOption"
         @stop="handleStop"
-        @retry-turn="handleRetry"
       />
       <StatusHUD />
     </div>

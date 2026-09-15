@@ -1,13 +1,12 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import InputBar from './InputBar.vue';
-import type { AgentActivityRun, ChatMessage, SystemEvent } from '@engine/types';
+import type { ChatMessage, SystemEvent } from '@engine/types';
 import { escapeHtml } from '@engine/beautifier';
 import { useGameStore } from '../../stores/game-store';
 import { useUIStore } from '../../stores/ui-store';
 import { computeConversationalDepths } from '../../lib/chat-depth';
 import BeautifiedNarrative from './BeautifiedNarrative.vue';
-import TurnActivityLedger from './TurnActivityLedger.vue';
 import CraftSystemCard from './cards/CraftSystemCard.vue';
 import CharGenSystemCard from './cards/CharGenSystemCard.vue';
 import CombatSystemCard from './cards/CombatSystemCard.vue';
@@ -34,7 +33,6 @@ const emit = defineEmits<{
   send: [content: string];
   'select-option': [text: string];
   stop: [];
-  'retry-turn': [messageId: string];
 }>();
 
 const game = useGameStore();
@@ -44,17 +42,6 @@ const container = ref<HTMLDivElement>();
 const expandedIds = ref<Record<string, boolean>>({});
 const pinnedToBottom = ref(true);
 const messageDepths = computed(() => computeConversationalDepths(props.messages ?? []));
-const activityRunsByMessage = computed(() => {
-  const grouped = new Map<string, AgentActivityRun[]>();
-  for (const run of game.agentActivityRuns ?? []) {
-    if (!run.sourceMessageId) continue;
-    const runs = grouped.get(run.sourceMessageId);
-    if (runs) runs.push(run);
-    else grouped.set(run.sourceMessageId, [run]);
-  }
-  return grouped;
-});
-
 /** 滚到底部（进存档 / 新消息 / 快照回退时调用）。nextTick 等本轮 DOM 落定。 */
 function scrollToBottom() {
   nextTick(() => {
@@ -192,10 +179,6 @@ const latestUserMsg = computed<ChatMessage | undefined>(() => {
   return undefined;
 });
 
-function activityRunsForMessage(messageId: string) {
-  return activityRunsByMessage.value.get(messageId) ?? [];
-}
-
 /**
  * 🆕 「思考中」指示（2026-08-12）：生成期间显示当前 Agent 正在做什么。
  * 数据源：game.currentAgentActivityRun（running/stopping 的最新活动 run），
@@ -213,17 +196,6 @@ const thinkingText = computed(() => {
   if (tool) return `${step.label} · ${tool.label}`;
   return step.label;
 });
-
-function canRetryRun(run: AgentActivityRun): boolean {
-  const messageId = run.sourceMessageId;
-  if (!messageId || props.isGenerating || (run.status !== 'failed' && run.status !== 'cancelled')) {
-    return false;
-  }
-  const messageRuns = activityRunsForMessage(messageId);
-  return (
-    latestUserMsg.value?.id === messageId && messageRuns[messageRuns.length - 1]?.id === run.id
-  );
-}
 
 /** 「回退」项的文案：assistant = 回退本轮；user = 回退到这条输入 */
 function rollbackLabel(msg: ChatMessage): string {
@@ -343,14 +315,6 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <TurnActivityLedger
-            v-for="run in activityRunsForMessage(msg.id)"
-            :key="run.id"
-            :run="run"
-            :can-retry="canRetryRun(run)"
-            @retry="emit('retry-turn', msg.id)"
-            @resize="handleNarrativeResize"
-          />
         </template>
 
         <!-- AI 叙事消息 — 只渲染美化正文 -->
