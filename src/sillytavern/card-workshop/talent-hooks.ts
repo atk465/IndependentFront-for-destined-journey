@@ -9,8 +9,6 @@
  * 确定性契约：纯函数、不 mutate、骰值调用方传入。
  */
 
-import { RARITY_LEVELS, type Rarity } from '../field-enums';
-
 /** 钩子效果种类 */
 export type RuleHookKind =
   | 'expMultiplier' // 经验获取倍率（鸿蒙道体 ×2）
@@ -28,7 +26,6 @@ export interface RuleHook {
   value: number;
 }
 
-/** 天赋名 → 规则钩子注册表（单一真源；加规则 = 加一行） */
 /** 规则钩子查找表（key = 天赋名，与 TALENT_CATALOG 模板名一致） */
 const RULE_HOOKS: Readonly<Record<string, RuleHook[]>> = {
   鸿蒙道体: [{ kind: 'expMultiplier', value: 2 }],
@@ -48,11 +45,6 @@ export function collectRuleHooks(talents: readonly { name: string }[] | undefine
     if (ruleHooks) hooks.push(...ruleHooks);
   }
   return hooks;
-}
-
-/** 取指定种类的钩子值；无 → undefined */
-export function getHookValue(hooks: readonly RuleHook[], kind: RuleHookKind): number | undefined {
-  return hooks.find((h) => h.kind === kind)?.value;
 }
 
 /** 经验倍率（鸿蒙道体 = 2，否则 1） */
@@ -78,10 +70,4 @@ export function hasVictoryMaterial(hooks: readonly RuleHook[]): boolean {
 /** 是否有战败奖励钩子（世界线的收束点） */
 export function hasDefeatReward(hooks: readonly RuleHook[]): boolean {
   return hooks.some((h) => h.kind === 'defeatRewardMultiplier');
-}
-
-/** 品质越一级（制作上限封顶传说） */
-export function tierUpCraft(tier: Rarity): Rarity {
-  const idx = RARITY_LEVELS.indexOf(tier);
-  return RARITY_LEVELS[Math.min(idx + 1, RARITY_LEVELS.length - 2)] ?? tier;
 }

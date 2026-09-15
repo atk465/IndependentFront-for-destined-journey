@@ -10,6 +10,7 @@ import {
   hasVictoryMaterial,
   hasDefeatReward,
   type RuleHook,
+  type RuleHookKind,
 } from './talent-hooks';
 
 const T = (name: string) => ({ name });
@@ -50,5 +51,20 @@ describe('RuleHook 类型契约', () => {
     const hook: RuleHook = { kind: 'expMultiplier', value: 2 };
     expect(hook.kind).toBe('expMultiplier');
     expect(hook.value).toBe(2);
+  });
+});
+
+describe('RuleHookKind 契约', () => {
+  it('五种钩子种类齐备', () => {
+    const kinds: readonly RuleHookKind[] = [
+      'expMultiplier',
+      'hpMultiplier',
+      'companionLimitOverride',
+      'statMultiplier',
+      'oncePerBattleNuke',
+      'victoryMaterial',
+      'defeatRewardMultiplier',
+    ];
+    expect(kinds).toHaveLength(7);
   });
 });
