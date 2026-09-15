@@ -15,16 +15,11 @@
  *    不重发 id 的话，第二次导入是**静默覆盖**第一次（Dexie `put` 语义），
  *    用户看到的是「怎么只有一个存档」而不是任何一种错误。
  *
- * 🔴 **字节永不随行**：`sceneImageBlobs` 不导出（与 FullBackup 同口径 —— 图片字节进
- *    JSON 会爆炸）。导出的插画记录一律打上 `blobDropped`，于是收件人那边图鉴显示
- *    「字节已清理 + 重画」这个**已有的、说得通的**状态，而不是一格坏图。
- *
  * 设计参考：database.ts 的 `deleteSaveSlot`（表清单）/ `validateBackupOrThrow`（三态校验）。
  */
 
 import {
   getDatabase,
-  characterAppearanceKey,
   normalizeSnapshotBackupRows,
   assertBackupNotFromFuture,
   DB_VERSION,
@@ -46,7 +41,6 @@ import type {
   PlotOutline,
   WorldBook,
 } from './types';
-import type { SceneImageRecord, CharacterSessionAppearance } from './types-image';
 
 // ═══════════════════════════════════════════════════════════
 // 类型
@@ -119,9 +113,6 @@ export interface SessionBackup {
   memories: MemoryRecord[];
   plotEvents: PlotEvent[];
   plotOutlines: PlotOutline[];
-  /** 🔴 只有元数据（= 配方），字节永不随行 */
-  sceneImages: SceneImageRecord[];
-  characterAppearances: CharacterSessionAppearance[];
   dependencies: SessionDependencies;
 }
 
@@ -281,7 +272,7 @@ export async function exportSessionSave(
     throw new Error(`导出失败：存档不存在（saveId=${saveId}）`);
   }
 
-  // 表清单与 deleteSaveSlot 同源，唯独不含 sceneImageBlobs（字节永不随行）
+  // 表清单与 deleteSaveSlot 同源
   const [
     profile,
     characters,
@@ -291,8 +282,6 @@ export async function exportSessionSave(
     memories,
     plotEvents,
     plotOutlines,
-    sceneImages,
-    characterAppearances,
     books,
     packs,
   ] = await Promise.all([
@@ -305,8 +294,6 @@ export async function exportSessionSave(
     db.memories.where('saveId').equals(saveId).toArray(),
     db.plotEvents.where('saveId').equals(saveId).toArray(),
     db.plotOutlines.where('saveId').equals(saveId).toArray(),
-    db.sceneImages.where('saveId').equals(saveId).toArray(),
-    db.characterAppearances.where('saveId').equals(saveId).toArray(),
     db.worldBooks.toArray(),
     db.contentPacks.toArray(),
   ]);
@@ -355,14 +342,6 @@ export async function exportSessionSave(
     memories: structuredClone(memories),
     plotEvents: structuredClone(plotEvents),
     plotOutlines: structuredClone(plotOutlines),
-    // 🔴 字节不随行 → 导出副本一律打 blobDropped，收件人看到的是「已清理 + 重画」。
-    //    只打给**真的画出来过**的记录（status==='done'）：给 failed/queued 打这个标记，
-    //    等于对着一条从没画出来的记录说「字节已清理」（判据同 hasStoredSceneImageBytes）。
-    //    ⚠️ 改的是**副本**，库里的行一个字节都不动。
-    sceneImages: structuredClone(sceneImages).map((row) =>
-      row.status === 'done' ? { ...row, blobDropped: true } : row,
-    ),
-    characterAppearances: structuredClone(characterAppearances),
     dependencies,
   };
 }
@@ -506,8 +485,6 @@ function validateSessionBackupOrThrow(backup: unknown): Record<string, unknown> 
     'memories',
     'plotEvents',
     'plotOutlines',
-    'sceneImages',
-    'characterAppearances',
   ];
   for (const f of arrayFields) {
     const v = rec[f];
@@ -546,8 +523,6 @@ export async function importSessionSave(backup: SessionBackup): Promise<{ saveId
   const memories = readArray<MemoryRecord>(rec, 'memories');
   const plotEvents = readArray<PlotEvent>(rec, 'plotEvents');
   const plotOutlines = readArray<PlotOutline>(rec, 'plotOutlines');
-  const sceneImages = readArray<SceneImageRecord>(rec, 'sceneImages');
-  const characterAppearances = readArray<CharacterSessionAppearance>(rec, 'characterAppearances');
 
   const newSaveId = crypto.randomUUID();
   const charIds = new IdMap();
@@ -555,7 +530,6 @@ export async function importSessionSave(backup: SessionBackup): Promise<{ saveId
   const snapIds = new IdMap();
   const plotIds = new IdMap();
   const outlineIds = new IdMap();
-  const imageIds = new IdMap();
 
   // 顺序有讲究：先把顶层真行注册进映射，之后嵌套副本里查不到的才是真悬空引用
   for (const c of characters) charIds.get(c.id);
@@ -563,7 +537,6 @@ export async function importSessionSave(backup: SessionBackup): Promise<{ saveId
   for (const s of snapshots) snapIds.get(s.id);
   for (const e of plotEvents) plotIds.get(e.id);
   for (const o of plotOutlines) outlineIds.get(o.id);
-  for (const img of sceneImages) imageIds.get(img.id);
 
   const remapCharacter = (c: CharacterState): CharacterState => ({
     ...c,
@@ -647,19 +620,6 @@ export async function importSessionSave(backup: SessionBackup): Promise<{ saveId
       : {}),
   }));
 
-  const nextSceneImages: SceneImageRecord[] = sceneImages.map((img) => ({
-    ...img,
-    id: imageIds.get(img.id),
-    saveId: newSaveId,
-    messageId: msgIds.get(img.messageId),
-  }));
-
-  const nextAppearances: CharacterSessionAppearance[] = characterAppearances.map((row) => ({
-    ...row,
-    key: characterAppearanceKey(newSaveId, row.name),
-    saveId: newSaveId,
-  }));
-
   await db.transaction(
     'rw',
     [
@@ -672,8 +632,6 @@ export async function importSessionSave(backup: SessionBackup): Promise<{ saveId
       db.memories,
       db.plotEvents,
       db.plotOutlines,
-      db.sceneImages,
-      db.characterAppearances,
     ],
     async () => {
       // 槽位：取现有最大 +1（slot 不是唯一索引，这里只求「不和别人挤同一格」）
@@ -708,8 +666,6 @@ export async function importSessionSave(backup: SessionBackup): Promise<{ saveId
       if (nextMemories.length > 0) await db.memories.bulkPut(nextMemories);
       if (nextPlotEvents.length > 0) await db.plotEvents.bulkPut(nextPlotEvents);
       if (nextPlotOutlines.length > 0) await db.plotOutlines.bulkPut(nextPlotOutlines);
-      if (nextSceneImages.length > 0) await db.sceneImages.bulkPut(nextSceneImages);
-      if (nextAppearances.length > 0) await db.characterAppearances.bulkPut(nextAppearances);
     },
   );
 

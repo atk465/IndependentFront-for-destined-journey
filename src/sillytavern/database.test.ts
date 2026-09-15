@@ -72,10 +72,6 @@ import {
   deleteAsset,
   deleteAssets,
   getAssetBlob,
-  // 角色外貌会话副本 (v19 / D56)
-  characterAppearanceKey,
-  getCharacterAppearances,
-  saveCharacterAppearance,
   DB_VERSION,
 } from './database';
 import type { FullBackup } from './database';
@@ -1060,7 +1056,7 @@ describe('exportAllData / importAllData', () => {
     // v21：地图字节本地缓存 mapBlobs（2026-08-07，D23 补强；字节同不进备份）。
     // v22：快照拆表（snapshots 只留元数据 + snapshotPayloads 存整档载荷，两者都进备份）。
     // v23：API 凭据级 RPM 策略表。
-    expect(backup.version).toBe(25);
+    expect(backup.version).toBe(26);
     expect(Array.isArray(backup.lorebooks)).toBe(true);
     expect(Array.isArray(backup.presets)).toBe(true);
     // SEC-01：settings 死表与 apiEndpoints 都可能含明文 Key，只留在本机，不进普通备份。
@@ -1080,12 +1076,6 @@ describe('exportAllData / importAllData', () => {
     expect(Array.isArray(backup.messages)).toBe(true);
     expect(Array.isArray(backup.worldBooks)).toBe(true);
     expect(Array.isArray(backup.regexStorage)).toBe(true);
-    // v17 —— 元数据进备份，字节（sceneImageBlobs）刻意不进（设计 §7.3）
-    expect(Array.isArray(backup.sceneImages)).toBe(true);
-    expect(Array.isArray(backup.imagePresets)).toBe(true);
-    expect('sceneImageBlobs' in backup).toBe(false);
-    // v19 —— 角色外貌会话副本与 sceneImages 同为「每存档」数据，必须同进同出
-    expect(Array.isArray(backup.characterAppearances)).toBe(true);
     // v20 —— contentPacks 刻意不进 FullBackup（D18 / §5.7）：payload 进备份 = 每份日常备份
     // 都成了可自由转发的完整内容包 + 体积翻倍。备份/恢复一致性由 reconcilePackState() 解决。
     expect('contentPacks' in backup).toBe(false);
@@ -1101,54 +1091,7 @@ describe('exportAllData / importAllData', () => {
     }
   });
 
-  /**
-   * 🔴 会话外貌漏出备份时**不会有任何报错** —— 存档的其余部分完好，只是每个角色的
-   * 本档变化静默退回基线，症状看起来像「AI 忘了她换过装」。所以这条走完整往返。
-   */
-  it('exportAllData/importAllData 应往返角色外貌会话副本（v19/D56）', async () => {
-    const db = getDatabase();
-    await saveCharacterAppearance({
-      key: characterAppearanceKey('save_test', '艾莉丝'),
-      saveId: 'save_test',
-      name: '艾莉丝',
-      patch: { outfit: 'dark travel cloak', condition: 'soaked' },
-      updatedAt: 1_700_000_000_000,
-    });
 
-    const backup = await exportAllData();
-    expect(backup.characterAppearances).toHaveLength(1);
-
-    // 清空这张表，模拟「换一台设备后导入」
-    await db.characterAppearances.clear();
-    expect(await getCharacterAppearances('save_test')).toHaveLength(0);
-
-    await importAllData(backup);
-
-    const restored = await getCharacterAppearances('save_test');
-    expect(restored).toHaveLength(1);
-    expect(restored[0].name).toBe('艾莉丝');
-    expect(restored[0].patch).toEqual({ outfit: 'dark travel cloak', condition: 'soaked' });
-  });
-
-  /** 三态语义：pre-v19 的旧备份对这张表**无话可说**，就不该有权删它 */
-  it('导入缺 characterAppearances 字段的旧备份应保留现有会话外貌', async () => {
-    await saveCharacterAppearance({
-      key: characterAppearanceKey('save_test', '苏婉'),
-      saveId: 'save_test',
-      name: '苏婉',
-      patch: { hairStyle: 'short hair' },
-      updatedAt: 1_700_000_000_000,
-    });
-
-    const backup = await exportAllData();
-    delete (backup as Partial<FullBackup>).characterAppearances;
-
-    await importAllData(backup as FullBackup);
-
-    const kept = await getCharacterAppearances('save_test');
-    expect(kept).toHaveLength(1);
-    expect(kept[0].patch).toEqual({ hairStyle: 'short hair' });
-  });
 
   it('importAllData 应还原可迁移数据', async () => {
     await saveMemory(makeMemory({ id: 'seed_mem' }));
@@ -2591,8 +2534,8 @@ describe('Asset CRUD (v13)', () => {
     await initializeDatabase();
     const db = getDatabase();
     // v20=D18 contentPacks; v21=地图字节; v22=快照拆表; v23=API RPM; v24=调试历史;
-    // v25=创意工坊下线（删 workshopProjects 表）
-    expect(db.verno).toBe(25);
+    // v25=创意工坊下线（删 workshopProjects 表）; v26=图像生成下线（删插画/外貌四表）
+    expect(db.verno).toBe(26);
 
     // 表册齐全: v12 的 17 张 + 素材两张 + 美化规则一张 + 正则 KV 一张
     //           + 图像生成三张 + 角色外貌会话副本一张（v19/D56）
@@ -2601,7 +2544,17 @@ describe('Asset CRUD (v13)', () => {
     //（误写 `表名: null` 或漏声明会在这里炸 —— 尤其 lorebooks/settings 两张死表按 D3 必须保留）
     // v25 起工坊下线（workshopProjects）+ 音频系统下线（audio* 四表），
     // 这五张表已从库里删除，不在清单里。
-    const REMOVED_IN_V25 = ['workshopProjects', 'audioTracks', 'audioBlobs', 'audioPlaylists', 'audioHandles'];
+    const REMOVED_IN_V25 = [
+      'workshopProjects',
+      'audioTracks',
+      'audioBlobs',
+      'audioPlaylists',
+      'audioHandles',
+      'sceneImages',
+      'sceneImageBlobs',
+      'imagePresets',
+      'characterAppearances',
+    ];
     const EXPECTED_TABLES = [
       ...Object.keys(V12_STORES).filter((t) => !REMOVED_IN_V25.includes(t)),
       'assetMeta',
@@ -2609,10 +2562,6 @@ describe('Asset CRUD (v13)', () => {
       'worldBooks',
       'beautifierRules',
       'regexStorage',
-      'sceneImages',
-      'sceneImageBlobs',
-      'imagePresets',
-      'characterAppearances',
       'contentPacks',
       'mapBlobs',
       'snapshotPayloads',
@@ -2634,9 +2583,6 @@ describe('Asset CRUD (v13)', () => {
     expect(await db.worldBooks.count()).toBe(0);
     expect(await db.beautifierRules.count()).toBe(0);
     expect(await db.regexStorage.count()).toBe(0);
-    expect(await db.sceneImages.count()).toBe(0);
-    expect(await db.sceneImageBlobs.count()).toBe(0);
-    expect(await db.imagePresets.count()).toBe(0);
     // v22 例外：snapshotPayloads 不是空的 —— 上面那行 v12 胖快照被升版拆了出来
     expect(await db.snapshotPayloads.count()).toBe(1);
     expect(await db.apiRateLimitPolicies.count()).toBe(0);

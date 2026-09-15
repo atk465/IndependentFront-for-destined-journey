@@ -61,14 +61,6 @@ import {
 import { buildSkirmishSettlementPatches } from '@engine/card-workshop/skirmish-settlement';
 import { runSkirmishAssessment, runSkirmishChronicle } from '@engine/card-workshop/skirmish-agent';
 import type { DeckCardData } from '@engine/combat-v3';
-import type {
-  ImageGenFailure,
-  ImagePromptOutput,
-  ImagePromptRequest,
-  SceneImageMarker,
-} from '@engine/types-image';
-import { splitSceneImageSegments } from '@engine/image-segments';
-import { stripMarkers } from '@engine/marker-protocol';
 import { AgentClient } from '@engine/agent-client';
 import type { StreamCallbacks } from '@engine/agent-client';
 import { createStateManager } from '@engine/state-manager';
@@ -105,7 +97,7 @@ import type {
 import { countAcceptableTriggers } from '@engine/plot-engine';
 // 🆕 Delta 会话（T4）：存档切换/销毁时清理该存档的 prompt session（string 入参 = 清整个 saveId）
 import { invalidatePromptSession } from '@engine/prompt-session-assembler';
-import { resolveSceneWeather } from './scene-image-seams';
+import { resolveSceneWeather } from './scene-weather';
 // 🆕 重铸（2026-08-24）：单条目重铸的引擎侧类型（RewriteTarget = 要重写的技能/装备/物品三选一）
 import type { RewriteTarget } from '@engine/item-gen-chain';
 
@@ -198,7 +190,6 @@ const SIDE_CHAIN_AGENT_IDS = new Set([
   'craft_gen',
   'char_gen',
   'item_gen',
-  'image_prompt',
   'combat_v3',
 ]);
 
@@ -274,35 +265,6 @@ const AGENT_LABELS: Record<string, string> = {
   item_gen: '物品生成',
   plot_outline: '剧情大纲',
 };
-
-/**
- * 把方言的 systemPrompt **合并**进 `image_prompt` 那条 config（图像 v2 / C3·C5）。
- *
- * 为什么是「合并」而不是「另造一条」: `buildAgentMessagesAsync` 只从 `configs` 里认
- * systemPrompt，而**同一条 config 还带着这个 agent 的全部 LLM 旋钮**（模型 / 温度 /
- * maxTokens / 世界书 —— `image-prompt-agent` 会把它们再查一遍）。新造一条顶掉原来的，
- * 用户在设置页调的模型与采样参数就全部静默回落成缺省 —— 不报错，只是这条侧链换了个
- * 模型在跑。所以这里克隆整条、只换那一格。
- *
- * @param override 空 / 只剩空白 / undefined → 原样返回（走 agent-config 或模板兜底，
- *   即图像 v1 行为）。🔴 **空白也要挡**：设置页今天不再写下只含空白的覆盖，但老档里
- *   可能躺着一份 —— 它会把这条侧链的整段 systemPrompt 换成一个空格，产出一串垃圾而
- *   没有任何一处报错。
- */
-export function withImagePromptSystem(
-  configs: readonly AgentConfig[],
-  override: string | undefined,
-): AgentConfig[] {
-  if (!override || override.trim() === '') return [...configs];
-  const index = configs.findIndex((c) => c.agentId === 'image_prompt');
-  if (index >= 0) {
-    return configs.map((c, i) => (i === index ? { ...c, systemPrompt: override } : c));
-  }
-  // 生产里到不了这里（`buildAgentConfigs` 的名单固定含 image_prompt）。真到了的话，
-  // 宁可补一条只带提示词的：没有它，方言的整段吃法会静默失效，而那是没有任何症状的。
-  console.warn('[GamePipeline] configs 里没有 image_prompt，合成一条只带 systemPrompt 的');
-  return [...configs, { agentId: 'image_prompt', systemPrompt: override } as AgentConfig];
-}
 
 const saveWork = new Map<
   string,
@@ -819,9 +781,6 @@ export class GamePipeline {
       'craft_gen', // 侧链: 制作生成，需完整 systemPrompt (真机 fix 2026-07-18)
       'char_gen', // 侧链: 角色生成，需完整 systemPrompt
       'item_gen', // 侧链: 物品生成，需完整 systemPrompt + {{ITEM_REQUEST}} 占位符
-      // 侧链: 情景插画的中文 → danbooru 转换（图像生成 D28）。不进主 DAG、也不进设置页
-      // Agent 子导航（D53）—— 但它的 systemPrompt/世界书/采样参数照旧从这里装配。
-      'image_prompt',
       // 侧链: 战斗决策（combat-v3 Coordinator 在战斗会话中按 RequiredInput.PlayerCommand
       // 唤起，不走主 DAG）。systemPrompt/模型/温度/世界书照旧从这里装配 —— coordinator
       // 按 agentId === 'combat_v3' 从 ctx.configs 读（见 combat-v3/coordinator.ts 的
@@ -1569,97 +1528,9 @@ export class GamePipeline {
       : undefined;
   }
 
-  /**
-   * 🖼 `<scene_image>` → 三档分流（设计 §8）。
-   *
-   * ```
-   * 【auto】   逐个标记过 checkQuota → ok 就 generate；拒了什么都不做
-   * 【manual】 什么都不做。渲染层在「无记录」那一格画按钮，点了才花钱（D14）
-   * 【off】    什么都不做。标记照扫（否则会漏成一行尖括号），但不建记录、不发请求
-   * ```
-   *
-   * 🔴 **D15：自动档绝不追溯开火。** 本方法只被 `onSceneImage` 唤起，而那个回调只在
-   * 编排器**刚产出这条消息**时触发一次；历史消息重新渲染走的是 `scene-image-store`
-   * 的查询，根本不经过这里。**日后千万别为了「补全历史插画」加一条扫描全部消息的
-   * 路径** —— 那会把这条安全性一次性拆掉，表现为「把开关从手动拨到自动，追溯烧掉
-   * 几十张图的钱」。补画的入口在正文里，一张一张点。
-   *
-   * 🔴 **D21：限额拒绝绝不丢弃标记。** 拿到 `ok:false` 就什么都不做 —— 那一格落到
-   * 「无记录」，按 §10.2 的真值表渲染成手动按钮。玩家看到的是一个按钮和一句「已达
-   * 本小时上限」，而不是一张凭空消失的图。
-   *
-   * 🔴 **D32：限额在侧链之前。** 排序由 `scene-image-store.generate()` 保证（缝的调用
-   * 顺序写在那儿），本方法只负责把每个标记喂给它。
-   *
-   * 🔴 **D25：永不自动重试。** 失败的记录留在那儿等玩家点重试，这里不看结果。
-   */
-  private async handleSceneImages(markers: SceneImageMarker[]): Promise<void> {
-    // 【manual】/【off】都是「什么都不做」，差别只在渲染层画不画那个按钮
-    if (this.settings.settings.imageGenMode !== 'auto') return;
-
-    const message = this.lastStoryMessage;
-    if (!message || markers.length === 0) return;
-
-    const { useSceneImageStore } = await import('../stores/scene-image-store');
-    const store = useSceneImageStore();
-    // 缝没接上 / 这个存档的记录还没载入 → 不开火。宁可少画一张，也不在一个不在
-    // 屏幕上的存档上花钱（切存档途中尤其容易撞上）。
-    if (store.activeSaveId !== this.saveId) {
-      console.warn('[GamePipeline] 情景插画：插画库尚未载入本存档，本轮不自动生成');
-      return;
-    }
-
-    // 🔴 分段编号必须与渲染层同源: `splitSceneImageSegments` 只给**正文有内容**的标记
-    // 发号（空 body 的标记照剥但不占号）。自己数一遍 markers 会在有空标记时错位，
-    // 图就挂到隔壁那一格去了。
-    const segments = splitSceneImageSegments(message.content);
-    // 侧链要的是**剥掉全部标记**的正文（判断氛围/光线/时间）
-    const narrative = stripMarkers(message.content).trim();
-    const location = this.game.player?.location || undefined;
-    const maxRating = this.settings.settings.imageMaxRating;
-
-    for (const segment of segments) {
-      if (segment.kind !== 'image') continue;
-      const marker = segment.marker;
-      try {
-        const result = await store.generate({
-          saveId: this.saveId,
-          messageId: message.id,
-          turn: message.turn,
-          anchorKind: 'marker',
-          occurrence: segment.occurrence,
-          source: 'auto',
-          intent: marker.bodyText,
-          title: marker.title,
-          characters: marker.characters,
-          // 标记没写 rating 时取设置里那一档；写了也会在 composePrompt 里被钳到上限（D38）
-          rating: marker.rating ?? maxRating,
-          narrative,
-          ...(location ? { location } : {}),
-        });
-        if (!result.ok) {
-          // D21: 什么都不做 —— 这一格会渲染成手动按钮，玩家想要就自己点
-          console.log(
-            `[GamePipeline] 情景插画被限额拦下（${result.reason}），降级成手动按钮: ${result.message}`,
-          );
-        }
-      } catch (err) {
-        // 一个标记出问题不该让同一条消息里剩下的标记跟着没了
-        console.warn('[GamePipeline] 情景插画入队失败（跳过这一个）:', err);
-      }
-    }
-  }
-
   private buildEventHandlers(runActivityId?: string): OrchestratorEvents {
     const debugTurnId = runActivityId ?? this.activeRunId ?? 'detached';
     return {
-      // 🖼 情景插画：三档分流。不 await —— 出图 5–60 秒，不该进管线时序
-      onSceneImage: (markers) => {
-        void this.handleSceneImages(markers).catch((err) => {
-          console.warn('[GamePipeline] 情景插画分流失败（不阻塞本轮）:', err);
-        });
-      },
-
       // 🎲 随机事件回执（§5.2）：结算五步全在 StateManager 里（**唯一写入口**，ADR-21），
       //    这里只把名字送过去。系统关闭 / 名字不在候选池两条 warn-noop 也在结算侧，
       //    在这里再判一遍就是第二处口径。
@@ -3164,75 +3035,9 @@ export class GamePipeline {
   }
 
   /**
-   * `image_prompt` 侧链（图像生成 G 阶段 / D28）—— 中文那句话 → danbooru 串。
-   *
-   * 这就是 `scene-image-store` 的 `runPromptAgent` 缝要的那个实现，形状与它逐字对齐
-   * （`ImagePromptOutput | ImageGenFailure`），于是接线只剩一行 `runPromptAgent: (r, s) =>
-   * pipeline.runImagePromptAgent(r, s)`。
-   *
-   * 🔴 **限额 `checkQuota` 必须在本方法之前**（D32）。两处花钱（LLM token + Anlas），
-   * 闸门要在最前面 —— 否则自动档会为被限流器拦下的插画白烧一次侧链调用。这条排序
-   * 由 store 的 `generate()` 保证，本方法只管调用本身。
-   *
-   * 🔴 **不抛错**：一切失败降级成 `errorKind: 'prompt-agent'`，上游一次都不会发。
-   *
-   * 🔴 `systemPromptOverride` 是**当前方言**那段话（图像 v2 / C3·C5）。方言拥有整个装配
-   *    契约，「教模型怎么说话」是其中一格 —— 而方言解析只在 `scene-image-seams` 一处
-   *    发生（本方法不认识方言，也不该认识）。传进来就**合并**进 image_prompt 那条 config，
-   *    不传就照旧走 agent-config / 模板兜底。
-   */
-  async runImagePromptAgent(
-    request: ImagePromptRequest,
-    signal?: AbortSignal,
-    systemPromptOverride?: string,
-  ): Promise<ImagePromptOutput | ImageGenFailure> {
-    const fail = (detail: string): ImageGenFailure => ({
-      ok: false,
-      kind: 'prompt-agent',
-      message: '提示词生成失败了，点重试；或自己写一份',
-      detail,
-      retryable: true,
-    });
-
-    const endpoint = this.getEndpointForAgent('image_prompt');
-    if (!endpoint) return fail('未配置 API endpoint');
-
-    const activityRunId = this.activeRunId ?? this.game.startAgentActivityRun(undefined, true);
-    this.game.updateAgentStatus('image_prompt', activityRunId);
-    let activityError: string | undefined;
-
-    try {
-      // 手动档可能在任何时候点（甚至本会话还没跑过一轮），chainData 不能假定已就绪
-      const chain = await this.ensureChainData();
-      const { callImagePromptAgent } = await import('@engine/image-prompt-agent');
-      const result = await callImagePromptAgent(
-        {
-          saveId: this.saveId,
-          request,
-          context: this.currentContext ?? this.buildContext(''),
-          endpoint,
-          configs: withImagePromptSystem(chain.agentConfigs, systemPromptOverride),
-          worldBooks: chain.worldBooks,
-          presets: chain.presets,
-          ...(signal ? { signal } : {}),
-        },
-        { clientFactory: this.getClientFactory(activityRunId) },
-      );
-      if (!result.ok) activityError = result.detail;
-      return result.ok ? result.value : result;
-    } catch (err) {
-      activityError = err instanceof Error ? err.message : String(err);
-      console.error('[GamePipeline] image_prompt 侧链失败:', err);
-      return fail(activityError);
-    } finally {
-      this.game.clearAgentStatus('image_prompt', activityError, activityRunId);
-    }
-  }
-
-  /**
    * 侧链要用的 configs/worldBooks/presets —— run() 里那三行的**惰性版本**。
    *
-   * 存在的理由只有一个：手动点「生成插画」不经过 run()，而 `chainData` 是 run()
+   * 存在的理由只有一个：手动触发的侧链不经过 run()，而 `chainData` 是 run()
    * 才填的。缺它时 systemPrompt 会退化成一行 stub（char_gen 2026-07-17 的真机教训）。
    */
   private async ensureChainData(): Promise<{

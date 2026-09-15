@@ -3,9 +3,8 @@ import {
   EndpointBindingError,
   extractStoryOptions,
   GamePipeline,
-  withImagePromptSystem,
 } from './game-pipeline';
-import type { AgentConfig, ApiEndpoint } from '@engine/types';
+import type { ApiEndpoint } from '@engine/types';
 import { patchAgentSettings } from '../stores/agent-settings';
 import type { AgentResult } from '@engine/types';
 
@@ -60,7 +59,6 @@ const {
   toastSpy,
   createSnapshotSpy,
   runCombatV3Mock,
-  callImagePromptAgentMock,
   summarizeAndSaveMock,
 } = vi.hoisted(() => ({
   commitSpy: vi.fn(async () => ({
@@ -75,7 +73,6 @@ const {
   ),
   toastSpy: vi.fn(),
   runCombatV3Mock: vi.fn(),
-  callImagePromptAgentMock: vi.fn(),
   summarizeAndSaveMock: vi.fn(),
 }));
 
@@ -93,10 +90,6 @@ vi.mock('@engine/combat-v3', () => ({
   runCombatV3: runCombatV3Mock,
 }));
 
-vi.mock('@engine/image-prompt-agent', () => ({
-  callImagePromptAgent: callImagePromptAgentMock,
-}));
-
 vi.mock('@engine/memory-summarizer', () => ({
   summarizeAndSave: summarizeAndSaveMock,
 }));
@@ -105,17 +98,6 @@ vi.mock('../stores/ui-store', () => ({
   useUIStore: () => ({ toast: toastSpy }),
 }));
 
-// 🖼 情景插画：三档分流只关心「有没有把标记喂给 store.generate」，store 本身另有测试
-const { sceneImageStore } = vi.hoisted(() => ({
-  sceneImageStore: {
-    activeSaveId: 'save-test' as string | null,
-    generate: vi.fn(async (_input: unknown) => ({ ok: true, id: 'simg_1' }) as any),
-  },
-}));
-
-vi.mock('../stores/scene-image-store', () => ({
-  useSceneImageStore: () => sceneImageStore,
-}));
 
 // 🆕 T4：invalidatePromptSessions 的唯一职责 = 把本 pipeline 的 saveId 交给引擎清理。
 // mock 掉引擎模块，直接 spy 收到的入参（断言「只清对应 saveId」）。
@@ -182,10 +164,6 @@ function makeSettingsStore(settingsOverrides: Record<string, any> = {}) {
   return {
     settings: {
       apiPool: [],
-      // 图像生成三档开关。默认 `'manual'` 与 `getDefaults()` 一致 —— 桩里写 `'auto'`
-      // 会让每条测试用例都悄悄走上花钱那条路
-      imageGenMode: 'manual',
-      imageMaxRating: 'general',
       // Q-18: per-Agent 设置合并成一张 `agents` 表（此前是 10 张并行 map，
       // 而且这份桩少列了 agentDirty / agentHistoryLayers / agentHistorySlice ——
       // 那正是「加一张 map 要改七处」的代价）
@@ -1210,356 +1188,11 @@ describe('flushEjsVarsDiffs — EJS vars 差量提交 (工坊 P2 / D5)', () => {
 // 🖼 方言 systemPrompt 注入（图像 v2 / C3·C5）
 // ═══════════════════════════════════════════════════════════
 
-describe('withImagePromptSystem', () => {
-  function cfg(over: Partial<AgentConfig> = {}): AgentConfig {
-    return {
-      agentId: 'image_prompt',
-      enabled: true,
-      apiEndpointId: 'ep_1',
-      model: 'gpt-x',
-      temperature: 0.3,
-      maxTokens: 4096,
-      topP: 0.9,
-      frequencyPenalty: 0.1,
-      presencePenalty: 0.2,
-      retryOnFail: true,
-      timeout: 120000,
-      userId: 'fp|save|image_prompt',
-      promptTemplate: { fixedSystem: '', fixedExamples: '' },
-      worldBookIds: ['book_a'],
-      systemPrompt: '老的那份',
-      ...over,
-    };
-  }
-
-  it('🔴 只换 systemPrompt，模型与采样旋钮**一格不动**', () => {
-    const configs = [cfg({ agentId: 'story', systemPrompt: 'story 的' }), cfg()];
-    const out = withImagePromptSystem(configs, '方言写的');
-
-    const image = out.find((c) => c.agentId === 'image_prompt');
-    expect(image?.systemPrompt).toBe('方言写的');
-    // 新造一条顶掉原来的，用户在设置页调的模型与采样参数就全部静默回落成缺省
-    expect(image?.model).toBe('gpt-x');
-    expect(image?.temperature).toBe(0.3);
-    expect(image?.maxTokens).toBe(4096);
-    expect(image?.topP).toBe(0.9);
-    expect(image?.frequencyPenalty).toBe(0.1);
-    expect(image?.presencePenalty).toBe(0.2);
-    expect(image?.worldBookIds).toEqual(['book_a']);
-    // 别人的 config 一个字节不动
-    expect(out.find((c) => c.agentId === 'story')?.systemPrompt).toBe('story 的');
-    // 原数组不被就地改写（调用方还拿着 chainData 那一份）
-    expect(configs[1].systemPrompt).toBe('老的那份');
-  });
-
-  it('不传覆盖 = 原样返回（走 agent-config / 模板兜底，即图像 v1 行为）', () => {
-    const configs = [cfg()];
-    expect(withImagePromptSystem(configs, undefined)[0].systemPrompt).toBe('老的那份');
-    expect(withImagePromptSystem(configs, '')[0].systemPrompt).toBe('老的那份');
-  });
-
-  it('🔴 只剩空白的覆盖照样当没有 —— 否则整段提示词变成一个空格，且不报错', () => {
-    // 设置页今天不再写下这种值（判空前先 trim），但老档里可能躺着一份
-    const configs = [cfg()];
-    expect(withImagePromptSystem(configs, ' ')[0].systemPrompt).toBe('老的那份');
-    expect(withImagePromptSystem(configs, '\n\t ')[0].systemPrompt).toBe('老的那份');
-  });
-
-  it('configs 里没有 image_prompt 时补一条（宁可多一条，也不让方言静默失效）', () => {
-    const out = withImagePromptSystem([cfg({ agentId: 'story' })], '方言写的');
-    expect(out).toHaveLength(2);
-    expect(out[1]).toMatchObject({ agentId: 'image_prompt', systemPrompt: '方言写的' });
-  });
-});
-
-describe('runImagePromptAgent — activity ledger', () => {
-  beforeEach(() => {
-    callImagePromptAgentMock.mockReset();
-  });
-
-  it('registers and settles a standalone image_prompt step around the Agent call', async () => {
-    const gameStore = makeGameStore();
-    const pipeline = new GamePipeline({
-      gameStore,
-      settingsStore: makeSettingsStore({
-        apiPool: [{ id: 'ep-image', name: 'image', model: 'image-model' }],
-      }),
-      saveId: 'save-test',
-    });
-    (pipeline as any).ensureChainData = vi.fn(async () => ({
-      agentConfigs: [],
-      worldBooks: [],
-      presets: [],
-    }));
-    callImagePromptAgentMock.mockResolvedValue({
-      ok: true,
-      value: {
-        scenePrompt: 'moonlit tavern',
-        sceneNegative: '',
-        desc: '月下旅店',
-      },
-    });
-
-    await pipeline.runImagePromptAgent({
-      intent: '月下的旅店',
-      characters: [],
-      narrative: '旅店安静地立在月色里。',
-      rating: 'general',
-    });
-
-    expect(gameStore.startAgentActivityRun).toHaveBeenCalledWith(undefined, true);
-    expect(gameStore.updateAgentStatus).toHaveBeenCalledWith('image_prompt', 'activity-test');
-    expect(callImagePromptAgentMock).toHaveBeenCalledOnce();
-    expect(gameStore.clearAgentStatus).toHaveBeenCalledWith(
-      'image_prompt',
-      undefined,
-      'activity-test',
-    );
-  });
-
-  it("keeps an older turn's callbacks bound to their original activity run", () => {
-    const gameStore = makeGameStore();
-    const pipeline = new GamePipeline({
-      gameStore,
-      settingsStore: makeSettingsStore(),
-      saveId: 'save-test',
-    });
-    const events = (pipeline as any).buildEventHandlers('activity-old');
-
-    // abort() unlocks input immediately, so a newer turn can own the instance before
-    // the older callbacks finish. Those late callbacks must not land in the new ledger.
-    (pipeline as any).activeRunId = 'activity-new';
-    events.onAgentStart('story', { apiEndpointId: 'ep-story', model: 'story-model' });
-    events.onToolCall('story', 'lookup_lore', { name: '旧城' }, { found: true });
-    events.onAgentError('story', '已取消');
-
-    expect(gameStore.updateAgentStatus).toHaveBeenCalledWith('story', 'activity-old');
-    expect(gameStore.recordAgentToolActivity).toHaveBeenCalledWith(
-      'story',
-      'lookup_lore',
-      { name: '旧城' },
-      { found: true },
-      'activity-old',
-    );
-    expect(gameStore.clearAgentStatus).toHaveBeenCalledWith('story', '已取消', 'activity-old');
-  });
-
-  it('preserves the completed provider payload when completion handling later fails', () => {
-    const gameStore = makeGameStore();
-    const pipeline = new GamePipeline({
-      gameStore,
-      settingsStore: makeSettingsStore(),
-      saveId: 'save-test',
-    });
-    const events = (pipeline as any).buildEventHandlers('activity-failed');
-    const result = {
-      ...makeResult('story', 'billable response'),
-      requestMessages: [{ role: 'user', content: 'billable request' }],
-      tokensUsed: 73,
-      duration: 42,
-      error: 'completion handler failed',
-    };
-
-    events.onAgentStart('story', { apiEndpointId: 'ep-story', model: 'story-model' });
-    events.onAgentError('story', result.error, result);
-
-    expect(gameStore.addAgentLogEntry).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        messages: result.requestMessages,
-        rawResponse: 'billable response',
-        tokensUsed: 73,
-        duration: 42,
-        error: 'completion handler failed',
-      }),
-    );
-  });
-
-  it('records memory-summary embedding usage as its own billable invocation', async () => {
-    const gameStore = makeGameStore();
-    const settingsStore = makeSettingsStore({
-      embeddingEndpointId: 'ep-embedding',
-      embeddingModel: 'embed-model',
-      apiPool: [
-        {
-          id: 'ep-embedding',
-          name: 'Embedding API',
-          baseUrl: 'https://api.example.test/v1',
-          apiKey: 'secret',
-          defaultModel: 'fallback-model',
-        },
-      ],
-    });
-    summarizeAndSaveMock.mockImplementationOnce(async (options: any) => {
-      options.onEmbeddingRequest({
-        input: 'summary embedding input',
-        model: 'embed-model',
-        baseUrl: 'https://api.example.test/v1',
-        startedAt: 100,
-        completedAt: 125,
-        promptTokens: 11,
-        totalTokens: 11,
-        dimensions: 1536,
-      });
-      return null;
-    });
-    const pipeline = new GamePipeline({ gameStore, settingsStore, saveId: 'save-test' });
-
-    await (pipeline as any).persistMemorySummary(
-      makeResult('memory_summary', '{"content":"summary"}'),
-      'activity-embedding',
-    );
-
-    expect(gameStore.addAgentLogEntry).toHaveBeenCalledWith(
-      expect.objectContaining({
-        turnId: 'activity-embedding',
-        agentId: 'memory_embedding',
-        model: 'embed-model',
-        messages: [{ role: 'user', content: 'summary embedding input' }],
-        tokensUsed: 11,
-        promptTokens: 11,
-      }),
-    );
-  });
-});
 
 // ═══════════════════════════════════════════════════════════
 // 🖼 情景插画：三档分流（图像生成 §8 / D15 / D21 / D32 / D48）
 // ═══════════════════════════════════════════════════════════
 
-describe('handleSceneImages — 三档分流', () => {
-  /** 让管线以为「story 刚产出了这条消息」，即 D15 那个唯一的开火时机 */
-  async function primeStory(pipeline: any, narrative: string, mode = 'auto'): Promise<void> {
-    pipeline.settings.settings.imageGenMode = mode;
-    await pipeline.handleAgentResult(makeResult('story', `<maintext>${narrative}</maintext>`));
-  }
-
-  const oneMarker =
-    '夜色渐深。<scene_image title="炉火" characters="苏婉">她望着壁炉</scene_image>';
-
-  beforeEach(() => {
-    sceneImageStore.activeSaveId = 'save-test';
-    sceneImageStore.generate.mockClear();
-    sceneImageStore.generate.mockImplementation(async () => ({ ok: true, id: 'simg_1' }));
-  });
-
-  it('auto：逐个标记进 store.generate，带上 messageId/turn/occurrence 与剥净的正文', async () => {
-    const pipeline: any = makePipeline();
-    await primeStory(pipeline, oneMarker);
-
-    await pipeline.handleSceneImages([{ type: 'scene_image' }]);
-
-    expect(sceneImageStore.generate).toHaveBeenCalledTimes(1);
-    const input = sceneImageStore.generate.mock.calls[0][0] as any;
-    expect(input).toMatchObject({
-      saveId: 'save-test',
-      messageId: 'msg_stub',
-      turn: 1,
-      anchorKind: 'marker',
-      occurrence: 0,
-      source: 'auto',
-      title: '炉火',
-      characters: ['苏婉'],
-      intent: '她望着壁炉',
-    });
-    // 侧链拿到的是**剥掉全部标记**的正文
-    expect(input.narrative).toBe('夜色渐深。');
-  });
-
-  it('auto：occurrence 与渲染分段同源 —— 空正文的标记照剥但不占号', async () => {
-    const pipeline: any = makePipeline();
-    await primeStory(
-      pipeline,
-      `A<scene_image title="空"></scene_image>B<scene_image title="甲">画面甲</scene_image>` +
-        `C<scene_image title="乙">画面乙</scene_image>`,
-    );
-
-    await pipeline.handleSceneImages([{ type: 'scene_image' }]);
-
-    const calls = sceneImageStore.generate.mock.calls.map((c: any[]) => c[0]);
-    expect(calls.map((c) => c.occurrence)).toEqual([0, 1]);
-    expect(calls.map((c) => c.title)).toEqual(['甲', '乙']);
-  });
-
-  it('manual / off：一次都不建记录（点了才花钱 / 这个子系统不存在）', async () => {
-    for (const mode of ['manual', 'off']) {
-      sceneImageStore.generate.mockClear();
-      const pipeline: any = makePipeline();
-      await primeStory(pipeline, oneMarker, mode);
-      await pipeline.handleSceneImages([{ type: 'scene_image' }]);
-      expect(sceneImageStore.generate).not.toHaveBeenCalled();
-    }
-  });
-
-  it('🔴 D15：没有「刚产出的那条消息」就绝不开火（历史消息不会走到这里）', async () => {
-    const pipeline: any = makePipeline();
-    pipeline.settings.settings.imageGenMode = 'auto';
-
-    await pipeline.handleSceneImages([{ type: 'scene_image' }]);
-
-    expect(sceneImageStore.generate).not.toHaveBeenCalled();
-  });
-
-  it('🔴 D15：每轮 run() 开头清空上一轮的消息，标记不会挂到隔壁回合去', async () => {
-    const pipeline: any = makePipeline();
-    await primeStory(pipeline, oneMarker);
-    expect(pipeline.lastStoryMessage).not.toBeNull();
-
-    // run() 的重置在 try 内很靠前；这里直接验字段本身的语义
-    pipeline.lastStoryMessage = null;
-    await pipeline.handleSceneImages([{ type: 'scene_image' }]);
-    expect(sceneImageStore.generate).not.toHaveBeenCalled();
-  });
-
-  it('🔴 D21：限额拒绝时什么都不做，同一条消息里剩下的标记照样各自判定', async () => {
-    sceneImageStore.generate.mockImplementation(async () => ({
-      ok: false,
-      reason: 'rolling-window',
-      message: '已达本小时上限',
-    }));
-    const pipeline: any = makePipeline();
-    await primeStory(
-      pipeline,
-      `<scene_image title="甲">画面甲</scene_image><scene_image title="乙">画面乙</scene_image>`,
-    );
-
-    await expect(pipeline.handleSceneImages([{ type: 'scene_image' }])).resolves.toBeUndefined();
-    // 被拒不等于放弃后面那个：每个标记各自过闸门（拒了只是落到「无记录」那一格）
-    expect(sceneImageStore.generate).toHaveBeenCalledTimes(2);
-  });
-
-  it('一个标记入队抛错不牵连同一条消息里的其它标记', async () => {
-    sceneImageStore.generate
-      .mockImplementationOnce(async () => {
-        throw new Error('boom');
-      })
-      .mockImplementationOnce(async () => ({ ok: true, id: 'simg_2' }));
-    const pipeline: any = makePipeline();
-    await primeStory(
-      pipeline,
-      `<scene_image title="甲">画面甲</scene_image><scene_image title="乙">画面乙</scene_image>`,
-    );
-
-    await pipeline.handleSceneImages([{ type: 'scene_image' }]);
-    expect(sceneImageStore.generate).toHaveBeenCalledTimes(2);
-  });
-
-  it('插画库还没载入本存档时不开火（切存档途中不该在别处花钱）', async () => {
-    sceneImageStore.activeSaveId = 'another-save';
-    const pipeline: any = makePipeline();
-    await primeStory(pipeline, oneMarker);
-
-    await pipeline.handleSceneImages([{ type: 'scene_image' }]);
-    expect(sceneImageStore.generate).not.toHaveBeenCalled();
-  });
-
-  it('标记没写 rating 时取设置里的上限档（D38 的另一半）', async () => {
-    const pipeline: any = makePipeline({}, { imageMaxRating: 'sensitive' });
-    await primeStory(pipeline, oneMarker);
-
-    await pipeline.handleSceneImages([{ type: 'scene_image' }]);
-    expect((sceneImageStore.generate.mock.calls[0][0] as any).rating).toBe('sensitive');
-  });
-});
 
 // ===== T16：combat_v3 玩家输入桥时序 + pre-combat 快照 =====
 // 设计 2026-08-09 §3.5：handleCombatTriggerV3 必须在 `await runCombatV3(...)` **之前**

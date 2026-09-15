@@ -72,7 +72,7 @@ import { hashMediaBytes, isMediaHashAvailable } from './media-hash';
 // ═══════════════════════════════════════════════════════════
 
 /** 单条目解压后上限 —— 10 MB（§5.1）。**不含音频**，音频走下面那条 */
-export const ASSET_ZIP_MAX_ENTRY_BYTES = 10 * 1024 * 1024;
+const ASSET_ZIP_MAX_ENTRY_BYTES = 10 * 1024 * 1024;
 
 /**
  * 单条**音频**解压后上限 —— 128 MB。
@@ -91,7 +91,7 @@ export const ASSET_ZIP_MAX_ENTRY_BYTES = 10 * 1024 * 1024;
 export const ASSET_ZIP_MAX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024;
 
 /** 清单文件名，仅认 zip 根目录那一份（§5.2） */
-export const ASSET_ZIP_MANIFEST_NAME = 'manifest.json';
+const ASSET_ZIP_MANIFEST_NAME = 'manifest.json';
 
 /**
  * 每次 push 给 fflate 的压缩字节数。
@@ -129,7 +129,7 @@ export type { DecodedEntry };
  * 炸掉（取值写错了会得到 `never`）；平行声明两份字符串联合则会静默走偏。
  * 缺的那个 `'suspect-missing-type'` 属于解析层，本模块判不出来。
  */
-export type AssetZipWarning = Extract<
+type AssetZipWarning = Extract<
   ImportWarning,
   'hash-unavailable' | 'suspect-filename-encoding'
 >;
@@ -431,7 +431,7 @@ function sanitizeSection(raw: unknown): Record<string, ImportManifestMeta> {
  * 不该毁掉一整包素材。清单能做的只有"追加元数据"，改名与改类型无从表达:
  * 输出形状里根本没有 name / type 字段。
  */
-export function parseAssetZipManifest(bytes: Uint8Array): AssetZipManifest | undefined {
+function parseAssetZipManifest(bytes: Uint8Array): AssetZipManifest | undefined {
   let parsed: unknown;
   try {
     parsed = JSON.parse(decodeUtf8(bytes));

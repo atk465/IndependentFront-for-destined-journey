@@ -93,7 +93,6 @@ function makeRegistryPack(): ContentPack {
     catalog: { data: { pools: ['catalog-from-pack'] } },
     namePools: { data: { given: ['name-from-pack'] } },
     branding: { appTitle: 'Pack Engine' },
-    imageDialects: { dialects: [{ id: 'dialect-from-pack' }] },
   } as ContentPack;
 }
 
@@ -124,7 +123,6 @@ describe('ensureContentRegistryLoaded —— URL 约定', () => {
       'branding',
       'catalog',
       'commissions',
-      'imageDialects',
       'locations',
       'mapPack',
       'markers',
@@ -139,7 +137,6 @@ describe('ensureContentRegistryLoaded —— URL 约定', () => {
     expect(byFace.namePools).toBe('/data/content/name-pools.json');
     expect(byFace.branding).toBe('/data/content/branding.json');
     // 🔴 第 7 面（图像 v2 / C4）：缺席不是错误，出图会退到内置兜底方言
-    expect(byFace.imageDialects).toBe('/data/content/image-dialects.json');
     // 🔴 第 8 面（地图 v1 / §3.3）：同样缺席不是错误，落位/天气/MAP_CONTEXT 整套静默不出
     expect(byFace.mapPack).toBe('/data/content/map-pack.json');
     // 🔴 randomEvents（随机事件 v1 / §3.3，在 ContentPack 里是第 13 分节）：缺席同样不是
@@ -164,7 +161,6 @@ describe('ensureContentRegistryLoaded —— 逐面加载', () => {
     expect(r.namePools).toEqual({ given: ['name-placeholder'] });
     expect(r.branding).toEqual({ appTitle: 'Placeholder Engine' });
     expect(r.markers).toEqual([{ id: 'marker-placeholder' }]);
-    expect(r.imageDialects).toEqual({ dialects: [{ id: 'dialect-placeholder' }] });
     expect(r.mapPack).toEqual({
       version: 'map-placeholder',
       contentHash: 'map-placeholder-hash',
@@ -224,7 +220,6 @@ describe('ensureContentRegistryLoaded —— 逐面加载', () => {
       'branding',
       'catalog',
       'commissions',
-      'imageDialects',
       'locations',
       'mapPack',
       'markers',
@@ -284,11 +279,10 @@ describe('ensureContentRegistryLoaded —— pack 优先（D20 三态）', () =>
     installFetchMock();
     await ensureContentRegistryLoaded();
     const r = getContentRegistry();
-    // pack 声明的四面（catalog/namePools 取 .data，branding/imageDialects 整节）
+    // pack 声明的三面（catalog/namePools 取 .data，branding 整节）
     expect(r.catalog).toEqual({ pools: ['catalog-from-pack'] });
     expect(r.namePools).toEqual({ given: ['name-from-pack'] });
     expect(r.branding).toEqual({ appTitle: 'Pack Engine' });
-    expect(r.imageDialects).toEqual({ dialects: [{ id: 'dialect-from-pack' }] });
     // pack 没声明的四面 → 占位 fetch 结果
     expect(r.locations).toEqual([{ id: 'loc-placeholder' }]);
     expect(r.bloodlines).toEqual({ bloodlines: [{ id: 'bl-placeholder' }] });

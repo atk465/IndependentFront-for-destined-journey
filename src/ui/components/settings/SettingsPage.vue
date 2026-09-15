@@ -30,7 +30,6 @@ import ThemeSection from './ThemeSection.vue';
 import MessagesSection from './MessagesSection.vue';
 import BeautifierSection from './BeautifierSection.vue';
 import AssetSection from './AssetSection.vue';
-import ImageSection from './image/ImageSection.vue';
 import DataSection from './DataSection.vue';
 import DeveloperSection from './DeveloperSection.vue';
 import AboutSection from './AboutSection.vue';
@@ -66,7 +65,6 @@ const navItems: { key: Section; label: string; icon: string }[] = [
   { key: 'beautifier', label: '输出美化', icon: 'fa-solid fa-wand-magic-sparkles' },
   // 媒体三分区相邻（音频 / 素材 / 图像生成），数据操作排在它们之后（设计 §7.1）
   { key: 'asset', label: '素材', icon: 'fa-solid fa-image' },
-  { key: 'image', label: '图像生成', icon: 'fa-solid fa-wand-sparkles' },
   { key: 'data', label: '存档数据', icon: 'fa-solid fa-database' },
   { key: 'developer', label: '开发者模式', icon: 'fa-solid fa-code' },
   { key: 'about', label: '关于', icon: 'fa-solid fa-circle-info' },
@@ -219,7 +217,6 @@ onMounted(() => {
             <AssetSection v-if="activeSection === 'asset'" />
 
             <!-- ========== 图像生成 ========== -->
-            <ImageSection v-if="activeSection === 'image'" />
 
             <!-- ========== 存档数据 ========== -->
             <DataSection v-if="activeSection === 'data'" />

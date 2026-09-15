@@ -43,13 +43,6 @@
  */
 import type { ApiEntry } from './settings-store';
 import type { AgentSettingsEntry } from './agent-settings';
-import type {
-  ImageDialectOverride,
-  ImageGenMode,
-  ImageProviderId,
-  ImageRating,
-  NaiBillingTier,
-} from '@engine/types-image';
 
 /** 剧情难度层级。`'adaptive'` = 按玩家层级动态；数字 = 钉死 T1-T7 */
 export type PlotDifficultyTier = 'adaptive' | number | string;
@@ -59,59 +52,6 @@ export type SnapshotRetentionMode = 'tiered' | 'dense';
 
 /** 播放列表循环模式 */
 export type AudioRepeatMode = 'off' | 'all' | 'one';
-
-/**
- * NovelAI 后端专属设置（图像 v2 / C8）。
- *
- * 🔴 **限额（`maxPerMessage` / `maxPerHour`）住在这里而不是共享区**：L1/L2 是**花钱**
- *    防线（C9），本地后端不设上限。放在共享区会让「ComfyUI 也该有个上限吧」这个
- *    看似合理的念头随时把它接回去，而那是用户明确推翻过的裁定。
- */
-export type ImageNovelaiSettings = {
-  /** 指向 API 池里 `apiType: 'image'` 的那条；null = 还没选 */
-  endpointId: string | null;
-  /** NAI 模型 id（**不是** LLM 模型）。默认见 `image-defaults.DEFAULT_IMAGE_MODEL` */
-  model: string;
-  /** 采样器。默认 `'k_euler_ancestral'`（录制样本值） */
-  sampler: string;
-  /** 噪声调度。默认 `'karras'`（录制样本值） */
-  noiseSchedule: string;
-  /**
-   * NAI 的 UC 预设编号，按录制值原样发。
-   * 🔴 它是**每模型一套**的具名清单序号，换模型语义就变 —— 所以负向文本由方言
-   *    （`baseNegative`）拿着，不靠这个字段表达。
-   */
-  ucPreset: number;
-  /**
-   * NovelAI 账户档位 —— 只喂给免费额度指示器，**不影响任何请求**。
-   *
-   * 默认 `'unset'` = 不猜（D43 补丁）：免费额度是 Opus 专属的，默认给乐观答案等于
-   * 替按点数付费的账户宣布「这些图不要钱」。
-   */
-  tier: NaiBillingTier;
-  /** L1 每条消息上限（auto/manual 都计入） */
-  maxPerMessage: number;
-  /** L2 每小时上限 —— 真正的失效保护，调大之前先读设计 §9 */
-  maxPerHour: number;
-};
-
-/**
- * ComfyUI 后端专属设置（图像 v2 / C8·C16）。
- *
- * 🔴 `baseUrl` **不进 API 池**（C16）：池建模的是带 key 的远端服务，ComfyUI 是无 key
- *    的本地地址，且这一格填错的败法是诚实的 connection-refused，不是 2026-08-05 那种
- *    「上游报一句指向别处的错」。
- */
-export type ImageComfySettings = {
-  /** ComfyUI 服务地址。默认 `'http://127.0.0.1:8188'`（假定与应用同机） */
-  baseUrl: string;
-  /** 用户粘贴的 API-format 工作流 JSON。**空串 = 用内置最小 SDXL 图** */
-  workflowJson: string;
-  /** 单张图的整体超时（ms）。默认 600000 —— 本地渲染慢，2 分钟硬闸会把还在跑的图记成失败 */
-  timeoutMs: number;
-  /** `/history/{id}` 轮询间隔（ms）。默认 1500 */
-  pollIntervalMs: number;
-};
 
 export type UiSettings = {
   // ═══ API 池 ═══
@@ -257,55 +197,6 @@ export type UiSettings = {
    * 删的是旧的那张图，拿旧墓碑挡住它等于让作者永远送不进来且无从得知。
    */
   remoteAssetTombstones: string[];
-
-  // ═══ 图像生成（设计 §11；图像 v2 / C8 重构成 per-provider 袋子）═══
-  //
-  // 🔴 这里**没有** `image_prompt` 的模型/温度/世界书 —— 那些走 `agent-settings.ts`
-  //    的 `agents` 袋子（D28/D52）。两者在同一个分区里挨着渲染，但存储各归各位。
-  // 🔴 也**没有**画质后缀 / 基础负向 / 侧链 systemPrompt 这三个字符串旋钮：它们是
-  //    **方言属性**（C6），住在 `imageDialectOverrides[dialectId]` 里，空 = 回落方言
-  //    JSON 的默认值。全局单份会把 danbooru 的调优带进散文档，静默废掉整个特性。
-  //    老用户那两个平铺字段由 `image-settings-migration.ts` 迁进去。
-
-  /** 后端。默认 `'novelai'` —— 与重构前唯一存在的那条路径一致 */
-  imageProvider: ImageProviderId;
-  /** 当前方言 id。默认 `'danbooru-anime'`（= `FALLBACK_IMAGE_DIALECT.id`，v1 行为） */
-  imageDialectId: string;
-  /**
-   * 用户对某条方言四个字符串旋钮的覆盖（C6）。**按方言 id 键控**。
-   * 缺席 / 空串 = 回落方言 JSON，详见 `ImageDialectOverride` 的注释。
-   */
-  imageDialectOverrides: Record<string, ImageDialectOverride>;
-
-  // ── 共享（两家都读；comfy 侧作为 %token% 替换值）──
-  /** 三档开关。默认 `'manual'`：手动档下多几个标记只是多几个按钮，不花钱 */
-  imageGenMode: ImageGenMode;
-  /** 出图宽（px）。默认 1216 —— 与 832 配成 NAI 官方横构图预设，面积卡在免费档内 */
-  imageWidth: number;
-  /** 出图高（px）。默认 832 */
-  imageHeight: number;
-  /** 采样步数。默认 23（免费档上限是 28） */
-  imageSteps: number;
-  /** CFG scale。默认 4.5（录制样本值） */
-  imageScale: number;
-  /** 🔴 **上限而非默认**（D38）：标记里写的 rating 会被钳到这里 */
-  imageMaxRating: ImageRating;
-  /** 正文里的插画默认打码显示，点一下才揭示（D46） */
-  imageBlurByDefault: boolean;
-  /** 自动档那一次性确认弹过没有（D44）。弹过就不再弹 */
-  imageAutoConfirmed: boolean;
-  /**
-   * 用户追加的负向，拼在基础负向之后。默认空串。
-   *
-   * 🔴 **C6 的唯一例外：它是全局的**，不按方言键控 —— 「永远别画 X」是用户口味，
-   *    不是方言属性。但 `supportsNegative:false` 时 UI 要**可见地禁用**它，
-   *    而不是收下再静默丢掉。
-   */
-  imageExtraNegative: string;
-
-  // ── per-provider ──
-  imageNovelai: ImageNovelaiSettings;
-  imageComfy: ImageComfySettings;
 
   // ═══ 下面几项**不在 `getDefaults()` 里**，但生产代码确实读它们 ═══
 

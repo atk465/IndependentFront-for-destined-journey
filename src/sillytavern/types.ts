@@ -15,9 +15,6 @@ import type { Modifier } from './effect-types';
 // type-only 循环安全：combat-v3/types.ts 反向 import 本文件的 CombatParticipant/StatusEffect 也是 type-only
 // EffectAutomaton 定义在 combat-v3/types.ts（v3 内核 DSL），这里只做类型引用不引入运行时
 import type { EffectAutomaton } from './combat-v3/types';
-// type-only 单向边：types-image.ts **不 import 本文件**（图像子系统的类型全部自持），
-// 所以这条边不成环。只为把 SceneImageMarker 接进 DetectedMarker 联合。
-import type { SceneImageMarker } from './types-image';
 // 地图 v1: `AgentContext.mapFlags` 的形状（分册 types-map.ts，口径同上 —— 只 type-only 反向引用）
 // 地图 v1.2: `AgentContext.mapFacts` 的形状（同一分册，同一条 type-only 口径）
 import type { MapFactsFlags, MapSaveFlags } from './types-map';
@@ -3457,7 +3454,6 @@ export type MarkerType =
   | 'item_gen_request'
   | 'item_update_request' // 物品调度
   | 'craft_gen_request' // 制作调度（统一 _request 后缀）
-  | 'scene_image' // 情景插画（图像生成 v1；标记即锚点，图就地插进正文）
   | 'event_trigger'; // 随机事件触发回执（随机事件 v1 §5.2；Story 认领候选池里的一条）
 
 /** 所有标记的公共字段 */
@@ -3535,7 +3531,7 @@ export interface CharDetectMarker extends DetectedMarkerBase {
  * `<event_trigger>` 标记 — Story 认领候选池里的一条随机事件（随机事件 v1 §5.2）。
  *
  * 写法是自闭合、写在回复末尾：`<event_trigger name="神秘商人"/>`。成对与漏写闭合两种
- * 写法也认（`lenientClosing`，同 `scene_image` 的理由：不认就等于
+ * 写法也认（`lenientClosing`：不认就等于
  * 「既不生效、也剥不掉」，那行尖括号会漏到玩家眼前）。
  *
  * 🔴 **`name` 是逻辑键，逐字匹配候选池**（铁则 1：AI 永不见 id）。结算侧
@@ -3561,14 +3557,7 @@ export type DetectedMarker =
   | ItemGenRequestMarker
   | ItemUpdateRequestMarker
   | CraftGenRequestMarker
-  // 图像生成 v1：`<scene_image>`。定义住在 types-image.ts（子系统类型集中在那里），
-  // 这里只把它接进联合，`marker-protocol.ts` 的 `MarkerOf`/`MarkerFields` 因此对它成立。
-  //
-  // 🔴 加/删 `MarkerType` 成员与改 `MARKER_SPECS` **必须同一次改动**：那张表是
-  //    `{ [K in Exclude<MarkerType,'scene_image'>]: … }` 的映射类型，只改一边当场缺键、
-  //    编译不过（设计 §3.1）。
-  | SceneImageMarker
-  // 随机事件 v1：`<event_trigger>`（§5.2 写侧）。同上一条 —— 它与 `MARKER_SPECS` 里的
+  // 随机事件 v1：`<event_trigger>`（§5.2 写侧）。它与 `MARKER_SPECS` 里的
   // `event_trigger` 一行是同一次改动的两半。
   | EventTriggerMarker;
 

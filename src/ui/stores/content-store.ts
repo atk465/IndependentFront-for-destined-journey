@@ -19,7 +19,7 @@
  *    行为兜底不变（失败不阻塞启动）；现在失败进 `contentStatus='error'` 而不是静默。
  *
  * 3. **内容注册表**（D16）。八面（catalog/locations/bloodlines/namePools/markers/branding/
- *    imageDialects/mapPack）的同步读取入口，约定 URL `/data/content/<name>.json`
+ *    mapPack）的同步读取入口，约定 URL `/data/content/<name>.json`
  *    （markers 例外，见 `CONTENT_REGISTRY_SOURCES`）。消费方（agent-tools 同步路径 /
  *    random-tables / bloodlines / $location）**同步**读它，所以注册表必须在任何 agent 执行前灌注完成——
  *    两段保证：模块顶层同步 `seedPlaceholderRegistry()`（保证非 null 骨架），
@@ -310,7 +310,7 @@ export async function loadAllDefaultBooks(): Promise<WorldBook[]> {
 // ═══════════════════════════════════════════════════════════
 
 /**
- * 内容注册表的各面（D16 / §5.1；第 7 面 imageDialects 由图像 v2 追加，
+ * 内容注册表的各面（D16 / §5.1；
  * 第 8 面 mapPack 由地图系统 v1 追加，`randomEvents` 由随机事件系统 v1 追加、
  * `remoteAssets` 由远程素材 v1 追加 —— 后两者在 `ContentPack` 里分别是**第 13 / 第 14
  * 分节**，两套编号各数各的，别混着读）。
@@ -412,7 +412,6 @@ export const CONTENT_REGISTRY_SOURCES: ReadonlyArray<{
   { face: 'bloodlines', url: '/data/content/bloodlines.json' },
   { face: 'namePools', url: '/data/content/name-pools.json' },
   { face: 'branding', url: '/data/content/branding.json' },
-  { face: 'imageDialects', url: '/data/content/image-dialects.json' },
   { face: 'mapPack', url: '/data/content/map-pack.json' },
   { face: 'randomEvents', url: '/data/content/random-events.json' },
   { face: 'commissions', url: '/data/content/commissions.json' },
@@ -507,7 +506,7 @@ async function fetchRegistryFace(
  * 已装 pack 各面的取值（D20 三态的 pack 半边）。
  *
  * 取法与装包执行器一致：`catalog` / `namePools` 取 `.data` 子字段，
- * `locations` / `mapMarkers` / `branding` / `bloodlines` / `imageDialects` / `mapPack` 是整节
+ * `locations` / `mapMarkers` / `branding` / `bloodlines` / `mapPack` 是整节
  * （方言分节按整节走，因为它落盘就是 `{ dialects: [...] }` —— 与 `bloodlines` 同形；
  * 地图包同理，它落盘就是 `MapPack` 本身，再包一层 `data` 只是多一层壳）。
  * 键**只在该面有值时才出现**——于是下游一律 `resolveSection(packFace, placeholder)`，
@@ -527,7 +526,6 @@ function packRegistryFaces(
   if (pack.namePools?.data !== undefined) out.namePools = pack.namePools.data;
   if (pack.mapMarkers !== undefined) out.markers = pack.mapMarkers;
   if (pack.branding !== undefined) out.branding = pack.branding;
-  if (pack.imageDialects !== undefined) out.imageDialects = pack.imageDialects;
   if (pack.mapPack !== undefined) out.mapPack = pack.mapPack;
   if (pack.randomEvents !== undefined) out.randomEvents = pack.randomEvents;
   // 远程素材分节是**裸数组**（没有 `.data` / `{ dialects }` 那层壳），故整节走
@@ -973,7 +971,6 @@ export const useContentStore = defineStore('content', () => {
       namePools: resolveSection(packFaces.namePools, reg.namePools),
       markers: resolveSection(packFaces.markers, reg.markers),
       branding: resolveSection(packFaces.branding, reg.branding),
-      imageDialects: resolveSection(packFaces.imageDialects, reg.imageDialects),
       mapPack: resolveSection(packFaces.mapPack, reg.mapPack),
       randomEvents: resolveSection(packFaces.randomEvents, reg.randomEvents),
       commissions: resolveSection(packFaces.commissions, reg.commissions),

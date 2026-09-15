@@ -15,7 +15,6 @@ import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import type { AgentActivityRun, ChatMessage } from '@engine/types';
 import ChatFlow from './ChatFlow.vue';
-import { useSettingsStore } from '../../stores/settings-store';
 import type { TimelineRestoreResult } from '../../stores/game-store';
 
 enableAutoUnmount(afterEach);
@@ -36,15 +35,6 @@ const ui = vi.hoisted(() => ({ toast: vi.fn(), navigate: vi.fn() }));
 
 vi.mock('../../stores/game-store', () => ({ useGameStore: () => game }));
 vi.mock('../../stores/ui-store', () => ({ useUIStore: () => ui }));
-vi.mock('../../stores/scene-image-store', () => ({
-  useSceneImageStore: () => ({
-    activeSaveId: 'save_1',
-    generate: vi.fn(async () => ({ ok: true as const, id: 'simg_new' })),
-  }),
-}));
-vi.mock('../../stores/image-preset-store', () => ({
-  useImagePresetStore: () => ({ loading: false, init: vi.fn(), find: vi.fn(() => undefined) }),
-}));
 
 function userMsg(id: string, content: string): ChatMessage {
   return { id, role: 'user', content, timestamp: 0 };
@@ -56,8 +46,6 @@ describe('ChatFlow 右键菜单 — user 消息', () => {
     vi.clearAllMocks();
     game.agentActivityRuns = [];
     game.rollbackOneTurn.mockResolvedValue({ status: 'restored', continuation: 'same-save' });
-    // 配图档关掉 → user 消息菜单只剩回退/复制两项（配图是给正文的）
-    useSettingsStore().settings.imageGenMode = 'off';
     Object.assign(navigator, { clipboard: { writeText: vi.fn(async () => {}) } });
   });
 

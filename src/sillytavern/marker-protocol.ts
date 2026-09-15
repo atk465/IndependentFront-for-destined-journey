@@ -14,7 +14,6 @@
  *   <craft_gen_request>   — request_dispatcher 发现制作场景 (统一 _request 后缀)
  *
  * 图像生成 v1 新增:
- *   <scene_image>    — 🖼 情景插画: 标记就是锚点，图就地插进正文（设计 §3）
  *
  * 随机事件 v1 新增:
  *   <event_trigger>  — 🎲 触发回执: Story 认领候选池里的一条随机事件（设计 §5.2）
@@ -41,9 +40,6 @@ import type {
   EventTriggerMarker,
   MarkerScanResult,
 } from './types';
-// 图像子系统的类型全部集中在 types-image.ts（`types.ts` 只把 SceneImageMarker
-// 接进 DetectedMarker 联合，并不再导出它）。type-only，不成环。
-import type { ImageRating, SceneImageMarker } from './types-image';
 
 // ========== Constants ==========
 
@@ -80,59 +76,6 @@ interface MarkerSpec<M extends DetectedMarker> {
    * 也会被剥掉，不该因为 AI 记没记得写闭合标签而改变去留。
    */
   lenientClosing?: boolean;
-}
-
-// ========== scene_image 字段助手（设计 §3.1 / §3.2）==========
-
-/** 标题上限（码位）。图鉴条目名 + 手动档按钮标签 */
-export const CAPTION_TITLE_MAX = 30;
-/** 副标题上限（码位）。`image_prompt` 产出的 `desc` 走这一档 */
-export const CAPTION_DESC_MAX = 60;
-
-/**
- * 短文案收敛（设计 §3.2）—— 纯函数。
- *
- * ① undefined/null → `''` ② 去掉裸的 `"` 与 `'`（属性解析残留；中文引号「」『』“”
- * 一律保留）③ trim ④ 折叠内部连续空白为单个空格 ⑤ 按**码位**截断到 max，不加省略号。
- *
- * 🔴 **绝不因为标题畸形就拒绝整个标记** —— 那会把一次装饰性失误升级成一张画不出来的图。
- * 本函数没有任何返回「无效」的路径，这是设计要求，不是遗漏。
- */
-export function sanitizeCaption(input: string | undefined | null, max: number): string {
-  if (input === undefined || input === null) return '';
-  // 先去引号再 trim: 反过来的话 `" 标题 "` 去掉引号后两端空白就留下了
-  const collapsed = input.replace(/["']/g, '').trim().replace(/\s+/g, ' ');
-  if (max <= 0) return '';
-  const points = Array.from(collapsed);
-  return points.length <= max ? collapsed : points.slice(0, max).join('');
-}
-
-/**
- * `characters="苏婉,艾莉"` → `['苏婉', '艾莉']`。
- *
- * 🔴 只切分隔符与去两端空白，**名字内容原样**（不折叠大小写 / 不 NFKC / 不去引号）——
- * 角色名是逻辑键，靠 `===` 匹配预设（铁律 1 / 素材系统 D2）。
- * 全角逗号与顿号也认: 产出这串的模型工作在中文语境里，`，` `、` 是它的日常写法，
- * 而分隔符归哪一档与「不归一化名字」不冲突。
- */
-function splitCharacterList(raw: string | undefined): string[] {
-  if (!raw) return [];
-  return raw
-    .split(/[,，、]/)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-}
-
-const IMAGE_RATINGS: readonly string[] = ['general', 'sensitive', 'questionable', 'explicit'];
-
-/**
- * 分级属性 → `ImageRating`。认不出（含缺省、拼错、写中文）一律 `undefined`,
- * 由设置里的默认档兜底 —— 猜一个更危险的档位是这里唯一不能做的事。
- */
-function normalizeRating(raw: string | undefined): ImageRating | undefined {
-  if (!raw) return undefined;
-  const key = raw.trim().toLowerCase();
-  return IMAGE_RATINGS.includes(key) ? (key as ImageRating) : undefined;
 }
 
 /**
@@ -220,20 +163,6 @@ const MARKER_SPECS: { [K in BlockMarkerType]: MarkerSpec<MarkerOf<K>> } = {
       },
     }),
   },
-  // 图像生成 v1: 情景插画（设计 §3.1）
-  //
-  // ⚠️ 正文（那句中文描述）**不过 `normalizeTagString`** —— 全角标点在中文句子里是
-  //    正确的，归一化会把它改坏。D27 的归一化对象是 `image_prompt` 的**输出**与用户
-  //    手打的**角色预设**，不是这里。
-  scene_image: {
-    emptyBody: '',
-    lenientClosing: true,
-    fields: (a) => ({
-      title: sanitizeCaption(a['title'], CAPTION_TITLE_MAX),
-      characters: splitCharacterList(a['characters']),
-      rating: normalizeRating(a['rating']),
-    }),
-  },
   // 随机事件 v1: `<event_trigger name="事件名"/>` 触发回执（设计 §5.2）
   //
   // 🔴 `lenientClosing` 是必需的，不是保险：提示词教 AI 写的就是**自闭合**形态，
@@ -288,7 +217,7 @@ function scanByTag<K extends BlockMarkerType>(text: string, type: K): MarkerOf<K
 
 /**
  * 宽松扫描骨架 —— 认自闭合 / 成对 / 只有开标签三种写法（设计 §3.4）。
- * 由 `MarkerSpec.lenientClosing` 选入，目前只有 `scene_image` 用。
+ * 由 `MarkerSpec.lenientClosing` 选入，目前只有 `event_trigger` 用。
  *
  * 🔴 自闭合与「开标签后什么都没写」都产出 `bodyText === ''` 的标记，**而不是不产出**:
  *    产出才会被 `scanMarkers` 的倒序剥离清掉（不然那行尖括号直接漏给玩家看）。
@@ -461,16 +390,6 @@ export function scanCraftGenRequests(text: string): CraftGenRequestMarker[] {
 }
 
 // ========== 图像生成 v1: 情景插画 ==========
-
-/**
- * 扫描文本中的 `<scene_image>` 标记（三种写法都认，见 `scanLenientTag`）。
- *
- * 🔴 `splitSceneImageSegments` 与其它下游一律走这一个入口 —— 一个标签两个解析器
- *    就是漂移的来路（设计 §5.1）。`bodyText === ''` 的那些是无效标记: 剥掉、不建记录。
- */
-export function scanSceneImages(text: string): SceneImageMarker[] {
-  return scanByTag(text, 'scene_image');
-}
 
 // ========== 随机事件 v1: 触发回执 ==========
 

@@ -314,7 +314,6 @@ export interface ContentPack {
   bloodlines?: PackBloodlinesSection;
   namePools?: PackNamePoolsSection;
   branding?: PackBrandingSection;
-  imageDialects?: PackImageDialectsSection;
   /** 地图内容包（地图系统 v1 / §3.3）—— 注册表第 8 面，整节替换 */
   mapPack?: PackMapPackSection;
   /**

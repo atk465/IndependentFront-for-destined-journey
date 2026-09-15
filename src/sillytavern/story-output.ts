@@ -32,8 +32,15 @@ const STREAM_CONTROL_TAGS = ['maintext', 'play_audio', 'event_trigger', ...CONTR
  *    而那三种写法（自闭合 / 成对 / 漏写闭合）的容忍度全在 marker-protocol 那一处定义。
  *    抄一条只认成对写法的正则，症状是「结算了、但标记还留在正文里」。
  */
-/** 音频系统下线后残留的 <play_audio> 标记照旧剥干净（旧存档的消息里可能有） */
-const LEGACY_PLAY_AUDIO = /<play_audio[^>]*\/>|<play_audio[^>]*>[\s\S]*?<\/play_audio\s*>|<play_audio[^>]*>/gi;
+/** 音频/图像系统下线后残留的 <play_audio>/<scene_image> 标记照旧剥干净（旧存档的消息里可能有） */
+const LEGACY_MARKER_TAGS = ['play_audio', 'scene_image'] as const;
+const LEGACY_MARKER_RE = new RegExp(
+  LEGACY_MARKER_TAGS.map(
+    (tag) =>
+      `<${tag}[^>]*\/>|<${tag}[^>]*>[\s\S]*?<\/${tag}\s*>|<${tag}[^>]*>`,
+  ).join('|'),
+  'gi',
+);
 
 function stripEventTriggerMarkers(text: string): string {
   const markers = scanEventTriggers(text);
@@ -141,7 +148,7 @@ function project(raw: string, partial: boolean): StoryProjection {
   if (partial) content = stripTrailingPartialControlTag(content);
 
   content = stripEventTriggerMarkers(content)
-    .replace(LEGACY_PLAY_AUDIO, '')
+    .replace(LEGACY_MARKER_RE, '')
     .replace(/<\/?maintext\b[^>]*>/gi, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
