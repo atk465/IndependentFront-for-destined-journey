@@ -666,7 +666,6 @@ describe('importSessionSave — 往返', () => {
 
     const chars = await db.characters.where('saveId').equals(newId).toArray();
     const player = chars.find((c) => c.type === 'player')!;
-    const npc = chars.find((c) => c.type === 'npc')!;
 
     const memory = (await db.memories.where('saveId').equals(newId).toArray())[0];
     expect(memory.relatedCharacterIds).toContain(player.id);
@@ -674,7 +673,6 @@ describe('importSessionSave — 往返', () => {
     expect(memory.relatedCharacterIds).toContain('莉薇娅');
 
     const profile = await db.saveProfiles.get(newId);
-    expect(profile?.contracts[0].targetId).toBe(npc.id);
     // affections 的键是名字（铁律 1），刻意不动
     expect(profile?.affections['莉薇娅']).toBe(45);
   });

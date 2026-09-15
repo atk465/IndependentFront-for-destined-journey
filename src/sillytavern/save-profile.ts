@@ -5,7 +5,7 @@
  * ADR-22: FP 是存档级元货币，独立于 CharacterState
  */
 
-import type { SaveProfile, FPTransaction, FateContract, Achievement, NewsItem } from './types';
+import type { SaveProfile, FPTransaction, Achievement, NewsItem } from './types';
 import { getSaveProfile, saveSaveProfile, createDefaultSaveProfile } from './database';
 import { withSaveWriteLock } from './state-write-queue';
 
@@ -97,32 +97,6 @@ export async function spendFP(
 
 export function canAffordFP(profile: SaveProfile, amount: number): boolean {
   return profile.fp >= amount;
-}
-
-// ========== Contracts ==========
-
-export async function addContract(
-  profile: SaveProfile,
-  contract: Omit<FateContract, 'id' | 'createdAt'>,
-): Promise<SaveProfile> {
-  profile.contracts.push({
-    ...contract,
-    id: crypto.randomUUID(),
-    createdAt: Date.now(),
-  });
-  await updateProfile(profile);
-  return profile;
-}
-
-export function getContracts(profile: SaveProfile): FateContract[] {
-  return profile.contracts;
-}
-
-export function getContractByTarget(
-  profile: SaveProfile,
-  targetId: string,
-): FateContract | undefined {
-  return profile.contracts.find((c) => c.targetId === targetId);
 }
 
 // ========== Achievements ==========

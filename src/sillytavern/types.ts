@@ -3198,7 +3198,8 @@ export interface SaveProfile {
    *  唯一变更是 delta_variable profile.reputation 且 metadata.source='commission'
    *  的引擎委托结算，stat-projection 只读投影） */
   reputation: number;
-  contracts: FateContract[];
+  /** 🪦 命运契约已下线；老档残留字段原样保留，读写口全部移除 */
+  contracts?: FateContract[];
   achievements: Achievement[];
   news: NewsItem[];
   quests: Record<string, Quest>;
@@ -3231,6 +3232,7 @@ export interface FPTransaction {
     | 'other';
 }
 
+/** 🪦 命运契约已下线 —— 仅老档兼容保留形状，引擎不再读写 */
 export interface FateContract {
   id: string;
   targetId: string;
