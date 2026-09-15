@@ -1548,14 +1548,6 @@ export const useCreateStore = defineStore('create', () => {
       maxMp: mpPreview.value,
       sp: spPreview.value,
       maxSp: spPreview.value,
-      ascension: {
-        enabled: false,
-        elements: [],
-        authority: [],
-        law: [],
-        deityPosition: '',
-        divineKingdom: { name: '', description: '' },
-      },
       // 开局 inventory/skills 留空 — 装备/道具/技能由开场正文经 item_gen 链正式生成落库
       // 出身天赋（天赋系统 T-S3）：7 选 1 必选，条目逐字来自 TALENT_CATALOG 模板
       ...(selectedCreationTalent.value

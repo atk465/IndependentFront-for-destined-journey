@@ -999,43 +999,6 @@ export interface StatusEffect {
   divinity?: DivinityLevel;
 }
 
-// ===== 登神长阶 (Ascension) 子类型 =====
-
-/** 要素 (Lv.13-16, 上限3) */
-export interface ElementDetail {
-  name: string;
-  description: string;
-  effects: string[]; // 被动效果列表
-  /** 🆕 Phase 9: 词条名→中文描述 (AI 编写, 前端展示, 与 Skill.effects 对齐) */
-  effectDescriptions?: Record<string, string>;
-  /** 🆕 Phase 9: 脚本注册表: lifecycle→JS code (AI 编写, 引擎执行, 与 Skill.scripts 对齐) */
-  scripts?: Record<string, string>;
-}
-
-/** 权能 (Lv.17-20, 3要素→1权能) */
-export interface AuthorityDetail {
-  name: string;
-  description: string;
-  effects: string[];
-  costDescription: string; // 消耗描述 (如 '25% 最大MP+SP+攻击+动作')
-  /** 🆕 Phase 9: 词条名→中文描述 */
-  effectDescriptions?: Record<string, string>;
-  /** 🆕 Phase 9: 脚本注册表 */
-  scripts?: Record<string, string>;
-}
-
-/** 法则 (Lv.21-24) */
-export interface LawDetail {
-  name: string;
-  description: string;
-  effects: string[];
-  costDescription: string;
-  /** 🆕 Phase 9: 词条名→中文描述 */
-  effectDescriptions?: Record<string, string>;
-  /** 🆕 Phase 9: 脚本注册表 */
-  scripts?: Record<string, string>;
-}
-
 /** 统一角色状态 — NPC/主角/怪物/召唤物 共用 */
 export interface CharacterState {
   // ===== 基础信息 =====
@@ -1073,19 +1036,6 @@ export interface CharacterState {
   sp: number;
   maxSp: number;
 
-  // ===== 登神长阶 (Lv.13+) =====
-  ascension: {
-    enabled: boolean; // 是否开启登神长阶
-    elements: ElementDetail[]; // 要素 (Array, 有序, Phase 9: Record→Array)
-    authority: AuthorityDetail[]; // 权能 (Array, 有序, Phase 9: Record→Array)
-    law: LawDetail[]; // 法则 (Array, 有序, Phase 9: Record→Array)
-    deityPosition: string; // 神位 (Lv.25)
-    divineKingdom: {
-      // 神国 (Lv.25巅峰)
-      name: string;
-      description: string;
-    };
-  };
 
   // ===== 装备/技能/背包 =====
   // M2: equipment[] 已删除 — 装备 = inventory 中 equippedSlot 非空的物品（规范 §3）
@@ -1175,14 +1125,6 @@ export function createDefaultCharacterState(
     maxMp: 50,
     sp: 50,
     maxSp: 50,
-    ascension: {
-      enabled: false,
-      elements: [],
-      authority: [],
-      law: [],
-      deityPosition: '',
-      divineKingdom: { name: '', description: '' },
-    },
     skills: [],
     inventory: [],
     statusEffects: [],
@@ -3598,7 +3540,7 @@ export interface CharUpdateRequestMarker extends DetectedMarkerBase {
 export interface ItemGenRequestMarker extends DetectedMarkerBase {
   type: 'item_gen_request';
   attributes: {
-    itemType: string; // equipment | skill | consumable | material | ascension
+    itemType: string; // equipment | skill | consumable | material
     source?: string; // craft | loot | gift | story
     owner?: string; // 归属角色 ID
   };
@@ -3764,31 +3706,6 @@ export interface CharGenOutput {
   likes: string;
   /** 🆕 心里话（40-80 tokens，角色内心独白/当前真实想法） */
   thoughts?: string;
-  /** 登神长阶 (Lv.13+ 可用) */
-  ascension: {
-    enabled: boolean;
-    /** 登神路径描述 */
-    path: string;
-    description: string;
-    /** 要素 (Lv.13-16, 1-3个) — 使用 ElementDetail 统一类型 */
-    elements: Array<Pick<ElementDetail, 'name' | 'description' | 'effects'>>;
-    /** 权能 (Lv.17-20, 1个) — 使用 AuthorityDetail 统一类型 */
-    authorities: Array<
-      Pick<AuthorityDetail, 'name' | 'description' | 'effects' | 'costDescription'>
-    >;
-    /** 法则 (Lv.21-24, 1-2个) */
-    laws: Array<{
-      name: string;
-      description: string;
-      passiveEffects: string[];
-      activeEffects: string[];
-      costDescription: string;
-    }>;
-    /** 神位 (Lv.25) */
-    deityPosition: string;
-    /** 神国 (Lv.25 巅峰) */
-    divineKingdom: { name: string; description: string };
-  };
   /** 🆕 char_gen 自身生成的技能 (供异步 item_gen 参考，也直接写入角色) */
   skills: Array<{
     name: string;
@@ -3945,17 +3862,6 @@ export interface ItemGenOutput {
     /** 🆕 重铸 (2026-08-24): 声明「把 replace 指定的已知条目替换成本条目」（item_gen `<item replace="...">`） */
     replace?: string;
   }>;
-  /** 🆕 Phase 9: 登神要素 (含 scripts + effectDescriptions) */
-  elements?: Array<
-    Pick<ElementDetail, 'name' | 'description' | 'effects' | 'effectDescriptions' | 'scripts'>
-  >;
-  /** 🆕 Phase 9: 权能 (含 scripts + effectDescriptions) */
-  authorities?: Array<
-    Pick<
-      AuthorityDetail,
-      'name' | 'description' | 'effects' | 'costDescription' | 'effectDescriptions' | 'scripts'
-    >
-  >;
 }
 
 /** Char Gen 链的最终结果 — char_gen → item_gen → 完整 CharacterState + Patches */

@@ -10,10 +10,8 @@ import type { AssetMetaRecord, CharacterState } from '@engine/types';
 import {
   buildAffectionView,
   buildAlbumGroups,
-  buildAscensionTracks,
   buildProfileFields,
   buildSubtitleSegments,
-  hasAnyAscension,
   itemQuality,
   splitInventory,
 } from './character-viewer';
@@ -178,100 +176,6 @@ describe('buildProfileFields', () => {
   });
 });
 
-describe('buildAscensionTracks', () => {
-  it('恒返回三条轨道，带上限与解锁级别', () => {
-    const tracks = buildAscensionTracks(char());
-    expect(tracks.map((t) => [t.label, t.cap])).toEqual([
-      ['要素', 3],
-      ['权能', 1],
-      ['法则', 2],
-    ]);
-    expect(tracks.every((t) => t.entries.length === 0)).toBe(true);
-    expect(hasAnyAscension(tracks)).toBe(false);
-  });
-
-  it('法则的 costDescription 进 cost，要素没有这一项', () => {
-    const tracks = buildAscensionTracks(
-      char({
-        ascension: {
-          enabled: true,
-          elements: [{ name: '空间', description: '折叠', effects: ['位移'] }],
-          authority: [],
-          law: [
-            {
-              name: '镇压与秩序',
-              description: '以法则镇压',
-              effects: ['定身'],
-              costDescription: '25% 最大MP',
-            },
-          ],
-          deityPosition: '',
-          divineKingdom: { name: '', description: '' },
-        },
-      }),
-    );
-    expect(tracks[0].entries[0]).toEqual({
-      name: '空间',
-      description: '折叠',
-      effects: ['位移'],
-      cost: '',
-    });
-    expect(tracks[2].entries[0].cost).toBe('25% 最大MP');
-    expect(hasAnyAscension(tracks)).toBe(true);
-  });
-
-  /**
-   * ★ Phase 9 把这三个字段从 Record 改成了 Array。存量存档里可能还是旧形状，
-   * 而 `.map` 对 Record 不成立 —— 不摊平的话整个弹窗白屏，不是少一行。
-   */
-  it('★ 旧存档的 Record 形状照样摊得平', () => {
-    const legacy = char();
-    (legacy.ascension as unknown as Record<string, unknown>).law = {
-      镇压与秩序: { name: '镇压与秩序', description: 'x', effects: [], costDescription: '' },
-    };
-    const tracks = buildAscensionTracks(legacy);
-    expect(tracks[2].entries.map((e) => e.name)).toEqual(['镇压与秩序']);
-  });
-
-  /**
-   * ★ `ascension` 同样零校验落库，AI 写得出 `elements: ['空间','时间']`。
-   * 按「只要对象」过滤会让一个真有两个要素的角色显示成 `0/3` +「尚未踏上长阶」——
-   * 静默丢数据比显示得不完整糟得多。
-   */
-  it('★ 裸字符串条目当「只有名字的条目」收下，不静默丢掉', () => {
-    const c = char();
-    (c.ascension as unknown as Record<string, unknown>).elements = ['空间', '时间'];
-    const tracks = buildAscensionTracks(c);
-    expect(tracks[0].entries.map((e) => e.name)).toEqual(['空间', '时间']);
-    expect(tracks[0].entries[0]).toEqual({
-      name: '空间',
-      description: '',
-      effects: [],
-      cost: '',
-    });
-    expect(hasAnyAscension(tracks)).toBe(true);
-  });
-
-  it('无名条目（空串 / 空对象 / null）不占格', () => {
-    const c = char();
-    (c.ascension as unknown as Record<string, unknown>).law = ['  ', {}, null, '秩序'];
-    expect(buildAscensionTracks(c)[2].entries.map((e) => e.name)).toEqual(['秩序']);
-  });
-
-  it('effects 不是数组时当空 —— 模板要 v-for 它', () => {
-    const c = char();
-    (c.ascension as unknown as Record<string, unknown>).law = [
-      { name: '秩序', description: 'x', effects: '定身' },
-    ];
-    expect(buildAscensionTracks(c)[2].entries[0].effects).toEqual([]);
-  });
-
-  it('整个 ascension 缺失（旧数据 / 怪物）也给三条空轨道', () => {
-    const broken = char();
-    delete (broken as unknown as Record<string, unknown>).ascension;
-    expect(buildAscensionTracks(broken)).toHaveLength(3);
-  });
-});
 
 describe('splitInventory', () => {
   it('按 equippedSlot 非空分家', () => {

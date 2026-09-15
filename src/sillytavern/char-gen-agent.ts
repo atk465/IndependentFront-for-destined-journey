@@ -431,32 +431,6 @@ export function assembleCharacterState(
     attributes: charData.attributes,
     ...calcResources(charData.tier, charData.attributes),
     expToNext: xpToNextNumber(charData.level),
-    ascension: {
-      enabled: charData.ascension.enabled,
-      elements: (charData.ascension.elements ?? []).map((e, i) => ({
-        name: e.name,
-        description: e.description,
-        effects: e.effects,
-        effectDescriptions: itemData.elements?.[i]?.effectDescriptions,
-        scripts: itemData.elements?.[i]?.scripts,
-      })),
-      authority: (charData.ascension.authorities ?? []).map((a, i) => ({
-        name: a.name,
-        description: a.description,
-        effects: a.effects,
-        costDescription: a.costDescription,
-        effectDescriptions: itemData.authorities?.[i]?.effectDescriptions,
-        scripts: itemData.authorities?.[i]?.scripts,
-      })),
-      law: (charData.ascension.laws ?? []).map((l) => ({
-        name: l.name,
-        description: l.description,
-        effects: [...(l.passiveEffects ?? []), ...(l.activeEffects ?? [])],
-        costDescription: l.costDescription,
-      })),
-      deityPosition: charData.ascension.deityPosition || '',
-      divineKingdom: charData.ascension.divineKingdom || { name: '', description: '' },
-    },
     skills,
     inventory,
     // M3/M6: 正式字段直写（规范 §2.1），customFields 只留真扩展数据（双写退役完成）
@@ -469,8 +443,6 @@ export function assembleCharacterState(
     customFields: {
       likes: charData.likes,
       faction: charData.faction,
-      ascensionPath: charData.ascension.path,
-      ascensionDescription: charData.ascension.description,
     },
     ...overrides,
   });
@@ -482,13 +454,13 @@ export function assembleCharacterState(
  * M3 重写要点:
  * - 附属 add_skill/add_item/equip_item 整体删除 — 全部数据内嵌在 add_character value 里一次落库
  *   （旧行为: 附属 patch 恒 errors，靠 add_character 兜底；删掉即修 #11 且防 target 修好后的二次叠加）
- * - ascension 数据已嵌入 add_character value 本体，删除 set_variable patch（#12 杀）
+ * - skills/inventory 数据已嵌入 add_character value 本体，删除 set_variable patch（#12 杀）
  * - target 用 character.name（铁律1: 名字寻址）
  */
 export function buildCharGenPatches(character: CharacterState): StatePatch[] {
   const patches: StatePatch[] = [];
 
-  // 1. 添加角色 — 单 patch，所有数据内嵌（skills/inventory/ascension 已在 value 体内）
+  // 1. 添加角色 — 单 patch，所有数据内嵌（skills/inventory 已在 value 体内）
   patches.push({
     op: 'add_character',
     target: `characters.${character.name}`,
@@ -1028,16 +1000,6 @@ function charGenFromJSON(data: any): CharGenOutput {
           : '',
     likes: data.likes ?? '',
     thoughts: data.thoughts ?? '',
-    ascension: {
-      enabled: false,
-      path: '',
-      description: '',
-      elements: [],
-      authorities: [],
-      laws: [],
-      deityPosition: '',
-      divineKingdom: { name: '', description: '' },
-    },
     skills: data.skills ?? [],
     equipment: data.equipment ?? [],
     inventory: data.inventory ?? [],
@@ -1072,72 +1034,6 @@ export function extractPersonalityText(xml: string): string {
 
 /** 从 XML <char_result> 中解析角色数据 */
 function parseCharGenXML(xml: string): CharGenOutput {
-  // ascension 子结构
-  const ascXML = tagInner(xml, 'ascension');
-  const ascElements: CharGenOutput['ascension']['elements'] = [];
-  const ascAuthorities: CharGenOutput['ascension']['authorities'] = [];
-  const ascLaws: CharGenOutput['ascension']['laws'] = [];
-
-  if (ascXML) {
-    // 解析 <element> 子标签
-    const elMatches = ascXML.matchAll(/<element\b([^>]*?)>([\s\S]*?)<\/element>/g);
-    for (const m of elMatches) {
-      const attrs = parseAttrsStr(m[1]);
-      ascElements.push({
-        name: attrs['name'] ?? '',
-        description: attrs['description'] ?? '',
-        effects:
-          m[2]
-            ?.trim()
-            .split('\n')
-            .filter((s) => s.trim())
-            .map((s) => s.trim()) ?? [],
-      });
-    }
-    // 解析 <authority> 子标签
-    const auMatches = ascXML.matchAll(/<authority\b([^>]*?)>([\s\S]*?)<\/authority>/g);
-    for (const m of auMatches) {
-      const attrs = parseAttrsStr(m[1]);
-      ascAuthorities.push({
-        name: attrs['name'] ?? '',
-        description: attrs['description'] ?? '',
-        effects:
-          m[2]
-            ?.trim()
-            .split('\n')
-            .filter((s) => s.trim())
-            .map((s) => s.trim()) ?? [],
-        costDescription: attrs['cost'] ?? '',
-      });
-    }
-    // 解析 <law> 子标签
-    // 🔴 **正文体被丢掉** —— 正则第二个捕获组 `m[2]` 抓的是 `<law>…</law>` 之间的正文，
-    //    但下面只读 `m[1]` 的属性；模型若把法则说明写在标签体里（而不是 description 属性里），
-    //    那段文字直接蒸发。2026-08-05 收紧 lint 时由 `no-unused-vars` 逮到
-    //    （原来是 `const innerText = m[2]?.trim()`，赋了值没人读，此前只是 warning）。
-    //    没有就地接上，是因为要先定 `<law>` 的写法约定（属性优先还是标签体优先、两者都有时谁赢），
-    //    那是模板/协议层的改动而不是 lint 清理 —— 留给单独一次提交。
-    const lawMatches = ascXML.matchAll(/<law\b([^>]*?)>([\s\S]*?)<\/law>/g);
-    for (const m of lawMatches) {
-      const attrs = parseAttrsStr(m[1]);
-      ascLaws.push({
-        name: attrs['name'] ?? '',
-        description: attrs['description'] ?? '',
-        passiveEffects:
-          attrs['passive']
-            ?.split(',')
-            .map((s) => s.trim())
-            .filter(Boolean) ?? [],
-        activeEffects:
-          attrs['active']
-            ?.split(',')
-            .map((s) => s.trim())
-            .filter(Boolean) ?? [],
-        costDescription: attrs['cost'] ?? '',
-      });
-    }
-  }
-
   // 技能/装备/物品 子结构 (char_gen 自行生成)
   const skillsXML = tagInner(xml, 'skills');
   const equipmentXML = tagInner(xml, 'equipment');
@@ -1180,25 +1076,6 @@ function parseCharGenXML(xml: string): CharGenOutput {
     personality: extractPersonalityText(xml),
     likes: stripInnerTags(tagInner(xml, 'likes') ?? ''),
     thoughts: stripInnerTags(tagInner(xml, 'thoughts') ?? ''),
-    ascension: {
-      enabled: (tagAttr(xml, 'ascension', 'enabled') ?? 'false') === 'true',
-      path: tagAttr(xml, 'ascension', 'path') ?? '',
-      description: tagAttr(xml, 'ascension', 'description') ?? '',
-      elements: ascElements,
-      authorities: ascAuthorities,
-      laws: ascLaws,
-      deityPosition: ascXML ? (tagInner(ascXML, 'deity_position') ?? '') : '',
-      divineKingdom: (() => {
-        if (!ascXML) return { name: '', description: '' };
-        const kdXML = tagInner(ascXML, 'kingdom');
-        return {
-          name: kdXML ? (tagAttr(kdXML, 'kingdom', 'name') ?? tagInner(kdXML, 'name') ?? '') : '',
-          description: kdXML
-            ? (tagAttr(kdXML, 'kingdom', 'description') ?? tagInner(kdXML, 'description') ?? '')
-            : '',
-        };
-      })(),
-    },
     skills,
     equipment,
     inventory,
@@ -1380,23 +1257,12 @@ function parseItemGenXML(xml: string): ItemGenOutput {
   const skillsXML = tagInner(xml, 'skills');
   const equipmentXML = tagInner(xml, 'equipment');
   const inventoryXML = tagInner(xml, 'inventory');
-  const ascensionXML = tagInner(xml, 'ascension');
 
   const skills = skillsXML ? parseSkillsXML(skillsXML) : [];
   const equipment = equipmentXML ? parseEquipmentXML(equipmentXML) : [];
   const inventory = inventoryXML ? parseInventoryXML(inventoryXML) : [];
 
-  // ascension 可能不存在（非登神角色）
-  let elements: ItemGenOutput['elements'] | undefined;
-  let authorities: ItemGenOutput['authorities'] | undefined;
-  if (ascensionXML) {
-    const elementsXML = tagInner(ascensionXML, 'elements');
-    const authoritiesXML = tagInner(ascensionXML, 'authorities');
-    if (elementsXML) elements = parseElementsXML(elementsXML);
-    if (authoritiesXML) authorities = parseAuthoritiesXML(authoritiesXML);
-  }
-
-  return { skills, equipment, inventory, elements, authorities };
+  return { skills, equipment, inventory };
 }
 
 function parseSkillsXML(xml: string): ItemGenOutput['skills'] {
@@ -1583,75 +1449,6 @@ function parseInventoryXML(xml: string): ItemGenOutput['inventory'] {
       ...(rawAutomata.length > 0 ? { automata: rawAutomata } : {}),
       // 🆕 重铸 (2026-08-24): replace 属性 → 声明替换目标（AI 在重铸模式下点名被替换的已知条目）
       ...(attrs['replace'] ? { replace: attrs['replace'] } : {}),
-    });
-  }
-  return results;
-}
-
-/**
- * Phase 9: 解析 <elements> 块内的 <element> 子标签。
- * 格式同 parseSkillsXML: 属性来自开标签, effect/script 子元素解析, 描述为纯文本部分。
- */
-function parseElementsXML(xml: string): NonNullable<ItemGenOutput['elements']> {
-  const matches = xml.matchAll(/<element\s+([^>]*?)>([\s\S]*?)<\/element>/g);
-  const results: NonNullable<ItemGenOutput['elements']> = [];
-  for (const m of matches) {
-    const attrs = parseAttrsStr(m[1]);
-    const innerContent = m[2]?.trim() ?? '';
-
-    // 提取 <effect name="...">content</effect> 子元素 → effectDescriptions
-    // Q-05：宽松正则（name 不必是第一个属性）—— 严格版会把 <effect type="x" name="y"> 静默丢掉
-    const effectDescriptions = parseNamedChildren(innerContent, 'effect');
-
-    // 提取 <script name="...">code</script> 子元素 → scripts
-    const scripts = parseNamedChildren(innerContent, 'script');
-
-    // 描述 = innerContent 中去除 effect/script 标签后的纯文本
-    const description = innerContent
-      .replace(/<(effect|script)\s[^>]*>[\s\S]*?<\/(effect|script)>/g, '')
-      .trim();
-
-    results.push({
-      name: attrs['name'] ?? '未命名要素',
-      description: description || innerContent,
-      effects: [],
-      ...(Object.keys(effectDescriptions).length > 0 ? { effectDescriptions } : {}),
-      ...(Object.keys(scripts).length > 0 ? { scripts } : {}),
-    });
-  }
-  return results;
-}
-
-/**
- * Phase 9: 解析 <authorities> 块内的 <authority> 子标签。
- * 与 parseElementsXML 相同模式，多了 cost_description 属性。
- */
-function parseAuthoritiesXML(xml: string): NonNullable<ItemGenOutput['authorities']> {
-  const matches = xml.matchAll(/<authority\s+([^>]*?)>([\s\S]*?)<\/authority>/g);
-  const results: NonNullable<ItemGenOutput['authorities']> = [];
-  for (const m of matches) {
-    const attrs = parseAttrsStr(m[1]);
-    const innerContent = m[2]?.trim() ?? '';
-
-    // 提取 <effect name="...">content</effect> 子元素 → effectDescriptions
-    // Q-05：宽松正则（name 不必是第一个属性）—— 严格版会把 <effect type="x" name="y"> 静默丢掉
-    const effectDescriptions = parseNamedChildren(innerContent, 'effect');
-
-    // 提取 <script name="...">code</script> 子元素 → scripts
-    const scripts = parseNamedChildren(innerContent, 'script');
-
-    // 描述 = innerContent 中去除 effect/script 标签后的纯文本
-    const description = innerContent
-      .replace(/<(effect|script)\s[^>]*>[\s\S]*?<\/(effect|script)>/g, '')
-      .trim();
-
-    results.push({
-      name: attrs['name'] ?? '未命名权能',
-      description: description || innerContent,
-      effects: [],
-      costDescription: attrs['cost_description'] ?? '',
-      ...(Object.keys(effectDescriptions).length > 0 ? { effectDescriptions } : {}),
-      ...(Object.keys(scripts).length > 0 ? { scripts } : {}),
     });
   }
   return results;

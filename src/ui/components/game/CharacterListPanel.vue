@@ -19,7 +19,7 @@ const ui = useUIStore();
 // ═══ NPC 列表 ═══
 const selectedIdx = ref(0);
 const showScripts = ref(false);
-const detailTab = ref<'equipment' | 'skills' | 'overview' | 'ascension' | 'status' | 'bag'>(
+const detailTab = ref<'equipment' | 'skills' | 'overview' | 'status' | 'bag'>(
   'overview',
 );
 const selStatusInspected = ref<string | null>(null);
@@ -380,15 +380,6 @@ async function doNpcRewrite(kind: 'equipment' | 'skills' | 'bag', name: string) 
             技能 {{ selSkills.length }}
           </button>
           <button
-            :class="{ active: detailTab === 'ascension' }"
-            @click="
-              detailTab = 'ascension';
-              showScripts = false;
-            "
-          >
-            登神
-          </button>
-          <button
             :class="{ active: detailTab === 'bag' }"
             @click="
               detailTab = 'bag';
@@ -710,37 +701,6 @@ async function doNpcRewrite(kind: 'equipment' | 'skills' | 'bag', name: string) 
                 </button>
               </div>
             </div>
-          </template>
-
-          <!-- 登神 -->
-          <template v-if="detailTab === 'ascension'">
-            <div v-if="!selected.ascension?.enabled" class="empty-tab">该角色未开启登神长阶</div>
-            <template v-else>
-              <div v-if="Object.keys(selected.ascension.elements || {}).length" class="asc-section">
-                <div class="d-label">要素</div>
-                <div v-for="(v, k) in selected.ascension.elements" :key="k" class="asc-item">
-                  {{ k }}: {{ (v as any).description || JSON.stringify(v) }}
-                </div>
-              </div>
-              <div
-                v-if="Object.keys(selected.ascension.authority || {}).length"
-                class="asc-section"
-              >
-                <div class="d-label">权能</div>
-                <div v-for="(v, k) in selected.ascension.authority" :key="k" class="asc-item">
-                  {{ k }}: {{ (v as any).description || JSON.stringify(v) }}
-                </div>
-              </div>
-              <div v-if="Object.keys(selected.ascension.law || {}).length" class="asc-section">
-                <div class="d-label">法则</div>
-                <div v-for="(v, k) in selected.ascension.law" :key="k" class="asc-item">
-                  {{ k }}: {{ (v as any).description || JSON.stringify(v) }}
-                </div>
-              </div>
-              <div v-if="selected.ascension.deityPosition">
-                <span class="d-label">神位</span> {{ selected.ascension.deityPosition }}
-              </div>
-            </template>
           </template>
 
           <!-- 背景 -->

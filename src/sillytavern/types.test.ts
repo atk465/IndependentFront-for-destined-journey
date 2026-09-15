@@ -59,16 +59,6 @@ describe('createDefaultCharacterState', () => {
     expect(c.maxSp).toBe(50);
   });
 
-  it('登神长阶默认 disabled', () => {
-    const c = createDefaultCharacterState();
-    expect(c.ascension.enabled).toBe(false);
-    expect(c.ascension.elements).toEqual([]);
-    expect(c.ascension.authority).toEqual([]);
-    expect(c.ascension.law).toEqual([]);
-    expect(c.ascension.deityPosition).toBe('');
-    expect(c.ascension.divineKingdom).toEqual({ name: '', description: '' });
-  });
-
   it('装备/技能/背包/状态 默认空数组', () => {
     const c = createDefaultCharacterState();
     // M2: equipment[] 已删除 — 装备 = inventory 中 equippedSlot 非空的物品（规范 §3）

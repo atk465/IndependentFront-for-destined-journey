@@ -14,14 +14,11 @@ import {
   getTierForLevel,
   tierNameForTier,
   xpToNextNumber,
-  canPassAscensionGate,
   resolveLevelUps,
-  resolveAscensionFlyup,
   getExperienceCoefficient,
   applyExpFloor,
   EXPERIENCE_COEFFICIENTS,
   type LevelUpInput,
-  type AscensionFlyupInput,
 } from './exp-table';
 
 // ========== 累计经验表 ==========
@@ -135,7 +132,6 @@ function makeLevelInput(overrides: Partial<LevelUpInput> = {}): LevelUpInput {
     attributes: { str: 10, dex: 10, con: 10, int: 10, spi: 10 },
     tier: 1,
     tierName: '普通',
-    ascension: { elements: [], authority: [], law: [], deityPosition: '' },
     ...overrides,
   };
 }
@@ -146,7 +142,6 @@ describe('resolveLevelUps —— 升级循环', () => {
     expect(res.level).toBe(1);
     expect(res.levelsGained).toBe(0);
     expect(res.freeAttrPoints).toBe(0);
-    expect(res.ascensionBlocked).toBe(false);
   });
 
   it('Lv1 totalExp=120 → 升到 Lv2，expToNext=360，+1 自由点', () => {
@@ -194,163 +189,8 @@ describe('resolveLevelUps —— 升级循环', () => {
     expect(res.freeAttrPoints).toBe(0);
   });
 
-  it('关键等级 12 无要素 → ascensionBlocked，totalExp 截断到 12 级门槛', () => {
-    const res = resolveLevelUps(makeLevelInput({ level: 12, totalExp: 99999, expToNext: 28440 }));
-    expect(res.ascensionBlocked).toBe(true);
-    expect(res.level).toBe(12);
-    expect(res.totalExp).toBe(28440); // 截断到当前级门槛
-  });
-
-  it('关键等级 12 有要素 → 放行升级到 13', () => {
-    const res = resolveLevelUps(
-      makeLevelInput({
-        level: 12,
-        totalExp: 28440,
-        expToNext: 28440,
-        ascension: {
-          elements: [{ name: '火', description: '' }],
-          authority: [],
-          law: [],
-          deityPosition: '',
-        },
-      }),
-    );
-    expect(res.ascensionBlocked).toBe(false);
-    expect(res.level).toBe(13);
-    expect(res.expToNext).toBe(38840);
-  });
 });
 
-// ========== 登神门槛（canPassAscensionGate） ==========
-
-describe('canPassAscensionGate', () => {
-  it('Lv12 需要素；Lv16 需权能；Lv20 需法则；Lv24 需神位', () => {
-    const empty = { elements: [], authority: [], law: [], deityPosition: '' };
-    expect(canPassAscensionGate(12, empty)).toBe(false);
-    expect(canPassAscensionGate(12, { ...empty, elements: [{}] })).toBe(true);
-    expect(canPassAscensionGate(16, { ...empty, authority: [{}] })).toBe(true);
-    expect(canPassAscensionGate(16, empty)).toBe(false);
-    expect(canPassAscensionGate(20, { ...empty, law: [{}] })).toBe(true);
-    expect(canPassAscensionGate(24, { ...empty, deityPosition: '晨曦神位' })).toBe(true);
-    expect(canPassAscensionGate(24, empty)).toBe(false);
-  });
-
-  it('非关键等级恒放行', () => {
-    const empty = { elements: [], authority: [], law: [], deityPosition: '' };
-    for (const lv of [1, 5, 10, 13, 18, 23]) {
-      expect(canPassAscensionGate(lv, empty)).toBe(true);
-    }
-  });
-});
-
-// ========== 登神飞升（resolveAscensionFlyup，放宽版） ==========
-
-function flyupInput(overrides: Partial<AscensionFlyupInput> = {}): AscensionFlyupInput {
-  return {
-    level: 1,
-    ascension: { elements: [], authority: [], law: [], deityPosition: '' },
-    ...overrides,
-  };
-}
-
-describe('resolveAscensionFlyup —— 持物即飞升 + 层级-1 硬性限制', () => {
-  it('无任何登神物 → 不飞升', () => {
-    expect(resolveAscensionFlyup(flyupInput({ level: 12 }))).toEqual({ flyup: false });
-  });
-
-  it('T3（Lv12）持要素 → 飞升 T4 升到 13', () => {
-    const res = resolveAscensionFlyup(
-      flyupInput({
-        level: 12,
-        ascension: { elements: [{}], authority: [], law: [], deityPosition: '' },
-      }),
-    );
-    expect(res.flyup).toBe(true);
-    expect(res.nextLevel).toBe(13);
-    expect(res.nextTier).toBe(4);
-  });
-
-  it('T2（Lv8）持要素 → 层级不足，不触发（硬性限制）', () => {
-    const res = resolveAscensionFlyup(
-      flyupInput({
-        level: 8,
-        ascension: { elements: [{}], authority: [], law: [], deityPosition: '' },
-      }),
-    );
-    expect(res.flyup).toBe(false);
-    expect(res.reason).toBe('层级不足');
-  });
-
-  it('T4 持权能 → 飞升 T5 升到 17', () => {
-    const res = resolveAscensionFlyup(
-      flyupInput({
-        level: 13,
-        ascension: { elements: [], authority: [{}], law: [], deityPosition: '' },
-      }),
-    );
-    expect(res.flyup).toBe(true);
-    expect(res.nextLevel).toBe(17);
-    expect(res.nextTier).toBe(5);
-  });
-
-  it('T5 持法则 → 飞升 T6 升到 21', () => {
-    const res = resolveAscensionFlyup(
-      flyupInput({
-        level: 17,
-        ascension: { elements: [], authority: [], law: [{}], deityPosition: '' },
-      }),
-    );
-    expect(res.flyup).toBe(true);
-    expect(res.nextLevel).toBe(21);
-    expect(res.nextTier).toBe(6);
-  });
-
-  it('T6 持神位 → 飞升 T7 升到 25', () => {
-    const res = resolveAscensionFlyup(
-      flyupInput({
-        level: 21,
-        ascension: { elements: [], authority: [], law: [], deityPosition: '晨曦神位' },
-      }),
-    );
-    expect(res.flyup).toBe(true);
-    expect(res.nextLevel).toBe(25);
-    expect(res.nextTier).toBe(7);
-  });
-
-  it('同时持多个登神物 → 取最高目标（神位 > 法则 > 权能 > 要素）', () => {
-    // T5（Lv17）既有权能又有法则 → 法则（T6）胜出
-    const res = resolveAscensionFlyup(
-      flyupInput({
-        level: 17,
-        ascension: { elements: [{}], authority: [{}], law: [{}], deityPosition: '' },
-      }),
-    );
-    expect(res.flyup).toBe(true);
-    expect(res.nextLevel).toBe(21);
-    expect(res.nextTier).toBe(6);
-  });
-
-  it('已超过目标层级（T4 但只有要素）→ 不飞升', () => {
-    const res = resolveAscensionFlyup(
-      flyupInput({
-        level: 15,
-        ascension: { elements: [{}], authority: [], law: [], deityPosition: '' },
-      }),
-    );
-    expect(res.flyup).toBe(false);
-  });
-
-  it('T6 持法则（法则目标是 T6）→ 层级不足（法则只能从 T5 飞）', () => {
-    const res = resolveAscensionFlyup(
-      flyupInput({
-        level: 22,
-        ascension: { elements: [], authority: [], law: [{}], deityPosition: '' },
-      }),
-    );
-    expect(res.flyup).toBe(false);
-    expect(res.reason).toBe('层级不足');
-  });
-});
 
 // ========== 模式系数表（简单/普通分档） ==========
 

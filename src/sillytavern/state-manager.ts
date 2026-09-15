@@ -49,14 +49,10 @@ import {
 } from './database';
 import { getVar, setVar, delVar, insertVar, applyPathOps } from './var-resolver';
 import { getTierConfig } from './tier-constants';
-// 经验系统改造 v1（2026-08-24）：升级/登神判定归 Code（ADR-11）。resolveAscensionFlyup
-// 负责「持物即飞升」，resolveLevelUps 负责 totalExp 驱动的升级循环。
+// 经验系统改造 v1（2026-08-24）：升级判定归 Code（ADR-11）。resolveLevelUps 负责
+// totalExp 驱动的升级循环。
 import {
-  resolveAscensionFlyup,
   resolveLevelUps,
-  xpToNextNumber,
-  tierNameForTier,
-  MILESTONE_LEVELS,
   applyExpFloor,
 } from './exp-table';
 import { getEngineSettings } from './engine-settings';
@@ -272,8 +268,6 @@ const UPDATE_CHAR_WHITELIST = new Set<string>([
   'maxMp',
   'sp',
   'maxSp',
-  // 登神长阶
-  'ascension',
   // 经济 / 位置 / 冒险者等级 / 当前行为
   'money',
   'location',
@@ -1118,10 +1112,10 @@ export class StateManager {
       // 只认主角：NPC/怪物/召唤物的等级由生成器一次性给定，没有「攒点数分配」这回事。
       //
       // 🔴 两条路径互斥（防双发放，经验系统改造 v1 2026-08-24）：
-      //  · 本次 patch 触及 totalExp 或 ascension → 走下面的 applyPlayerProgression ——
-      //    升级/登神全部由 exp-table 的纯函数判定，属性点/里程碑统一发放；
+      //  · 本次 patch 触及 totalExp → 走下面的 applyPlayerProgression ——
+      //    升级全部由 exp-table 的纯函数判定，属性点/里程碑统一发放；
       //  · 否则 → 保留下面的旧兜底逻辑（兼容 AI 直接写 level/tier 的存量行为）。
-      if (char.type === 'player' && !keys.includes('totalExp') && !keys.includes('ascension')) {
+      if (char.type === 'player' && !keys.includes('totalExp')) {
         // ① 升级：每升 1 级 +1 自由属性点
         //    双重发放 guard —— patch 自己写了 freeAttrPoints 时不再叠加，
         //    否则 AI 一边发点数一边升级，玩家会白拿一倍。
@@ -1162,19 +1156,16 @@ export class StateManager {
       }
     }
 
-    // ===== 经验系统改造 v1：totalExp / ascension 驱动的主角推进（升级循环 + 登神飞升）=====
-    // 战斗（combat_v3）与制作（craft_gen）的经验都经 update_character delta 累加 totalExp；
-    // 登神物（ascension 字段）由 AI 写入。这两条变化一落地，升级/登神就由 Code 统一接管。
-    // 放在旧自动加点块之外、且在 value 落地之后 —— resolveLevelUps 读的是「落地后」的新状态。
+    // ===== 经验系统改造 v1：totalExp 驱动的主角推进（升级循环）=====
+    // 战斗（combat_v3）与制作（craft_gen）的经验都经 update_character delta 累加 totalExp。
+    // 变化一落地，升级就由 Code 统一接管。放在旧自动加点块之外、且在 value 落地之后 ——
+    // resolveLevelUps 读的是「落地后」的新状态。
     // 🔴 keys 是上面 `if (patch.value ...)` 块内的局部变量，这里在块外要用得重取一份。
     const touchedKeys =
       patch.value && typeof patch.value === 'object'
         ? Object.keys(patch.value as Record<string, any>)
         : [];
-    if (
-      char.type === 'player' &&
-      (touchedKeys.includes('totalExp') || touchedKeys.includes('ascension'))
-    ) {
+    if (char.type === 'player' && touchedKeys.includes('totalExp')) {
       this.applyPlayerProgression(char);
     }
     // metadata.action 保留原行为: 有则覆盖 currentAction（可与 value.currentAction 并存，metadata 优先）
@@ -1185,44 +1176,18 @@ export class StateManager {
   }
 
   /**
-   * 主角经验/登神推进（经验系统改造 v1，2026-08-24）。
+   * 主角经验推进（经验系统改造 v1，2026-08-24）。
    *
-   * 由 `applyUpdateCharacter` 在本次 patch 触及主角 `totalExp` 或 `ascension` 时调用。
-   * 两段式（ADR-11：确定性数值规则归 Code，不交给 AI 算）：
-   *  ① 登神飞升（`resolveAscensionFlyup`，主人裁定放宽版）：持物即飞升 + 层级-1 硬性限制 ——
-   *     等级跳到目标层起点（13/17/21/25）、tier 同步，**顺便升级**（每级 +1 属性点 + 里程碑全属性+1）；
-   *  ② 升级循环（`resolveLevelUps`）：totalExp 攒够就逐级升，里程碑全属性+1 且 tier 提升，
-   *     关键等级（12/16/20/24）登神条件不满足时 totalExp 截断到当前级门槛。
+   * 由 `applyUpdateCharacter` 在本次 patch 触及主角 `totalExp` 时调用。
+   * 升级循环（`resolveLevelUps`，ADR-11：确定性数值规则归 Code，不交给 AI 算）：
+   * totalExp 攒够就逐级升，每级 +1 属性点、里程碑全属性+1 且 tier 提升。
    */
   private applyPlayerProgression(char: CharacterState): void {
     // 旧档经验保底归一化（幂等兜底，方案 A）：totalExp 抬到「升当前等级门槛」、expToNext 重算。
-    // 加载时（game-store）已做过一次，这里再兜一道——任何 totalExp/ascension 提交路径都自愈。
+    // 加载时（game-store）已做过一次，这里再兜一道——任何 totalExp 提交路径都自愈。
     applyExpFloor(char);
-    // ① 登神飞升（放宽版）
-    const fly = resolveAscensionFlyup({ level: char.level, ascension: char.ascension });
-    if (fly.flyup && fly.nextLevel !== undefined && fly.nextTier !== undefined) {
-      const oldLevel = char.level;
-      char.level = fly.nextLevel;
-      char.tier = fly.nextTier;
-      char.tierName = tierNameForTier(fly.nextTier);
-      char.expToNext = xpToNextNumber(fly.nextLevel);
-      // 顺便升级：每级 +1 自由属性点 + 里程碑全属性+1
-      char.freeAttrPoints = (char.freeAttrPoints ?? 0) + (fly.nextLevel - oldLevel);
-      for (let lv = oldLevel + 1; lv <= fly.nextLevel; lv++) {
-        const milestone = MILESTONE_LEVELS[lv];
-        if (milestone) {
-          const base = (char.attributes ?? {}) as Record<string, number>;
-          const next: Record<string, number> = { ...base };
-          for (const attr of ATTRIBUTE_KEYS) {
-            next[attr] =
-              (typeof base[attr] === 'number' ? base[attr] : 0) + milestone.attributeBonus;
-          }
-          char.attributes = next as CharacterState['attributes'];
-        }
-      }
-    }
 
-    // ② 升级循环（totalExp 驱动）
+    // 升级循环（totalExp 驱动）
     const res = resolveLevelUps({
       level: char.level,
       totalExp: char.totalExp,
@@ -1231,7 +1196,6 @@ export class StateManager {
       attributes: char.attributes,
       tier: char.tier,
       tierName: char.tierName,
-      ascension: char.ascension,
     });
     char.level = res.level;
     char.totalExp = res.totalExp;
@@ -1240,11 +1204,6 @@ export class StateManager {
     char.attributes = res.attributes;
     char.tier = res.tier;
     char.tierName = res.tierName;
-    if (res.ascensionBlocked) {
-      console.info(
-        `[StateManager] 登神长阶未开启，${char.name} 经验已封顶于 Lv.${res.level}（需持有对应登神物突破）`,
-      );
-    }
   }
 
   private async applySetResource(patch: StatePatch): Promise<GameEvent> {

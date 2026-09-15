@@ -103,19 +103,6 @@ function projectStatusEffects(effects: CharacterState['statusEffects'] | undefin
   }));
 }
 
-/** 登神长阶（Lv.13+）；未开启时返回一个「已开启: false」的空壳，免得创作者到处判 undefined */
-function projectAscension(asc: CharacterState['ascension'] | undefined): Record<string, any> {
-  if (!asc) return { 已开启: false, 要素: [], 权能: [], 法则: [], 神位: '', 神国: '' };
-  return {
-    已开启: asc.enabled === true,
-    要素: (asc.elements ?? []).map((x: any) => x?.name ?? String(x ?? '')),
-    权能: (asc.authority ?? []).map((x: any) => x?.name ?? String(x ?? '')),
-    法则: (asc.law ?? []).map((x: any) => x?.name ?? String(x ?? '')),
-    神位: asc.deityPosition ?? '',
-    神国: asc.divineKingdom?.name ?? '',
-  };
-}
-
 /**
  * 构建 `stats` 只读面快照。
  *
@@ -159,7 +146,6 @@ export function buildStatData(input: StatProjectionInput): Record<string, any> {
       装备: projectEquipment(player.inventory),
       技能: projectSkills(player.skills),
       状态效果: projectStatusEffects(player.statusEffects),
-      登神长阶: projectAscension(player.ascension),
     };
   }
 

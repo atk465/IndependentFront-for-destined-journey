@@ -827,7 +827,6 @@ export const EJS_SURFACE = {
     'stats.主角.装备',
     'stats.主角.技能',
     'stats.主角.状态效果',
-    'stats.主角.登神长阶',
     'stats.主角.金钱',
     'stats.队伍',
     'stats.世界.回合',

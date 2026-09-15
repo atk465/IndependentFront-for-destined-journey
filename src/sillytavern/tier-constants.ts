@@ -193,32 +193,3 @@ export function getCombatCoefficient(tier: number): number {
   return cfg?.combatCoefficient ?? 2.0;
 }
 
-// ========== 层级突破校验 ==========
-
-/** 检查是否可以突破到目标层级 */
-export function canBreakthrough(
-  currentLevel: number,
-  currentTier: number,
-  targetTier: number,
-  ascensionElements: number,
-): { allowed: boolean; reason?: string } {
-  if (targetTier <= currentTier) {
-    return { allowed: false, reason: '目标层级不高于当前层级' };
-  }
-
-  const cfg = getTierConfig(targetTier);
-  if (!cfg) return { allowed: false, reason: '无效的目标层级' };
-
-  // 等级要求
-  const maxLevelOfCurrent = getTierConfig(currentTier)?.levelRange[1] ?? 0;
-  if (currentLevel < maxLevelOfCurrent) {
-    return { allowed: false, reason: `需要达到当前层级满级 (Lv.${maxLevelOfCurrent})` };
-  }
-
-  // 登神长阶要求 (T4+)
-  if (targetTier >= 4 && ascensionElements < Math.min(3, targetTier - 3)) {
-    return { allowed: false, reason: `需要更多登神要素 (当前: ${ascensionElements})` };
-  }
-
-  return { allowed: true };
-}

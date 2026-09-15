@@ -12,7 +12,6 @@ import {
   calcAttributePoints,
   getTierQualityCap,
   getCombatCoefficient,
-  canBreakthrough,
 } from './tier-constants';
 
 // ========== TIER_CONFIGS 结构 ==========
@@ -324,71 +323,5 @@ describe('getCombatCoefficient', () => {
   it('无效 tier 应返回默认值 2.0', () => {
     expect(getCombatCoefficient(0)).toBe(2.0);
     expect(getCombatCoefficient(-1)).toBe(2.0);
-  });
-});
-
-// ========== canBreakthrough 层级突破校验 ==========
-
-describe('canBreakthrough', () => {
-  it('目标层级不高于当前层级 (同层) 应拒绝', () => {
-    const result = canBreakthrough(4, 1, 1, 0);
-    expect(result.allowed).toBe(false);
-    expect(result.reason).toBe('目标层级不高于当前层级');
-  });
-
-  it('目标层级低于当前层级应拒绝', () => {
-    const result = canBreakthrough(4, 2, 1, 0);
-    expect(result.allowed).toBe(false);
-    expect(result.reason).toBe('目标层级不高于当前层级');
-  });
-
-  it('等级不足 (未达到当前层级满级) 应拒绝', () => {
-    // T1 levelRange=[1,4], 满级=4. currentLevel=3 < 4, 不应突破到 T2
-    const result = canBreakthrough(3, 1, 2, 0);
-    expect(result.allowed).toBe(false);
-    expect(result.reason).toContain('需要达到当前层级满级');
-    expect(result.reason).toContain('Lv.4');
-  });
-
-  it('等级足够且低层突破 (T1→T2) 应允许', () => {
-    // T1 满级=4, currentLevel=4 满足条件, T2<4 不需要登神要素
-    const result = canBreakthrough(4, 1, 2, 0);
-    expect(result.allowed).toBe(true);
-  });
-
-  it('T4+ 突破需要登神要素, 不足时应拒绝', () => {
-    // T3→T4: targetTier=4, 需要 ascensionElements >= min(3, 4-3)=1
-    // T3 满级=12, currentLevel=12 满足等级条件, 但 ascensionElements=0 < 1
-    const result = canBreakthrough(12, 3, 4, 0);
-    expect(result.allowed).toBe(false);
-    expect(result.reason).toContain('需要更多登神要素');
-  });
-
-  it('T4+ 突破登神要素足够时应允许', () => {
-    // T3→T4: 需要 ascensionElements >= 1
-    const result = canBreakthrough(12, 3, 4, 1);
-    expect(result.allowed).toBe(true);
-  });
-
-  it('高层突破需要更多登神要素 (T5→T6 需 3 个)', () => {
-    // T5→T6: targetTier=6, min(3, 6-3)=3, 需要 ascensionElements >= 3
-    const resultInsufficient = canBreakthrough(20, 5, 6, 2);
-    expect(resultInsufficient.allowed).toBe(false);
-    expect(resultInsufficient.reason).toContain('需要更多登神要素');
-
-    const resultSufficient = canBreakthrough(20, 5, 6, 3);
-    expect(resultSufficient.allowed).toBe(true);
-  });
-
-  it('无效目标层级应拒绝', () => {
-    const result = canBreakthrough(25, 7, 8, 99);
-    expect(result.allowed).toBe(false);
-    expect(result.reason).toBe('无效的目标层级');
-  });
-
-  it('T2→T3 (目标<4) 不需要登神要素即可突破', () => {
-    // T2 满级=8, currentLevel=8 满足等级条件, targetTier=3<4 不需要登神要素
-    const result = canBreakthrough(8, 2, 3, 0);
-    expect(result.allowed).toBe(true);
   });
 });

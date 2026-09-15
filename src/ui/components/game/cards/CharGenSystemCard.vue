@@ -252,127 +252,6 @@ const inventoryGroups = computed(() => {
         </div>
       </div>
 
-      <!-- J. 登神长阶 — 参照原版 divinity-card -->
-      <div v-if="event.details.ascension?.enabled" class="ci-section ci-section-divider">
-        <h4 class="ci-sec-title ci-sec-dao" :style="{ color: tierColor }">登神长阶</h4>
-
-        <!-- 神位 deityPosition -->
-        <p
-          v-if="event.details.ascension.deityPosition"
-          class="ci-dao-deity"
-          :style="{ color: tierColor }"
-        >
-          {{ event.details.ascension.deityPosition }}
-        </p>
-
-        <!-- 登神路径 path -->
-        <p v-if="event.details.ascension.path" class="ci-dao-path">
-          {{ event.details.ascension.path }}
-        </p>
-        <p v-if="event.details.ascension.description" class="ci-item-desc">
-          {{ event.details.ascension.description.slice(0, 150) }}
-        </p>
-
-        <!-- 神国 divineKingdom -->
-        <div v-if="event.details.ascension.divineKingdom?.name" class="ci-item-card ci-accent-tier">
-          <div class="ci-item-header">
-            <span class="ci-item-name" :style="{ color: tierColor }">{{
-              event.details.ascension.divineKingdom.name
-            }}</span>
-          </div>
-          <div class="ci-item-body">
-            <p v-if="event.details.ascension.divineKingdom.description" class="ci-item-desc">
-              {{ event.details.ascension.divineKingdom.description.slice(0, 200) }}
-            </p>
-          </div>
-        </div>
-
-        <!-- 要素 elements -->
-        <template v-if="event.details.ascension.elements?.length">
-          <h5 class="ci-sub-title" :style="{ color: raceColor }">要素</h5>
-          <div
-            v-for="el in event.details.ascension.elements"
-            :key="el.name"
-            class="ci-item-card ci-accent-tier"
-          >
-            <div class="ci-item-header">
-              <span class="ci-item-name">{{ el.name }}</span>
-            </div>
-            <div class="ci-item-body">
-              <p class="ci-item-desc">{{ el.description }}</p>
-              <!-- 要素 effects 是 string[]（char-gen-agent 按行切），不是 name→desc 表；
-                   照 (v, k) 渲染会把数组下标当词条名画出来 -->
-              <div v-if="el.effects?.length" class="ci-effects">
-                <span v-for="eff in el.effects" :key="eff" class="ci-effect-pill">
-                  <span>{{ eff }}</span>
-                </span>
-              </div>
-            </div>
-          </div>
-        </template>
-
-        <!-- 权能 authorities -->
-        <template v-if="event.details.ascension.authorities?.length">
-          <h5 class="ci-sub-title" :style="{ color: raceColor }">权能</h5>
-          <div
-            v-for="au in event.details.ascension.authorities"
-            :key="au.name"
-            class="ci-item-card ci-accent-tier"
-          >
-            <div class="ci-item-header">
-              <span class="ci-item-name">{{ au.name }}</span>
-            </div>
-            <div class="ci-item-body">
-              <p class="ci-item-desc">{{ au.description }}</p>
-              <p v-if="au.costDescription" class="ci-cost">{{ au.costDescription }}</p>
-              <!-- 同 elements：权能 effects 也是 string[] -->
-              <div v-if="au.effects?.length" class="ci-effects">
-                <span v-for="eff in au.effects" :key="eff" class="ci-effect-pill">
-                  <span>{{ eff }}</span>
-                </span>
-              </div>
-            </div>
-          </div>
-        </template>
-
-        <!-- 法则 laws -->
-        <template v-if="event.details.ascension.laws?.length">
-          <h5 class="ci-sub-title" :style="{ color: raceColor }">法则</h5>
-          <div
-            v-for="law in event.details.ascension.laws"
-            :key="law.name"
-            class="ci-item-card ci-accent-tier"
-          >
-            <div class="ci-item-header">
-              <span class="ci-item-name">{{ law.name }}</span>
-            </div>
-            <div class="ci-item-body">
-              <p class="ci-item-desc">{{ law.description }}</p>
-              <p v-if="law.costDescription" class="ci-cost">{{ law.costDescription }}</p>
-              <div v-if="law.passiveEffects?.length" class="ci-effects">
-                <span
-                  v-for="pe in law.passiveEffects"
-                  :key="pe"
-                  class="ci-effect-pill ci-eff-passive"
-                >
-                  <span class="ci-effect-key">被动</span>
-                  <span>{{ pe }}</span>
-                </span>
-              </div>
-              <div v-if="law.activeEffects?.length" class="ci-effects">
-                <span
-                  v-for="ae in law.activeEffects"
-                  :key="ae"
-                  class="ci-effect-pill ci-eff-active"
-                >
-                  <span class="ci-effect-key">主动</span>
-                  <span>{{ ae }}</span>
-                </span>
-              </div>
-            </div>
-          </div>
-        </template>
-      </div>
     </div>
   </div>
 </template>
@@ -539,14 +418,6 @@ const inventoryGroups = computed(() => {
   box-shadow: 0 0 5px color-mix(in srgb, var(--ci-race, transparent) 50%, transparent);
   flex-shrink: 0;
 }
-.ci-sec-dao {
-  color: inherit;
-} /* 登神标题用层级色 */
-.ci-sec-dao::before {
-  background: var(--ci-tier, var(--theme-text-muted));
-  box-shadow: 0 0 5px color-mix(in srgb, var(--ci-tier, transparent) 50%, transparent);
-}
-
 /* ═══ Chip ─ 参照原版 card-tag ═══ */
 .ci-chips {
   display: flex;
@@ -710,19 +581,6 @@ const inventoryGroups = computed(() => {
   border: 1px solid var(--theme-card-border);
   color: var(--theme-text-secondary);
   font-family: monospace;
-}
-
-/* ═══ 登神长阶 ─ 参照原版 divinity-card ═══ */
-.ci-dao-deity {
-  text-align: center;
-  font-size: 0.9375rem;
-  font-weight: 700;
-  margin: 0 0 4px;
-}
-.ci-dao-path {
-  font-weight: 600;
-  font-size: 0.875rem;
-  margin: 0 0 4px;
 }
 
 /* ═══ Profile grid ─ 参照原版 profile-grid ═══ */

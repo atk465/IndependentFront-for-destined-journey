@@ -150,31 +150,6 @@ export function hasIdentity(char: CharacterState, identity: string): boolean {
   return char.identity.includes(identity);
 }
 
-// ========== 登神长阶查询 ==========
-
-/** 检查角色是否开启了登神长阶 */
-export function hasAscension(char: CharacterState): boolean {
-  return char.ascension?.enabled ?? false;
-}
-
-/** 获取角色的要素列表 */
-export function getElements(char: CharacterState): string[] {
-  if (!char.ascension?.elements) return [];
-  return char.ascension.elements.map((e) => e.name);
-}
-
-/** 获取角色的权能列表 */
-export function getAuthorities(char: CharacterState): string[] {
-  if (!char.ascension?.authority) return [];
-  return char.ascension.authority.map((a) => a.name);
-}
-
-/** 获取角色的法则列表 */
-export function getLaws(char: CharacterState): string[] {
-  if (!char.ascension?.law) return [];
-  return char.ascension.law.map((l) => l.name);
-}
-
 // ========== $char Namespace ==========
 
 /** AI 只读 $char API */
@@ -200,8 +175,4 @@ export const $char = {
   getIdentities,
   getOccupations,
   hasIdentity,
-  hasAscension,
-  getElements,
-  getAuthorities,
-  getLaws,
 } as const;

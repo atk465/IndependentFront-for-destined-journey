@@ -42,14 +42,6 @@ function makeCharacter(overrides: Partial<CharacterState> = {}): CharacterState 
     maxMp: 50,
     sp: 30,
     maxSp: 50,
-    ascension: {
-      enabled: false,
-      elements: [],
-      authority: [],
-      law: [],
-      deityPosition: '',
-      divineKingdom: { name: '', description: '' },
-    },
     // M2: 装备 = inventory 中 equippedSlot 非空的物品（规范 §3）
     skills: [
       {
@@ -562,28 +554,6 @@ describe('filterZoneContent — NARRATIVE', () => {
     expect(result).not.toContain('onTick');
     expect(result).not.toContain('onRemove');
     expect(result).not.toContain('$resource.modifyHp(owner, -1)');
-  });
-
-  it('ascension shows only enabled state and category names', () => {
-    const char = makeCharacter({
-      ascension: {
-        enabled: true,
-        elements: [{ name: '炎之要素', description: '火之要素', effects: [] }],
-        authority: [{ name: '锻冶权能', description: '锻冶', effects: [], costDescription: '' }],
-        law: [],
-        deityPosition: '',
-        divineKingdom: { name: '', description: '' },
-      },
-    });
-    const content = { characters: [char] };
-    const result = filterZoneContent('npc', content, 'NARRATIVE', 'story', ctx);
-    expect(result).not.toBeNull();
-    expect(result).toContain('登神长阶');
-    expect(result).toContain('炎之要素');
-    expect(result).toContain('锻冶权能');
-    // Internal details should be stripped
-    expect(result).not.toContain('elements');
-    expect(result).not.toContain('authority');
   });
 
   it('reads appearance/background/personality from customFields', () => {

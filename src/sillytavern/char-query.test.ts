@@ -49,10 +49,6 @@ import {
   getIdentities,
   getOccupations,
   hasIdentity,
-  hasAscension,
-  getElements,
-  getAuthorities,
-  getLaws,
   $char,
 } from './char-query';
 
@@ -70,14 +66,6 @@ function makeChar(overrides: Partial<CharacterState> = {}): CharacterState {
     maxHp: 200,
     identity: ['冒险者', '剑士'],
     occupation: ['战士'],
-    ascension: {
-      enabled: false,
-      elements: [],
-      authority: [],
-      law: [],
-      deityPosition: '',
-      divineKingdom: { name: '', description: '' },
-    },
     ...overrides,
   });
 }
@@ -443,84 +431,6 @@ describe('hasIdentity', () => {
 
 // ---- Ascension tests ----
 
-describe('hasAscension', () => {
-  it('登神长阶启用时返回 true', () => {
-    const c = makeChar({
-      ascension: {
-        enabled: true,
-        elements: [{ name: '火', description: '火焰要素', effects: [] }],
-        authority: [],
-        law: [],
-        deityPosition: '',
-        divineKingdom: { name: '', description: '' },
-      },
-    });
-    expect(hasAscension(c)).toBe(true);
-  });
-
-  it('登神长阶未启用时返回 false', () => {
-    const c = makeChar();
-    expect(hasAscension(c)).toBe(false);
-  });
-});
-
-describe('getElements', () => {
-  it('返回要素列表', () => {
-    const c = makeChar({
-      ascension: {
-        enabled: true,
-        elements: [
-          { name: '火', description: '炎之要素', effects: [] },
-          { name: '水', description: '水之要素', effects: [] },
-        ],
-        authority: [],
-        law: [],
-        deityPosition: '',
-        divineKingdom: { name: '', description: '' },
-      },
-    });
-    expect(getElements(c)).toEqual(['火', '水']);
-  });
-
-  it('无要素时返回空数组', () => {
-    const c = makeChar();
-    expect(getElements(c)).toEqual([]);
-  });
-});
-
-describe('getAuthorities', () => {
-  it('返回权能列表', () => {
-    const c = makeChar({
-      ascension: {
-        enabled: true,
-        elements: [],
-        authority: [
-          { name: '战斗', description: '战斗权能', effects: [], costDescription: '消耗SP' },
-        ],
-        law: [],
-        deityPosition: '',
-        divineKingdom: { name: '', description: '' },
-      },
-    });
-    expect(getAuthorities(c)).toEqual(['战斗']);
-  });
-});
-
-describe('getLaws', () => {
-  it('返回法则列表', () => {
-    const c = makeChar({
-      ascension: {
-        enabled: true,
-        elements: [],
-        authority: [],
-        law: [{ name: '重力', description: '重力法则', effects: [], costDescription: '消耗MP+SP' }],
-        deityPosition: '',
-        divineKingdom: { name: '', description: '' },
-      },
-    });
-    expect(getLaws(c)).toEqual(['重力']);
-  });
-});
 
 // ---- $char namespace ----
 
@@ -545,10 +455,6 @@ describe('$char namespace', () => {
     expect(typeof $char.getIdentities).toBe('function');
     expect(typeof $char.getOccupations).toBe('function');
     expect(typeof $char.hasIdentity).toBe('function');
-    expect(typeof $char.hasAscension).toBe('function');
-    expect(typeof $char.getElements).toBe('function');
-    expect(typeof $char.getAuthorities).toBe('function');
-    expect(typeof $char.getLaws).toBe('function');
   });
 
   it('$char.getChar 与顶层 getChar 是同一个函数', () => {

@@ -576,7 +576,6 @@ export const ALL_TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'object',
         properties: {
           effectDescription: { type: 'string', description: '期望达成的效果描述' },
-          divinity: { type: 'integer', minimum: 0, maximum: 8, description: '登神强度' },
           verifiableBounds: { type: 'object', description: '可验证的数值边界' },
           requestedRuleOverride: { type: 'string', description: '请求覆盖的 RuleKey（可选）' },
           reason: { type: 'string', description: '裁决理由' },
@@ -1060,7 +1059,6 @@ temp.<path>    — 会话临时 (不持久化)
 @skill.<技能名>.<scriptKey> — 引用指定技能的脚本
 @item.<物品名>.<scriptKey>  — 引用指定物品的脚本
 @status.<效果名>.<scriptKey> — 引用指定状态效果的脚本
-@ascension.<要素名>.<scriptKey> — 引用登神要素的脚本
 
 ⚠️ 沙盒行为说明:
 - 变量读写只能用于写入 Side Effect 参数，不能用于读取状态做条件分支。
