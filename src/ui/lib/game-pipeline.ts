@@ -42,6 +42,12 @@ import {
   sealedCardPlay,
   type CardInPlayEffect,
 } from '@engine/card-workshop/entry-combat';
+import {
+  applyBond,
+  bondForCard,
+  type BondInfo,
+} from '@engine/card-workshop/affection-bond';
+import { cardKindOf } from '@engine/card-workshop/card-kind';
 import { willModifierOf } from '@engine/card-workshop/unsealing';
 import { getCommissionDefs } from '@engine/commission-runtime';
 import { buildCraftBiasLines } from '@engine/card-workshop/talent-entry';
@@ -2209,10 +2215,25 @@ export class GamePipeline {
             ? { ...res.action, power: res.action.power + escalateBeat }
             : res.action;
         activate = res.activate;
+        // 好感共鸣：伙伴卡（召唤/军团）破封后效果发动 → 乘共鸣倍率（审计行置拍审计之前）
+        const isBondKind =
+          cardKindOf(card.词条) === '召唤' || cardKindOf(card.词条) === '军团';
+        const sealedBond =
+          res.effectFired && isBondKind
+            ? bondForCard(card.name, this.game.saveProfile?.affections)
+            : null;
+        if (sealedBond && sealedBond.multiplier !== 1 && action.power > 0) {
+          action = { ...action, power: applyBond(action.power, sealedBond.multiplier) };
+        }
         prepend = [
           ...res.prepend,
           ...(escalateBeat > 0
             ? [`▸ 连战递增：行动值 +${escalateBeat}（第 ${session.beat + 1} 拍）`]
+            : []),
+          ...(sealedBond && sealedBond.multiplier !== 1
+            ? [
+                `▸ 好感共鸣：与【${card.name}】的羁绊（${sealedBond.label} ${sealedBond.affection}）→ 效果 ×${sealedBond.multiplier}`,
+              ]
             : []),
         ];
         recoil = res.recoil;
@@ -2239,6 +2260,22 @@ export class GamePipeline {
       action = plan.action;
       if (plan.mode === '在场') {
         activate = { name: card.name, type: plan.effect.type, amount: plan.effect.amount };
+      }
+      // 好感共鸣（主人裁定：伙伴卡接入好感度）——打出召唤/军团卡时，同名角色的好感
+      // 等级决定威力与在场效果乘区（好感高伙伴卖力；反感以下消极怠工 ×0.8）。
+      // 名字即羁绊：卡名 = 角色名，查 SaveProfile.affections，零配置。
+      let bond: BondInfo | null = null;
+      const kind = cardKindOf(card.词条);
+      if (kind === '召唤' || kind === '军团') {
+        bond = bondForCard(card.name, this.game.saveProfile?.affections);
+      }
+      if (bond && bond.multiplier !== 1) {
+        if (action.power > 0) action = { ...action, power: applyBond(action.power, bond.multiplier) };
+        if (activate) activate = { ...activate, amount: applyBond(activate.amount, bond.multiplier) };
+        prepend = [
+          ...(prepend ?? []),
+          `▸ 好感共鸣：与【${card.name}】的羁绊（${bond.label} ${bond.affection}）→ 效果 ×${bond.multiplier}`,
+        ];
       }
       // 出卡宣言（主人裁定：纯叙事素材，数值照常结算；置于拍审计之前的「意图」行）
       if (choice.intent && choice.intent.trim()) {

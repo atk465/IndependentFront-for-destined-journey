@@ -1570,3 +1570,146 @@ describe('submitSkirmishCounter —— 封印卡启封流', () => {
     expect(s.playerHp).toBe(130);
   });
 });
+
+// ═══════════════════════════════════════════════════════════
+// 好感共鸣（伙伴卡 × 好感度，2026-09-16 主人裁定）
+// ═══════════════════════════════════════════════════════════
+
+describe('submitSkirmishCounter —— 好感共鸣（伙伴卡 × 好感度）', () => {
+  const 共鸣会话 = () => ({
+    enemyName: '岩爪兽',
+    enemyLevel: 12,
+    intents: [{ move: '咬', threat: 10, counters: ['防御'] }],
+    beat: 0,
+    playerHp: 155,
+    playerMaxHp: 155,
+    enemyHp: 200,
+    enemyMaxHp: 200,
+    guard: 10,
+    log: [],
+    playedCards: [],
+    counteredBeats: 0,
+    activeEffects: [],
+    unsealedCards: [],
+    finished: null,
+  });
+  /** 召唤卡玩家；affection 作为同名 NPC 的好感记录注入 saveProfile.affections */
+  const 召唤玩家 = (_affection?: number) => ({
+    name: '莱恩',
+    level: 9,
+    attributes: { str: 14, con: 14, dex: 12, int: 10, spi: 10 },
+    hp: 155,
+    maxHp: 155,
+    totalExp: 0,
+    inventory: [
+      {
+        name: '莉薇娅',
+        type: '卡牌',
+        quantity: 1,
+        cardTier: '青铜',
+        词条: ['召唤', '风'],
+      },
+    ],
+  });
+  const makeSave = (affection?: number) => ({
+    name: '莱恩',
+    ...(affection !== undefined ? { affections: { 莉薇娅: affection } } : {}),
+  });
+
+  it('有同名 NPC 且好感 ≥90（誓死追随）→ 效果 ×1.5 + 审计行', async () => {
+    const setSkirmishSession = vi.fn();
+    const pipeline = makePipeline({
+      player: 召唤玩家(),
+      saveProfile: makeSave(95),
+      skirmishSession: 共鸣会话(),
+      setSkirmishSession,
+    });
+    (pipeline as any).rollD20 = vi.fn(() => 10);
+    await (pipeline as any).submitSkirmishCounter({ kind: '卡', name: '莉薇娅' });
+
+    const s = setSkirmishSession.mock.calls[setSkirmishSession.mock.calls.length - 1][0];
+    const log = s.log.join('\n');
+    expect(log).toContain('好感共鸣：与【莉薇娅】的羁绊（誓死追随 95）→ 效果 ×1.5');
+    // 在场效果金额已乘 1.5（buff 2×power 取整后翻 1.5 倍，能整除故精确）
+    expect(s.activeEffects[0].amount).toBe(
+      Math.round((s.activeEffects[0].amount / 1.5) * 1.5),
+    );
+  });
+
+  it('反感（≤ -10）→ 消极怠工 ×0.8，效果缩水', async () => {
+    const setSkirmishSession = vi.fn();
+    const pipeline = makePipeline({
+      player: 召唤玩家(),
+      saveProfile: makeSave(-40),
+      skirmishSession: 共鸣会话(),
+      setSkirmishSession,
+    });
+    (pipeline as any).rollD20 = vi.fn(() => 10);
+    await (pipeline as any).submitSkirmishCounter({ kind: '卡', name: '莉薇娅' });
+
+    const s = setSkirmishSession.mock.calls[setSkirmishSession.mock.calls.length - 1][0];
+    expect(s.log.join('\n')).toContain('好感共鸣：与【莉薇娅】的羁绊');
+    expect(s.log.join('\n')).toContain('×0.8');
+  });
+
+  it('账本无同名记录 → 无共鸣（不加不减、无审计行）', async () => {
+    const setSkirmishSession = vi.fn();
+    const pipeline = makePipeline({
+      player: 召唤玩家(),
+      saveProfile: makeSave(undefined),
+      skirmishSession: 共鸣会话(),
+      setSkirmishSession,
+    });
+    (pipeline as any).rollD20 = vi.fn(() => 10);
+    await (pipeline as any).submitSkirmishCounter({ kind: '卡', name: '莉薇娅' });
+
+    const s = setSkirmishSession.mock.calls[setSkirmishSession.mock.calls.length - 1][0];
+    expect(s.log.join('\n')).not.toContain('好感共鸣');
+  });
+
+  it('中立（好感 0，有记录）→ 不出审计行也不改数值（×1 等价不触发）', async () => {
+    const setSkirmishSession = vi.fn();
+    const pipeline = makePipeline({
+      player: 召唤玩家(),
+      saveProfile: makeSave(0),
+      skirmishSession: 共鸣会话(),
+      setSkirmishSession,
+    });
+    (pipeline as any).rollD20 = vi.fn(() => 10);
+    await (pipeline as any).submitSkirmishCounter({ kind: '卡', name: '莉薇娅' });
+
+    const s = setSkirmishSession.mock.calls[setSkirmishSession.mock.calls.length - 1][0];
+    expect(s.log.join('\n')).not.toContain('好感共鸣');
+  });
+
+  it('非伙伴卡（技能/装备/直击）不吃共鸣 —— 名字撞了也不加', async () => {
+    const setSkirmishSession = vi.fn();
+    const pipeline = makePipeline({
+      player: {
+        name: '莱恩',
+        level: 9,
+        attributes: { str: 14, con: 14, dex: 12, int: 10, spi: 10 },
+        hp: 155,
+        maxHp: 155,
+        totalExp: 0,
+        inventory: [
+          {
+            name: '莉薇娅的祝福',
+            type: '卡牌',
+            quantity: 1,
+            cardTier: '青铜',
+            词条: ['技能', '火'],
+          },
+        ],
+      },
+      saveProfile: makeSave(95),
+      skirmishSession: 共鸣会话(),
+      setSkirmishSession,
+    });
+    (pipeline as any).rollD20 = vi.fn(() => 10);
+    await (pipeline as any).submitSkirmishCounter({ kind: '卡', name: '莉薇娅的祝福' });
+
+    const s = setSkirmishSession.mock.calls[setSkirmishSession.mock.calls.length - 1][0];
+    expect(s.log.join('\n')).not.toContain('好感共鸣');
+  });
+});
