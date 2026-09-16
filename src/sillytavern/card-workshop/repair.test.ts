@@ -9,6 +9,7 @@ import {
   isRepairable,
   validateRepairMaterials,
   planRepair,
+  planQuench,
 } from './repair';
 import type { CardItem, InventoryItem } from '../types';
 
@@ -126,5 +127,43 @@ describe('planRepair（修复 + 强化 + 跃迁）', () => {
     expect(r.ok).toBe(false);
     expect(r.reason).toContain('素材不足');
     expect(r.plan.upgraded).toBe(false);
+  });
+});
+
+// ===== planQuench（健康卡淬炼：词条强化 + 跃迁，2026-09-16）=====
+
+describe('planQuench（淬炼）', () => {
+  it('素材元素并入词条（无跃迁）', () => {
+    const r = planQuench(card('青铜', ['火', '技能']), [material('冰晶', '优良')]);
+    expect(r.ok).toBe(true);
+    expect(r.plan.new词条).toContain('冰');
+    expect(r.plan.upgraded).toBe(false);
+    expect(r.plan.summary).toContain('词条强化');
+  });
+
+  it('相生复合：木? 火风得燎原（复用融合内核）', () => {
+    const r = planQuench(card('白银', ['火', '技能']), [material('风羽', '优良')]);
+    expect(r.ok).toBe(true);
+    expect(r.plan.new词条).toContain('风');
+    expect(r.plan.new词条).toContain('燎原');
+  });
+
+  it('高品素材 → 品质跃迁一档 + 属性包', () => {
+    const before = card('青铜', ['火', '技能']);
+    const r = planQuench(before, [material('星核', '传说')]);
+    expect(r.ok).toBe(true);
+    expect(r.plan.upgraded).toBe(true);
+    expect(r.plan.newTier).toBe('白银');
+    expect(r.plan.attributeDelta).toEqual(UPGRADE_ATTRIBUTE_DELTA);
+    expect(r.plan.summary).toContain('青铜 → 白银');
+  });
+
+  it('无素材 / 无效果 → 校验失败且不抛', () => {
+    const empty = planQuench(card('青铜', ['火']), []);
+    expect(empty.ok).toBe(false);
+    expect(empty.reason).toContain('至少需要 1 份素材');
+    const futile = planQuench(card('星辉', ['火', '技能', '燎原']), [material('火晶', '普通')]);
+    expect(futile.ok).toBe(false);
+    expect(futile.reason).toContain('不会有任何效果');
   });
 });

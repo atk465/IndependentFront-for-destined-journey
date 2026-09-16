@@ -80,6 +80,48 @@ export function validateRepairMaterials(
   return { ok: true };
 }
 
+/** 强化：素材元素并入（去重）+ 相生复合（复用融合内核真源）；返回新词条与新增列表 */
+function mergeStrengthen词条(
+  词条: string[],
+  materials: InventoryItem[],
+): { 词条: string[]; added: string[] } {
+  const next = [...词条];
+  const added: string[] = [];
+  for (const m of materials) {
+    for (const e of deriveElements(m)) {
+      if (!next.includes(e)) {
+        next.push(e);
+        added.push(e);
+      }
+    }
+  }
+  for (const newWord of [...added]) {
+    for (const existing of next) {
+      if (added.includes(existing)) continue;
+      const product = synergyProduct(newWord, existing);
+      if (product && !next.includes(product)) {
+        next.push(product);
+        added.push(product);
+      }
+    }
+  }
+  return { 词条: next, added };
+}
+
+/** 品质跃迁判定：素材最高档高于卡品质档 → 升一档（一次一档，溢出浪费） */
+function tierUpgradeOf(
+  cardTier: CardTier,
+  materials: InventoryItem[],
+): { upgraded: boolean; newTier: CardTier } {
+  const maxExtraTier = materials.reduce((max, m) => Math.max(max, itemTierToMaterialTier(m)), 0);
+  const tierIdx = CARD_TIERS.indexOf(cardTier);
+  const materialIdx = Math.min(CARD_TIERS.length - 1, Math.max(0, maxExtraTier - 1));
+  if (materialIdx > tierIdx && tierIdx < CARD_TIERS.length - 1) {
+    return { upgraded: true, newTier: CARD_TIERS[tierIdx + 1] };
+  }
+  return { upgraded: false, newTier: cardTier };
+}
+
 /** 修复 + 强化计划（纯计算，不落库） */
 export interface RepairPlan {
   /** 修复后卡的数据补丁（damaged 清除；调用方与 cardTier 一起 update_item） */
@@ -120,43 +162,83 @@ export function planRepair(
   if (!validation.ok) return { ok: false, reason: validation.reason, plan: base };
 
   // 强化：额外素材的元素并入（去重）+ 相生复合（素材元素 × 卡面元素查融合内核真源）
-  const 词条 = [...card.词条];
-  const added: string[] = [];
-  for (const m of extraMaterials) {
-    for (const e of deriveElements(m)) {
-      if (!词条.includes(e)) {
-        词条.push(e);
-        added.push(e);
-      }
-    }
-  }
-  for (const newWord of [...added]) {
-    for (const existing of 词条) {
-      if (added.includes(existing)) continue;
-      const product = synergyProduct(newWord, existing);
-      if (product && !词条.includes(product)) {
-        词条.push(product);
-        added.push(product);
-      }
-    }
-  }
+  const strengthened = mergeStrengthen词条(card.词条, extraMaterials);
+  const plan: RepairPlan = { ...base, new词条: strengthened.added };
 
   // 品质跃迁：额外素材最高稀有度 > 卡品质档 → 升一档（一次一档，溢出浪费）
-  const maxExtraTier = extraMaterials.reduce(
-    (max, m) => Math.max(max, itemTierToMaterialTier(m)),
-    0,
-  );
-  const tierIdx = CARD_TIERS.indexOf(card.cardTier);
-  const materialIdx = Math.min(CARD_TIERS.length - 1, Math.max(0, maxExtraTier - 1));
-  const plan: RepairPlan = { ...base, new词条: added };
-  if (materialIdx > tierIdx && tierIdx < CARD_TIERS.length - 1) {
+  const jump = tierUpgradeOf(card.cardTier, extraMaterials);
+  if (jump.upgraded) {
     plan.upgraded = true;
-    plan.newTier = CARD_TIERS[tierIdx + 1];
+    plan.newTier = jump.newTier;
     plan.attributeDelta = { ...UPGRADE_ATTRIBUTE_DELTA };
     plan.summary = `修复【${card.name}】并以高品素材淬炼——品质跃迁 ${card.cardTier} → ${plan.newTier}`;
-    if (added.length > 0) plan.summary += `，新增词条：${added.join('、')}`;
-  } else if (added.length > 0) {
-    plan.summary = `修复【${card.name}】，词条强化：${added.join('、')}`;
+    if (strengthened.added.length > 0)
+      plan.summary += `，新增词条：${strengthened.added.join('、')}`;
+  } else if (strengthened.added.length > 0) {
+    plan.summary = `修复【${card.name}】，词条强化：${strengthened.added.join('、')}`;
+  }
+  return { ok: true, plan };
+}
+
+/** 淬炼计划（纯计算，不落库）：健康卡的词条强化与品质跃迁 */
+export interface QuenchPlan {
+  /** 淬炼后的完整词条（调用方整体 update_item） */
+  new词条: string[];
+  /** 跃迁后的卡牌品质（未跃迁 = 原品质） */
+  newTier: CardTier;
+  /** 是否发生品质跃迁（调用方需同步角色 tier + 属性包，一次提交双写） */
+  upgraded: boolean;
+  /** 跃迁属性包（世界内持久成长；更新角色 attributes 用） */
+  attributeDelta: Record<string, number>;
+  /** 淬炼说明（卡面/叙事用） */
+  summary: string;
+}
+
+/**
+ * 规划一次淬炼（健康卡 + 素材 → 词条强化/品质跃迁；纯函数）。
+ *
+ * 与 planRepair 共享强化/跃迁内核，但没有修复语义：不需要模板配额、不检定必成，
+ * 卡也不必处于损坏态。素材卡不能淬炼（它们是材料载体）。
+ *
+ * @param card 健康的战斗卡（素材卡无淬炼意义，调用方先以 cardKindOf 排除）
+ * @param materials 消耗的素材（≥1；元素并入 + 相生复合；品质高于卡则跃迁）
+ */
+export function planQuench(
+  card: Pick<CardItem, 'name' | 'cardTier' | '词条'>,
+  materials: InventoryItem[],
+): RepairValidation & { plan: QuenchPlan } {
+  const base: QuenchPlan = {
+    new词条: [...card.词条],
+    newTier: card.cardTier,
+    upgraded: false,
+    attributeDelta: {},
+    summary: `淬炼【${card.name}】`,
+  };
+  if (materials.length === 0) {
+    return { ok: false, reason: '至少需要 1 份素材', plan: base };
+  }
+  const strengthened = mergeStrengthen词条(card.词条, materials);
+  const jump = tierUpgradeOf(card.cardTier, materials);
+  const plan: QuenchPlan = {
+    new词条: strengthened.词条,
+    newTier: jump.newTier,
+    upgraded: jump.upgraded,
+    attributeDelta: jump.upgraded ? { ...UPGRADE_ATTRIBUTE_DELTA } : {},
+    summary: '',
+  };
+  if (jump.upgraded) {
+    plan.summary = `以高品素材淬炼【${card.name}】——品质跃迁 ${card.cardTier} → ${plan.newTier}`;
+  } else {
+    plan.summary = `淬炼【${card.name}】`;
+  }
+  if (strengthened.added.length > 0) {
+    plan.summary += `，词条强化：${strengthened.added.join('、')}`;
+  } else if (!jump.upgraded) {
+    return {
+      ok: false,
+      reason: '素材没有带来新的元素或相生变化，也无更高品质——这次淬炼不会有任何效果',
+      plan,
+    };
   }
   return { ok: true, plan };
 }

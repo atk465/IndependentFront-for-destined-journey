@@ -17,6 +17,8 @@
 import type { CardItem, StatePatch } from '../types';
 import { cardKindOf, isConsumableKind } from './card-kind';
 import { applyCardExp } from './skirmish';
+import type { CompanionSeed } from '../start-catalog-mechanics';
+import { buildSummonCompanion, isSummonCard, needsFirstSummon } from './companion';
 import type { SkirmishSession, SkirmishSettlement } from './skirmish-session';
 
 export interface SkirmishPersistInput {
@@ -29,6 +31,13 @@ export interface SkirmishPersistInput {
   settlement: SkirmishSettlement;
   /** 卡名 → 实物（背包查找；查不到的名字跳过） */
   cardOf: (name: string) => CardItem | undefined;
+  /** 首召入库（2026-09-17 巨兽召唤池）：卡名 → 伙伴种子（内容仓 cardPool 供给；未命中走缺省「铭灵」口径） */
+  summonSeedOf?: (name: string) => CompanionSeed | undefined;
+  /** 存档内已有角色名（首召判定；不传=按「全部首召」处理） */
+  existingCharacterNames?: readonly string[];
+  /** 伙伴出生地（缺省跟随主角所在地） */
+  playerLocation?: string;
+  saveId?: string;
 }
 
 /** 终局 → StatePatch[]（主角经验/HP + 参战卡经验/消耗）。纯函数，不落库 */
@@ -80,6 +89,24 @@ export function buildSkirmishSettlementPatches(input: SkirmishPersistInput): Sta
         changes: { cardExp: next.cardExp, cardPowerBonus: next.cardPowerBonus },
       },
     });
+  }
+  // 首召入库（2026-09-17 巨兽召唤池）：本场打出召唤卡且存档内无同名角色 →
+  // 结算 commit 里 add_character 一名 type:'summon' 伙伴实体（确定性，军团排除）
+  for (const name of input.session.playedCards) {
+    const card = input.cardOf(name);
+    if (!card || !isSummonCard(card)) continue;
+    if (!needsFirstSummon(name, input.existingCharacterNames ?? [])) continue;
+    patches.push({
+      op: 'add_character',
+      target: 'characters',
+      value: buildSummonCompanion({
+        card,
+        seed: input.summonSeedOf?.(name),
+        saveId: input.saveId ?? '',
+        playerName: input.playerName,
+        location: input.playerLocation ?? '',
+      }),
+    } as StatePatch);
   }
   return patches;
 }

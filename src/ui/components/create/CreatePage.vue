@@ -50,30 +50,29 @@ async function checkReadiness() {
   }
 }
 
-// 懒加载步骤组件
+// 懒加载步骤组件（2026-09-16 精简：9 步 → 6 步，命定核心/背景故事/确认提交三步下线，
+// 背景预设选择器并入基础信息步；2026-09-16 二调：出身天赋提前到第 3 步，
+// 剧情规划据此调整大纲；提交点 = 剧情规划（末步））
 const Step0 = defineAsyncComponent(() => import('./CreateStepDifficulty.vue'));
 const Step1 = defineAsyncComponent(() => import('./CreateStepBasic.vue'));
-const Step2 = defineAsyncComponent(() => import('./CreateStepDestinyCore.vue'));
+const Step2 = defineAsyncComponent(() => import('./CreateStepTalent.vue'));
 const Step3 = defineAsyncComponent(() => import('./CreateStepCharacters.vue'));
 const Step4 = defineAsyncComponent(() => import('./CreateStepSelections.vue'));
-const Step5 = defineAsyncComponent(() => import('./CreateStepBackground.vue'));
-const Step6 = defineAsyncComponent(() => import('./CreateStepPlot.vue'));
-const Step7 = defineAsyncComponent(() => import('./CreateStepTalent.vue'));
-const Step8 = defineAsyncComponent(() => import('./CreateStepConfirm.vue'));
+const Step5 = defineAsyncComponent(() => import('./CreateStepPlot.vue'));
 
-const stepComponents = [Step0, Step1, Step2, Step3, Step4, Step5, Step6, Step7, Step8] as const;
+const stepComponents = [Step0, Step1, Step2, Step3, Step4, Step5] as const;
 
 const currentComponent = computed(() => stepComponents[store.currentStep]);
 
 const nextLabel = computed(() =>
-  store.isCreating ? '正在创建…' : store.currentStep === 8 ? '✦ 开始命运之旅 ✦' : '下一步 →',
+  store.isCreating ? '正在创建…' : store.currentStep === 5 ? '✦ 开始命运之旅 ✦' : '下一步 →',
 );
 
-// Step 7 特殊处理: 点击"下一步" → 执行 startJourney
+// Step 5（剧情规划，最后一步）特殊处理: 点击"下一步" → 执行 startJourney
 async function handleNext() {
   if (store.isCreating || !ready.value) return;
   creationError.value = '';
-  if (store.currentStep === 7) {
+  if (store.currentStep === 5) {
     try {
       const saveId = await store.startJourney();
       ui.navigate('game', saveId);
@@ -102,7 +101,7 @@ onMounted(() => {
       ← 首页
     </button>
 
-    <CreateSteps v-if="ready" :current="store.currentStep" :total="9" />
+    <CreateSteps v-if="ready" :current="store.currentStep" :total="6" />
 
     <PointsBar
       v-if="ready"

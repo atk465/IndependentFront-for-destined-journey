@@ -14,7 +14,7 @@ import type { InventoryItem } from '../types';
 import { QUALITY_RANK } from '../types';
 import type { MaterialSpec } from './card-fusion';
 
-/** 卡兰大陆九元素（覆盖融合内核相生/相克表用到的全部元素） */
+/** 铭刻纪元九元素（覆盖融合内核相生/相克表用到的全部元素） */
 export const ELEMENT_KEYWORDS = ['火', '水', '风', '土', '雷', '光', '暗', '冰', '金'] as const;
 
 /** 品质 → 素材稀有度 1-5（7 级品质的后两档封顶） */

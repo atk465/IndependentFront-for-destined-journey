@@ -25,7 +25,7 @@ export type EquipSlot = (typeof EQUIP_SLOTS)[number];
 export const ITEM_TYPES = ['装备', '消耗品', '材料', '任务物品', '特殊', '卡牌'] as const;
 export type ItemType = (typeof ITEM_TYPES)[number];
 
-/** 卡牌品质（制卡系统 5 级，独立于 7 级装备品质；卡兰大陆世界观） */
+/** 卡牌品质（制卡系统 5 级，独立于 7 级装备品质；铭刻纪元世界观） */
 export const CARD_TIERS = ['白铁', '青铜', '白银', '鎏金', '星辉'] as const;
 export type CardTier = (typeof CARD_TIERS)[number];
 

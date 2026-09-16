@@ -144,3 +144,89 @@ function fleeSkirmishAfter(session: ReturnType<typeof startSkirmish>) {
   const fled = fleeSkirmish(session);
   return settleSkirmish(fled, 9);
 }
+
+// ===== 首召入库（2026-09-17 巨兽召唤池）=====
+
+describe('首召入库：打出召唤卡 → add_character 伙伴实体', () => {
+  const 召唤卡: CardItem = {
+    name: '远古巨兽·岩爪',
+    type: '卡牌',
+    quantity: 1,
+    cardTier: '鎏金',
+    sealed: false,
+    词条: ['土', '召唤'],
+    recipe: {
+      mainMaterial: '地脉髓',
+      subMaterials: [],
+      tier: '鎏金',
+      fusionKind: '叠加',
+      cost: 200,
+      rating: '成功',
+    },
+  };
+  const 燎原: CardItem = { ...燎原符卡 };
+
+  it('首召（无同名角色）→ 结算补丁含 add_character；已有同名 → 不再生成', () => {
+    const session = playBeat(
+      playBeat(开战(), 燎原行动, 17),
+      { label: '打出 召唤卡', power: 20, tags: [], cardName: 召唤卡.name },
+      15,
+    );
+    playBeat(session, { label: '收尾', power: 30, tags: [] }, 12);
+    const settle = () => {
+      const result = settleSkirmish(session, 9);
+      expect(result).not.toBeNull();
+      return result!;
+    };
+
+    const cards = new Map<string, CardItem>([
+      [燎原.name, 燎原],
+      [召唤卡.name, 召唤卡],
+    ]);
+    const base = {
+      playerName: '阿黑',
+      playerTotalExp: 0,
+      session,
+      settlement: settle(),
+      cardOf: (n: string) => cards.get(n),
+      summonSeedOf: (n: string) =>
+        n === 召唤卡.name ? { race: '岩甲古龙裔', temperament: '寡言护主' } : undefined,
+      playerLocation: '艾瑟嘉德',
+      saveId: 'save1',
+    };
+
+    const first = buildSkirmishSettlementPatches({ ...base });
+    const add = first.filter((p) => p.op === 'add_character');
+    expect(add).toHaveLength(1);
+    const char = add[0].value as any;
+    expect(char.name).toBe('远古巨兽·岩爪');
+    expect(char.type).toBe('summon');
+    expect(char.race).toBe('岩甲古龙裔');
+
+    // 已有同名（第二次召唤）→ 不再生成
+    const second = buildSkirmishSettlementPatches({
+      ...base,
+      existingCharacterNames: ['玩家', '远古巨兽·岩爪'],
+    });
+    expect(second.filter((p) => p.op === 'add_character')).toHaveLength(0);
+  });
+
+  it('未传 seedOf → 仍生成，种族落缺省「铭灵」口径', () => {
+    const session = playBeat(
+      playBeat(开战(), { label: '打出 召唤卡', power: 25, tags: [], cardName: 召唤卡.name }, 15),
+      { label: '收尾一', power: 30, tags: [] },
+      12,
+    );
+    playBeat(session, { label: '收尾二', power: 30, tags: [] }, 12);
+    const patches = buildSkirmishSettlementPatches({
+      playerName: '阿黑',
+      playerTotalExp: 0,
+      session,
+      settlement: settleSkirmish(session, 9)!,
+      cardOf: (n) => (n === 召唤卡.name ? 召唤卡 : undefined),
+    });
+    const add = patches.filter((p) => p.op === 'add_character');
+    expect(add).toHaveLength(1);
+    expect((add[0].value as any).race).toBe('铭灵');
+  });
+});

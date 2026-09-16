@@ -9,7 +9,8 @@
  * 1. **首装零冲突**: 新鲜占位状态 + pack 全新书 → 全 added，0 conflicted
  * 2. **编辑后 N 冲突**: 用户编辑过占位书（现 hash ≠ 占位基线）+ 首装 → 该书 conflicted
  * 3. **占位建档 → 装包 uid 迁移**: 存档 enabledWorldBookEntries 含占位 uid → 按名配对产 rewrite；
- *    system_core 失配 → needsSelectionPartitions（恰好单条，不是整本）；多选失配 → 清除 + note
+ *    character 失配 → needsSelectionPartitions（恰好单条，不是整本）；多选失配 → 清除 + note
+ *    （system_core 已随捏人精简降级为多选：失配 → 清除 + note）
  * 4. **卸载编辑检测**: 用户编辑过的 pack 书 → 出现在确认清单
  *
  * 设计: docs/planning/2026-08-05-content-engine-separation-design.md §4 / §5.1 / §5.2 / D18 / D19 / D20 / D43 / D40
@@ -217,7 +218,7 @@ describe('planSaveUidMigration — D43 三段式', () => {
     expect(migration.needsSelectionPartitions).toEqual([]);
   });
 
-  it('system_core 失配（pack 没有同名条目）→ needsSelectionPartitions 恰好单条', () => {
+  it('system_core 失配 → 已降级为多选：清除 + sideEffect note（2026-09-16 精简）', () => {
     // 占位书条目名「旧核心」，pack 书改成「新核心」—— 配不上
     const placeholderBk = placeholderBook({
       id: 'system_core',
@@ -234,11 +235,10 @@ describe('planSaveUidMigration — D43 三段式', () => {
     const notes: WorkshopNote[] = [];
     const migration = planSaveUidMigration([packBk], [placeholderBk], enabledEntries, notes);
 
-    // 单选钉选分区失配 → needs_selection（不许裸删）
-    expect(migration.needsSelectionPartitions).toEqual(['system_core']);
+    // 命定核心轴下线后 system_core 不再单选钉选 → 失配键允许清除 + note
+    expect(migration.needsSelectionPartitions).toEqual([]);
     expect(migration.rewrite).toEqual({});
-    // 不产 sideEffect note（单选钉选分区不走清除路径）
-    expect(notes.filter((n) => n.kind === 'sideEffect')).toEqual([]);
+    expect(notes.some((n) => n.kind === 'sideEffect')).toBe(true);
   });
 
   it('character 失配 → needsSelectionPartitions 含 character', () => {
@@ -347,26 +347,26 @@ describe('planPackInstall — saveUidMigration 接线（端到端）', () => {
     expect(plan.saveUidMigration?.needsSelectionPartitions).toEqual([]);
   });
 
-  it('system_core 失配 → plan.saveUidMigration.needsSelectionPartitions 恰好单条', () => {
+  it('character 失配 → plan.saveUidMigration.needsSelectionPartitions 恰好单条', () => {
     const placeholderBk = placeholderBook({
-      id: 'system_core',
-      partition: 'system_core',
-      entries: [entry({ uid: PLACEHOLDER_UID_RESERVED_BASE, name: '旧核心' })],
+      id: 'character',
+      partition: 'character',
+      entries: [entry({ uid: PLACEHOLDER_UID_RESERVED_BASE + 1, name: '旧角色' })],
     });
     const packBk = book({
-      id: 'system_core',
-      partition: 'system_core',
-      entries: [entry({ uid: 413, name: '新核心' })],
+      id: 'character',
+      partition: 'character',
+      entries: [entry({ uid: 100, name: '新角色' })],
     });
     const pack: ContentPack = { ...minimalPack(), worldBooks: [packBk] };
     const current: CurrentLibrary = {
       worldBooks: [placeholderBk],
-      enabledWorldBookEntries: [`system_core:${PLACEHOLDER_UID_RESERVED_BASE}`],
+      enabledWorldBookEntries: [`character:${PLACEHOLDER_UID_RESERVED_BASE + 1}`],
     };
 
     const plan = planPackInstall(pack, current, {}, {});
 
-    expect(plan.saveUidMigration?.needsSelectionPartitions).toEqual(['system_core']);
+    expect(plan.saveUidMigration?.needsSelectionPartitions).toEqual(['character']);
     // 恰好单条，不是整本（裸删会触发内容通胀，D43）
     expect(plan.saveUidMigration?.needsSelectionPartitions).toHaveLength(1);
   });
@@ -543,8 +543,8 @@ describe('planPackInstall — randomEvents 分节（三态 + 整节替换）', (
 // ═══════════════════════════════════════════════════════════
 
 describe('SINGLE_SELECT_PINNED_PARTITIONS', () => {
-  it('单选钉选分区恰好是 system_core + character', () => {
-    expect(SINGLE_SELECT_PINNED_PARTITIONS).toEqual(['system_core', 'character']);
+  it('单选钉选分区恰好是 character（system_core 已随捏人精简降级多选）', () => {
+    expect(SINGLE_SELECT_PINNED_PARTITIONS).toEqual(['character']);
   });
 });
 

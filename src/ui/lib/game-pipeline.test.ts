@@ -1,9 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import {
-  EndpointBindingError,
-  extractStoryOptions,
-  GamePipeline,
-} from './game-pipeline';
+import { EndpointBindingError, extractStoryOptions, GamePipeline } from './game-pipeline';
 import type { ApiEndpoint } from '@engine/types';
 import { patchAgentSettings } from '../stores/agent-settings';
 import type { AgentResult } from '@engine/types';
@@ -97,7 +93,6 @@ vi.mock('@engine/memory-summarizer', () => ({
 vi.mock('../stores/ui-store', () => ({
   useUIStore: () => ({ toast: toastSpy }),
 }));
-
 
 // 🆕 T4：invalidatePromptSessions 的唯一职责 = 把本 pipeline 的 saveId 交给引擎清理。
 // mock 掉引擎模块，直接 spy 收到的入参（断言「只清对应 saveId」）。
@@ -323,36 +318,6 @@ describe('sendOpeningPrompt', () => {
     expect(run).toHaveBeenCalledWith('OPENING', undefined, false);
     expect(gameStore.releaseOpeningPromptClaim).not.toHaveBeenCalled();
   });
-});
-
-describe('buildAgentConfigs — selected system core visibility', () => {
-  it.each([408, 413, 999])(
-    'adds system_core to char_gen for any selected system-core entry (uid %s)',
-    (uid) => {
-      const pipeline = makePipeline({
-        activeSave: {
-          metadata: { enabledWorldBookEntries: [`system_core:${uid}`] },
-        },
-      });
-      const settings = (pipeline as any).settings.settings;
-      patchAgentSettings(settings, 'char_gen', {
-        worldBookEnabled: true,
-        worldBookIds: ['world_setting', 'race', 'character'],
-      });
-      patchAgentSettings(settings, 'story', {
-        worldBookEnabled: true,
-        worldBookIds: ['world_setting'],
-      });
-
-      const configs = (pipeline as any).buildAgentConfigs({ char_gen: {} });
-      const charGen = configs.find((config: any) => config.agentId === 'char_gen');
-      const story = configs.find((config: any) => config.agentId === 'story');
-
-      expect(charGen.worldBookIds).toContain('system_core');
-      expect(story.worldBookIds).toContain('system_core');
-    },
-  );
-
 });
 
 describe('buildAgentConfigs — combat_v3 侧链装配', () => {
@@ -1031,7 +996,6 @@ vi.mock('../stores/audio-store', () => ({
   }),
 }));
 
-
 // ============================================================================
 // 工坊 P2 (ADR-30 D5) — EJS vars 差量提交 + 体积护栏
 // ============================================================================
@@ -1188,11 +1152,9 @@ describe('flushEjsVarsDiffs — EJS vars 差量提交 (工坊 P2 / D5)', () => {
 // 🖼 方言 systemPrompt 注入（图像 v2 / C3·C5）
 // ═══════════════════════════════════════════════════════════
 
-
 // ═══════════════════════════════════════════════════════════
 // 🖼 情景插画：三档分流（图像生成 §8 / D15 / D21 / D32 / D48）
 // ═══════════════════════════════════════════════════════════
-
 
 // ===== T16：combat_v3 玩家输入桥时序 + pre-combat 快照 =====
 // 设计 2026-08-09 §3.5：handleCombatTriggerV3 必须在 `await runCombatV3(...)` **之前**
@@ -1631,9 +1593,7 @@ describe('submitSkirmishCounter —— 好感共鸣（伙伴卡 × 好感度）'
     const log = s.log.join('\n');
     expect(log).toContain('好感共鸣：与【莉薇娅】的羁绊（誓死追随 95）→ 效果 ×1.5');
     // 在场效果金额已乘 1.5（buff 2×power 取整后翻 1.5 倍，能整除故精确）
-    expect(s.activeEffects[0].amount).toBe(
-      Math.round((s.activeEffects[0].amount / 1.5) * 1.5),
-    );
+    expect(s.activeEffects[0].amount).toBe(Math.round((s.activeEffects[0].amount / 1.5) * 1.5));
   });
 
   it('反感（≤ -10）→ 消极怠工 ×0.8，效果缩水', async () => {

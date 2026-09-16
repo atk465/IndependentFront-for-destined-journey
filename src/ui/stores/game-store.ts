@@ -18,7 +18,15 @@ import type {
   DebugTurnRecord,
 } from '@engine/types';
 export type { DebugAgentEntry, DebugTurnRecord } from '@engine/types';
-import { planRepair } from '@engine/card-workshop/repair';
+import { planQuench, planRepair } from '@engine/card-workshop/repair';
+import {
+  FORTUNE_MODES,
+  drawFortuneCard,
+  rollFortuneTier,
+  type FortuneMode,
+} from '@engine/card-workshop/fortune-draw';
+import { cardCatalogToItem, parseCatalogData } from '@engine/start-catalog';
+import { d100 } from '@engine/dice';
 import { buildDemoCardsPatches, buildDemoDeckPatches } from '@engine/card-workshop/demo';
 import { toPlainCardAlbum } from '@engine/card-workshop/album';
 import { planCommissionDelivery } from '@engine/card-workshop/commission';
@@ -31,7 +39,9 @@ import {
   getExchangeCatalog,
   talentExchangePrice,
 } from '@engine/card-workshop/talent-entry';
-import { getReputation as getTalentReputation } from '@engine/save-profile';
+import { getReputation as getTalentReputation, getProfile, spendFP } from '@engine/save-profile';
+import { getContentRegistry } from './content-store';
+import type { CardTier } from '@engine/field-enums';
 import type { SkirmishSession } from '@engine/card-workshop/skirmish-session';
 import type { SkirmishChoice } from '@engine/card-workshop/skirmish';
 import {
@@ -273,12 +283,14 @@ export const useGameStore = defineStore('game', () => {
     const list = flags?.eventCommissions;
     if (!Array.isArray(list)) return [];
     const day = currentGameDay();
-    return list.filter((ec) => isEventCommissionActive(ec, day)).map((ec: any) => ({
-      def: ec.def as CommissionDef,
-      sourceEvent: String(ec.sourceEvent ?? ''),
-      armedDay: Number(ec.armedDay ?? 0),
-      expiresDay: Number(ec.expiresDay ?? 0),
-    }));
+    return list
+      .filter((ec) => isEventCommissionActive(ec, day))
+      .map((ec: any) => ({
+        def: ec.def as CommissionDef,
+        sourceEvent: String(ec.sourceEvent ?? ''),
+        armedDay: Number(ec.armedDay ?? 0),
+        expiresDay: Number(ec.expiresDay ?? 0),
+      }));
   });
   const activeEventCommissions = computed(() => eventCommissions.value);
 
@@ -369,6 +381,159 @@ export const useGameStore = defineStore('game', () => {
     const result = await sm.commitChatState(patches);
     if (result.success) await refreshFromDb();
     return result.success ? { ok: true } : { ok: false, reason: result.errors.join('; ') };
+  }
+
+  /**
+   * 淬炼：健康卡 + 素材 → 词条强化/品质跃迁（2026-09-16）。
+   * 与 repairCard 同形状的原子提交：update_item（词条/cardTier）+ remove_item（素材）
+   * + 跃迁时 update_character（tier delta + 属性包）。
+   */
+  async function quenchCard(
+    cardName: string,
+    materialNames: string[],
+  ): Promise<{ ok: boolean; reason?: string; summary?: string }> {
+    const playerChar = player.value;
+    if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
+    const materials = materialNames
+      .map((n) => playerChar.inventory.find((i) => i.name === n))
+      .filter((i): i is InventoryItem => !!i);
+    const card = playerChar.inventory.find(
+      (i): i is CardItem => i.name === cardName && i.type === '卡牌',
+    );
+    if (!card) return { ok: false, reason: '找不到该卡' };
+
+    const { ok, reason, plan } = planQuench(card, materials);
+    if (!ok) return { ok: false, reason };
+
+    const patches: StatePatch[] = [
+      {
+        op: 'update_item',
+        target: `characters.${playerChar.name}`,
+        value: {
+          name: cardName,
+          changes: {
+            词条: plan.new词条,
+            ...(plan.upgraded ? { cardTier: plan.newTier } : {}),
+          },
+        },
+      },
+      ...materialNames.map((name) => ({
+        op: 'remove_item' as const,
+        target: `characters.${playerChar.name}`,
+        value: { name, quantity: 1 },
+      })),
+    ];
+    if (plan.upgraded) {
+      patches.push({
+        op: 'update_character',
+        target: `characters.${playerChar.name}`,
+        value: { tier: 1, attributes: plan.attributeDelta },
+        metadata: { delta: true, source: 'card_quench' },
+      } as StatePatch);
+    }
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState(patches);
+    if (result.success) await refreshFromDb();
+    return result.success
+      ? { ok: true, summary: plan.summary }
+      : { ok: false, reason: result.errors.join('; ') };
+  }
+
+  /**
+   * 抽封铭卡（命运祭坛，2026-09-17）：d100 掷档 → cardPool 按档抽卡 →
+   * CardItem 直落背包+卡册。纯 Code 确定性，不经叙事链、不走 item_gen。
+   * coin 模式扣帝冕币（update_character 绝对值），fp 模式扣命运点（spendFP）。
+   */
+  async function drawFortune(mode: FortuneMode): Promise<
+    | {
+        ok: true;
+        tier: CardTier;
+        card: { name: string; cardTier: CardTier; 词条: string[]; description: string };
+        d100: number;
+        summary: string;
+      }
+    | { ok: false; reason: string }
+  > {
+    const spec = FORTUNE_MODES[mode];
+    const playerChar = player.value;
+    if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
+
+    // 卡池：内容注册表 catalog.cardPool（装内容包后为铭刻卡池，未装则占位小样）
+    const pool = parseCatalogData(getContentRegistry().catalog).cardPool.filter(
+      (c) => !c.imitation,
+    );
+    if (pool.length === 0) return { ok: false, reason: '命运卡堆是空的（需安装内容包）' };
+
+    // 费用预检
+    if (mode === 'coin' && playerChar.money < spec.gcCost) {
+      return { ok: false, reason: `帝冕币不足（需 ${spec.gcCost} GC）` };
+    }
+    const profile = saveProfile.value;
+    if (mode === 'fp' && (profile?.fp ?? 0) < spec.fpCost) {
+      return { ok: false, reason: `命运点不足（需 ${spec.fpCost} FP）` };
+    }
+
+    // 掷问
+    const roll = d100();
+    const tier = rollFortuneTier(mode, roll.total);
+    const picked = drawFortuneCard(pool, tier);
+    if (!picked) return { ok: false, reason: '命运卡堆是空的（需安装内容包）' };
+    const cardItem = cardCatalogToItem(picked);
+
+    const patches: StatePatch[] = [
+      {
+        op: 'add_item',
+        target: `characters.${playerChar.name}`,
+        value: cardItem as unknown as Record<string, unknown>,
+      },
+    ];
+    if (mode === 'coin') {
+      patches.push({
+        op: 'update_character',
+        target: `characters.${playerChar.name}`,
+        value: { money: playerChar.money - spec.gcCost },
+      } as StatePatch);
+    }
+    // 收录进卡册 owned（不自动编组——编组是玩家在卡册的决策）
+    const album = playerChar.cardAlbum ?? { owned: [], deck: [], capacity: 60 };
+    if (!album.owned.includes(cardItem.name)) {
+      patches.push({
+        op: 'update_character',
+        target: `characters.${playerChar.name}`,
+        value: {
+          cardAlbum: {
+            owned: [...album.owned, cardItem.name].slice(0, album.capacity),
+            deck: album.deck,
+            capacity: album.capacity,
+          },
+        },
+      } as StatePatch);
+    }
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState(patches);
+    if (!result.success) return { ok: false, reason: result.errors.join('; ') };
+
+    if (mode === 'fp') {
+      const fresh = await getProfile(activeSaveId.value);
+      await spendFP(fresh, spec.fpCost, '命运祭坛掷问', 'other');
+      await refreshFromDb();
+    } else {
+      await refreshFromDb();
+    }
+
+    const summary = `底石说：「${picked.name}」——${tier}品质的${picked.formEntry}卡${picked.element ? `，铭着${picked.element}行铭文` : ''}。`;
+    return {
+      ok: true,
+      tier,
+      card: {
+        name: picked.name,
+        cardTier: picked.cardTier,
+        词条: cardItem.词条,
+        description: picked.description,
+      },
+      d100: roll.total,
+      summary,
+    };
   }
 
   // === 元数据 ===
@@ -1593,6 +1758,8 @@ export const useGameStore = defineStore('game', () => {
     activePlotEvents,
     plotOutline,
     repairCard,
+    quenchCard,
+    drawFortune,
     seedDemoCards,
     skirmishSession,
     isInCombat,

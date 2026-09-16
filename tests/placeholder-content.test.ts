@@ -81,10 +81,9 @@ describe('占位内容 · 注册表八面能被生产解析器吃下', () => {
     expect(pack.countries.length).toBeGreaterThan(0);
   });
 
-  it('catalog：七池解析出来非空，三类装备各 ≥3 件', () => {
+  it('catalog：六池解析出来非空，三类装备各 ≥3 件', () => {
     const catalog = parseCatalogData(getContentRegistry().catalog);
     expect(isCatalogPopulated(catalog)).toBe(true);
-    expect(catalog.destinyCores).toHaveLength(3);
     expect(catalog.itemPool.length).toBeGreaterThanOrEqual(5);
     expect(catalog.backgrounds).toHaveLength(3);
     for (const type of ['武器', '防具', '饰品']) {

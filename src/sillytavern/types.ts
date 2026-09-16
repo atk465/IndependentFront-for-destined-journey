@@ -149,7 +149,6 @@ export type EffectIntent =
       damageTakenOverrideId?: string;
     };
 
-
 export interface EffectAutomatonDecl {
   id: string;
   name?: string;
@@ -243,7 +242,7 @@ export interface DeckCardData {
 import type { RandomEventOfferEntry } from './random-event-context';
 // 捏人预设（`CreatePreset`）里的两个目录形状。**type-only 且不成环** ——
 // `start-catalog-mechanics.ts` 是零 import 的叶子模块（机制半边，D24）。
-import type { CatalogItem, BackgroundTemplate } from './start-catalog-mechanics';
+import type { CardCatalogItem } from './start-catalog-mechanics';
 
 // ========== World Book (Lorebook) Types (v3, deprecated) ==========
 // Phase 8 用新 WorldBook 类型替代，旧 Lorebook/LorebookEntry 保留兼容导入
@@ -1255,14 +1254,13 @@ export interface CharacterState {
   sp: number;
   maxSp: number;
 
-
   // ===== 装备/技能/背包 =====
   // M2: equipment[] 已删除 — 装备 = inventory 中 equippedSlot 非空的物品（规范 §3）
   skills: Skill[];
   inventory: InventoryItem[];
   statusEffects: StatusEffect[];
 
-  // ===== 卡牌工坊（卡兰大陆世界观 MVP） =====
+  // ===== 卡牌工坊（铭刻纪元世界观 MVP） =====
   /** 卡册状态：owned=已拥有卡牌名，deck=当前卡组，capacity=容量。逻辑键=名字，无 id */
   cardAlbum?: CardAlbumState;
   /** 天赋（设计 §4-天赋，访谈共识 T1~T8 / docs/planning/2026-09-14-talent-system-design.md）：
@@ -1653,15 +1651,10 @@ export interface CreatePreset {
     money: number;
     destinyPoints: number;
   };
-  equipments: CatalogItem[];
-  items: CatalogItem[];
-  skills: CatalogItem[];
-  background: BackgroundTemplate | null;
-  customBackgroundText: string;
-  destinyCoreId: string | null;
+  /** 开局购卡（2026-09-16 卡牌化）：旧 equipments/items/skills 三字段退役，加载时容错忽略 */
+  cards: CardCatalogItem[];
   plotSettings: PlotSettings | null;
   /** Phase 10h: 世界书驱动字段 */
-  systemCoreEntryUid?: number | null;
   enabledCharacterEntryUids?: number[];
   /** 角色补充信息 */
   personality?: string;

@@ -43,7 +43,6 @@ const FIXTURE_BACKGROUNDS: BackgroundTemplate[] = [
   bg('guild', { requiredIdentity: '学徒' }),
   bg('winged', { requiredRace: '羽族' }),
   bg('harbor', { requiredLocation: '灰港' }),
-  bg('marked', { requiredDestinyCore: '晨星' }),
 ];
 
 const FIXTURE_TREE: CascaderOption[] = [
@@ -66,7 +65,6 @@ const FIXTURE_TREE: CascaderOption[] = [
 
 const FIXTURE_CATALOG = {
   version: 1,
-  destinyCores: [{ id: 'dc_dawn', name: '晨星', author: 'fixture', theme: 'fixture' }],
   equipmentPool: [{ id: 'eq_1', name: '木剑', category: 'equipment', rarity: 'common' }],
   itemPool: [{ id: 'it_1', name: '干粮', category: 'item', rarity: 'common' }],
   skillPool: [],
@@ -129,9 +127,8 @@ describe('机制常量（不进 pack，随引擎走）', () => {
 describe('parseCatalogData', () => {
   it('正常输入逐面透传', () => {
     const c = parseCatalogData(FIXTURE_CATALOG);
-    expect(c.destinyCores).toHaveLength(1);
     expect(c.equipmentPool[0].name).toBe('木剑');
-    expect(c.backgrounds).toHaveLength(6);
+    expect(c.backgrounds).toHaveLength(5);
     expect(c.raceCosts['羽族']).toBe(30);
     expect(c.startLocations).toHaveLength(2);
   });
@@ -258,7 +255,6 @@ describe('背景分类（计数与筛选同源）', () => {
     expect(classifyBackground(bg('b', { requiredIdentity: '学徒' }))).toBe('identity');
     expect(classifyBackground(bg('c', { requiredRace: '羽族' }))).toBe('race');
     expect(classifyBackground(bg('d', { requiredLocation: '灰港' }))).toBe('location');
-    expect(classifyBackground(bg('e', { requiredDestinyCore: '晨星' }))).toBe('location');
   });
 
   it('多重限定时身份优先（与旧 if/else 链一致）', () => {

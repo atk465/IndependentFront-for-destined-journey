@@ -13,6 +13,7 @@ const emit = defineEmits<{
 const allTools = [
   { id: 'items', label: '背包', icon: 'fa-solid fa-box' },
   { id: 'cardAlbum', label: '卡册', icon: 'fa-solid fa-clone' },
+  { id: 'fortuneAltar', label: '祭坛', icon: 'fa-solid fa-monument' },
   { id: 'commissionBoard', label: '委托', icon: 'fa-solid fa-bullhorn' },
   { id: 'talentPanel', label: '天赋', icon: 'fa-solid fa-fingerprint' },
   { id: 'craftBench', label: '制台', icon: 'fa-solid fa-wand-magic-sparkles' },

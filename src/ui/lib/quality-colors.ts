@@ -71,7 +71,7 @@ export function qualityLabelFromRarity(code: string): Rarity {
 }
 
 /**
- * 卡牌品质（卡兰大陆 5 级：白铁→星辉）→ 品质调色板。
+ * 卡牌品质（铭刻纪元 5 级：白铁→星辉）→ 品质调色板。
  *
  * 卡牌品质独立于 7 级装备品质，但没有自己的调色板 —— 借同一条主题令牌
  * （白铁=common … 星辉=legendary），照样跟随主题，不硬编码 hex。

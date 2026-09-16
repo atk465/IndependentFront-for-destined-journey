@@ -20,7 +20,7 @@ beforeEach(() => {
   create = reactive({
     currentStep: 0,
     contentStatus: 'ready',
-    stepValid: Array(8).fill(true),
+    stepValid: Array(6).fill(true),
     initContent: vi.fn(),
     loadWorldBookEntries: vi.fn(),
     nextStep: vi.fn(),
@@ -42,7 +42,7 @@ describe('first journey readiness', () => {
     settings.settings.apiPool = [
       { id: 'chat', baseUrl: 'http://localhost:1234/v1', model: 'local', apiType: 'chat' },
     ];
-    create.currentStep = 7;
+    create.currentStep = 5;
     create.startJourney
       .mockRejectedValueOnce(new Error('disk failure'))
       .mockResolvedValueOnce('new-save');

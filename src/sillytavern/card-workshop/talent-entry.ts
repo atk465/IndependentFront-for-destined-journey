@@ -3386,7 +3386,7 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'A' as TalentGrade,
     source: 'universal',
     description:
-      '每轮对话，群星会告诉你一个关于卡兰大陆的情报。你也可以主动问你想知道的，但需要花费一定代价。',
+      '每轮对话，群星会告诉你一个关于铭刻纪元的情报。你也可以主动问你想知道的，但需要花费一定代价。',
     entries: [],
   },
   {
@@ -6522,7 +6522,7 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'E' as TalentGrade,
     source: 'universal',
     description:
-      '你只是个普通人，体内没有任何灵力，也无法感受到卡兰大陆的魔力，但你拥有概念级能力禁法：任何能量攻击都无法对你和你的伙伴卡造成伤害，你和你的伙伴卡也无法使用魔力，你的伙伴卡MP值始终为0，但每次升级其余的基础属性增长倍率为1.5。',
+      '你只是个普通人，体内没有任何灵力，也无法感受到铭刻纪元的铭力，但你拥有概念级能力禁法：任何能量攻击都无法对你和你的伙伴卡造成伤害，你和你的伙伴卡也无法使用魔力，你的伙伴卡MP值始终为0，但每次升级其余的基础属性增长倍率为1.5。',
     entries: [],
   },
   {

@@ -11,7 +11,7 @@
  *    Dexie 里是全量数据。
  *
  * 外加一条消费端联调：捏人页的 `loadWorldBookEntries()` 必须从 store 取
- * `system_core` / `character`（此前直读 `data/worldbooks/*.json`，用户编辑进不来）。
+ * `character`（此前直读 `data/worldbooks/*.json`，用户编辑进不来）。
  *
  * 内置书 fetch 在 Node 下不可用 → mock `loadBuiltInWorldBooks`；
  * 但**保留真实的 `loadWorldBooksWithFallback`**，因为消费端切换后走的正是它。
@@ -91,13 +91,9 @@ function makeBook(
   };
 }
 
-/** 出厂内置书集合（含捏人页要用的两个分区） */
+/** 出厂内置书集合（含捏人页要用的 character 分区） */
 function defaultBuiltIns(): WorldBook[] {
-  return [
-    makeBook('world_setting', 3),
-    makeBook('system_core', 2, 'system_core'),
-    makeBook('character', 4, 'character'),
-  ];
+  return [makeBook('world_setting', 3), makeBook('character', 4, 'character')];
 }
 
 describe('P0-4 世界书消费端切换 —— 启动流程', () => {
@@ -125,21 +121,25 @@ describe('P0-4 世界书消费端切换 —— 启动流程', () => {
     expect(wb.lastMigration).toMatchObject({ status: 'migrated', bookCount: 0 });
 
     // 内置书补齐了 —— 这是「不炸」之外真正要的东西
-    expect(wb.books.map((b) => b.id).sort()).toEqual(['character', 'system_core', 'world_setting']);
-    expect(await getDatabase().worldBooks.count()).toBe(3);
+    expect(wb.books.map((b) => b.id).sort()).toEqual(['character', 'world_setting']);
+    expect(await getDatabase().worldBooks.count()).toBe(2);
 
     // 消费端读的是 `wb.books.length`，不再是被移除的 `s.worldBooks.length`
     expect(loose(useSettingsStore().settings)[LEGACY_BOOKS_KEY]).toBeUndefined();
   });
 
-  it('全新用户: 捏人页 loadWorldBookEntries() 拿得到 system_core / character 条目', async () => {
+  it('全新用户: 捏人页 loadWorldBookEntries() 拿得到 character 条目', async () => {
     const create = useCreateStore();
     await create.loadWorldBookEntries();
 
-    expect(create.systemCoreEntries).toHaveLength(2);
     expect(create.characterEntries).toHaveLength(4);
-    // 内容而不只是条数 —— 断言真的是那两本书的条目
-    expect(create.systemCoreEntries.map((e) => e.content)).toEqual(['正文 1', '正文 2']);
+    // 内容而不只是条数 —— 断言真的是那本书的条目
+    expect(create.characterEntries.map((e) => e.content)).toEqual([
+      '正文 1',
+      '正文 2',
+      '正文 3',
+      '正文 4',
+    ]);
   });
 
   // ── 2. 老用户 ──────────────────────────────────────────
@@ -172,14 +172,9 @@ describe('P0-4 世界书消费端切换 —— 启动流程', () => {
     expect(serialized).not.toContain('我自己的书');
     expect(serialized).not.toContain('"entries"');
 
-    // ③ Dexie 里是全量：迁移的 2 本 + 内置补的 2 本
+    // ③ Dexie 里是全量：迁移的 2 本 + 内置补的 1 本
     const rows = await getDatabase().worldBooks.toArray();
-    expect(rows.map((r) => r.id).sort()).toEqual([
-      'character',
-      'my_own',
-      'system_core',
-      'world_setting',
-    ]);
+    expect(rows.map((r) => r.id).sort()).toEqual(['character', 'my_own', 'world_setting']);
   });
 
   it('老用户: 捏人页读到的是**用户编辑过的** character 条目，不是出厂 JSON', async () => {
@@ -194,8 +189,6 @@ describe('P0-4 世界书消费端切换 —— 启动流程', () => {
     // 出厂 character 有 4 条；用户版只有 1 条 —— 拿到 1 条才证明读的是 store 不是文件
     expect(create.characterEntries).toHaveLength(1);
     expect(create.characterEntries[0].name).toBe('玩家自己加的角色');
-    // 缺的 system_core 由内置合并补上，同样进得了捏人页
-    expect(create.systemCoreEntries).toHaveLength(2);
   });
 
   // ── 3. 幂等：重复启动不重复写 ──────────────────────────

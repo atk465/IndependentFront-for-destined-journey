@@ -22,7 +22,6 @@
  */
 
 export * from './start-catalog-mechanics';
-import type { CatalogRarityCode } from './start-catalog-mechanics';
 
 export const ATTRIBUTE_NAMES = ['力量', '敏捷', '体质', '智力', '精神'] as const;
 export const ATTR_CN_TO_EN: Record<string, string> = {
@@ -39,15 +38,7 @@ export const ATTR_EN_TO_CN: Record<string, string> = {
   int: '智力',
   spi: '精神',
 };
-export const RARITY_LABELS: CatalogRarityCode[] = [
-  'common',
-  'uncommon',
-  'rare',
-  'epic',
-  'legendary',
-  'mythic',
-  'only',
-];
+
 export const QUALITY_COLORS: Record<string, string> = {
   普通: '#9e9e9e',
   优良: '#4caf50',

@@ -3,7 +3,7 @@
  *
  * 数据来源:
  * - start-catalog-mechanics.ts — 难度档位/性别枚举 + 目录 schema 与纯函数（**引擎**，D24）
- * - 内容注册表 `catalog` 面 — 命定核心/背景/种族费用/身份费用/起始地树（**内容**，D24）
+ * - 内容注册表 `catalog` 面 — 背景/种族费用/身份费用/起始地树（**内容**，D24；命定核心已下线）
  * - 内容注册表 `bloodlines` 面 — 血脉集（D25②，经 `getBloodlineSet()` 读）
  * - 内容注册表 `branding` 面 — 纪元名（D9，存档创建时盖章）
  * - tier-constants.ts — 7 层级 HP/MP/SP 乘数
@@ -25,6 +25,7 @@ import type {
   ApiEndpoint,
   AgentConfig,
   ExperienceMode,
+  CardItem,
 } from '@engine/types';
 import { calcResources } from '@engine/tier-constants';
 // 🆕 经验系统改造 v1：创建角色时 totalExp/expToNext 用累计表语义（旧 expCap 已退役）
@@ -41,20 +42,23 @@ import {
 } from '@engine/plot-outline';
 import type { AgentContext } from '@engine/types';
 import { createDefaultTime, formatGameTime, GAME_EPOCH_YEAR } from '@engine/time-system';
-import { getCreationCatalog } from '@engine/card-workshop/talent-entry';
-import { normalizeRarity } from '@engine/field-enums';
+import {
+  getCreationCatalog,
+  talentExchangePrice,
+  type TalentTemplate,
+} from '@engine/card-workshop/talent-entry';
 import { useSettingsStore } from './settings-store';
 import {
-  type CatalogItem,
   type CatalogData,
-  type BackgroundTemplate,
-  type DestinyCore,
+  type CardCatalogItem,
+  type CardFormEntry,
   type DifficultyPreset,
-  type CatalogRarityCode,
   type BackgroundCategory,
   GENDER_OPTIONS,
   ATTRIBUTE_NAMES,
   ATTR_CN_TO_EN,
+  STARTER_CARDS,
+  cardCatalogToItem,
   parseCatalogData,
   isCatalogPopulated,
   findDifficultyPreset,
@@ -112,17 +116,14 @@ export const useCreateStore = defineStore('create', () => {
   const stepValid = computed<Record<number, boolean>>(() => ({
     0: difficulty.value !== null,
     1: name.value.trim().length > 0 && race.value !== '' && attributesFullyAllocated.value,
-    2: selectedSystemCoreEntryUid.value !== null,
+    2: selectedCreationTalent.value !== null, // 出身天赋（7 选 1 必选；第 3 步，供剧情规划参照）
     3: true, // 角色启用（可选）
     4: true, // 装备选择
-    5: true, // 背景故事
-    6: true, // 剧情规划
-    7: selectedCreationTalent.value !== null, // 出身天赋（7 选 1 必选）
-    8: attributesFullyAllocated.value, // 确认提交前再次守住预设晚加载等绕过路径
+    5: true, // 剧情规划
   }));
 
   function nextStep() {
-    if (currentStep.value < 8 && stepValid.value[currentStep.value]) currentStep.value++;
+    if (currentStep.value < 5 && stepValid.value[currentStep.value]) currentStep.value++;
   }
   function prevStep() {
     if (currentStep.value > 0) currentStep.value--;
@@ -361,13 +362,13 @@ export const useCreateStore = defineStore('create', () => {
 
   const raceCost = computed(() => lookupCost(catalog.value.raceCosts, race.value));
   const identityCost = computed(() => lookupCost(catalog.value.identityCosts, identity.value));
-  const equipmentCost = computed(() =>
-    selectedEquipments.value.reduce((s, e) => s + (e.cost || 0), 0),
-  );
-  const itemCost = computed(() =>
-    selectedItems.value.reduce((s, i) => s + (i.cost || 0) * (i.quantity || 1), 0),
-  );
-  const skillCost = computed(() => selectedSkills.value.reduce((s, sk) => s + (sk.cost || 0), 0));
+  const cardCost = computed(() => selectedCards.value.reduce((n, c) => n + (c.cost || 0), 0));
+  /** 出身天赋计价（2026-09-16 分级定价）：与声望兑换同公式（基础×品级乘数），货币为转生点 */
+  const talentCost = computed(() => {
+    if (!selectedCreationTalent.value) return 0;
+    const tpl = getCreationCatalog().find((t) => t.name === selectedCreationTalent.value);
+    return tpl ? talentExchangePrice(tpl) : 0;
+  });
   const moneyCost = computed(() => Math.ceil(money.value / 100));
   const destinyCost = computed(() => Math.ceil(destinyPoints.value / 2));
   const levelCost = computed(() => Math.max(0, level.value - 1) * 5);
@@ -378,49 +379,25 @@ export const useCreateStore = defineStore('create', () => {
       identityCost.value +
       levelCost.value +
       usedAP.value +
-      equipmentCost.value +
-      itemCost.value +
-      skillCost.value +
+      cardCost.value +
+      talentCost.value +
       moneyCost.value +
       destinyCost.value,
   );
   const remainingPoints = computed(() => reincarnationPoints.value - totalCost.value);
 
   // ═══════════════════════════════════════════════════════
-  // 命定核心
+  // Phase 10h: 世界书驱动的角色启用
   // ═══════════════════════════════════════════════════════
-  const destinyCore = ref<DestinyCore | null>(null);
-  const destinyCorePool = computed(() => catalog.value.destinyCores);
-
-  function selectDestinyCore(coreId: string) {
-    const core = catalog.value.destinyCores.find((c) => c.id === coreId);
-    destinyCore.value = core ?? null;
-  }
-
-  // ═══════════════════════════════════════════════════════
-  // Phase 10h: 世界书驱动的命定核心 + 角色启用
-  // ═══════════════════════════════════════════════════════
-
-  /** system_core 世界书条目列表（命定核心候选） */
-  const systemCoreEntries = ref<WorldBookEntry[]>([]);
 
   /** character 世界书条目列表（可启用角色） */
   const characterEntries = ref<WorldBookEntry[]>([]);
-
-  /** 选中的命定核心 entry uid */
-  const selectedSystemCoreEntryUid = ref<number | null>(null);
-
-  /** 选中的命定核心条目 */
-  const selectedSystemCoreEntry = computed<WorldBookEntry | null>(() => {
-    if (selectedSystemCoreEntryUid.value === null) return null;
-    return systemCoreEntries.value.find((e) => e.uid === selectedSystemCoreEntryUid.value) ?? null;
-  });
 
   /** 勾选的 character entry uids */
   const enabledCharacterEntryUids = ref<Set<number>>(new Set());
 
   /**
-   * 加载 system_core 和 character 条目。
+   * 加载 character 条目。
    *
    * Phase 0 起改读 worldbook-store（Dexie 全量：内置 + 用户导入/编辑 + 将来的工坊书），
    * 不再直读 `data/worldbooks/*.json` —— 此前用户在设置页对内置书的编辑
@@ -431,22 +408,13 @@ export const useCreateStore = defineStore('create', () => {
       const wb = useWorldBookStore();
       await wb.init();
       const books = await loadWorldBooksWithFallback(wb.books as WorldBook[]);
-      systemCoreEntries.value = books
-        .filter((b) => b.partition === 'system_core')
-        .flatMap((b) => b.entries);
       characterEntries.value = books
         .filter((b) => b.partition === 'character')
         .flatMap((b) => b.entries);
     } catch {
       // fetch 不可用时静默跳过，保持空数组
-      systemCoreEntries.value = [];
       characterEntries.value = [];
     }
-  }
-
-  /** 单选命定核心（传 null 取消选择） */
-  function selectSystemCoreEntry(uid: number | null) {
-    selectedSystemCoreEntryUid.value = uid;
   }
 
   /** toggle 勾选角色 */
@@ -463,237 +431,76 @@ export const useCreateStore = defineStore('create', () => {
   /** 构建存档用的世界书条目 ID 列表（partition:uid 格式） */
   function buildEnabledWorldBookEntries(): string[] {
     const ids: string[] = [];
-
-    // 命定核心 → system_core:uid
-    if (selectedSystemCoreEntryUid.value !== null) {
-      ids.push(`system_core:${selectedSystemCoreEntryUid.value}`);
-    }
-
-    // 启用角色 → character:uid
     for (const uid of enabledCharacterEntryUids.value) {
       ids.push(`character:${uid}`);
     }
-
     return ids;
   }
 
   // ═══════════════════════════════════════════════════════
-  // 装备/道具/技能 选择 (→ 开场提示词路径)
   // ═══════════════════════════════════════════════════════
-  const selectedEquipments = ref<CatalogItem[]>([]);
-  const selectedItems = ref<CatalogItem[]>([]);
-  const selectedSkills = ref<CatalogItem[]>([]);
-  /** 出身天赋（天赋系统 T-S3：捏人第 9 步，7 选 1 必选；名字 = TALENT_CATALOG 模板键） */
+  // 开局购卡 (→ 开场卡面叙事 + CharacterState 卡组直落)
+  // 2026-09-16 卡牌化：旧 CDN 装备/道具/技能目录（旧体系形状、经 item_gen 生成旧版
+  // 物品、进不了卡组）退役。卡从内容仓 catalog.cardPool 选购，提交时确定性构造
+  // CardItem 写 inventory + cardAlbum——铁律3 数值归 Code，且交锋只读背包里的
+  // type:'卡牌'，卡必须直接落背包才能打出。
+  // ═══════════════════════════════════════════════════════
+  const selectedCards = ref<CardCatalogItem[]>([]);
+  /** 出身天赋（天赋系统 T-S3：捏人第 3 步，必选 1；名字 = TALENT_CATALOG 模板键） */
   const selectedCreationTalent = ref<string | null>(null);
-
-  const activeCategory = ref<'equipment' | 'item' | 'skill'>('equipment');
-  const rarityFilter = ref<CatalogRarityCode | 'all'>('all');
-  const typeFilter = ref<string>('all');
-
-  // ═══ 装备/道具/技能 — 运行时从仓库 fetch，保留分组结构 ═══
-  // 对齐参考仓库 Selections: 数据是 { 外层分组key: [物品] } 结构，
-  // 外层 key（剑类武器/头部防具/戒指…）就是子分类。旧实现爬取时丢了外层 key，
-  // 只留了对象内 type(武器/防具) 与 tag[0](单手剑)，导致分类粒度错位。
-  const REPO_DATA_BASE =
-    'https://testingcf.jsdelivr.net/gh/The-poem-of-destiny/FrontEnd-for-destined-journey@1.8.2/public/assets/data';
-
-  const equipmentGroups = ref<Record<string, CatalogItem[]>>({});
-  const itemGroups = ref<Record<string, CatalogItem[]>>({});
-  const skillGroups = ref<Record<string, CatalogItem[]>>({});
-
-  /** 仓库原始对象 → CatalogItem */
-  function parseCatalogItem(
-    raw: any,
-    category: 'equipment' | 'item' | 'skill',
-    group: string,
-  ): CatalogItem {
-    return {
-      id: `${category[0]}_${group}_${(raw.name || '').replace(/[^a-zA-Z一-鿿]/g, '_')}`,
-      name: raw.name || '',
-      category,
-      type: raw.type || '',
-      rarity: raw.rarity || 'common',
-      tag: raw.tag || [],
-      effect: raw.effect || {},
-      consume: raw.consume || '',
-      description: raw.description || '',
-      cost: raw.cost ?? 30,
-      ...(category === 'item' ? { quantity: raw.quantity ?? 1 } : {}),
-    };
-  }
-
-  /** fetch 仓库 JSON 并保留 {分组: [物品]} 结构（清洗注释/尾逗号） */
-  async function loadGroupedCatalog(
-    file: string,
-    category: 'equipment' | 'item' | 'skill',
-  ): Promise<Record<string, CatalogItem[]>> {
-    try {
-      const resp = await fetch(`${REPO_DATA_BASE}/${file}.json`);
-      const text = await resp.text();
-      const cleaned = text
-        .replace(/\/\/.*$/gm, '')
-        .replace(/,\s*}/g, '}')
-        .replace(/,\s*]/g, ']');
-      const data = JSON.parse(cleaned);
-      const result: Record<string, CatalogItem[]> = {};
-      for (const [group, list] of Object.entries(data)) {
-        if (!Array.isArray(list)) continue;
-        result[group] = (list as any[]).map((raw) => parseCatalogItem(raw, category, group));
-      }
-      return result;
-    } catch {
-      return {};
+  /** 随机天赋_offer（2026-09-16）：洗牌捏人池取前 8（池不足 8 全出），可重抽换一批 */
+  const talentOffers = ref<TalentTemplate[]>([]);
+  function rollTalentOffers() {
+    const pool = [...getCreationCatalog()];
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    talentOffers.value = pool.slice(0, 8);
+    // 重抽后若已选天赋不在新一批里，清空选择让玩家重新挑
+    if (
+      selectedCreationTalent.value &&
+      !talentOffers.value.some((t) => t.name === selectedCreationTalent.value)
+    ) {
+      selectedCreationTalent.value = null;
     }
   }
 
-  // 三类并行加载（Node 测试环境 fetch 失败则保持空 {}，筛选相关测试见空跳过）
-  // `void` + `.catch` 是刻意的：这是发射后不管的预热，失败就保持空目录（上面
-  // loadGroupedCatalog 已经自己吞过一层），但**不能**让拒绝漏成未处理拒绝。
-  void Promise.all([
-    loadGroupedCatalog('equipments', 'equipment'),
-    loadGroupedCatalog('items', 'item'),
-    loadGroupedCatalog('skills', 'skill'),
-  ])
-    .then(([eq, it, sk]) => {
-      equipmentGroups.value = eq;
-      itemGroups.value = it;
-      skillGroups.value = sk;
-    })
-    .catch((err: unknown) => {
-      console.error('[create-store] 目录预热失败，保持空目录:', err);
-    });
+  /** 开局购卡分栏（八类中的可购四类；召唤/军团/契约与共鸣叙事强耦合，不开局卖） */
+  const CARD_CATEGORIES = ['装备', '技能', '领域', '物资'] as const;
+  const activeCardCategory = ref<CardFormEntry>('装备');
 
-  /** 当前大分类对应的分组数据 */
-  const activeGroups = computed<Record<string, CatalogItem[]>>(() => {
-    switch (activeCategory.value) {
-      case 'equipment':
-        return equipmentGroups.value;
-      case 'item':
-        return itemGroups.value;
-      case 'skill':
-        return skillGroups.value;
-      default:
-        return {};
-    }
-  });
-
-  const filteredPool = computed(() => {
-    const groups = activeGroups.value;
-    // typeFilter 现存的是「分组 key」（剑类武器/头部防具…），'all' = 跨组全部
-    let pool: CatalogItem[];
-    if (typeFilter.value !== 'all' && groups[typeFilter.value]) {
-      pool = groups[typeFilter.value];
-    } else {
-      pool = Object.values(groups).flat();
-    }
-    if (rarityFilter.value !== 'all') {
-      pool = pool.filter((i) => i.rarity === rarityFilter.value);
-    }
-    return pool;
-  });
-
-  watch(activeCategory, () => {
-    typeFilter.value = 'all';
-  });
-
-  /**
-   * 子分类 = 当前大分类下仓库的分组 key
-   * 装备 → 剑类武器/斧锤类武器/头部防具/戒指… · 技能 → 主动/被动…
-   * 完全对齐参考仓库 Selections 的 Object.keys(data) 语义
-   */
-  const subCategories = computed(() =>
-    Object.keys(activeGroups.value).sort((a, b) => a.localeCompare(b, 'zh')),
+  const cardPool = computed(() => catalog.value.cardPool.filter((c) => !c.imitation));
+  const filteredCards = computed(() =>
+    cardPool.value.filter((c) => c.formEntry === activeCardCategory.value),
   );
 
-  function isSelected(item: CatalogItem): boolean {
-    switch (item.category) {
-      case 'equipment':
-        return selectedEquipments.value.some((e) => e.id === item.id);
-      case 'item':
-        return selectedItems.value.some((i) => i.id === item.id);
-      case 'skill':
-        return selectedSkills.value.some((s) => s.id === item.id);
+  function isCardSelected(card: CardCatalogItem): boolean {
+    return selectedCards.value.some((c) => c.id === card.id);
+  }
+
+  /** 点数足够才可加购（已选中的总可以保留） */
+  function canSelectCard(card: CardCatalogItem): boolean {
+    if (isCardSelected(card)) return true;
+    return remainingPoints.value >= (card.cost || 0);
+  }
+
+  function toggleCard(card: CardCatalogItem) {
+    if (isCardSelected(card)) {
+      selectedCards.value = selectedCards.value.filter((c) => c.id !== card.id);
+    } else if (canSelectCard(card)) {
+      selectedCards.value = [...selectedCards.value, card];
     }
-  }
-
-  /** 检查物品是否可以选中: 点数足够 + 未选中 + 种族/身份限制 */
-  function canSelect(item: CatalogItem): boolean {
-    if (isSelected(item)) return true; // 已选中 = 可以保留
-    const cost = item.cost || 0;
-    if (remainingPoints.value < cost) return false;
-    // 种族限制 (为未来数据扩展预留)
-    if ((item as any).requiredRace && (item as any).requiredRace !== race.value) return false;
-    // 身份限制 (为未来数据扩展预留)
-    if ((item as any).requiredIdentity && (item as any).requiredIdentity !== identity.value)
-      return false;
-    return true;
-  }
-
-  function addEquipment(item: CatalogItem) {
-    if (isSelected(item)) return;
-    // 允许同一个 type 选多个装备（不强制替换）
-    selectedEquipments.value = [...selectedEquipments.value, item];
-  }
-
-  function removeEquipment(itemId: string) {
-    selectedEquipments.value = selectedEquipments.value.filter((e) => e.id !== itemId);
-  }
-
-  function addItem(item: CatalogItem) {
-    const existing = selectedItems.value.find((i) => i.id === item.id);
-    if (existing) {
-      selectedItems.value = selectedItems.value.map((i) =>
-        i.id === item.id ? { ...i, quantity: (i.quantity || 1) + (item.quantity || 1) } : i,
-      );
-    } else {
-      selectedItems.value = [...selectedItems.value, { ...item }];
-    }
-  }
-
-  function removeItem(itemId: string) {
-    selectedItems.value = selectedItems.value.filter((i) => i.id !== itemId);
-  }
-
-  function addSkill(item: CatalogItem) {
-    if (isSelected(item)) return;
-    selectedSkills.value = [...selectedSkills.value, item];
-  }
-
-  function removeSkill(skillId: string) {
-    selectedSkills.value = selectedSkills.value.filter((s) => s.id !== skillId);
-  }
-
-  /** 编辑自定义物品（按 id 原地替换，供 SelectedPanel 编辑入口） */
-  function updateEquipment(item: CatalogItem) {
-    selectedEquipments.value = selectedEquipments.value.map((e) => (e.id === item.id ? item : e));
-  }
-  function updateItem(item: CatalogItem) {
-    selectedItems.value = selectedItems.value.map((i) => (i.id === item.id ? item : i));
-  }
-  function updateSkill(item: CatalogItem) {
-    selectedSkills.value = selectedSkills.value.map((s) => (s.id === item.id ? item : s));
   }
 
   function clearAllSelections() {
-    selectedEquipments.value = [];
-    selectedItems.value = [];
-    selectedSkills.value = [];
+    selectedCards.value = [];
   }
 
   // ═══════════════════════════════════════════════════════
-  // 背景故事
-  // ═══════════════════════════════════════════════════════
-  const selectedBackground = ref<BackgroundTemplate | null>(null);
-  const customBackgroundText = ref('');
-
-  function selectBackground(bg: BackgroundTemplate | null) {
-    selectedBackground.value = bg;
-    // 不再清空 customBackgroundText — 用户可能在预设和自定义之间切换，
-    // buildOpeningPrompt 优先用预设，所以保留自定义文本不影响正确性。
-  }
-
-  // ═══════════════════════════════════════════════════════
-  // 背景分类 (4 侧栏: 通用/身份/种族/地区)
+  // 背景预设目录 (4 分类: 通用/身份/种族/地区)
+  // —— 2026-09-16 精简：独立「背景故事」步删除，预设选择器并入基础信息步的
+  //    身世字段旁挂；选中预设只把 fullText 写进身世文本，不另设选中状态。
   // ═══════════════════════════════════════════════════════
 
   const activeBackgroundCategory = ref<BackgroundCategory>('universal');
@@ -713,34 +520,6 @@ export const useCreateStore = defineStore('create', () => {
   const filteredBackgrounds = computed(() =>
     filterBackgroundsByCategory(catalog.value.backgrounds, activeBackgroundCategory.value),
   );
-
-  /** 检查单个背景是否满足所有限定条件 */
-  function checkBackgroundConditions(bg: BackgroundTemplate): {
-    valid: boolean;
-    missing: string[];
-  } {
-    const missing: string[] = [];
-    if (bg.requiredRace && race.value !== bg.requiredRace) {
-      missing.push(`种族需为「${bg.requiredRace}」`);
-    }
-    if (bg.requiredIdentity && identity.value !== bg.requiredIdentity) {
-      missing.push(`身份需为「${bg.requiredIdentity}」`);
-    }
-    if (bg.requiredLocation) {
-      const loc = startLocation.value;
-      // 前缀匹配: 如 "诺瓦·瓦伦蒂亚城" 匹配 "大陆中南部区域-瓦伦蒂亚公国-诺瓦·瓦伦蒂亚城-外城区"
-      if (loc !== bg.requiredLocation && !loc.includes(bg.requiredLocation)) {
-        missing.push(`出生地需在「${bg.requiredLocation}」`);
-      }
-    }
-    if (bg.requiredDestinyCore) {
-      const dc = destinyCore.value?.name;
-      if (!dc || !dc.includes(bg.requiredDestinyCore)) {
-        missing.push(`命定核心需为「${bg.requiredDestinyCore}」`);
-      }
-    }
-    return { valid: missing.length === 0, missing };
-  }
 
   // ═══════════════════════════════════════════════════════
   // 剧情规划 — 对齐 PlotSettings 类型 (types.ts)
@@ -1003,7 +782,7 @@ export const useCreateStore = defineStore('create', () => {
       if (cfg && cfg.worldBookIds?.length) {
         filtered = all.filter((wb) => cfg.worldBookIds!.includes(wb.id));
       }
-      // 对齐游戏页面：只注入用户在捏人页勾选的角色 + 命定核心
+      // 对齐游戏页面：只注入用户在捏人页勾选的角色
       const enabledEntries = buildEnabledWorldBookEntries();
       return filterBooksByEnabledEntries(filtered, enabledEntries);
     } catch {
@@ -1522,6 +1301,12 @@ export const useCreateStore = defineStore('create', () => {
     //    dispatcher 必须从 {{USER_INPUT}} 的原始清单认物品，否则名字漂移、数值被 item_gen 重掷。
     // HP/MP/SP/五维等基础属性仍在此 Code 计算。
 
+    // 开局卡组（2026-09-16 卡牌化）：保底白铁卡 + 购入卡，确定性构造 CardItem 直落
+    // inventory + cardAlbum（铁律3 数值归 Code；交锋读背包 type:'卡牌'，卡必须在背包）。
+    const starterItems: CardItem[] = STARTER_CARDS.map((c) => cardCatalogToItem(c));
+    const boughtItems: CardItem[] = selectedCards.value.map((c) => cardCatalogToItem(c));
+    const deckNames = [...starterItems, ...boughtItems].map((c) => c.name);
+
     return {
       id: charId,
       saveId,
@@ -1548,7 +1333,9 @@ export const useCreateStore = defineStore('create', () => {
       maxMp: mpPreview.value,
       sp: spPreview.value,
       maxSp: spPreview.value,
-      // 开局 inventory/skills 留空 — 装备/道具/技能由开场正文经 item_gen 链正式生成落库
+      // 开局卡组直落（卡面叙事在 buildOpeningPrompt；不再走 item_gen）
+      inventory: [...starterItems, ...boughtItems],
+      cardAlbum: { owned: deckNames, deck: deckNames, capacity: 60 },
       // 出身天赋（天赋系统 T-S3）：7 选 1 必选，条目逐字来自 TALENT_CATALOG 模板
       ...(selectedCreationTalent.value
         ? (() => {
@@ -1570,7 +1357,6 @@ export const useCreateStore = defineStore('create', () => {
           })()
         : {}),
       skills: [],
-      inventory: [],
       statusEffects: [],
       money: money.value,
       location: startLocation.value === '自定义' ? customStartLocation.value : startLocation.value,
@@ -1585,7 +1371,6 @@ export const useCreateStore = defineStore('create', () => {
       customFields: {
         // M6 T2: saveId/gender/personality/physics/backstory 已升一等字段停写
         age: age.value,
-        destinyCoreId: destinyCore.value?.id ?? null,
         destinyPoints: destinyPoints.value,
         extra: extra.value.trim(),
       },
@@ -1600,7 +1385,6 @@ export const useCreateStore = defineStore('create', () => {
   //   → {{CHARACTER_STATE}} system prompt 占位符自动格式化注入
   // - 装备 / 技能 / 物品 / 背景 / 性格身材身世 → 下游 Agent 需要处理
   //   → 组装为自然语言，作为开场 user 消息注入，走 story→request_dispatcher→vars_update 链路
-  // - 命定核心由已启用的 system_core 世界书条目单独注入；开场 user 消息不替它规定人格或显现方式
 
   function buildOpeningPrompt(): string {
     const charName = name.value.trim() || '未命名';
@@ -1611,16 +1395,6 @@ export const useCreateStore = defineStore('create', () => {
       '$1$2$3，$4$5',
     );
     lines.push(`${openingTime}，${charName}的故事由此开始。`);
-
-    // 开局剧情是已经发生的事实。直接把场景交给 story，不用「数据」「区块」等元语言
-    // 给首轮定下清单式语气。
-    if (selectedBackground.value) {
-      lines.push('');
-      lines.push(substituteUser(selectedBackground.value.fullText));
-    } else if (customBackgroundText.value.trim()) {
-      lines.push('');
-      lines.push(substituteUser(customBackgroundText.value.trim()));
-    }
 
     // 初始金钱（2026-08-08）：把开局经济作为**既成事实**写进开场白，与初始装备同地位。
     // 🔴 防的是「系统权威数值被 AI 叙事覆盖」：story prompt 的 CHARACTER_STATE 里明明有
@@ -1633,77 +1407,19 @@ export const useCreateStore = defineStore('create', () => {
       lines.push(`${charName}身无分文，衣袋里连一枚帝冕币也没有。`);
     }
 
-    // 装备
-    if (selectedEquipments.value.length > 0) {
+    // 开局卡组（2026-09-16 卡牌化）：保底卡 + 购入卡，卡面叙事写进开场白。
+    // 卡的实物已在 buildCharacterState 确定性落库（铁律3），这里不再给 dispatcher
+    // 发清单——避免 item_gen 产出第二份旧版物品。
+    const deckCards = [...STARTER_CARDS, ...selectedCards.value];
+    if (deckCards.length > 0) {
       lines.push('');
-      lines.push(`${charName}带着这些装备。`);
-      const STATS_CN: Record<string, string> = {
-        atk: '攻击力',
-        defense: '防御',
-        penetration: '穿透',
-        hit: '命中',
-        dodge: '闪避',
-        dr: '减伤',
-      };
-      for (const e of selectedEquipments.value) {
-        const rarity = normalizeRarity(e.rarity) ?? e.rarity;
-        const desc = e.description ? `，${e.description}` : '';
-        const effects =
-          e.effect && Object.keys(e.effect).length > 0
-            ? `；它的特性包括${Object.entries(e.effect)
-                .map(([k, v]) => `${k}（${v}）`)
-                .join('、')}`
-            : '';
-        const tags = e.tag?.length ? `，常被归为${e.tag.join('、')}` : '';
-        const statsStr =
-          e.stats && Object.keys(e.stats).length > 0
-            ? `；其${Object.entries(e.stats)
-                .map(([k, v]) => `${STATS_CN[k] ?? k}为${v}`)
-                .join('、')}`
-            : '';
-        lines.push(`${e.name}是一件${rarity}品质的${e.type}${desc}${tags}${effects}${statsStr}。`);
+      lines.push(`${charName}的卡匣里贴身放着这些铭卡，每张都已与她心意相通，交锋时可以打出：`);
+      for (const c of deckCards) {
+        const el = c.element ? `，铭着${c.element}行的铭文` : '';
+        const desc = c.description ? `——${c.description}` : '';
+        lines.push(`「${c.name}」，一张${c.cardTier}品质的${c.formEntry}卡${el}${desc}。`);
       }
-    }
-
-    // 技能
-    if (selectedSkills.value.length > 0) {
-      lines.push('');
-      lines.push(`${charName}已经掌握这些本领。`);
-      for (const s of selectedSkills.value) {
-        const rarity = normalizeRarity(s.rarity) ?? s.rarity;
-        const desc = s.description ? `，${s.description}` : '';
-        const effects =
-          s.effect && Object.keys(s.effect).length > 0
-            ? `；它能带来${Object.entries(s.effect)
-                .map(([k, v]) => `${k}（${v}）`)
-                .join('、')}`
-            : '';
-        const consume = s.consume ? `；施展时需要${s.consume}` : '';
-        const tags = s.tag?.length ? `，属于${s.tag.join('、')}` : '';
-        lines.push(
-          `${s.name}是一项${rarity}品质的${s.type}本领${desc}${tags}${effects}${consume}。`,
-        );
-      }
-    }
-
-    // 背包物品
-    if (selectedItems.value.length > 0) {
-      lines.push('');
-      lines.push(`${charName}的行囊里还有这些东西。`);
-      for (const i of selectedItems.value) {
-        const rarity = normalizeRarity(i.rarity) ?? i.rarity;
-        const desc = i.description ? `，${i.description}` : '';
-        const effects =
-          i.effect && Object.keys(i.effect).length > 0
-            ? `；它的用途包括${Object.entries(i.effect)
-                .map(([k, v]) => `${k}（${v}）`)
-                .join('、')}`
-            : '';
-        const tags = i.tag?.length ? `，常被归为${i.tag.join('、')}` : '';
-        lines.push(
-          `${charName}有${i.quantity || 1}件${i.name}，那是${rarity}品质的${i.type}${desc}${tags}${effects}。`,
-        );
-      }
+      lines.push('这些卡是她的本命卡组，不是货物，不会出现在交易里。');
     }
 
     // 角色补充信息
@@ -1718,14 +1434,15 @@ export const useCreateStore = defineStore('create', () => {
     if (backstory.value.trim() || extra.value.trim()) {
       lines.push('');
       lines.push(
-        `关于${charName}的来历，已知的是：\n${[backstory.value.trim(), extra.value.trim()].filter(Boolean).join('\n\n')}`,
+        `关于${charName}的来历，已知的是：\n${substituteUser(
+          [backstory.value.trim(), extra.value.trim()].filter(Boolean).join('\n\n'),
+        )}`,
       );
     }
 
     // 收尾：约束首轮叙事流程 —— 先以开局背景为舞台重新演绎（既定事实不变），再自然续写。
     // 🔴 这一句同时是 `{{SKILL_STATE}}` 从开场消息里截取初始技能声明的结束边界
     //    （placeholder-registry 的 isNaturalOpeningSkillEnd），改措辞要同步改那里。
-    // 命定核心不在这里点名或规定演出，完全服从单独注入的世界书条目。
     lines.push('');
     lines.push(
       `以上是${charName}的角色设定与开局剧情。首轮叙事请以「开局剧情」描写的时间地点为舞台：先将这段开场以你的笔触重新演绎（可扩写细节与氛围，不可改变既定事实），再自然续写后续发展。`,
@@ -1908,14 +1625,8 @@ export const useCreateStore = defineStore('create', () => {
         money: money.value,
         destinyPoints: destinyPoints.value,
       },
-      equipments: [...selectedEquipments.value],
-      items: [...selectedItems.value],
-      skills: [...selectedSkills.value],
-      background: selectedBackground.value,
-      customBackgroundText: customBackgroundText.value,
-      destinyCoreId: destinyCore.value?.id ?? null,
+      cards: [...selectedCards.value],
       plotSettings: plotSettings.value,
-      systemCoreEntryUid: selectedSystemCoreEntryUid.value,
       enabledCharacterEntryUids: [...enabledCharacterEntryUids.value],
       personality: personality.value,
       physics: physics.value,
@@ -1947,13 +1658,11 @@ export const useCreateStore = defineStore('create', () => {
     money.value = data.character.money;
     destinyPoints.value = data.character.destinyPoints;
     clearAllSelections();
-    data.equipments.forEach((e) => addEquipment(e));
-    data.items.forEach((i) => addItem(i));
-    data.skills.forEach((s) => addSkill(s));
-    selectedBackground.value = data.background;
-    customBackgroundText.value = data.customBackgroundText || '';
-    if (data.destinyCoreId) selectDestinyCore(data.destinyCoreId);
-    if (data.systemCoreEntryUid) selectSystemCoreEntry(data.systemCoreEntryUid);
+    // 旧预设的 equipments/items/skills 字段已随卡牌化退役，容错忽略
+    for (const card of data.cards ?? []) {
+      if (!canSelectCard(card)) continue;
+      selectedCards.value = [...selectedCards.value, card];
+    }
     if (data.enabledCharacterEntryUids) {
       enabledCharacterEntryUids.value = new Set(data.enabledCharacterEntryUids);
     }
@@ -2027,9 +1736,6 @@ export const useCreateStore = defineStore('create', () => {
     destinyPoints.value = 0;
     money.value = 0;
     clearAllSelections();
-    destinyCore.value = null;
-    selectedBackground.value = null;
-    customBackgroundText.value = '';
     plotOutline.value = null;
     isPlotGenerating.value = false;
     plotOutlineChapters.value = [];
@@ -2048,10 +1754,10 @@ export const useCreateStore = defineStore('create', () => {
     plotEventsPerChapter.value = 0;
     initPlotDefaultsFromSettings();
     showPresetModal.value = false;
-    selectedSystemCoreEntryUid.value = null;
     enabledCharacterEntryUids.value = new Set();
-    systemCoreEntries.value = [];
     characterEntries.value = [];
+    selectedCreationTalent.value = null;
+    talentOffers.value = [];
   }
 
   return {
@@ -2122,57 +1828,35 @@ export const useCreateStore = defineStore('create', () => {
     raceCost,
     identityCost,
     levelCost,
-    equipmentCost,
-    itemCost,
-    skillCost,
+    cardCost,
     moneyCost,
     destinyCost,
     totalCost,
     remainingPoints,
-    // 命定核心
-    destinyCore,
-    destinyCorePool,
-    selectDestinyCore,
     // Phase 10h: 世界书驱动
-    systemCoreEntries,
     characterEntries,
-    selectedSystemCoreEntryUid,
-    selectedSystemCoreEntry,
     enabledCharacterEntryUids,
     loadWorldBookEntries,
-    selectSystemCoreEntry,
     toggleCharacterEntry,
     buildEnabledWorldBookEntries,
     // P1-5: 工坊项目启用轴（项目级多选）
-    // 选择 (→ 开场提示词)
-    selectedEquipments,
-    selectedItems,
-    selectedSkills,
-    activeCategory,
-    rarityFilter,
-    typeFilter,
-    subCategories,
-    filteredPool,
-    isSelected,
-    canSelect,
-    addEquipment,
-    removeEquipment,
-    addItem,
-    removeItem,
-    addSkill,
-    removeSkill,
-    updateEquipment,
-    updateItem,
-    updateSkill,
+    // 开局购卡 (→ 卡组直落)
+    selectedCards,
+    CARD_CATEGORIES,
+    activeCardCategory,
+    cardPool,
+    filteredCards,
+    talentOffers,
+    rollTalentOffers,
+    talentCost,
+    isCardSelected,
+    canSelectCard,
+    toggleCard,
     clearAllSelections,
-    // 背景
-    selectedBackground,
-    customBackgroundText,
-    selectBackground,
+    // 背景（预设目录 → 基础信息步身世旁挂选择器）
     activeBackgroundCategory,
     backgroundCategories,
     filteredBackgrounds,
-    checkBackgroundConditions,
     // 剧情
     plotMode,
     plotDurationYears,

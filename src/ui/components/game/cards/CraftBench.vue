@@ -17,8 +17,9 @@ import type { CardItem, InventoryItem } from '@engine/types';
 import { fuse } from '@engine/card-workshop/card-fusion';
 import { ELEMENT_KEYWORDS, deriveElements, toMaterial } from '@engine/card-workshop/material';
 import type { MaterialSpec } from '@engine/card-workshop/card-fusion';
-import { REPAIR_RECIPE, isDamaged, planRepair } from '@engine/card-workshop/repair';
+import { REPAIR_RECIPE, isDamaged, planQuench, planRepair } from '@engine/card-workshop/repair';
 import type { RepairPlan } from '@engine/card-workshop/repair';
+import { cardKindOf } from '@engine/card-workshop/card-kind';
 import AppButton from '../../shared/AppButton.vue';
 
 const game = useGameStore();
@@ -135,6 +136,56 @@ function toggleElement(slot: SlotKey, e: string) {
   else chips.splice(i, 1);
 }
 
+// ═══ 淬炼区（2026-09-16：健康卡 + 素材 → 词条强化/品质跃迁；复用修复内核）═══
+
+/** 可淬炼的健康战斗卡（非素材类、未损坏；损坏的走修复区） */
+const quenchableCards = computed<CardItem[]>(() =>
+  (player.value?.inventory ?? []).filter(
+    (i): i is CardItem =>
+      i.type === '卡牌' && !isDamaged(i) && cardKindOf((i as CardItem).词条 ?? []) !== '素材',
+  ),
+);
+const quenchCardName = ref('');
+const quenchMaterialNames = ref<string[]>([]);
+const quenching = ref(false);
+const quenchError = ref('');
+const quenchResult = ref('');
+
+const quenchTarget = computed(() =>
+  quenchableCards.value.find((c) => c.name === quenchCardName.value),
+);
+const quenchMaterials = computed<InventoryItem[]>(() =>
+  quenchMaterialNames.value
+    .map((n) => (player.value?.inventory ?? []).find((i) => i.name === n))
+    .filter((i): i is InventoryItem => !!i),
+);
+const quenchValidation = computed(() => {
+  if (!quenchTarget.value || quenchMaterialNames.value.length === 0) return undefined;
+  return planQuench(quenchTarget.value, quenchMaterials.value);
+});
+const quenchPlan = computed(() => quenchValidation.value?.plan);
+
+function toggleQuenchMaterial(name: string) {
+  const i = quenchMaterialNames.value.indexOf(name);
+  if (i === -1) quenchMaterialNames.value.push(name);
+  else quenchMaterialNames.value.splice(i, 1);
+}
+
+async function doQuench() {
+  if (!quenchCardName.value || !quenchValidation.value?.ok) return;
+  quenching.value = true;
+  quenchError.value = '';
+  quenchResult.value = '';
+  const r = await game.quenchCard(quenchCardName.value, [...quenchMaterialNames.value]);
+  quenching.value = false;
+  if (!r.ok) {
+    quenchError.value = r.reason ?? '淬炼失败';
+    return;
+  }
+  quenchResult.value = r.summary ?? '淬炼完成';
+  quenchMaterialNames.value = [];
+}
+
 const KIND_LABEL: Record<string, string> = { 叠加: '同类叠加', 相生: '相生复合', 相克: '相克不稳' };
 const RATING_HINT: Record<string, string> = {
   大失败: '灾祸难挡',
@@ -146,9 +197,11 @@ const RATING_HINT: Record<string, string> = {
 
 <template>
   <div class="craft-bench">
-    <div v-if="materials.length === 0" class="empty-tab">背包里还没有可用的素材（材料）…</div>
+    <div v-if="materials.length === 0" class="empty-tab">
+      背包里还没有可用的素材（材料）——素材来自冒险掉落、店铺采买与委托奖励。
+    </div>
 
-    <div v-else class="bench-columns">
+    <div class="bench-columns" v-else>
       <!-- 素材选择 -->
       <section class="bench-col slots-col" aria-label="素材">
         <h4 class="d-label">素材（1 主 + 0~2 副）</h4>
@@ -257,10 +310,75 @@ const RATING_HINT: Record<string, string> = {
       </section>
     </div>
 
-    <!-- 修复区（契约召唤 C' 制：伙伴被打倒 → 卡损坏；有损坏卡时出现） -->
-    <section v-if="damagedCards.length > 0" class="repair-section" aria-label="修复损坏的卡">
+    <!-- 淬炼区（2026-09-16：健康卡 + 素材 → 词条强化/品质跃迁） -->
+    <section class="repair-section" aria-label="淬炼强化">
+      <h4 class="d-label">淬炼强化</h4>
+      <div v-if="quenchableCards.length === 0" class="empty-tab small">背包里没有可淬炼的铭卡…</div>
+      <div v-else-if="materials.length === 0" class="empty-tab small">
+        没有素材可消耗——先去弄点材料。
+      </div>
+      <div v-else class="slot-card">
+        <div class="slot-head">
+          <select v-model="quenchCardName" class="slot-select" aria-label="选择要淬炼的卡">
+            <option value="" disabled>选择要淬炼的卡…</option>
+            <option v-for="c in quenchableCards" :key="c.name" :value="c.name">
+              {{ c.name }}（{{ c.cardTier }}）
+            </option>
+          </select>
+        </div>
+        <div class="slot-price">
+          点选消耗的素材：元素并入词条、相生可复合；素材品质高于卡时，品质跃迁一档。
+        </div>
+        <div class="chip-row">
+          <button
+            v-for="m in materials"
+            :key="m.name"
+            type="button"
+            class="chip toggle"
+            :class="{ on: quenchMaterialNames.includes(m.name) }"
+            @click="toggleQuenchMaterial(m.name)"
+          >
+            {{ m.name }}
+          </button>
+        </div>
+        <div v-if="quenchPlan" class="kv-grid">
+          <div class="kv-row">
+            <span class="k">跃迁</span>
+            <span class="v">{{
+              quenchPlan.upgraded ? `${quenchTarget?.cardTier} → ${quenchPlan.newTier}` : '否'
+            }}</span>
+          </div>
+          <div class="kv-row">
+            <span class="k">词条变化</span>
+            <span class="v">{{
+              quenchPlan.new词条.length ? quenchPlan.new词条.join('、') : '无'
+            }}</span>
+          </div>
+        </div>
+        <p v-if="quenchValidation && !quenchValidation.ok" class="clash-warn" role="alert">
+          {{ quenchValidation.reason }}
+        </p>
+        <p v-if="quenchResult" class="bench-note">{{ quenchResult }}</p>
+        <p v-if="quenchError" class="clash-warn" role="alert">{{ quenchError }}</p>
+        <AppButton
+          size="sm"
+          variant="primary"
+          :disabled="!quenchValidation?.ok || quenching"
+          :loading="quenching"
+          @click="doQuench"
+        >
+          淬炼
+        </AppButton>
+      </div>
+    </section>
+
+    <!-- 修复区（契约召唤 C' 制：伙伴被打倒 → 卡损坏） -->
+    <section class="repair-section" aria-label="修复损坏的卡">
       <h4 class="d-label">修复损坏的卡</h4>
-      <div class="slot-card">
+      <div v-if="damagedCards.length === 0" class="empty-tab small">
+        没有损坏的卡——伙伴被打倒时，损伤由卡承载，那时来这里修。
+      </div>
+      <div v-else class="slot-card">
         <div class="slot-head">
           <select v-model="repairCardName" class="slot-select" aria-label="选择损坏的卡">
             <option value="" disabled>选择损坏的卡…</option>

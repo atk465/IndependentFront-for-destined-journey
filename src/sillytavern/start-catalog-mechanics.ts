@@ -4,14 +4,14 @@
  * 设计真源: `docs/planning/2026-08-05-content-engine-separation-design.md` D24。
  *
  * 这里住的是「换一套世界观也不会变」的东西：
- * - **schema / 类型**（`CatalogItem` / `BackgroundTemplate` / `DestinyCore` / `CascaderOption`…）
+ * - **schema / 类型**（`CatalogItem` / `BackgroundTemplate` / `CascaderOption`…）
  * - **机制常量**（`DIFFICULTY_PRESETS` 难度档位 / `GENDER_OPTIONS` 性别枚举 /
  *   `BACKGROUND_RESTRICTIONS` 限定覆盖表）—— 它们是玩法规则，不是世界观内容，
  *   所以 **不进 pack**，随引擎走。
  * - **纯函数 / 校验 / 计算规则**（`parseCatalogData` 容错解析 / 点数查表 / 地点树扁平化 /
  *   背景分类）
  *
- * 🔴 **这里不许出现任何一条具体条目内容**。七个池（装备/物品/技能、背景、命定核心、
+ * 🔴 **这里不许出现任何一条具体条目内容**。六个池（装备/物品/技能、背景、
  * 种族/身份点数表、起始地树）已抽成 `data/content/catalog.json`，经内容注册表
  * （`content-store.getContentRegistry().catalog`）供给，pack 可整份替换。
  * 往本文件里加一件装备、一个背景、一个地名，就是把内容重新焊回引擎。
@@ -63,17 +63,106 @@ export interface BackgroundTemplate {
   requiredRace?: string;
   requiredIdentity?: string;
   requiredLocation?: string;
-  requiredDestinyCore?: string;
 }
 
-export interface DestinyCore {
+/**
+ * 开局购卡分栏（2026-09-16 卡牌化）：八类形态词条中的可购四类。
+ * 召唤/军团/契约卡与好感共鸣、契约叙事强耦合（卡名=伙伴名），不开局卖。
+ */
+export type CardFormEntry = '装备' | '技能' | '领域' | '物资';
+
+/**
+ * 卡目录条目的形态词域 = 可购四类 + 召唤/军团（召唤/军团不进开局购卡，
+ * 但可入抽封铭卡卡池与制卡提名）。
+ */
+export type CardPoolFormEntry = CardFormEntry | '召唤' | '军团';
+
+/** 召唤卡伙伴种子（首召实体化用，2026-09-17 巨兽召唤池） */
+export interface CompanionSeed {
+  /** 伙伴种族（全雌世界：铭灵/诸族/兽裔皆可） */
+  race: string;
+  /** 性情一句话（写进伙伴 personality） */
+  temperament: string;
+}
+
+/** 卡牌目录条目（内容仓 catalog.cardPool 供给；cardTier 用 field-enums 的中文五级） */
+export interface CardCatalogItem {
   id: string;
   name: string;
-  author: string;
-  theme: string;
-  description?: string;
-  mode?: string;
+  cardTier: import('./field-enums').CardTier;
+  formEntry: CardPoolFormEntry;
+  /** 九元素之一（火/水/风/土/雷/光/暗/冰/金），缺省 = 无元素铭文 */
+  element?: string;
+  description: string;
+  /** 转生点计价：白铁 10 / 青铜 20 / 白银 40 / 鎏金 80 / 星辉 160 */
+  cost: number;
+  /** 召唤卡专属：首召实体化的伙伴种子（军团卡不需要——群像不个体化） */
+  companion?: CompanionSeed;
+  /** 禁忌仿卡专属：配方（素材名组合）与所仿的传说卡名。有此字段的卡不进抽卡池/开局购卡 */
+  imitation?: {
+    ofName: string;
+    materials: string[];
+  };
 }
+
+/**
+ * 禁忌仿卡配方匹配（2026-09-17）：素材名集合与配方完全一致（顺序无关、数量一致）。
+ * 命中 → 制卡产出定格为该仿卡（名字/词条/品质由内容侧定死——弱化但代价巨大）。
+ */
+export function matchImitation(
+  materialNames: readonly string[],
+  pool: readonly CardCatalogItem[],
+): CardCatalogItem | undefined {
+  const key = (names: readonly string[]) => JSON.stringify([...names].sort());
+  const wanted = key(materialNames);
+  if (materialNames.length === 0) return undefined;
+  return pool.find((c) => c.imitation && key(c.imitation.materials) === wanted);
+}
+
+/** 卡目录条目 → 实体卡（确定性构造；recipe 为快照占位，逻辑键=名字，铁律1/3） */
+export function cardCatalogToItem(c: CardCatalogItem): import('./types').CardItem {
+  const 词条 = c.element ? [c.element, c.formEntry] : [c.formEntry];
+  return {
+    name: c.name,
+    quantity: 1,
+    type: '卡牌',
+    rarity: '普通',
+    cardTier: c.cardTier,
+    词条,
+    description: c.description,
+    sealed: false,
+    recipe: {
+      mainMaterial: c.name,
+      subMaterials: [],
+      tier: c.cardTier,
+      fusionKind: '叠加',
+      cost: c.cost,
+      rating: '成功',
+    },
+  };
+}
+
+/** 开局保底卡组（白铁×2，零点赠送；交锋开局就能玩） */
+export const STARTER_CARDS: CardCatalogItem[] = [
+  {
+    id: 'starter_行旅短刃',
+    name: '行旅短刃',
+    cardTier: '白铁',
+    formEntry: '装备',
+    element: '金',
+    description: '制式短刃卡，铭着一行「不折」。每拍加持，最老实的一张。',
+    cost: 0,
+  },
+  {
+    id: 'starter_凝神一击',
+    name: '凝神一击',
+    cardTier: '白铁',
+    formEntry: '技能',
+    element: '火',
+    description: '把一口气钉在字上的一击。打出即生效，用完即泯。',
+    cost: 0,
+  },
+];
 
 export interface CascaderOption {
   label: string;
@@ -85,14 +174,15 @@ export interface CascaderOption {
  * 捏人目录的内容面（= 注册表 `catalog` 面 / pack `catalog.data` 的形状）。
  *
  * 真值住在 `data/content/catalog.json`。字段名与旧常量一一对应：
- * `destinyCores` ← DEFAULT_DESTINY_CORES、`equipmentPool` ← DEFAULT_EQUIPMENT_POOL、
+ * `equipmentPool` ← DEFAULT_EQUIPMENT_POOL、
  * `itemPool` ← DEFAULT_ITEM_POOL、`skillPool` ← DEFAULT_SKILL_POOL、
  * `backgrounds` ← DEFAULT_BACKGROUNDS、`raceCosts` ← DEFAULT_RACE_COSTS、
  * `identityCosts` ← DEFAULT_IDENTITY_COSTS、`startLocations` ← START_LOCATIONS。
  */
 export interface CatalogData {
-  destinyCores: DestinyCore[];
   equipmentPool: CatalogItem[];
+  /** 开局购卡目录（2026-09-16 卡牌化：CardCatalogItem[]，内容仓 catalog.json 的 cardPool 面） */
+  cardPool: CardCatalogItem[];
   itemPool: CatalogItem[];
   skillPool: CatalogItem[];
   backgrounds: BackgroundTemplate[];
@@ -122,16 +212,7 @@ export const DIFFICULTY_PRESETS: DifficultyPreset[] = [
 ];
 
 /** 性别枚举（机制，D24）——与世界观无关的表单选项集。 */
-export const GENDER_OPTIONS = [
-  '男',
-  '女',
-  '雌性',
-  '雄性',
-  '扶他',
-  '男娘',
-  '假小子',
-  '自定义',
-] as const;
+export const GENDER_OPTIONS = ['男', '雄性', '自定义'] as const;
 
 /**
  * 背景限定条件的覆盖表（机制，D24）。
@@ -154,8 +235,8 @@ export const CUSTOM_OPTION_KEY = '自定义';
 
 /** 全空目录：注册表那一面缺席 / 坏掉时的取值。**不是**错误信号，是「还没内容」。 */
 export const EMPTY_CATALOG: CatalogData = Object.freeze({
-  destinyCores: [],
   equipmentPool: [],
+  cardPool: [],
   itemPool: [],
   skillPool: [],
   backgrounds: [],
@@ -202,8 +283,8 @@ function costFace(raw: unknown, key: string): Record<string, number> {
  */
 export function parseCatalogData(raw: unknown): CatalogData {
   return {
-    destinyCores: arrayFace<DestinyCore>(raw, 'destinyCores'),
     equipmentPool: arrayFace<CatalogItem>(raw, 'equipmentPool'),
+    cardPool: arrayFace<CardCatalogItem>(raw, 'cardPool'),
     itemPool: arrayFace<CatalogItem>(raw, 'itemPool'),
     skillPool: arrayFace<CatalogItem>(raw, 'skillPool'),
     backgrounds: arrayFace<BackgroundTemplate>(raw, 'backgrounds'),
@@ -221,7 +302,6 @@ export function parseCatalogData(raw: unknown): CatalogData {
  */
 export function isCatalogPopulated(data: CatalogData): boolean {
   return (
-    data.destinyCores.length > 0 ||
     data.equipmentPool.length > 0 ||
     data.itemPool.length > 0 ||
     data.skillPool.length > 0 ||
@@ -290,14 +370,14 @@ export type BackgroundCategory = 'universal' | 'identity' | 'race' | 'location';
 /**
  * 一条背景归哪一类（**唯一**判定，四处调用点共用）。
  *
- * 优先级刻意与旧 `backgroundCategories` 的 if/else 链一致：身份 > 种族 > 地区/核心 > 通用。
+ * 优先级刻意与旧 `backgroundCategories` 的 if/else 链一致：身份 > 种族 > 地区 > 通用。
  * 一条背景同时限定身份与种族时只算身份那一类——计数与筛选必须用同一条规则，
  * 否则侧栏数字与列表长度对不上。
  */
 export function classifyBackground(bg: BackgroundTemplate): BackgroundCategory {
   if (bg.requiredIdentity) return 'identity';
   if (bg.requiredRace) return 'race';
-  if (bg.requiredLocation || bg.requiredDestinyCore) return 'location';
+  if (bg.requiredLocation) return 'location';
   return 'universal';
 }
 

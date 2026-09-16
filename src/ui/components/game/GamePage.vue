@@ -20,6 +20,7 @@ import SnapshotPanel from './SnapshotPanel.vue';
 import MapPanel from './MapPanel.vue';
 import DebugPanel from './DebugPanel.vue';
 import CardAlbumPanel from './cards/CardAlbumPanel.vue';
+import FortuneAltar from './cards/FortuneAltar.vue';
 import CommissionBoard from './cards/CommissionBoard.vue';
 import TalentPanel from './cards/TalentPanel.vue';
 import CraftBench from './cards/CraftBench.vue';
@@ -263,8 +264,6 @@ function onModalOpenChange(v: boolean) {
       <StatusHUD />
     </div>
 
-
-    
     <!-- 交锋拍制战斗面板（设计共识 §8；session 驱动，战报审计行走正文流） -->
     <SkirmishPanel />
 
@@ -349,7 +348,7 @@ function onModalOpenChange(v: boolean) {
       <DebugPanel />
     </AppModal>
     <AppModal
-      title="卡册 · 卡兰大陆"
+      title="卡册 · 铭刻纪元"
       :open="game.activeModal === 'cardAlbum'"
       size="xl"
       closable
@@ -359,7 +358,17 @@ function onModalOpenChange(v: boolean) {
       <CardAlbumPanel />
     </AppModal>
     <AppModal
-      title="公会委托板 · 卡兰大陆"
+      title="命运祭坛 · 铭刻纪元"
+      :open="game.activeModal === 'fortuneAltar'"
+      size="md"
+      closable
+      @close="game.closeModal()"
+      @update:open="onModalOpenChange"
+    >
+      <FortuneAltar />
+    </AppModal>
+    <AppModal
+      title="公会委托板 · 铭刻纪元"
       :open="game.activeModal === 'commissionBoard'"
       size="lg"
       closable
@@ -369,7 +378,7 @@ function onModalOpenChange(v: boolean) {
       <CommissionBoard />
     </AppModal>
     <AppModal
-      title="天赋 · 卡兰大陆"
+      title="天赋 · 铭刻纪元"
       :open="game.activeModal === 'talentPanel'"
       size="lg"
       closable

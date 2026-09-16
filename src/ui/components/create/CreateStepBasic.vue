@@ -1,17 +1,36 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { useCreateStore } from '../../stores/create-store';
 import { ATTRIBUTE_NAMES } from '@engine/start-catalog';
+import type { BackgroundTemplate } from '@engine/start-catalog';
 import FormInput from '../shared/form/FormInput.vue';
 import FormSelect from '../shared/form/FormSelect.vue';
 import FormStepper from '../shared/form/FormStepper.vue';
 import ResourceBar from '../shared/ResourceBar.vue';
 import AttributeEditor from './AttributeEditor.vue';
+import CategoryTabs from './CategoryTabs.vue';
+import BackgroundList from './BackgroundList.vue';
 
 const store = useCreateStore();
 
 /** 三条资源条的最大值，用于统一比例尺 */
 const peakMax = computed(() => Math.max(store.hpPreview, store.mpPreview, store.spPreview, 1));
+
+// ===== 背景预设旁挂（2026-09-16 精简：独立背景步并入此处） =====
+const showBgPicker = ref(false);
+/** BackgroundList 的受选状态（仅面板内高亮用，选中即写入身世并收起） */
+const pickedBg = ref<BackgroundTemplate | null>(null);
+
+const bgCategories = computed(() =>
+  store.backgroundCategories.map((c) => ({ key: c.key, label: c.label, count: c.count })),
+);
+
+/** 点选预设 → 成品文案写入身世（<user> 占位留待 buildOpeningPrompt 统一替换） */
+function applyBackground(bg: BackgroundTemplate | null) {
+  pickedBg.value = bg;
+  if (bg?.fullText) store.backstory = bg.fullText;
+  showBgPicker.value = false;
+}
 </script>
 
 <template>
@@ -91,6 +110,35 @@ const peakMax = computed(() => Math.max(store.hpPreview, store.mpPreview, store.
           placeholder="简述角色的身世来历"
           type="textarea"
         />
+        <!-- 背景预设旁挂（精简：原独立背景步并入） -->
+        <div class="bg-picker">
+          <button
+            type="button"
+            class="bg-picker-toggle"
+            :aria-expanded="showBgPicker"
+            @click="showBgPicker = !showBgPicker"
+          >
+            {{ showBgPicker ? '▲ 收起背景预设' : '▼ 从预设背景选择' }}
+          </button>
+          <div v-if="showBgPicker" class="bg-picker-panel">
+            <CategoryTabs
+              :categories="bgCategories"
+              :model-value="store.activeBackgroundCategory"
+              @update:model-value="
+                store.activeBackgroundCategory = $event as
+                  'race' | 'identity' | 'location' | 'universal'
+              "
+            />
+            <BackgroundList
+              :model-value="pickedBg"
+              :backgrounds="store.filteredBackgrounds"
+              :character-race="store.race"
+              :character-identity="store.identity"
+              :character-location="store.startLocation"
+              @update:model-value="applyBackground"
+            />
+          </div>
+        </div>
         <FormInput
           v-model="store.extra"
           label="补充"
@@ -270,10 +318,7 @@ const peakMax = computed(() => Math.max(store.hpPreview, store.mpPreview, store.
         <div class="cost-summary">
           <span>种族「{{ store.race }}」{{ store.raceCost }}点</span>
           <span>身份「{{ store.identity }}」{{ store.identityCost }}点</span>
-          <span
-            >装备 {{ store.equipmentCost }} | 道具 {{ store.itemCost }} | 技能
-            {{ store.skillCost }}</span
-          >
+          <span>开局购卡 {{ store.cardCost }}点</span>
         </div>
       </div>
     </div>
@@ -333,6 +378,38 @@ const peakMax = computed(() => Math.max(store.hpPreview, store.mpPreview, store.
   font-size: 0.75rem;
   line-height: 1.6;
   color: var(--theme-text-muted);
+}
+
+/* ===== 背景预设旁挂 ===== */
+.bg-picker {
+  margin-top: -6px;
+}
+.bg-picker-toggle {
+  padding: 2px 10px;
+  border: 1px dashed var(--theme-card-border);
+  border-radius: var(--theme-radius-sm);
+  background: transparent;
+  color: var(--theme-text-secondary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--theme-transition-fast);
+}
+.bg-picker-toggle:hover {
+  border-color: var(--theme-color-primary);
+  color: var(--theme-color-primary);
+}
+.bg-picker-panel {
+  margin-top: var(--theme-spacing-xs);
+  padding: var(--theme-spacing-sm);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-md);
+  background: var(--theme-card-bg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--theme-spacing-sm);
+  max-height: 24rem;
+  overflow-y: auto;
 }
 
 /* ===== 右侧 ===== */

@@ -45,3 +45,35 @@ export function deckPower(deck: string[], cardOf: (name: string) => CardItem | u
   }
   return total;
 }
+
+/** deck 战斗化（2026-09-17，主人裁决）：
+ *  ① 出卡资格收敛卡组——交锋只能打出编入卡组的卡（背包=收藏，卡组=出战配置）；
+ *     卡组为空（未整备）时回退全背包，不惩罚老档。过滤口径与 SkirmishPanel 一致：
+ *     排除损坏与未启封。
+ *  ② 开战防护加成——guard += ⌊deckPower/3⌋（卡组是你的盾，C' 制互补）。 */
+
+export function battleReadyCards(
+  inventory: readonly CardItem[],
+  deck: readonly string[],
+): CardItem[] {
+  const playable = inventory.filter(
+    (c) => c.type === '卡牌' && !isSealedCard(c) && !isDamagedCard(c),
+  );
+  if (deck.length === 0) return playable; // 未整备 → 回退全背包
+  const inDeck = new Set(deck);
+  return playable.filter((c) => inDeck.has(c.name));
+}
+
+function isSealedCard(c: CardItem): boolean {
+  return c.sealed === true;
+}
+
+function isDamagedCard(c: CardItem): boolean {
+  const d = c.data as Record<string, unknown> | undefined;
+  return d?.['damaged'] === true;
+}
+
+/** 开战防护加成：⌊卡组战力/3⌋（数值口径：12 张均青铜 ≈ +8，每拍减伤 +4——有感不爆炸） */
+export function deckGuardBonus(deckPowerTotal: number): number {
+  return Math.max(0, Math.floor(deckPowerTotal / 3));
+}

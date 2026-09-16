@@ -12,6 +12,7 @@ import { useGameStore } from '../../../stores/game-store';
 import type { BasicCounter } from '@engine/card-workshop/skirmish';
 import { BASIC_COUNTERS } from '@engine/card-workshop/skirmish';
 import { cardCombatTags } from '@engine/card-workshop/entry-combat';
+import { battleReadyCards } from '@engine/card-workshop/deck-power';
 import { cardTierVar } from '../../../lib/quality-colors';
 
 const game = useGameStore();
@@ -21,17 +22,14 @@ const currentIntent = computed(() => {
   if (!s || s.finished !== null || s.intents.length === 0) return null;
   return s.intents[s.beat % s.intents.length] ?? null;
 });
-/** 出卡通道：未启封、未损坏的背包卡（会话层装配战力与标签） */
+/** 出卡通道（2026-09-17 deck 战斗化）：只能打出**编入卡组**的卡；卡组未整备时回退全背包 */
 const cardOptions = computed(() => {
-  const cards: CardItem[] = [];
-  for (const item of game.player?.inventory ?? []) {
-    if (item.type !== '卡牌') continue;
-    const card = item as CardItem;
-    if (card.sealed === true || card.data?.damaged === true) continue;
-    cards.push(card);
-  }
+  const all: CardItem[] = (game.player?.inventory ?? []).filter(
+    (i): i is CardItem => i.type === '卡牌',
+  );
+  const deck = game.player?.cardAlbum?.deck ?? [];
   const used = new Set(session.value?.playedCards ?? []);
-  return cards.map((c) => ({
+  return battleReadyCards(all, deck).map((c) => ({
     name: c.name,
     cardTier: c.cardTier,
     tags: cardCombatTags(c.词条),

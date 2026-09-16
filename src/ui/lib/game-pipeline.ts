@@ -42,11 +42,7 @@ import {
   sealedCardPlay,
   type CardInPlayEffect,
 } from '@engine/card-workshop/entry-combat';
-import {
-  applyBond,
-  bondForCard,
-  type BondInfo,
-} from '@engine/card-workshop/affection-bond';
+import { applyBond, bondForCard, type BondInfo } from '@engine/card-workshop/affection-bond';
 import { cardKindOf } from '@engine/card-workshop/card-kind';
 import { willModifierOf } from '@engine/card-workshop/unsealing';
 import { getCommissionDefs } from '@engine/commission-runtime';
@@ -66,6 +62,9 @@ import { runSkirmishAssessment, runSkirmishChronicle } from '@engine/card-worksh
 import { AgentClient } from '@engine/agent-client';
 import type { StreamCallbacks } from '@engine/agent-client';
 import { createStateManager } from '@engine/state-manager';
+import { parseCatalogData } from '@engine/start-catalog';
+import { getContentRegistry } from '../stores/content-store';
+import { deckGuardBonus, deckPower } from '@engine/card-workshop/deck-power';
 import { projectStoryOutput, projectStreamingStory } from '@engine/story-output';
 import { loadWorldBooksWithFallback } from '@engine/builtin-worldbooks';
 import { filterBooksByEnabledEntries } from '@engine/worldbook-loader';
@@ -105,7 +104,6 @@ import { toEpochMinutes, MINUTES_PER_GAME_DAY } from '@engine/time-system';
 // 🆕 重铸（2026-08-24）：单条目重铸的引擎侧类型（RewriteTarget = 要重写的技能/装备/物品三选一）
 import type { RewriteTarget } from '@engine/item-gen-chain';
 import type { CommissionDef } from '@engine/card-workshop/commission';
-
 
 /** EJS `ui.log` 环形缓冲上限（能力面 §6.2） */
 import { diffVars, measureDiffSize, EJS_DIFF_SIZE_LIMIT } from '@engine/ejs-vars-diff';
@@ -167,12 +165,7 @@ export class EndpointBindingError extends Error {
  * 端点失效不能拖垮整轮叙事 —— 装配置时跳过（不装配端点），真被调用时由
  * `getEndpointForAgent` 再判一次并按既有 optional 策略跳过。
  */
-const SIDE_CHAIN_AGENT_IDS = new Set([
-  'craft_gen',
-  'char_gen',
-  'item_gen',
-  'combat_v3',
-]);
+const SIDE_CHAIN_AGENT_IDS = new Set(['craft_gen', 'char_gen', 'item_gen', 'combat_v3']);
 
 interface DebugEntryInput {
   invocationId: string;
@@ -852,19 +845,10 @@ export class GamePipeline {
           ? s.activePresetId
           : (defaults.presetId as string | undefined) || undefined;
       const worldBookEnabled = agentCfg.worldBookEnabled;
-      const configuredWorldBookIds = worldBookEnabled ? agentCfg.worldBookIds : [];
-      const selectedSystemCore =
-        this.game.activeSave?.metadata?.enabledWorldBookEntries?.some((entry: string) =>
-          entry.startsWith('system_core:'),
-        ) ?? false;
-      // Selected core lore is authoritative save data. Story and char_gen both
-      // need the source entry; the other agents keep their configured partitions.
-      const isCoreLoreAgent = agentId === 'story' || agentId === 'char_gen';
-      const coreBookIds = isCoreLoreAgent && selectedSystemCore ? ['system_core'] : [];
-      const worldBookIds =
-        worldBookEnabled && coreBookIds.length > 0
-          ? [...new Set([...configuredWorldBookIds, ...coreBookIds])]
-          : configuredWorldBookIds;
+      const worldBookIds = worldBookEnabled ? agentCfg.worldBookIds : [];
+      // 命定核心轴已下线（2026-09-16 精简）：不再有 system_core 存档级单选，
+      // agent 世界书一律走配置的 worldBookIds；老档残余 system_core 条目仍由
+      // worldbook-loader 的存档级过滤自然兼容。
 
       // systemPrompt/template 统一读 agentCfg（已合覆写 ?? 默认）。空串 → undefined
       // （AgentConfig 里 undefined = 不发该字段，与原 `defaults.X || undefined` 行为一致）。
@@ -2093,11 +2077,8 @@ export class GamePipeline {
   private maybeBackfillMissingMemories(): void {
     const endpoint = this.buildEmbeddingEndpoint();
     if (!endpoint) return; // 未配置 embedding 端点 —— 静默退避
-    void backfillMissingMemories(
-      this.saveId,
-      LAZY_BACKFILL_MAX_PER_RECALL,
-      endpoint,
-      (trace) => this.recordEmbeddingRequest(trace, endpoint, this.activeRunId ?? undefined),
+    void backfillMissingMemories(this.saveId, LAZY_BACKFILL_MAX_PER_RECALL, endpoint, (trace) =>
+      this.recordEmbeddingRequest(trace, endpoint, this.activeRunId ?? undefined),
     ).catch((err) => {
       // 顶部 catch 已涵盖单条失败；此 catch 兜整批非预期错误
       console.warn('[GamePipeline] 向量召回惰性回填异常（不影响主链）:', err);
@@ -2169,6 +2150,16 @@ export class GamePipeline {
       return { ok: false, reason: 'skirmish_eval 未解析到 API 池（设置 → Agent 配置）' };
     }
     const stats = deriveCombatStats({ attributes: playerC.attributes, level: playerC.level });
+    // deck 战斗化（2026-09-17）：卡组战力 → 开战防护加成 + 敌情评估参考
+    const deckNames = playerC.cardAlbum?.deck ?? [];
+    const deck = deckPower(deckNames, (n) => {
+      const found = playerC.inventory.find((i) => i.name === n);
+      return found?.type === '卡牌' ? (found as CardItem) : undefined;
+    });
+    const deckGuard = stats.guard + deckGuardBonus(deck);
+    if (deck > 0) {
+      this.emitMessage(`【卡组整备】战力 ${deck}，防护 +${deckGuardBonus(deck)}`, 'assistant');
+    }
     try {
       const assessment = await runSkirmishAssessment(
         {
@@ -2178,7 +2169,7 @@ export class GamePipeline {
           sceneHint,
           playerLevel: playerC.level,
           playerPower: stats.atk,
-          playerTotalPower: stats.atk + stats.guard + stats.agi,
+          playerTotalPower: stats.atk + stats.guard + stats.agi + deck,
         },
         { clientFactory: this.getClientFactory() },
       );
@@ -2189,9 +2180,9 @@ export class GamePipeline {
         playerHp: playerC.hp,
         playerMaxHp: playerC.maxHp,
         enemyHp: assessment.enemyHp,
-        guard: stats.guard,
+        guard: deckGuard,
       });
-      const session = judgeCrush(stats.atk + stats.guard + stats.agi, assessment.enemyPower)
+      const session = judgeCrush(stats.atk + stats.guard + stats.agi + deck, assessment.enemyPower)
         ? crushFinish(base)
         : base;
       this.game.setSkirmishSession(session);
@@ -2259,8 +2250,7 @@ export class GamePipeline {
             : res.action;
         activate = res.activate;
         // 好感共鸣：伙伴卡（召唤/军团）破封后效果发动 → 乘共鸣倍率（审计行置拍审计之前）
-        const isBondKind =
-          cardKindOf(card.词条) === '召唤' || cardKindOf(card.词条) === '军团';
+        const isBondKind = cardKindOf(card.词条) === '召唤' || cardKindOf(card.词条) === '军团';
         const sealedBond =
           res.effectFired && isBondKind
             ? bondForCard(card.name, this.game.saveProfile?.affections)
@@ -2313,8 +2303,10 @@ export class GamePipeline {
         bond = bondForCard(card.name, this.game.saveProfile?.affections);
       }
       if (bond && bond.multiplier !== 1) {
-        if (action.power > 0) action = { ...action, power: applyBond(action.power, bond.multiplier) };
-        if (activate) activate = { ...activate, amount: applyBond(activate.amount, bond.multiplier) };
+        if (action.power > 0)
+          action = { ...action, power: applyBond(action.power, bond.multiplier) };
+        if (activate)
+          activate = { ...activate, amount: applyBond(activate.amount, bond.multiplier) };
         prepend = [
           ...(prepend ?? []),
           `▸ 好感共鸣：与【${card.name}】的羁绊（${bond.label} ${bond.affection}）→ 效果 ×${bond.multiplier}`,
@@ -2397,6 +2389,8 @@ export class GamePipeline {
     // ③ 同窗原子落库 + 回读 + 防重触发记录
     if (this.ownsActiveSave) {
       const sm = createStateManager(this.saveId);
+      // 首召入库（2026-09-17 巨兽召唤池）：种子查内容仓 cardPool，已有角色名查存档
+      const fortunePool = parseCatalogData(getContentRegistry().catalog).cardPool;
       const settlementPatches = buildSkirmishSettlementPatches({
         playerName: playerC.name,
         playerTotalExp: playerC.totalExp,
@@ -2406,7 +2400,37 @@ export class GamePipeline {
           const found = playerC.inventory.find((i) => i.name === name);
           return found?.type === '卡牌' ? (found as CardItem) : undefined;
         },
+        summonSeedOf: (name) => fortunePool.find((c) => c.name === name)?.companion,
+        existingCharacterNames: this.game.characters.map((c) => c.name),
+        playerLocation: playerC.location,
+        saveId: this.saveId,
       });
+      // 禁忌仿卡使用惩罚（canon：黑市赝品，声望账本记得每一笔）
+      const imitationUsed: string[] = [];
+      for (const name of session.playedCards) {
+        const played = playerC.inventory.find((i) => i.name === name);
+        const playedData =
+          played?.type === '卡牌'
+            ? ((played as CardItem).data as Record<string, unknown> | undefined)
+            : undefined;
+        if (playedData && typeof playedData.imitationOf === 'string') {
+          imitationUsed.push(name);
+        }
+      }
+      for (const name of imitationUsed) {
+        settlementPatches.push({
+          op: 'delta_variable',
+          target: 'profile.reputation',
+          amount: -3,
+          metadata: { source: 'forbidden_imitation', card: name },
+        } as StatePatch);
+      }
+      if (imitationUsed.length > 0) {
+        this.emitMessage(
+          `【铭法院名录】检测到禁忌仿卡流通：${imitationUsed.join('、')}——声望各 -3，通缉名录已记上一笔。`,
+          'assistant',
+        );
+      }
       // 击杀掠取（天赋）：胜利/碾压时按条目缴获赏金（delta 入账）
       let killGc = 0;
       if (session.finished === '胜利' || session.finished === '碾压') {
@@ -2500,9 +2524,14 @@ export class GamePipeline {
           presets: this.chainData?.presets,
           talentBias,
         } as any;
+        // 禁忌仿卡配方（2026-09-17）：内容仓 cardPool 带 imitation 字段的条目
+        const imitationRecipes = parseCatalogData(getContentRegistry().catalog).cardPool.filter(
+          (c) => c.imitation,
+        );
         const result = await runCraftGenChain(request, {
           clientFactory,
           stateManager,
+          imitationRecipes,
         });
         this.clearAgentActivityStatus('craft_gen', undefined, runActivityId);
         if (result.narrative) {

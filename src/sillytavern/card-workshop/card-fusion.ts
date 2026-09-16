@@ -1,5 +1,5 @@
 /**
- * card-fusion.ts — 卡牌工坊确定性融合内核（卡兰大陆世界观 MVP）
+ * card-fusion.ts — 卡牌工坊确定性融合内核（铭刻纪元世界观）
  *
  * 设计原则（对齐数据字段规范）：
  * - 纯函数、零 AI 参与：卡牌的 tier / 词条 / 造价 / 评级全部由输入确定性推导。
@@ -74,6 +74,12 @@ const SYNERGY_TABLE: Record<string, string> = {
   '金+雷': '磁暴',
   '光+水': '虹耀',
   '暗+火': '焚影',
+  // 2026-09-17 元素表扩展（路线图分支 4）：+5 对，覆盖风/雷/冰/土/暗/光的自然组合
+  '风+雷': '雷暴',
+  '冰+风': '凛冽',
+  '土+火': '熔岩',
+  '冰+暗': '玄冰',
+  '光+金': '辉金',
 };
 
 /** 相生产物词条集（deck-power 等消费方用；由表派生，不许手抄第二份） */
@@ -85,7 +91,9 @@ export function synergyProduct(e1: string, e2: string): string | undefined {
 }
 
 /** 相克表：冲突元素（key 按 UTF-16 code point 升序，与 pairKey 一致） */
-const CLASH_TABLE = new Set<string>(['水+火', '暗+光', '土+风']);
+// 🔴 key 一律按码点升序（pairKey 同口径）：『光+暗』『冰+火』『水+雷』。
+//    原『暗+光』未按码点排序 → 暗光相克从不命中（潜伏 bug，随扩展一并修正）。
+const CLASH_TABLE = new Set<string>(['水+火', '光+暗', '土+风', '冰+火', '水+雷']);
 
 /** 判定融合类型 */
 export function classifyFusion(main: MaterialSpec, subs: MaterialSpec[]): '叠加' | '相生' | '相克' {

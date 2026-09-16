@@ -33,7 +33,7 @@ export function buildNamingMessages(req: TalentNamingRequest): Array<{
   content: string;
 }> {
   const system = [
-    '你是卡兰大陆的天赋命名者。两份天赋正在融合，产物的骨架条目已经由法则确定。',
+    '你是铭刻纪元的天赋命名者。两份天赋正在融合，产物的骨架条目已经由法则确定。',
     '为这个新天赋起一个名字，并写一句表现描述。',
     '硬性规则：',
     '1. 只输出一个 JSON 对象：{"name":"天赋名","description":"表现描述"}',

@@ -74,7 +74,7 @@ export function buildAssessmentMessages(req: SkirmishAssessRequest): Array<{
   const power = Math.max(1, Math.round(req.playerPower));
   const plLevel = Math.max(1, Math.round(req.playerLevel));
   const system = [
-    '你是卡兰大陆的战斗导演。请为一场即将开始的交锋预提交敌方战斗档案与招式序列。',
+    '你是铭刻纪元的战斗导演。请为一场即将开始的交锋预提交敌方战斗档案与招式序列。',
     '',
     '硬性规则：',
     '1. 只输出一个 JSON 对象，不要任何其他文字：{"enemyName":"敌人名","enemyLevel":整数,"enemyHp":整数,"enemyPower":整数,"intents":[{"move":"招式名","threat":整数,"counters":["反制标签"],"hook":"敌方本拍行动钩子"}]}',
@@ -168,7 +168,7 @@ export function buildChronicleMessages(req: SkirmishChronicleRequest): Array<{
   content: string;
 }> {
   const system = [
-    '你是卡兰大陆的战斗记事官。一场交锋刚刚结束，逐拍的战报审计链附后——所有数值都已定案。',
+    '你是铭刻纪元的战斗记事官。一场交锋刚刚结束，逐拍的战报审计链附后——所有数值都已定案。',
     '请写一段**战斗过程的记叙**，让亲历者读来有情绪。',
     '硬性规则：',
     '1. 200~350 字，直接输出正文；不要 JSON、不要标题、不要逐条复述审计行。',

@@ -44,6 +44,8 @@ import {
 import type { ToolExecutionContext } from './types';
 // Q-05：XML / JSON 解析的唯一工具面（参数顺序一律 (source, tag)）
 import { tagInner, tagBlock, parseAttrsStr } from './agent-xml';
+import { matchImitation } from './start-catalog-mechanics';
+import { cardCatalogToItem } from './start-catalog-mechanics';
 import { extractJsonPayload } from './model-json';
 
 // ========== Types ==========
@@ -90,6 +92,9 @@ export interface CraftGenDeps {
   stateManager?: {
     commitDomainCommand: (patches: StatePatch[]) => Promise<void>;
   };
+  /** 禁忌仿卡配方（2026-09-17）：内容仓 cardPool 里带 imitation 字段的条目；
+   *  制卡素材组合命中 → 产出定格为仿卡。不传 = 黑市仿制线关闭。 */
+  imitationRecipes?: import('./start-catalog-mechanics').CardCatalogItem[];
 }
 
 /**
@@ -619,17 +624,28 @@ export async function runCraftGenChain(
   let cardProduct: CardItem | undefined;
   if (craftOutput.craftParams.industry === '制卡' && craftOutput.success) {
     const owner = request.context.characters?.find((c) => c.name === characterId);
-    cardProduct = buildCardItem({
-      productName: craftOutput.productName,
-      description: craftOutput.checkSummary,
-      quantity: craftOutput.craftParams.quantity,
-      quality: craftOutput.quality,
-      rating: craftOutput.rating,
-      materialSpecs: resolveMaterialSpecs(
-        parseMaterialNames(craftOutput.craftParams.materials),
-        owner?.inventory ?? [],
-      ),
-    });
+    const materialNames = parseMaterialNames(craftOutput.craftParams.materials);
+    // 禁忌仿卡（2026-09-17）：素材组合命中黑市配方 → 产出定格为仿卡（弱化定值，
+    // 名字不由 AI 起；data.imitationOf 供使用惩罚结算识别）
+    const imitationHit = deps.imitationRecipes
+      ? matchImitation(materialNames, deps.imitationRecipes)
+      : undefined;
+    if (imitationHit) {
+      const item = cardCatalogToItem(imitationHit);
+      cardProduct = {
+        ...item,
+        data: { ...(item.data ?? {}), imitationOf: imitationHit.imitation!.ofName },
+      };
+    } else {
+      cardProduct = buildCardItem({
+        productName: craftOutput.productName,
+        description: craftOutput.checkSummary,
+        quantity: craftOutput.craftParams.quantity,
+        quality: craftOutput.quality,
+        rating: craftOutput.rating,
+        materialSpecs: resolveMaterialSpecs(materialNames, owner?.inventory ?? []),
+      });
+    }
   }
 
   const patches = [

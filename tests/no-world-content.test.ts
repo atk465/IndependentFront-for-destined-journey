@@ -132,8 +132,8 @@ describe('② 体量轴：占位内容阈值（§6 / D32）', () => {
   const wbDir = join(REPO_ROOT, 'public', 'data', 'worldbooks');
   const bookFiles = existsSync(wbDir) ? readdirSync(wbDir).filter((f) => f.endsWith('.json')) : [];
 
-  it('15 本占位世界书', () => {
-    expect(bookFiles).toHaveLength(15);
+  it('14 本占位世界书', () => {
+    expect(bookFiles).toHaveLength(14);
   });
 
   it('单本 ≤10 条 / 全集 ≤150 条', () => {
