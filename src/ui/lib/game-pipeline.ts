@@ -100,6 +100,7 @@ import { countAcceptableTriggers } from '@engine/plot-engine';
 import { invalidatePromptSession } from '@engine/prompt-session-assembler';
 import { resolveSceneWeather } from './scene-weather';
 import { eventCommissionDefs } from '@engine/card-workshop/event-commission';
+import { backfillMissingMemories, LAZY_BACKFILL_MAX_PER_RECALL } from '@engine/memory-store';
 import { toEpochMinutes, MINUTES_PER_GAME_DAY } from '@engine/time-system';
 // 🆕 重铸（2026-08-24）：单条目重铸的引擎侧类型（RewriteTarget = 要重写的技能/装备/物品三选一）
 import type { RewriteTarget } from '@engine/item-gen-chain';
@@ -964,6 +965,12 @@ export class GamePipeline {
     // 步5: 读存档级剧情配置（捏人页 startJourney 落 metadata.plotSettings）；老存档无字段 → off 兜底
     const meta = this.game.activeSave?.metadata as Record<string, any> | undefined;
     const plotSettings = meta?.plotSettings ?? { mode: 'off', tabooContent: '' };
+
+    // 🆕 向量召回惰性回填（随机事件旁路，fire-and-forget）：旧记忆的 `embedding` 为
+    // undefined 会让它们永远归 fallback 排序（重要度 + 时间），永远进不了 compatible 段。
+    // 每轮上下文构建时扫一眼缺失条、重嵌一小批 → 下一轮起它们是真正的余弦匹配。
+    // 失败是常态（网络/端点临时不可用）→ 单条失败仅记日志、不影响本轮编排与并发方。
+    this.maybeBackfillMissingMemories();
 
     return {
       userInput,
@@ -2076,6 +2083,25 @@ export class GamePipeline {
     const dynamicDefs = eventCommissionDefs(list, day);
     const dynamicNames = new Set(dynamicDefs.map((d) => d.name));
     return [...dynamicDefs, ...staticDefs.filter((d) => !dynamicNames.has(d.name))];
+  }
+
+  /**
+   * 惰性回填：扫存档里 embedding 缺失的记忆，按上限批次重嵌。
+   * fire-and-forget：不阻塞 buildContext 与后续编排；回填完成自然写入 db，下次召回它们
+   * 进 compatible 段；失败静默（一两条坏数据不该让 agent 链挂掉）。
+   */
+  private maybeBackfillMissingMemories(): void {
+    const endpoint = this.buildEmbeddingEndpoint();
+    if (!endpoint) return; // 未配置 embedding 端点 —— 静默退避
+    void backfillMissingMemories(
+      this.saveId,
+      LAZY_BACKFILL_MAX_PER_RECALL,
+      endpoint,
+      (trace) => this.recordEmbeddingRequest(trace, endpoint, this.activeRunId ?? undefined),
+    ).catch((err) => {
+      // 顶部 catch 已涵盖单条失败；此 catch 兜整批非预期错误
+      console.warn('[GamePipeline] 向量召回惰性回填异常（不影响主链）:', err);
+    });
   }
 
   /** 处理战斗触发 — 统一走交锋拍（v3 战斗页已随 combat-v3 下线删除） */
