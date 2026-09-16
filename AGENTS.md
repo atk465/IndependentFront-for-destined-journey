@@ -358,7 +358,7 @@ D:\Code\fated_poem_independent_assets\reference\status_index.html
 
 ## 项目概览
 
-**IndependentFront-for-destined-journey**（命定之诗独立前端）— 一个独立的、兼容 SillyTavern 的引擎库，用于文字 RPG / 交互式小说。引擎核心 + 前端 UI 一体化项目，目标是成为支持多 Agent 协作、事件驱动效果系统、可插拔角色的完整文字 RPG 游戏。
+**IndependentFront-for-destined-journey**（《铭刻录》独立前端）— 一个独立的、兼容 SillyTavern 的引擎库，用于文字 RPG / 交互式小说。引擎核心 + 前端 UI 一体化项目，目标是成为支持多 Agent 协作、事件驱动效果系统、可插拔角色的完整文字 RPG 游戏。
 
 ## 常用命令
 
@@ -561,4 +561,4 @@ bash scripts/notify.sh "<Phase名称> 完成!" "<关键指标>"
 
 ## 内容许可
 
-本仓库包含创意内容（世界观设定、角色卡、Lore），受 `《命定之诗》内容二创与素材使用授权协议.md` 约束。代码部分（`src/sillytavern/` 目录下）源自 `tavernlike` skill，使用 **MIT** 许可。两者不可混淆 — 对引擎的修改遵循 MIT；对世界观内容的复用或再分发须遵守独立授权协议。
+本仓库包含创意内容（世界观设定、角色卡、Lore），世界观为《铭刻录》独立原创（见内容仓 `fated_poem_independent_assets/docs/canon.md`）。代码部分（`src/sillytavern/` 目录下）源自 `tavernlike` skill，使用 **MIT** 许可。两者不可混淆 — 对引擎的修改遵循 MIT；对世界观内容的复用或再分发须遵守独立授权协议。

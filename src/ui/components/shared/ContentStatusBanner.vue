@@ -10,7 +10,7 @@
   - error: 「内容加载失败，部分默认配置可能缺失」+ lastFetchError
   - pack / needs_attention: 由 T7 装包流程驱动，本波占位不出现（activePackId 为空时不渲染）
 
-  🔴 横幅文案含产品名引用（「导入《命定之诗》内容包…」），入 D32 白名单——
+  🔴 横幅文案含产品名引用（「导入《铭刻录》内容包…」），入 D32 白名单——
      本波文案刻意先不带产品名，留待 D26 品牌面落地后由 branding 注入。
 -->
 <script setup lang="ts">
