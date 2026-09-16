@@ -25,6 +25,9 @@ import CommissionBoard from './cards/CommissionBoard.vue';
 import TalentPanel from './cards/TalentPanel.vue';
 import CraftBench from './cards/CraftBench.vue';
 import SkirmishPanel from './combat/SkirmishPanel.vue';
+import { matchFreeCardPlay } from '@engine/card-workshop/free-card-play';
+import { battleReadyCards } from '@engine/card-workshop/deck-power';
+import type { CardItem } from '@engine/types';
 
 const game = useGameStore();
 const ui = useUIStore();
@@ -203,6 +206,27 @@ onBeforeUnmount(() => {
 });
 
 async function handleSend(content: string) {
+  // 🔴 交锋活跃分流（2026-09-17 路线图 1.1 L1）：自由文本提名出卡。
+  //  命中可出卡名 → 直接走 submitSkirmishCounter（与面板点选同路）；
+  //  基础应对词 → 应对；否则照旧走叙事管线（交锋中的自由对话不禁止）。
+  if (game.skirmishSession && !game.skirmishSession.finished && !game.isGenerating) {
+    const session = game.skirmishSession;
+    const deck = game.player?.cardAlbum?.deck ?? [];
+    const all: CardItem[] = (game.player?.inventory ?? []).filter(
+      (i): i is CardItem => i.type === '卡牌',
+    );
+    const match = matchFreeCardPlay(content, battleReadyCards(all, deck), session.playedCards);
+    if (match.kind === '卡') {
+      ui.toast(`自由提名：打出「${match.choice.name}」`, 'info');
+      await game.submitSkirmishCounter(match.choice);
+      return;
+    }
+    if (match.kind === '应对') {
+      await game.submitSkirmishCounter(match.choice);
+      return;
+    }
+  }
+
   // 🔴 2026-09-13 真机：这两个守卫原先**静默 return** —— 一旦某个请求长时间不返回
   //（上游 60s 超时/重试中），玩家看到的就是「按什么都没反应」，无从判断是卡死还是
   // 在生成。改为明说原因：生成中提示可点停止；管线缺失提示重进存档。

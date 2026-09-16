@@ -12,6 +12,7 @@ import { useGameStore } from '../../../stores/game-store';
 import type { BasicCounter } from '@engine/card-workshop/skirmish';
 import { BASIC_COUNTERS } from '@engine/card-workshop/skirmish';
 import { cardCombatTags } from '@engine/card-workshop/entry-combat';
+import { recommendCards } from '@engine/card-workshop/free-card-play';
 import { battleReadyCards } from '@engine/card-workshop/deck-power';
 import { cardTierVar } from '../../../lib/quality-colors';
 
@@ -22,18 +23,22 @@ const currentIntent = computed(() => {
   if (!s || s.finished !== null || s.intents.length === 0) return null;
   return s.intents[s.beat % s.intents.length] ?? null;
 });
-/** 出卡通道（2026-09-17 deck 战斗化）：只能打出**编入卡组**的卡；卡组未整备时回退全背包 */
+/** 出卡通道（2026-09-17 deck 战斗化）：只能打出**编入卡组**的卡；卡组未整备时回退全背包。
+ *  推荐徽章（2026-09-17 L3）：按当前敌方意图的反制标签命中数排序，命中≥1 亮「相性」。 */
 const cardOptions = computed(() => {
   const all: CardItem[] = (game.player?.inventory ?? []).filter(
     (i): i is CardItem => i.type === '卡牌',
   );
   const deck = game.player?.cardAlbum?.deck ?? [];
   const used = new Set(session.value?.playedCards ?? []);
-  return battleReadyCards(all, deck).map((c) => ({
+  const ranked = recommendCards(battleReadyCards(all, deck), currentIntent.value?.counters, used);
+  return ranked.map((c) => ({
     name: c.name,
     cardTier: c.cardTier,
     tags: cardCombatTags(c.词条),
     used: used.has(c.name),
+    counterHits: c.counterHits,
+    recommended: c.recommended,
   }));
 });
 
@@ -220,6 +225,7 @@ function dismiss() {
       >
         <span class="tier-dot" :style="{ background: cardTierVar(c.cardTier) }" />
         {{ c.name }}
+        <span v-if="c.recommended" class="rec-badge">相性✓</span>
         <span v-if="c.used" class="tag-hint">已用</span>
         <span v-else-if="c.tags.length > 0" class="tag-hint">{{ c.tags.join('·') }}</span>
       </button>
@@ -446,3 +452,6 @@ function dismiss() {
   color: var(--theme-text-muted, #967756);
 }
 </style>
+.rec-badge { font-size: 0.625rem; font-weight: 700; padding: 0 5px; border-radius: 999px; color:
+var(--theme-success); border: 1px solid color-mix(in srgb, var(--theme-success) 40%, transparent);
+background: color-mix(in srgb, var(--theme-success) 10%, transparent); }
