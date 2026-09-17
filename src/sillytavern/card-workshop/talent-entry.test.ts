@@ -128,6 +128,8 @@ describe('TALENT_ENTRY_POOL（单一真源）', () => {
     '快咏',
     '体型压制',
     '狂化',
+    '本名武器',
+    '同契',
   ];
   const ALL_CHANNELS: readonly TalentChannel[] = [
     'creation',
@@ -342,8 +344,10 @@ describe('buildCraftBiasLines —— 炼制倾向汇总（切片 T-S2 实装）'
 // ===== 已实装机制判定（2026-09-17：真机抽到「天生剑骨」零机制）=====
 
 describe('hasWorkingMechanic / getDrawableCatalog', () => {
-  it('空 entries（纯描述，如天生剑骨）→ 未实装', () => {
-    expect(hasWorkingMechanic({ name: '天生剑骨（东方）', entries: [] } as never)).toBe(false);
+  it('空 entries 且无名字钩子 → 未实装（伪造模板，不绑具体天赋名）', () => {
+    // 历史注记：这条的反例原本用「天生剑骨（东方）」，SS 收官时它已补上条目，
+    // 改用伪造名——判定路径本身与具体天赋名无关。
+    expect(hasWorkingMechanic({ name: '不存在的纯描述天赋', entries: [] } as never)).toBe(false);
   });
 
   it('仅含未落地条目（鉴定）→ 未实装', () => {
@@ -373,8 +377,8 @@ describe('hasWorkingMechanic / getDrawableCatalog', () => {
     const drawable = getDrawableCatalog();
     expect(drawable.length).toBeGreaterThan(0);
     expect(drawable.every((t) => hasWorkingMechanic(t))).toBe(true);
-    // 天生剑骨不出现在抽卡池
-    expect(drawable.some((t) => t.name === '天生剑骨（东方）')).toBe(false);
+    // 「天生剑骨」SS 收官时已补条目，如今**应该在**抽卡池里（universal 源）
+    expect(drawable.some((t) => t.name === '天生剑骨（东方）')).toBe(true);
   });
 
   it('名字钩子路径：条目为空但规则层挂了名字 → 也算已实装', () => {
@@ -388,9 +392,10 @@ describe('hasWorkingMechanic / getDrawableCatalog', () => {
     }
   });
 
-  it('两条路径都对才不误判：没条目也没钩子的仍是「仅叙事」', () => {
-    const tpl = getTalentTemplate('天生剑骨（东方）')!;
-    expect(tpl.entries).toEqual([]);
+  it('两条路径都对才不误判：伪造「没条目也没钩子」的模板仍是「仅叙事」', () => {
+    // 历史注记：反例原用「天生剑骨（东方）」，SS 收官时它已补条目（46/46）。
+    // 判定逻辑与具体名无关，用伪造模板保持这条反例的效力。
+    const tpl = { name: '伪造的纯描述天赋', entries: [] } as never;
     expect(hasWorkingMechanic(tpl)).toBe(false);
   });
 

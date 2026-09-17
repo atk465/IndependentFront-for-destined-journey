@@ -97,7 +97,9 @@ export type TalentEntryKind =
   | '群威' // 敌人多且弱时全属性提升（A「小人国的女王」）
   | '快咏' // 技能冷却与 MP 消耗减半（B「快速咏唱」）
   | '体型压制' // 攻击远小于自己的敌人时额外伤害（B「体格差压制」）
-  | '狂化'; // 玩家处于负面状态时攻击提升（B「宿醉狂暴」）
+  | '狂化' // 玩家处于负面状态时攻击提升（B「宿醉狂暴」）
+  | '本名武器' // 开局绑定一把随等级成长的武器卡（SS「天生剑骨」「战意破苍穹」）
+  | '同契'; // 与首张伙伴卡同步成长——战斗经验按比例同步（SS「爱」）
 
 /** 骨架条目：kind + 预设参数 + 独占渠道标记 */
 export interface TalentEntry {
@@ -219,6 +221,10 @@ export interface TalentEntry {
     crushPct?: number;
     /** 狂化：攻击倍率（×） */
     rageMult?: number;
+    /** 本名武器：武器类型（剑/弓；内容参数） */
+    weapon?: string;
+    /** 同契：同步给首张伙伴卡的经验比例（%） */
+    syncPct?: number;
   };
 }
 
@@ -462,6 +468,9 @@ export const TALENT_ENTRY_POOL: readonly TalentEntry[] = [
   e({ kind: '快咏', channel: 'universal', params: { percent: 50 } }),
   e({ kind: '体型压制', channel: 'universal', params: { crushPct: 30 } }),
   e({ kind: '狂化', channel: 'universal', params: { rageMult: 2 } }),
+  e({ kind: '本名武器', channel: 'universal', params: { weapon: '剑' } }),
+  e({ kind: '本名武器', channel: 'universal', params: { weapon: '弓' } }),
+  e({ kind: '同契', channel: 'universal', params: { syncPct: 50 } }),
   e({ kind: '改造', channel: 'story', params: {} }),
   // ── v10 扩容（伙伴卡生成通道，2026-09-17）──
   e({ kind: '捕获', channel: 'story', params: {} }),
@@ -585,6 +594,8 @@ const ENTRY_NUMERIC_TIERS: Partial<
   快咏: { percent: [50] },
   体型压制: { crushPct: [20, 30] },
   狂化: { rageMult: [1.5, 2] },
+  本名武器: {},
+  同契: { syncPct: [50] },
 };
 
 /**
@@ -637,6 +648,8 @@ export const ENTRY_STRENGTH_BASELINE = {
   快咏: { percent: 50 },
   体型压制: { crushPct: 30 },
   狂化: { rageMult: 2 },
+  本名武器: {},
+  同契: { syncPct: 50 },
 } as const;
 
 /** 各种类的必填内容参数（非空字符串；keywords 为字符串数组） */
@@ -725,6 +738,8 @@ const ENTRY_KIND_LIST: readonly TalentEntryKind[] = [
   '快咏',
   '体型压制',
   '狂化',
+  '本名武器',
+  '同契',
 ];
 
 /**
@@ -774,6 +789,8 @@ const ENTRY_OPTIONAL_NUMERIC: Partial<Record<TalentEntryKind, readonly string[]>
   快咏: ['percent'],
   体型压制: ['crushPct'],
   狂化: ['rageMult'],
+  本名武器: ['weapon'],
+  同契: ['syncPct'],
 };
 
 export function validateTalentEntries(entries: readonly TalentEntry[]): {
@@ -1874,7 +1891,17 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '【恋母情结】你制作的所有【伙伴卡】都会视你为"孩子"，拥有极强的保护欲和控制欲。她们会为你提供无与伦比的防御和恢复，在战斗时强行吸引仇恨，但当你试图使用她们不认可的卡牌时，有概率遭到"母爱惩戒"，该卡牌被无效化并对你造成精神冲击。',
-    entries: [],
+    // 2026-09-18 SS 收尾：守护/母爱词条必附（防御与恢复的形态承诺）+ 威压
+    // （强行吸引仇恨 = 敌方威胁被吸引）+ 叙事（母爱惩戒的触发由 AI 裁量）。
+    entries: [
+      {
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['守护', '母爱'], weight: 3 },
+      },
+      { kind: '威压', channel: 'universal', params: { percent: 30 } },
+      { kind: '叙事意图', channel: 'universal', params: {} },
+    ],
   },
   {
     name: '最终解释权',
@@ -1950,7 +1977,14 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你天生拥有一把跟自己同步成长，极其强大的【本名剑】装备卡，你不能拿装备其他武器类装备卡，但你在制作剑类装备卡时触发良性进化概率为百分之百。',
-    entries: [],
+    // 2026-09-18 SS 收尾：本名武器管道（soul-weapon.ts，武器=剑）——制卡台
+    // 「唤醒本名武器」动作按等级生成/升档绑定卡；「不能装备其他武器」与
+    // 「制剑必良性进化」分别记 backlog 与品质突破（见下方条目）。
+    entries: [
+      { kind: '本名武器', channel: 'universal', params: { weapon: '剑' } },
+      { kind: '品质突破', channel: 'universal', params: { productClass: '剑类装备' } },
+      { kind: '叙事意图', channel: 'universal', params: {} },
+    ],
   },
   {
     name: '阵法大师（东方）',
@@ -2053,7 +2087,9 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你构筑的卡组不再是卡牌的集合，而是一个微缩的生态系统。卡牌之间会自行繁衍、捕食、进化，你需要像"神"一样去维护这个生态的平衡。',
-    entries: [],
+    // 2026-09-18 SS 收尾：降档——「卡组自行繁衍捕食进化」是整套子系统，
+    // 无法用单一管道兑现；叙事入口让 AI 演绎生态平衡，真正的生态引擎记 backlog。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '画师',
@@ -2071,7 +2107,13 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你制作的第一张伙伴卡不需要任何材料。你制作的第一张伙伴卡是你本人的性转后的姿态。你们共享知识、记忆、能力，当任意一方变强时，另一方都会同步获得相同幅度的强化。',
-    entries: [],
+    // 2026-09-18 SS 收尾：`同契` 管道——战斗经验按 50% 同步给卡组首张伙伴卡
+    // （「同步强化」的机械兑现）。「首召免材 + 性转姿态」由叙事演绎（免材造卡
+    // 需凭空路径，已记 backlog）。
+    entries: [
+      { kind: '同契', channel: 'universal', params: { syncPct: 50 } },
+      { kind: '叙事意图', channel: 'universal', params: {} },
+    ],
   },
   {
     name: '血伶人',
@@ -2130,7 +2172,9 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你获得本源武器装备卡【麒麟殒天弓】，武器与你因果绑定，只有你或你认可的人能够使用。武器技能：当你对敌方造成伤害时，可以选择一个【击伤】效果对所有目标生效直到战斗结束：箭折双臂/击踵断机/矢贯中枢/锋破气海/箭碎天冲。武器技能无法被任何方式无效化，武器本身无法被任何方式抢夺盗取。',
-    entries: [],
+    // 2026-09-18 SS 收尾：本名武器管道（武器=弓，预设名「麒麟殒天弓」）。
+    // 因果绑定写进 data.soulBound（机械锚点）；五种【击伤】是独立战斗效果，记 backlog。
+    entries: [{ kind: '本名武器', channel: 'universal', params: { weapon: '弓' } }],
   },
   {
     name: '鬼话连篇',
@@ -2138,7 +2182,12 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你无法制作【伙伴卡】。当你创作出一个鬼故事或都市传说时，其中的主人公将会成为你的【伙伴卡】，这个过程不会消耗你的MP，伙伴卡的技能会根据故事生成。故事的完成度、逻辑感和恐怖程度都会影响其初始等级。你在每个等阶只能通过此天赋获得至多两个【伙伴卡】。',
-    entries: [],
+    // 2026-09-18 SS 收尾：鬼故事主人公成伙伴 = 叙事供给（质量→初始等级由 AI 裁量）；
+    // 「无法制作伙伴卡」= 成品限定非伙伴；「每等阶至多两个」由叙事记账。
+    entries: [
+      { kind: '成品限定', channel: 'universal', params: { productClass: '非伙伴卡' } },
+      { kind: '叙事意图', channel: 'universal', params: {} },
+    ],
   },
   {
     name: '冰封王座',
@@ -2184,7 +2233,9 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你的属性修正为更高一档的公式，但升级所需经验为标准制卡师的5倍。你与伙伴获得的经验会储存起来，需要手动升级，储存的经验可分享给伙伴卡。',
-    entries: [],
+    // 2026-09-18 SS 收尾：「属性高一档公式」= 全属性倍率 1.5（名字钩子，与女王领域
+    // 同档）；「升级经验 5 倍 / 手动升级 / 经验分享」需要升级阈值系统，已记 backlog。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '海神代言人',
@@ -2200,7 +2251,9 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你的脑海中刻印着一张不断自动更新的完整海图，包括所有已知和未知的暗礁、洋流、沉船位置与魔物巢穴分布。你在海上永远不会迷失方向，且航行速度提升50%。',
-    entries: [],
+    // 2026-09-18 SS 收尾：海图与航速全在地图/旅行域（引擎无航行系统），
+    // 降档为纯叙事入口；真正的航行加成记 backlog。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '黑潮之子',
@@ -7581,6 +7634,8 @@ export const IMPLEMENTED_ENTRY_KINDS: ReadonlySet<TalentEntryKind> = new Set<Tal
   '快咏',
   '体型压制',
   '狂化',
+  '本名武器',
+  '同契',
   '战技附加',
 ]);
 

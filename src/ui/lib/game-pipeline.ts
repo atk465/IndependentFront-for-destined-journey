@@ -3462,6 +3462,37 @@ export class GamePipeline {
           );
         }
       }
+      // 同契（SS「爱」）：与首张伙伴卡同步成长——战斗经验按 syncPct 同步。
+      // 「首张伙伴卡」= 卡组第一张召唤/军团卡（确定序；卡组顺序即玩家心意）。
+      if (settlement.exp.total > 0) {
+        const holdsBond = flatEntriesOf(playerC.talents?.list).some((e) => e.kind === '同契');
+        if (holdsBond) {
+          const syncPct = entryStrength(playerC.talents?.list, '同契', 'syncPct');
+          const firstCompanion = (playerC.cardAlbum?.deck ?? [])
+            .map((n) => playerC.inventory.find((i) => i.name === n && i.type === '卡牌'))
+            .find((c) => {
+              const words = (c as CardItem | undefined)?.词条 ?? [];
+              return words.includes('召唤') || words.includes('军团');
+            }) as CardItem | undefined;
+          if (firstCompanion && syncPct > 0) {
+            const syncExp = Math.round(settlement.exp.total * (syncPct / 100));
+            if (syncExp > 0) {
+              settlementPatches.push({
+                op: 'update_item',
+                target: `characters.${playerC.name}`,
+                value: {
+                  name: firstCompanion.name,
+                  changes: { cardExp: (firstCompanion.cardExp ?? 0) + syncExp },
+                },
+              } as StatePatch);
+              this.emitMessage(
+                `▸ 【同契】你与【${firstCompanion.name}】同频共振——她分得 ${syncExp} 卡牌经验`,
+                'assistant',
+              );
+            }
+          }
+        }
+      }
       // 败犬烙印（SS）：每次战败在灵魂上留一枚。累计计数走 worldFlags.counters，
       // **不随天失效**——攒着，直到制卡时烧掉一枚扭转命运。
       if (session.finished === '败北') {

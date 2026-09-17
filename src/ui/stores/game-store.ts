@@ -87,6 +87,12 @@ import { planFootAlchemy } from '@engine/card-workshop/partner-alchemy';
 import { planCardCraft } from '@engine/card-workshop/card-craft-plan';
 import { coerceBlueprints, consumeBlueprint } from '@engine/card-workshop/opponent-blueprints';
 import { fallbackCraftNarration } from '@engine/card-craft-narrate';
+import {
+  findSoulWeapon,
+  planSoulWeapon,
+  shouldUpgradeSoulWeapon,
+  soulWeaponTierForLevel,
+} from '@engine/card-workshop/soul-weapon';
 import { tierForLevel } from '@engine/card-workshop/companion-capture';
 import {
   FACE_SLAP_KEY,
@@ -875,6 +881,69 @@ export const useGameStore = defineStore('game', () => {
   /**
    * 拆解（SSS「素材之王」非战斗侧）：物品 → 素材（材料）。
    */
+  /**
+   * 唤醒/升档本名武器（SS「天生剑骨」「战意破苍穹」）：
+   *  - 首次调用 → 按等级生成绑定装备卡（词条含「本名」+ 武器类型）
+   *  - 等级提升后再调 → 档位随 tierForLevel 重算（只升不降——「同步成长」）
+   * 门槛：持 `本名武器` 条目；武器类型从条目 params 读。
+   */
+  async function ensureSoulWeapon(): Promise<{
+    ok: boolean;
+    reason?: string;
+    summary?: string;
+    productName?: string;
+  }> {
+    const playerChar = player.value;
+    if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
+    if (!hasMechanicGate('本名武器')) {
+      return { ok: false, reason: '需要持有本名武器类天赋' };
+    }
+    const entry = (playerChar.talents?.list ?? [])
+      .flatMap((t) => t.entries ?? [])
+      .find((e) => e.kind === '本名武器');
+    const weaponType = String(entry?.params.weapon ?? '剑') as '剑' | '弓';
+
+    const existing = findSoulWeapon(playerChar.inventory, playerChar.name);
+    if (existing && !shouldUpgradeSoulWeapon(existing as CardItem, playerChar.level)) {
+      return {
+        ok: false,
+        reason: `【${existing.name}】已在你手中（${(existing as CardItem).cardTier}）——她随你成长，无需再唤醒`,
+      };
+    }
+
+    const tier = soulWeaponTierForLevel(playerChar.level);
+    const card = planSoulWeapon(playerChar.name, weaponType, playerChar.level);
+    const sm = createStateManager(activeSaveId.value);
+    const patches: StatePatch[] = existing
+      ? [
+          {
+            op: 'update_item',
+            target: `characters.${playerChar.name}`,
+            value: {
+              name: existing.name,
+              changes: { cardTier: tier, 词条: card.词条 },
+            },
+          },
+        ]
+      : [
+          {
+            op: 'add_item',
+            target: `characters.${playerChar.name}`,
+            value: card as unknown as Record<string, unknown>,
+          },
+        ];
+    const result = await sm.commitChatState(patches);
+    if (!result.success) return { ok: false, reason: result.errors.join('; ') };
+    await refreshFromDb();
+    return {
+      ok: true,
+      productName: card.name,
+      summary: existing
+        ? `【${existing.name}】随你成长——品质升至 ${tier}`
+        : `【${card.name}】应声而出（${tier}）——她与你因果绑定，随你成长`,
+    };
+  }
+
   /**
    * 制卡主路（2026-09-17 第三档）：**Code 侧一次算完，AI 只写叙事与命名**。
    *
@@ -3473,6 +3542,7 @@ export const useGameStore = defineStore('game', () => {
     contractCard,
     dismantleItem,
     craftCard,
+    ensureSoulWeapon,
     upgradeMaterial,
     exchangeItem,
     drawMaterialTen,

@@ -39,6 +39,7 @@ const RULE_HOOKS: Readonly<Record<string, RuleHook[]>> = {
   倒也可斩: [{ kind: 'oncePerBattleNuke', value: 50 }],
   一拳超人系统: [{ kind: 'dailyNuke', value: 80 }],
   败北强化: [{ kind: 'defeatExpMultiplier', value: 2 }],
+  千秋证果: [{ kind: 'statMultiplier', value: 1.5 }],
 };
 
 /** 该天赋名是否登记了规则钩子（`hasWorkingMechanic` 的名字钩子路径用） */
