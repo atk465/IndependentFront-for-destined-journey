@@ -198,11 +198,13 @@ describe('三条天赋侧接线', () => {
       const tpl = getTalentTemplate(name);
       expect(tpl, name).toBeDefined();
       expect(tpl!.grade, name).toBe('A');
+      // 荒野镖客在战斗维度批次追加了暴击条目，这里只断言「条件加成」仍在
       expect(
         tpl!.entries.map((e) => e.kind),
         name,
-      ).toEqual(['条件加成']);
-      expect(tpl!.entries[0].params, name).toEqual(params);
+      ).toContain('条件加成');
+      const condEntry = tpl!.entries.find((e) => e.kind === '条件加成')!;
+      expect(condEntry.params, name).toEqual(params);
       expect(hasWorkingMechanic(tpl!), name).toBe(true);
     }
   });

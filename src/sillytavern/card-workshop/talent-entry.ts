@@ -90,7 +90,14 @@ export type TalentEntryKind =
   | '模块化' // 载具卡有额外改装槽，战斗中可热插拔换形态（S「模块化天才」）
   | '倒影' // 战败可复制敌方招式作制卡蓝本（S「支配者倒影」）
   | '条件加成' // 条件成立（如卡组无伙伴卡）时获得数值加成（A「荒野镖客」等）
-  | '独行'; // 产出的生物卡独行时效果翻倍（A「孤狼」）
+  | '独行' // 产出的生物卡独行时效果翻倍（A「孤狼」）
+  | '暴击' // 拍内暴击：几率%与倍率（A「荒野镖客」/B「战场直觉」）
+  | '嗜血' // 伙伴卡低伤势时攻击提升（A「虐待狂化」）
+  | '处决' // 可对重伤敌人处决（B「处刑者」）
+  | '群威' // 敌人多且弱时全属性提升（A「小人国的女王」）
+  | '快咏' // 技能冷却与 MP 消耗减半（B「快速咏唱」）
+  | '体型压制' // 攻击远小于自己的敌人时额外伤害（B「体格差压制」）
+  | '狂化'; // 玩家处于负面状态时攻击提升（B「宿醉狂暴」）
 
 /** 骨架条目：kind + 预设参数 + 独占渠道标记 */
 export interface TalentEntry {
@@ -199,6 +206,19 @@ export interface TalentEntry {
     cond?: string;
     /** 条件加成：阈值之上每个的追加 %（触发阈值复用 threshold，语义同为「达到」） */
     perExtra?: number;
+    /** 暴击：几率（%）/ 暴击倍率（与惰性/献祭的 critMult 不同义，这里叫 critPower） */
+    chance?: number;
+    critPower?: number;
+    /** 嗜血/处决：伤势阈值（%） */
+    hurtPct?: number;
+    /** 嗜血：触发后攻击提升 %（与威压/体魄的 percent 不同义，这里叫 boostPct） */
+    boostPct?: number;
+    /** 处决：威慑伤 */
+    shockPower?: number;
+    /** 体型压制：额外行动值 % */
+    crushPct?: number;
+    /** 狂化：攻击倍率（×） */
+    rageMult?: number;
   };
 }
 
@@ -431,6 +451,17 @@ export const TALENT_ENTRY_POOL: readonly TalentEntry[] = [
     params: { cond: '伙伴卡数', threshold: 0, percent: 0, perExtra: 5 },
   }),
   e({ kind: '独行', channel: 'universal', params: {} }),
+  e({ kind: '暴击', channel: 'universal', params: { chance: 20, critPower: 2 } }),
+  e({ kind: '嗜血', channel: 'universal', params: { hurtPct: 30, boostPct: 50 } }),
+  e({ kind: '处决', channel: 'universal', params: { hurtPct: 15, shockPower: 10 } }),
+  e({
+    kind: '群威',
+    channel: 'universal',
+    params: { threshold: 2, percent: 15, perExtra: 5 },
+  }),
+  e({ kind: '快咏', channel: 'universal', params: { percent: 50 } }),
+  e({ kind: '体型压制', channel: 'universal', params: { crushPct: 30 } }),
+  e({ kind: '狂化', channel: 'universal', params: { rageMult: 2 } }),
   e({ kind: '改造', channel: 'story', params: {} }),
   // ── v10 扩容（伙伴卡生成通道，2026-09-17）──
   e({ kind: '捕获', channel: 'story', params: {} }),
@@ -547,6 +578,13 @@ const ENTRY_NUMERIC_TIERS: Partial<
   模块化: { slots: [1, 2], swaps: [1] },
   倒影: { maxHold: [3, 5, 9] },
   条件加成: { threshold: [0, 3, 4], percent: [0, 10, 15, 20, 25], perExtra: [0, 2, 5] },
+  暴击: { chance: [15, 20], critPower: [2] },
+  嗜血: { hurtPct: [30], boostPct: [30, 50] },
+  处决: { hurtPct: [15], shockPower: [10] },
+  群威: { threshold: [2], percent: [10, 15], perExtra: [5] },
+  快咏: { percent: [50] },
+  体型压制: { crushPct: [20, 30] },
+  狂化: { rageMult: [2] },
 };
 
 /**
@@ -592,6 +630,13 @@ export const ENTRY_STRENGTH_BASELINE = {
   倒影: { maxHold: 5 },
   条件加成: { threshold: 0, percent: 25, perExtra: 0 },
   独行: {},
+  暴击: { chance: 20, critPower: 2 },
+  嗜血: { hurtPct: 30, boostPct: 50 },
+  处决: { hurtPct: 15, shockPower: 10 },
+  群威: { threshold: 2, percent: 15, perExtra: 5 },
+  快咏: { percent: 50 },
+  体型压制: { crushPct: 30 },
+  狂化: { rageMult: 2 },
 } as const;
 
 /** 各种类的必填内容参数（非空字符串；keywords 为字符串数组） */
@@ -673,6 +718,13 @@ const ENTRY_KIND_LIST: readonly TalentEntryKind[] = [
   '倒影',
   '条件加成',
   '独行',
+  '暴击',
+  '嗜血',
+  '处决',
+  '群威',
+  '快咏',
+  '体型压制',
+  '狂化',
 ];
 
 /**
@@ -715,6 +767,13 @@ const ENTRY_OPTIONAL_NUMERIC: Partial<Record<TalentEntryKind, readonly string[]>
   模块化: ['slots', 'swaps'],
   倒影: ['maxHold'],
   条件加成: ['threshold', 'percent', 'perExtra'],
+  暴击: ['chance', 'critPower'],
+  嗜血: ['hurtPct', 'boostPct'],
+  处决: ['hurtPct', 'shockPower'],
+  群威: ['threshold', 'percent', 'perExtra'],
+  快咏: ['percent'],
+  体型压制: ['crushPct'],
+  狂化: ['rageMult'],
 };
 
 export function validateTalentEntries(entries: readonly TalentEntry[]): {
@@ -3074,6 +3133,12 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
         channel: 'universal',
         params: { cond: '无伙伴卡', threshold: 0, percent: 25, perExtra: 0 },
       },
+      // 2026-09-17 战斗维度：暴击率 +15% → 拍内 15% 几率 ×2
+      {
+        kind: '暴击',
+        channel: 'universal',
+        params: { chance: 15, critPower: 2 },
+      },
     ],
   },
   {
@@ -3389,7 +3454,14 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '制作出的女性伙伴卡在面对复数个等级低于自己的敌人时，全属性会获得提升。敌人越多，她就越强。',
-    entries: [],
+    // 2026-09-17 战斗维度：多敌落地——敌方数量与等级对照由评估 Agent 声明。
+    entries: [
+      {
+        kind: '群威',
+        channel: 'universal',
+        params: { threshold: 2, percent: 15, perExtra: 5 },
+      },
+    ],
   },
   {
     name: '军靴的纪律',
@@ -3561,7 +3633,9 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你的女性伙伴卡在HP低于30%时，会进入虐待狂化状态。攻击力与攻击速度大幅提升，但在战斗结束后，会持续虐待你直到状态结束。',
-    entries: [],
+    // 2026-09-17 战斗维度：卡的伤势 ≤30%（重伤）时攻击 +50%——「卡有血」现在有了
+    // 会话级近似（打出时满状态、每拍按敌方 dot 磨损，见 battle-dimensions）。
+    entries: [{ kind: '嗜血', channel: 'universal', params: { hurtPct: 30, boostPct: 50 } }],
   },
   {
     name: '将就着用',
@@ -4191,7 +4265,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '当你处于中毒或醉酒等负面状态时，你的痛觉被屏蔽，攻击力大幅提升，但命中率轻微下降。',
-    entries: [],
+    // 2026-09-17 战斗维度：玩家负面状态标记（叙事侧置入、隔夜作废）。
+    entries: [{ kind: '狂化', channel: 'universal', params: { rageMult: 2 } }],
   },
   {
     name: '套索龟甲缚',
@@ -4699,7 +4774,9 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'B' as TalentGrade,
     source: 'universal',
     description: '制作出的伙伴卡在攻击体型远小于自己的敌人时，会造成额外的威压伤害（无视防御）。',
-    entries: [],
+    // 2026-09-17 战斗维度：体型五档（玩家按等级派生、敌方由评估声明）；
+    // 攻击体型远小于自己（差距 ≥2）→ 行动值 +30%。
+    entries: [{ kind: '体型压制', channel: 'universal', params: { crushPct: 30 } }],
   },
   {
     name: '碾压快感',
@@ -4912,7 +4989,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'B' as TalentGrade,
     source: 'universal',
     description: '在战斗中，你能敏锐地察觉到敌人的弱点，暴击率提升20%。',
-    entries: [],
+    // 2026-09-17 战斗维度：暴击率 +20%（拍内 20% 几率 ×2）。
+    entries: [{ kind: '暴击', channel: 'universal', params: { chance: 20, critPower: 2 } }],
   },
   {
     name: '幸运星',
@@ -4974,7 +5052,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'B' as TalentGrade,
     source: 'universal',
     description: '使用技能卡时，MP消耗降低50%，且施法冷却减少50%。',
-    entries: [],
+    // 2026-09-17 战斗维度：技能冷却维度落地（会话账：卡名→剩余拍数，每拍递减）。
+    entries: [{ kind: '快咏', channel: 'universal', params: { percent: 50 } }],
   },
   {
     name: '泰坦之妻',
@@ -5296,7 +5375,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '伙伴卡获得处决技能。可以对生命值低于15%且处于无法反抗状态的敌人发动，无视其剩余生命值直接将其虐杀，并对周围敌人造成巨大震慑。',
-    entries: [],
+    // 2026-09-17 战斗维度：对伤势 ≤15% 的敌人处决（震慑伤 10）。
+    entries: [{ kind: '处决', channel: 'universal', params: { hurtPct: 15, shockPower: 10 } }],
   },
   {
     name: '粉碎之触',
@@ -7410,6 +7490,13 @@ export const IMPLEMENTED_ENTRY_KINDS: ReadonlySet<TalentEntryKind> = new Set<Tal
   '倒影',
   '条件加成',
   '独行',
+  '暴击',
+  '嗜血',
+  '处决',
+  '群威',
+  '快咏',
+  '体型压制',
+  '狂化',
   '战技附加',
 ]);
 

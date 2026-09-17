@@ -121,6 +121,13 @@ describe('TALENT_ENTRY_POOL（单一真源）', () => {
     '倒影',
     '条件加成',
     '独行',
+    '暴击',
+    '嗜血',
+    '处决',
+    '群威',
+    '快咏',
+    '体型压制',
+    '狂化',
   ];
   const ALL_CHANNELS: readonly TalentChannel[] = [
     'creation',
