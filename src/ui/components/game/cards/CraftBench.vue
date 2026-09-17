@@ -49,6 +49,7 @@ import {
   planTrain,
   type TrainDirection,
 } from '@engine/card-workshop/craft-flow-hooks';
+import { planFootAlchemy } from '@engine/card-workshop/partner-alchemy';
 import { craftTierCeilingIndex } from '@engine/card-workshop/craft-rank';
 import type { TalentEntry, TalentEntryKind } from '@engine/card-workshop/talent-entry';
 import AppButton from '../../shared/AppButton.vue';
@@ -469,6 +470,51 @@ async function doAbyss() {
     return;
   }
   abyssMsg.value = r.summary ?? '深渊契约已缔结';
+}
+
+// ═══ 足之炼金术区（`炼金` 条目：S「足之炼金术」）═══
+const canAlchemy = computed(() => game.hasMechanicGate('炼金'));
+const alchemyPartner = ref('');
+const alchemyMaterial = ref('');
+const alchemyMsg = ref('');
+const alchemyErr = ref('');
+const alchemyPreview = computed(() => {
+  const p = smeltables.value.find((c) => c.name === alchemyPartner.value);
+  const m = materials.value.find((x) => x.name === alchemyMaterial.value);
+  if (!p || !m) return undefined;
+  return planFootAlchemy(p, m, 3);
+});
+async function doAlchemy() {
+  if (!alchemyPartner.value || !alchemyMaterial.value) return;
+  alchemyErr.value = '';
+  alchemyMsg.value = '';
+  const r = await game.footAlchemy(alchemyPartner.value, alchemyMaterial.value);
+  if (!r.ok) {
+    alchemyErr.value = r.reason ?? '炼金失败';
+    return;
+  }
+  alchemyMsg.value = r.summary ?? '炼成';
+  alchemyMaterial.value = '';
+}
+
+// ═══ 打脸点数（`打脸` 条目：S「打脸升级系统」）═══
+const canSlap = computed(() => game.hasMechanicGate('打脸'));
+const slapPoints = computed(() => (canSlap.value ? game.faceSlapPoints() : 0));
+const nemesis = computed(() => game.currentNemesis());
+const slapBusy = ref(false);
+const slapMsg = ref('');
+const slapErr = ref('');
+async function doRedeemSlap() {
+  slapBusy.value = true;
+  slapErr.value = '';
+  slapMsg.value = '';
+  const r = await game.redeemFaceSlap();
+  slapBusy.value = false;
+  if (!r.ok) {
+    slapErr.value = r.reason ?? '兑换失败';
+    return;
+  }
+  slapMsg.value = r.summary ?? '兑换完成';
 }
 
 // ═══ 调教区（`调教` 条目：S「调教大师系统」）═══
@@ -1244,6 +1290,63 @@ const RATING_HINT: Record<string, string> = {
         <p v-if="abyssErr" class="clash-warn" role="alert">{{ abyssErr }}</p>
         <AppButton size="sm" variant="primary" :disabled="!abyssPreview?.ok" @click="doAbyss">
           缔结深渊契约
+        </AppButton>
+      </div>
+    </section>
+
+    <!-- 足之炼金术区（门槛：`炼金` 条目——S「足之炼金术」） -->
+    <section v-if="canAlchemy" class="repair-section" aria-label="足之炼金术">
+      <h4 class="d-label">足之炼金术（天赋：足之炼金术）</h4>
+      <div v-if="smeltables.length === 0 || materials.length === 0" class="empty-tab small">
+        需要一张伙伴卡与一件素材…
+      </div>
+      <div v-else class="slot-card">
+        <div class="slot-price">
+          让伙伴卡踩踏一件素材——炼出<b>全新的道具卡</b>。
+          <b>素材会被消耗，她不会</b>（她是踩踏者，不是原料）。
+        </div>
+        <div class="slot-head">
+          <select v-model="alchemyPartner" class="slot-select" aria-label="选择踩踏的伙伴卡">
+            <option value="" disabled>选伙伴卡…</option>
+            <option v-for="c in smeltables" :key="c.name" :value="c.name">{{ c.name }}</option>
+          </select>
+          <select v-model="alchemyMaterial" class="slot-select" aria-label="选择被踩踏的素材">
+            <option value="" disabled>选素材…</option>
+            <option v-for="m in materials" :key="m.name" :value="m.name">
+              {{ m.name }}（{{ m.rarity ?? '普通' }}）
+            </option>
+          </select>
+        </div>
+        <p v-if="alchemyPreview?.plan" class="bench-note">{{ alchemyPreview.plan.summary }}</p>
+        <p v-if="alchemyMsg" class="bench-note">{{ alchemyMsg }}</p>
+        <p v-if="alchemyErr" class="clash-warn" role="alert">{{ alchemyErr }}</p>
+        <AppButton size="sm" variant="primary" :disabled="!alchemyPreview?.plan" @click="doAlchemy">
+          踩踏炼金
+        </AppButton>
+      </div>
+    </section>
+
+    <!-- 打脸点数（门槛：`打脸` 条目——S「打脸升级系统」） -->
+    <section v-if="canSlap" class="repair-section" aria-label="打脸点数">
+      <h4 class="d-label">打脸点数（天赋：打脸升级系统）</h4>
+      <div class="slot-card">
+        <div class="slot-price">
+          被人看不起之后打赢，就能攒下打脸点数——点数可折成一件装备。
+          <b>当前 {{ slapPoints }} 点</b>。
+          <span v-if="nemesis">
+            宿敌：<b>{{ nemesis.name }}</b
+            >（Lv{{ nemesis.level }}）——与他一战经验翻倍。
+          </span>
+        </div>
+        <p v-if="slapMsg" class="bench-note">{{ slapMsg }}</p>
+        <p v-if="slapErr" class="clash-warn" role="alert">{{ slapErr }}</p>
+        <AppButton
+          size="sm"
+          variant="primary"
+          :disabled="slapPoints <= 0 || slapBusy"
+          @click="doRedeemSlap"
+        >
+          兑换装备
         </AppButton>
       </div>
     </section>

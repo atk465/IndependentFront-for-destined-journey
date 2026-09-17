@@ -81,6 +81,14 @@ import {
   planTrain,
   type TrainDirection,
 } from '@engine/card-workshop/craft-flow-hooks';
+import { planFootAlchemy } from '@engine/card-workshop/partner-alchemy';
+import { tierForLevel } from '@engine/card-workshop/companion-capture';
+import {
+  FACE_SLAP_KEY,
+  canRedeemFaceSlap,
+  coerceNemesis,
+} from '@engine/card-workshop/conditional-exp';
+import { coerceTrueNames } from '@engine/card-workshop/true-name';
 import { materialNameOf } from '@engine/card-workshop/card-dismantle';
 import type { TalentEntry, TalentEntryKind } from '@engine/card-workshop/talent-entry';
 import { planCommissionDelivery } from '@engine/card-workshop/commission';
@@ -222,6 +230,10 @@ export const useGameStore = defineStore('game', () => {
     duel: () => Promise<void>;
     /** 献祭召唤（S「召唤媒介系统」） */
     sacrifice: () => Promise<void>;
+    /** 念出真名（S「真名看破系统」） */
+    trueName: () => Promise<void>;
+    /** 热插拔模块（S「模块化天才」） */
+    hotSwap: () => Promise<void>;
   } | null>(null);
 
   /** controller 未就绪时点下的开战请求（attach 后自动补发——消灭「点了没反应」的时序窗） */
@@ -237,6 +249,10 @@ export const useGameStore = defineStore('game', () => {
       duel: () => Promise<void>;
       /** 献祭召唤（S「召唤媒介系统」） */
       sacrifice: () => Promise<void>;
+      /** 念出真名（S「真名看破系统」） */
+      trueName: () => Promise<void>;
+      /** 热插拔模块（S「模块化天才」） */
+      hotSwap: () => Promise<void>;
     } | null,
   ) {
     skirmishController.value = c;
@@ -827,6 +843,62 @@ export const useGameStore = defineStore('game', () => {
    * 拆解（SSS「素材之王」非战斗侧）：物品 → 素材（材料）。
    */
   /**
+   * 足之炼金术（S）：伙伴卡踩踏素材 → 炼出全新道具卡。
+   * **素材被消耗、伙伴卡不消耗**（她是踩踏者不是原料）——这是这条天赋的成本。
+   */
+  async function footAlchemy(
+    partnerName: string,
+    materialName: string,
+  ): Promise<{ ok: boolean; reason?: string; summary?: string; productName?: string }> {
+    const playerChar = player.value;
+    if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
+    if (!hasMechanicGate('炼金')) return { ok: false, reason: '需要天赋【足之炼金术】' };
+    const partner = playerChar.inventory.find(
+      (i): i is CardItem => i.name === partnerName && i.type === '卡牌',
+    );
+    if (!partner) return { ok: false, reason: '找不到该伙伴卡' };
+    const material = playerChar.inventory.find((i) => i.name === materialName);
+    if (!material) return { ok: false, reason: '找不到该素材' };
+
+    const { ok, reason, plan } = planFootAlchemy(partner, material, strengthOf('炼金', 'maxTier'));
+    if (!ok || !plan) return { ok: false, reason };
+
+    const album = toPlainCardAlbum(playerChar.cardAlbum ?? { owned: [], deck: [], capacity: 60 });
+    const patches: StatePatch[] = [
+      {
+        op: 'remove_item',
+        target: `characters.${playerChar.name}`,
+        value: { name: plan.consumedMaterial, quantity: 1 },
+      },
+      {
+        op: 'add_item',
+        target: `characters.${playerChar.name}`,
+        value: plan.product as unknown as Record<string, unknown>,
+      },
+      ...(album.owned.includes(plan.product.name)
+        ? []
+        : [
+            {
+              op: 'update_character',
+              target: `characters.${playerChar.name}`,
+              value: {
+                cardAlbum: {
+                  owned: [...album.owned, plan.product.name].slice(0, album.capacity),
+                  deck: album.deck,
+                  capacity: album.capacity,
+                },
+              },
+            } as StatePatch,
+          ]),
+    ];
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState(patches);
+    if (!result.success) return { ok: false, reason: result.errors.join('; ') };
+    await refreshFromDb();
+    return { ok: true, summary: plan.summary, productName: plan.product.name };
+  }
+
+  /**
    * 调教伙伴卡（S「调教大师系统」）：每级 +1 卡面战力，方向词条（忠犬/女王）在
    * 第一次调教时定下。调教度存卡的 `data.调教`，战力增量走既有的 cardPowerBonus。
    */
@@ -866,6 +938,60 @@ export const useGameStore = defineStore('game', () => {
     if (!result.success) return { ok: false, reason: result.errors.join('; ') };
     await refreshFromDb();
     return { ok: true, summary: plan.summary };
+  }
+
+  /**
+   * 打脸点数兑换（S「打脸升级系统」）：花点数换一件装备。
+   * 装备档位按点数消耗量走（一次兑一件，品质对齐当前冒险者等级）。
+   */
+  async function redeemFaceSlap(): Promise<{ ok: boolean; reason?: string; summary?: string }> {
+    const playerChar = player.value;
+    if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
+    if (!hasMechanicGate('打脸')) return { ok: false, reason: '需要天赋【打脸升级系统】' };
+    const cost = strengthOf('打脸', 'redeemCost');
+    const have = counterOf(counters(), FACE_SLAP_KEY);
+    if (!canRedeemFaceSlap(have, cost)) {
+      return { ok: false, reason: `打脸点数不足（当前 ${have}，需要 ${cost}）` };
+    }
+    const tier = tierForLevel(playerChar.level);
+    const name = `打脸所得·${tier}装备`;
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState([
+      {
+        op: 'add_item',
+        target: `characters.${playerChar.name}`,
+        value: {
+          name,
+          quantity: 1,
+          type: '装备',
+          rarity: '稀有',
+          description: '被人看不起之后，用实力换来的东西。',
+        } as unknown as Record<string, unknown>,
+      },
+      {
+        op: 'set_variable',
+        target: `worldFlags.counters.${FACE_SLAP_KEY}`,
+        value: have - cost,
+      } as StatePatch,
+    ]);
+    if (!result.success) return { ok: false, reason: result.errors.join('; ') };
+    await refreshFromDb();
+    return { ok: true, summary: `花掉 ${cost} 点打脸点数——换来【${name}】` };
+  }
+
+  /** 打脸点数（面板展示用） */
+  function faceSlapPoints(): number {
+    return counterOf(counters(), FACE_SLAP_KEY);
+  }
+
+  /** 当前宿敌（面板展示用） */
+  function currentNemesis() {
+    return coerceNemesis(saveProfile.value?.worldFlags?.nemesis);
+  }
+
+  /** 已记住的真名（面板展示用） */
+  function knownTrueNames(): string[] {
+    return coerceTrueNames(saveProfile.value?.worldFlags?.trueNames);
   }
 
   /** 标记「下一次制卡失败时回溯」（S「时间回溯」） */
@@ -1019,6 +1145,16 @@ export const useGameStore = defineStore('game', () => {
   /** 献祭召唤（S「召唤媒介系统」） */
   async function sacrificeSummon(): Promise<void> {
     await skirmishController.value?.sacrifice();
+  }
+
+  /** 念出真名（S「真名看破系统」） */
+  async function speakTrueName(): Promise<void> {
+    await skirmishController.value?.trueName();
+  }
+
+  /** 热插拔模块（S「模块化天才」）：把已上场的模块化载具换一种形态再发动 */
+  async function hotSwapModule(): Promise<void> {
+    await skirmishController.value?.hotSwap();
   }
 
   /**
@@ -3124,6 +3260,11 @@ export const useGameStore = defineStore('game', () => {
     upgradeMaterial,
     exchangeItem,
     drawMaterialTen,
+    footAlchemy,
+    redeemFaceSlap,
+    faceSlapPoints,
+    currentNemesis,
+    knownTrueNames,
     trainCompanion,
     setPendingRewind,
     pendingRewind,
@@ -3134,6 +3275,8 @@ export const useGameStore = defineStore('game', () => {
     twinBonds,
     declareDuel,
     sacrificeSummon,
+    speakTrueName,
+    hotSwapModule,
     rollFortuneDice,
     ownedDiceTables,
     scarCount,

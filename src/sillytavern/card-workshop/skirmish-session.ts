@@ -70,6 +70,10 @@ export interface SkirmishSession {
   duel?: DuelRules;
   /** 已触发过组合技的双生卡名（每对每场一次的去重账） */
   comboFired?: string[];
+  /** 真名看破是否已在本场念过（每场一次的守卫） */
+  trueNameUsed?: boolean;
+  /** 模块化热插拔本场已用次数（每场次数由条目限） */
+  hotSwapsUsed?: number;
 }
 
 export interface StartSkirmishInput {
@@ -205,6 +209,8 @@ export interface BeatOptions {
   lastStand?: { hpFloor: number };
   /** 本拍触发组合技后要记入账本的卡名（调用方算好，会话只落账） */
   comboFired?: string[];
+  /** 本拍念出了真名 → 记入会话账（每场一次） */
+  trueNameUsed?: boolean;
 }
 
 export const FINAL_CHAPTER_BEAT = ENTRY_STRENGTH_BASELINE.终章.beats;
@@ -375,7 +381,9 @@ export function playBeat(
     playerHp: playerHpFinal,
     ...(lastStandFires ? { lastStandUsed: true } : {}),
     ...(opts?.comboFired ? { comboFired: opts.comboFired } : {}),
+    ...(opts?.trueNameUsed ? { trueNameUsed: true } : {}),
     ...(s.duel ? { duel: s.duel } : {}),
+    ...(s.hotSwapsUsed ? { hotSwapsUsed: s.hotSwapsUsed } : {}),
     enemyHp: enemyHpFinal,
     log: [...s.log, ...lines],
     playedCards:

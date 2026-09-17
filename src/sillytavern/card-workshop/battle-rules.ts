@@ -15,6 +15,7 @@
 
 import type { CardItem } from '../types';
 import { cardKindOf } from './card-kind';
+import type { CardInPlayEffect } from './entry-combat';
 
 /** 懒惰印记词条名（制卡时打在卡上；内容侧可再命名） */
 export const LAZY_ENTRY = '懒惰';
@@ -135,6 +136,49 @@ export function resolveTwinCombo(input: {
     fired: true,
     power: mult,
     note: `【双生羁绊】${card.name} 与 ${twin} 同频——组合技发动（行动值 ×${mult}）`,
+  };
+}
+
+// ════════════════════════════════════════════════════════════════════
+// 模块化（模块化天才）
+// ════════════════════════════════════════════════════════════════════
+
+/** 模块化印记词条名（制卡时打在载具/装备卡上） */
+export const MODULAR_ENTRY = '模块化';
+
+/** 这张卡带模块化印记吗 */
+export function isModularCard(card: Pick<CardItem, '词条'>): boolean {
+  return (card.词条 ?? []).includes(MODULAR_ENTRY);
+}
+
+/**
+ * 热插拔裁定（纯函数）：把一次已上场的**在play效果**换一种形态再发动一次。
+ *
+ * 口径：**buff ↔ dot 对调**——「根据战况瞬间切换形态与功能」在拍制里最直白的
+ * 落法就是「助战」与「灼烧」互换。每场次数由条目 `模块化{swaps}` 限。
+ */
+export function resolveHotSwap(input: {
+  card: Pick<CardItem, 'name' | '词条'>;
+  /** 该卡本场已激活过的在场效果 */
+  current: CardInPlayEffect | undefined;
+  used: number;
+  maxSwaps: number;
+}): { ok: boolean; reason?: string; switched?: CardInPlayEffect; note?: string } {
+  if (!isModularCard(input.card)) {
+    return { ok: false, reason: `【${input.card.name}】不是模块化载具——换不了` };
+  }
+  if (!input.current) {
+    return { ok: false, reason: `【${input.card.name}】还没上过场，没有可插拔的模块` };
+  }
+  if (input.used >= Math.max(1, Math.round(input.maxSwaps) || 1)) {
+    return { ok: false, reason: '本场的热插拔次数用尽了' };
+  }
+  const from = input.current.type;
+  const to = from === 'buff' ? 'dot' : 'buff';
+  return {
+    ok: true,
+    switched: { ...input.current, type: to },
+    note: `【模块化】${input.card.name} 在战场上调了模块——${from === 'buff' ? '助战' : '灼烧'} 换成 ${to === 'buff' ? '助战' : '灼烧'}（×${input.current.amount}）`,
   };
 }
 

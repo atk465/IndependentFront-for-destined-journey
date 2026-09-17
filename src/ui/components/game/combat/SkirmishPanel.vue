@@ -72,6 +72,20 @@ async function doSacrifice() {
   await game.sacrificeSummon();
 }
 
+/** 念出真名（S「真名看破系统」）：每场一次的精神冲击 */
+const canTrueName = computed(() => game.hasMechanicGate('真名'));
+const trueNameUsed = computed(() => session.value?.trueNameUsed === true);
+const knownTrueNames = computed(() => game.knownTrueNames());
+async function doTrueName() {
+  await game.speakTrueName();
+}
+
+/** 热插拔（S「模块化天才」）：把已上场的模块化载具换一种形态再发动 */
+const canHotSwap = computed(() => game.hasMechanicGate('模块化'));
+async function doHotSwap() {
+  await game.hotSwapModule();
+}
+
 /** 捕获（SSS「你是我的了」）：战胜后把对手变成伙伴卡 */
 const canCapture = computed(() => game.hasMechanicGate('捕获'));
 const capturing = ref(false);
@@ -226,6 +240,30 @@ function dismiss() {
         @click="doSacrifice"
       >
         献祭召唤
+      </button>
+      <button
+        v-if="canHotSwap"
+        type="button"
+        class="counter-btn modular"
+        :disabled="game.skirmishBusy"
+        title="把已上场的模块化载具换一种形态再发动（每场次数有限）"
+        @click="doHotSwap"
+      >
+        热插拔模块
+      </button>
+      <button
+        v-if="canTrueName && !trueNameUsed"
+        type="button"
+        class="counter-btn truename"
+        :disabled="game.skirmishBusy"
+        :title="
+          knownTrueNames.includes(session?.enemyName ?? '')
+            ? '这个名字你认过——冲击加成'
+            : '念出对方真名，造成一次精神冲击（每场一次）'
+        "
+        @click="doTrueName"
+      >
+        念出真名
       </button>
       <button
         type="button"

@@ -82,7 +82,12 @@ export type TalentEntryKind =
   | '决斗' // 可强制 1v1：禁用伙伴卡、免疫外部伤害与治疗（S「西部决斗礼仪」）
   | '赌运' // 对冲融合大失败叠厄运，厄运抬高下一次的评级（S「赌徒谬论」）
   | '调教' // 可调教伙伴卡：等级越高潜力激发越彻底（S「调教大师系统」）
-  | '回溯'; // 制卡失败时可回溯重裁一次，代价大量精神力（S「时间回溯」）
+  | '回溯' // 制卡失败时可回溯重裁一次，代价大量精神力（S「时间回溯」）
+  | '宿敌' // 被强敌视为宿敌时激活：与其战斗经验翻倍，胜之夺取气运（S「宿敌认证系统」）
+  | '打脸' // 被嘲讽后打赢：海量经验 + 打脸点数（S「打脸升级系统」）
+  | '炼金' // 伙伴卡踩踏素材炼出全新道具卡（S「足之炼金术」）
+  | '真名' // 可念出对方真名造成一次精神冲击（S「真名看破系统」）
+  | '模块化'; // 载具卡有额外改装槽，战斗中可热插拔换形态（S「模块化天才」）
 
 /** 骨架条目：kind + 预设参数 + 独占渠道标记 */
 export interface TalentEntry {
@@ -173,6 +178,20 @@ export interface TalentEntry {
     maxLevel?: number;
     /** 回溯：每次回溯的精神力消耗 */
     mpCost?: number;
+    /** 宿敌：与宿敌战斗的经验倍率 */
+    expMult?: number;
+    /** 打脸：打赢时的额外经验 / 每次胜利获得的点数 / 兑换一件装备所需点数 */
+    expBonus?: number;
+    pointsPerWin?: number;
+    redeemCost?: number;
+    /** 真名：精神冲击的基础威力 / 每级玩家等级追加 */
+    shockBase?: number;
+    shockPerLevel?: number;
+    /** 模块化：额外改装槽位数 / 每场可热插拔次数 */
+    slots?: number;
+    swaps?: number;
+    /** 炼金：可炼出的最高卡档（0 = 不限） */
+    maxTier?: number;
   };
 }
 
@@ -384,6 +403,15 @@ export const TALENT_ENTRY_POOL: readonly TalentEntry[] = [
   e({ kind: '赌运', channel: 'universal', params: { maxHold: 5, maxLift: 3 } }),
   e({ kind: '调教', channel: 'universal', params: { maxLevel: 3 } }),
   e({ kind: '回溯', channel: 'universal', params: { mpCost: 30 } }),
+  e({ kind: '宿敌', channel: 'universal', params: { expMult: 2 } }),
+  e({
+    kind: '打脸',
+    channel: 'universal',
+    params: { expBonus: 100, pointsPerWin: 1, redeemCost: 10 },
+  }),
+  e({ kind: '炼金', channel: 'universal', params: { maxTier: 3 } }),
+  e({ kind: '真名', channel: 'universal', params: { shockBase: 20, shockPerLevel: 2 } }),
+  e({ kind: '模块化', channel: 'universal', params: { slots: 2, swaps: 1 } }),
   e({ kind: '改造', channel: 'story', params: {} }),
   // ── v10 扩容（伙伴卡生成通道，2026-09-17）──
   e({ kind: '捕获', channel: 'story', params: {} }),
@@ -493,6 +521,11 @@ const ENTRY_NUMERIC_TIERS: Partial<
   赌运: { maxHold: [3, 5, 9], maxLift: [1, 2, 3] },
   调教: { maxLevel: [2, 3, 5] },
   回溯: { mpCost: [20, 30, 50] },
+  宿敌: { expMult: [2, 3] },
+  打脸: { expBonus: [50, 100], pointsPerWin: [1, 2], redeemCost: [5, 10] },
+  炼金: { maxTier: [2, 3] },
+  真名: { shockBase: [10, 20], shockPerLevel: [2, 3] },
+  模块化: { slots: [1, 2], swaps: [1] },
 };
 
 /**
@@ -530,6 +563,11 @@ export const ENTRY_STRENGTH_BASELINE = {
   赌运: { maxHold: 5, maxLift: 3 },
   调教: { maxLevel: 3 },
   回溯: { mpCost: 30 },
+  宿敌: { expMult: 2 },
+  打脸: { expBonus: 100, pointsPerWin: 1, redeemCost: 10 },
+  炼金: { maxTier: 3 },
+  真名: { shockBase: 20, shockPerLevel: 2 },
+  模块化: { slots: 2, swaps: 1 },
 } as const;
 
 /** 各种类的必填内容参数（非空字符串；keywords 为字符串数组） */
@@ -602,6 +640,11 @@ const ENTRY_KIND_LIST: readonly TalentEntryKind[] = [
   '赌运',
   '调教',
   '回溯',
+  '宿敌',
+  '打脸',
+  '炼金',
+  '真名',
+  '模块化',
 ];
 
 /**
@@ -637,6 +680,11 @@ const ENTRY_OPTIONAL_NUMERIC: Partial<Record<TalentEntryKind, readonly string[]>
   赌运: ['maxHold', 'maxLift'],
   调教: ['maxLevel'],
   回溯: ['mpCost'],
+  宿敌: ['expMult'],
+  打脸: ['expBonus', 'pointsPerWin', 'redeemCost'],
+  炼金: ['maxTier'],
+  真名: ['shockBase', 'shockPerLevel'],
+  模块化: ['slots', 'swaps'],
 };
 
 export function validateTalentEntries(entries: readonly TalentEntry[]): {
@@ -2181,7 +2229,9 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你制作的载具卡天生拥有额外的改装槽位，且其部件支持战斗中热插拔，能够根据战况瞬间切换形态与功能，是战场上的变形金刚。',
-    entries: [],
+    // 2026-09-17：产出的载具/装备卡带「改装槽」与「模块化」印记；
+    // 战斗中可热插拔一次——把已上场的模块化卡再发动一次并换一种形态。
+    entries: [{ kind: '模块化', channel: 'universal', params: { slots: 2, swaps: 1 } }],
   },
   {
     name: '瘟疫之源',
@@ -2293,7 +2343,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '极度稀有的天赋。制作出的女性伙伴卡能通过踩踏不同的素材，将其转化为全新的道具卡。例如踩踏矿石可能炼出金属，踩踏草药可能炼出药剂。',
-    entries: [],
+    // 2026-09-17：伙伴卡踩踏素材 → 炼出全新道具卡（partner-alchemy.ts）。
+    entries: [{ kind: '炼金', channel: 'universal', params: { maxTier: 3 } }],
   },
   {
     name: '绝对支配宣言',
@@ -2365,7 +2416,9 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '当你被一名强大的敌人视为宿敌时，系统会激活。每次与宿敌战斗或想到他时，你的训练效率都会翻倍，战胜宿敌后更能夺取其部分气运或一项技能。',
-    entries: [],
+    // 2026-09-17：败给更强的敌人 → 他被记为宿敌；与宿敌战斗经验翻倍，
+    // 胜之夺取气运（一次性）并清空宿敌。
+    entries: [{ kind: '宿敌', channel: 'universal', params: { expMult: 2 } }],
   },
   {
     name: '搞事系统',
@@ -2391,7 +2444,15 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '当你被人嘲讽、鄙视或看不起后，再用实力狠狠打对方的脸，你将获得海量经验值和打脸点数，可用于兑换特殊称号或装备。',
-    entries: [],
+    // 2026-09-17：被嘲讽标记生效期间打赢 → 额外经验 + 打脸点数；
+    // 点数可在制卡台兑换装备（走既有的 add_item 通道）。
+    entries: [
+      {
+        kind: '打脸',
+        channel: 'universal',
+        params: { expBonus: 100, pointsPerWin: 1, redeemCost: 10 },
+      },
+    ],
   },
   {
     name: '剧透者系统',
@@ -2426,7 +2487,9 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你可以看穿一切伪装，洞悉他人的真名和部分真实信息。念出对方的真名，可以对其造成一次强大的精神冲击。',
-    entries: [],
+    // 2026-09-17：每场一次「念出真名」——按等级造成固定精神冲击（不走 HP 百分比，
+    // 与小人都能用的「倒也可斩」区分开）；念过的名字会被记住。
+    entries: [{ kind: '真名', channel: 'universal', params: { shockBase: 20, shockPerLevel: 2 } }],
   },
   {
     name: '恶魔之角',
@@ -7128,6 +7191,11 @@ export const IMPLEMENTED_ENTRY_KINDS: ReadonlySet<TalentEntryKind> = new Set<Tal
   '赌运',
   '调教',
   '回溯',
+  '宿敌',
+  '打脸',
+  '炼金',
+  '真名',
+  '模块化',
   '战技附加',
 ]);
 

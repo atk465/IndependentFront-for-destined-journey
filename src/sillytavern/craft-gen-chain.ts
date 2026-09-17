@@ -47,7 +47,7 @@ import { tagInner, tagBlock, parseAttrsStr } from './agent-xml';
 import { matchImitation } from './start-catalog-mechanics';
 import { applyCraftTalentBonus, isDesireDominant } from './card-workshop/craft-talent-bonus';
 import { entryStrength, totalCopies } from './card-workshop/talent-rule-modifiers';
-import { LAZY_ENTRY } from './card-workshop/battle-rules';
+import { LAZY_ENTRY, MODULAR_ENTRY } from './card-workshop/battle-rules';
 import { liftFromMisfortune } from './card-workshop/craft-flow-hooks';
 import { cardKindOf } from './card-workshop/card-kind';
 import { cardCatalogToItem } from './start-catalog-mechanics';
@@ -731,6 +731,22 @@ export async function runCraftGenChain(
         desireDominant,
       });
       cardProduct = boosted;
+      // 模块化天才（S）：产出的**载具/装备卡**带「模块化」印记 + 改装槽位数——
+      // 战斗中可热插拔一次（换一种在场形态）。
+      if (has('模块化') && cardProduct) {
+        const kind = cardKindOf(cardProduct.词条 ?? []);
+        if (kind === '装备') {
+          const slots = entryStrength(talentList, '模块化', 'slots');
+          cardProduct = {
+            ...cardProduct,
+            词条: (cardProduct.词条 ?? []).includes(MODULAR_ENTRY)
+              ? cardProduct.词条
+              : [...(cardProduct.词条 ?? []), MODULAR_ENTRY],
+            data: { ...(cardProduct.data ?? {}), 改装槽: slots },
+          };
+          notes.push(`【模块化天才】载具卡带 ${slots} 个改装槽——战斗中可热插拔换形态`);
+        }
+      }
       // 懒惰天才（S）：产出的**生物卡**（召唤/军团）带「懒惰」印记——
       // 拍内 50% 摸鱼跳过行动、否则行动值翻倍（见 battle-rules.resolveLazyCard）。
       if (has('惰性') && cardProduct) {

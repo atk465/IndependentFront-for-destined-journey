@@ -93,6 +93,8 @@ import {
   coerceTwinBonds,
   duelBlocksCard,
   isLazyCard,
+  isModularCard,
+  resolveHotSwap,
   resolveLazyCard,
   resolveTwinCombo,
 } from '@engine/card-workshop/battle-rules';
@@ -101,6 +103,21 @@ import {
   MISFORTUNE_PER_FAILURE,
   isGreatFailure,
 } from '@engine/card-workshop/craft-flow-hooks';
+import {
+  FACE_SLAP_KEY,
+  coerceNemesis,
+  coerceTaunt,
+  isNemesisBattle,
+  nemesisExpMultiplier,
+  settleFaceSlap,
+  shouldMarkNemesis,
+} from '@engine/card-workshop/conditional-exp';
+import {
+  coerceTrueNames,
+  hasTrueName,
+  rememberTrueName,
+  trueNameShockPower,
+} from '@engine/card-workshop/true-name';
 import { coerceSpirits } from '@engine/card-workshop/behind-spirits';
 import {
   buffActiveToday,
@@ -2372,7 +2389,97 @@ export class GamePipeline {
       flee: (endReason) => this.fleeSkirmishEncounter(endReason),
       duel: () => this.declareDuel(),
       sacrifice: () => this.sacrificeSummon(),
+      trueName: () => this.speakTrueName(),
+      hotSwap: () => this.hotSwapModule(),
     });
+  }
+
+  /**
+   * 热插拔（S「模块化天才」）：把一张已上场的模块化载具卡的在场效果**换一种形态**
+   * 再发动一次（buff ↔ dot）。每场次数由条目 `模块化{swaps}` 限。
+   */
+  private async hotSwapModule(): Promise<void> {
+    const session = this.game.skirmishSession;
+    const playerC = this.game.player;
+    if (!session || session.finished !== null || !playerC) return;
+    if (
+      !(playerC.talents?.list ?? []).some((t) => (t.entries ?? []).some((e) => e.kind === '模块化'))
+    ) {
+      this.emitMessage('【模块化天才】需要持有对应天赋。', 'assistant');
+      return;
+    }
+    // 找一张本场已激活、且带模块化印记的卡
+    const hit = session.activeEffects.find((e) => {
+      const inv = playerC.inventory.find((i) => i.name === e.name);
+      return inv?.type === '卡牌' && isModularCard(inv as CardItem);
+    });
+    const card = hit ? (playerC.inventory.find((i) => i.name === hit.name) as CardItem) : undefined;
+    const swap = resolveHotSwap({
+      card: card ?? { name: hit?.name ?? '空', 词条: [] },
+      current: hit,
+      used: session.hotSwapsUsed ?? 0,
+      maxSwaps: entryStrength(playerC.talents?.list, '模块化', 'swaps'),
+    });
+    if (!swap.ok || !swap.switched) {
+      this.emitMessage(`【模块化天才】${swap.reason ?? '换不了'}`, 'assistant');
+      return;
+    }
+    const swapsUsed = (session.hotSwapsUsed ?? 0) + 1;
+    this.game.setSkirmishSession({
+      ...session,
+      activeEffects: session.activeEffects.map((e) => (e.name === hit!.name ? swap.switched! : e)),
+      hotSwapsUsed: swapsUsed,
+      log: [...session.log, `▸ ${swap.note}`],
+    });
+    this.emitMessage(`▸ ${swap.note}`, 'assistant');
+  }
+
+  /**
+   * 念出真名（S「真名看破系统」）：每场一次的精神冲击。
+   *
+   * 威力 = 基础 + 每级 × 玩家等级（**不走敌方 HP 百分比**——那是「倒也可斩」的口径，
+   * 两条大招因此有各自的适用面：这条打小怪过剩、打大怪不足）。
+   * 念过的名字会被记住，下次对上同一个名字加成——「洞悉真名」一旦发生就不会忘。
+   */
+  private async speakTrueName(): Promise<void> {
+    const session = this.game.skirmishSession;
+    const playerC = this.game.player;
+    if (!session || session.finished !== null || !playerC) return;
+    if (session.trueNameUsed === true) {
+      this.emitMessage('【真名看破】这一场已经念过了——一个名字一场只压得住一次。', 'assistant');
+      return;
+    }
+    const has = (playerC.talents?.list ?? []).some((t) =>
+      (t.entries ?? []).some((e) => e.kind === '真名'),
+    );
+    if (!has) {
+      this.emitMessage('【真名看破】需要持有对应天赋。', 'assistant');
+      return;
+    }
+    const known = coerceTrueNames(this.game.saveProfile?.worldFlags?.trueNames);
+    const alreadyKnown = hasTrueName(known, session.enemyName);
+    const shock = trueNameShockPower({
+      base: entryStrength(playerC.talents?.list, '真名', 'shockBase'),
+      perLevel: entryStrength(playerC.talents?.list, '真名', 'shockPerLevel'),
+      playerLevel: playerC.level,
+      alreadyKnown,
+    });
+    const next = playBeat(
+      session,
+      { label: `念出真名·${session.enemyName}`, power: shock.power, tags: [] },
+      this.rollSkirmishD20(),
+      { prepend: [`▸ 【真名看破】${shock.note}`], trueNameUsed: true },
+    );
+    this.game.setSkirmishSession(next);
+    this.emitMessage(next.log.slice(session.log.length).join(String.fromCharCode(10)), 'assistant');
+    if (this.ownsActiveSave) {
+      const names = rememberTrueName(known, session.enemyName);
+      const sm = createStateManager(this.saveId);
+      await sm.commitChatState([
+        { op: 'set_variable', target: 'worldFlags.trueNames', value: names } as StatePatch,
+      ]);
+    }
+    if (next.finished) await this.settleAndNarrate(next);
   }
 
   /**
@@ -3010,7 +3117,21 @@ export class GamePipeline {
     if (!playerC) return;
     // 规则钩子（名字表）：经验倍率（鸿蒙道体 ×2 / 千秋证果 ×5）——此前 getter 写好了没人调
     const hooks = collectRuleHooks(playerC.talents?.list);
-    const settlement = settleSkirmish(session, playerC.level, expMultiplierOf(hooks));
+    // 条件经验（S「宿敌认证系统」）：与宿敌战斗经验翻倍
+    const holdsNemesis = flatEntriesOf(playerC.talents?.list).some((e) => e.kind === '宿敌');
+    const nemesis = coerceNemesis(this.game.saveProfile?.worldFlags?.nemesis);
+    const nemesisMult = nemesisExpMultiplier({
+      holdsTalent: holdsNemesis,
+      nemesis,
+      enemyName: session.enemyName,
+      expMult: entryStrength(playerC.talents?.list, '宿敌', 'expMult'),
+    });
+    if (nemesisMult.note) this.emitMessage(`▸ ${nemesisMult.note}`, 'assistant');
+    const settlement = settleSkirmish(
+      session,
+      playerC.level,
+      expMultiplierOf(hooks) * nemesisMult.mult,
+    );
     if (!settlement) return;
 
     // ① 战斗记叙（一次 AI 调用，只演绎不算数）
@@ -3125,6 +3246,85 @@ export class GamePipeline {
               },
             } as StatePatch);
           }
+        }
+      }
+      // 宿敌认证（S）：败给更强的敌人 → 他被记为宿敌；战胜宿敌 → 夺取气运并清空。
+      if (holdsNemesis) {
+        const today = this.currentGameDay();
+        if (
+          shouldMarkNemesis({
+            finished: session.finished,
+            enemyLevel: session.enemyLevel,
+            playerLevel: playerC.level,
+          })
+        ) {
+          if (!isNemesisBattle(nemesis, session.enemyName)) {
+            settlementPatches.push({
+              op: 'set_variable',
+              target: 'worldFlags.nemesis',
+              value: { name: session.enemyName, level: session.enemyLevel, since: today },
+            } as StatePatch);
+            this.emitMessage(
+              `▸ 【宿敌认证】你输给了【${session.enemyName}】——从此他视你为宿敌。与他交锋时，训练效率翻倍。`,
+              'assistant',
+            );
+          }
+        } else if (
+          isNemesisBattle(nemesis, session.enemyName) &&
+          (session.finished === '胜利' || session.finished === '碾压')
+        ) {
+          // 夺取气运：一次性把恩怨结清（金钱按宿敌等级折算）
+          const seized = Math.max(10, session.enemyLevel * 10);
+          settlementPatches.push({
+            op: 'update_character',
+            target: `characters.${playerC.name}`,
+            value: { money: playerC.money + seized },
+          } as StatePatch);
+          settlementPatches.push({
+            op: 'set_variable',
+            target: 'worldFlags.nemesis',
+            value: null,
+          } as StatePatch);
+          this.emitMessage(
+            `▸ 【宿敌认证】你赢了【${nemesis!.name}】——夺取其气运：+${seized} GC。这段恩怨结了。`,
+            'assistant',
+          );
+        }
+      }
+      // 打脸升级（S）：被嘲讽标记当天打赢 → 海量经验 + 打脸点数
+      {
+        const holdsSlap = flatEntriesOf(playerC.talents?.list).some((e) => e.kind === '打脸');
+        const slap = settleFaceSlap({
+          holdsTalent: holdsSlap,
+          mark: coerceTaunt(this.game.saveProfile?.worldFlags?.taunted),
+          today: this.currentGameDay(),
+          finished: session.finished,
+          expBonus: entryStrength(playerC.talents?.list, '打脸', 'expBonus'),
+          pointsPerWin: entryStrength(playerC.talents?.list, '打脸', 'pointsPerWin'),
+        });
+        if (slap.expBonus > 0 || slap.points > 0) {
+          const beforePoints = counterOf(
+            coerceCounters(this.game.saveProfile?.worldFlags?.counters),
+            FACE_SLAP_KEY,
+          );
+          settlementPatches.push({
+            op: 'update_character',
+            target: `characters.${playerC.name}`,
+            value: { totalExp: Math.max(0, session.playerHp) * 0 + slap.expBonus },
+            metadata: { delta: true, source: 'face-slap' },
+          } as StatePatch);
+          settlementPatches.push({
+            op: 'set_variable',
+            target: `worldFlags.counters.${FACE_SLAP_KEY}`,
+            value: beforePoints + slap.points,
+          } as StatePatch);
+          // 嘲讽标记用掉即清（打了脸，这事就过去了）
+          settlementPatches.push({
+            op: 'set_variable',
+            target: 'worldFlags.taunted',
+            value: null,
+          } as StatePatch);
+          if (slap.note) this.emitMessage(`▸ ${slap.note}`, 'assistant');
         }
       }
       // 复生（S「再生」）：败北结算时 HP 不落 0——不死之身，只是这一场输了。
