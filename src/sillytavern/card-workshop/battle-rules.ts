@@ -23,6 +23,9 @@ export const LAZY_ENTRY = '懒惰';
 /** 双生羁绊词条名（缔结羁绊时打在两张卡上） */
 export const TWIN_ENTRY = '双生';
 
+/** 独行印记词条名（S/A「孤狼」：场上没有其它友方时翻倍） */
+export const LONE_ENTRY = '独行';
+
 // ════════════════════════════════════════════════════════════════════
 // 惰性（懒惰天才）
 // ════════════════════════════════════════════════════════════════════
@@ -35,6 +38,11 @@ export interface LazyCardEntry {
 /** 这张卡是否带懒惰印记（词条即单一真源） */
 export function isLazyCard(card: Pick<CardItem, '词条'>): boolean {
   return (card.词条 ?? []).includes(LAZY_ENTRY);
+}
+
+/** 这张卡是否带独行印记 */
+export function isLoneCard(card: Pick<CardItem, '词条'>): boolean {
+  return (card.词条 ?? []).includes(LONE_ENTRY);
 }
 
 export type LazyOutcome =

@@ -89,7 +89,8 @@ export type TalentEntryKind =
   | '真名' // 可念出对方真名造成一次精神冲击（S「真名看破系统」）
   | '模块化' // 载具卡有额外改装槽，战斗中可热插拔换形态（S「模块化天才」）
   | '倒影' // 战败可复制敌方招式作制卡蓝本（S「支配者倒影」）
-  | '条件加成'; // 条件成立（如卡组无伙伴卡）时获得数值加成（A「荒野镖客」等）
+  | '条件加成' // 条件成立（如卡组无伙伴卡）时获得数值加成（A「荒野镖客」等）
+  | '独行'; // 产出的生物卡独行时效果翻倍（A「孤狼」）
 
 /** 骨架条目：kind + 预设参数 + 独占渠道标记 */
 export interface TalentEntry {
@@ -429,6 +430,7 @@ export const TALENT_ENTRY_POOL: readonly TalentEntry[] = [
     channel: 'universal',
     params: { cond: '伙伴卡数', threshold: 0, percent: 0, perExtra: 5 },
   }),
+  e({ kind: '独行', channel: 'universal', params: {} }),
   e({ kind: '改造', channel: 'story', params: {} }),
   // ── v10 扩容（伙伴卡生成通道，2026-09-17）──
   e({ kind: '捕获', channel: 'story', params: {} }),
@@ -500,7 +502,7 @@ const ENTRY_NUMERIC_TIERS: Partial<
   行动值加成: { amount: [1, 2, 3, 6] },
   防御加值: { amount: [1, 2, 4] },
   威压: { percent: [30] },
-  体魄: { percent: [200] },
+  体魄: { percent: [20, 200] },
   产出数量: { copies: [1, 3] },
   风险系数: { risk: [20] },
   金钱加投: { gold: [50], bonus: [20] },
@@ -589,6 +591,7 @@ export const ENTRY_STRENGTH_BASELINE = {
   模块化: { slots: 2, swaps: 1 },
   倒影: { maxHold: 5 },
   条件加成: { threshold: 0, percent: 25, perExtra: 0 },
+  独行: {},
 } as const;
 
 /** 各种类的必填内容参数（非空字符串；keywords 为字符串数组） */
@@ -669,6 +672,7 @@ const ENTRY_KIND_LIST: readonly TalentEntryKind[] = [
   '模块化',
   '倒影',
   '条件加成',
+  '独行',
 ];
 
 /**
@@ -4219,7 +4223,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你的眼里只有钱。遇到高价值素材或卡币时，无视所有精神类控制debuff；但如果有人抢你的战利品，你会陷入不死不休的狂暴。',
-    entries: [],
+    // 2026-09-17 B 级批次①：「无视精神控制」是抗性规则、「被抢战利品则狂暴」是触发叙事——世界怎么回应你。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '黑市老千',
@@ -4227,7 +4232,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '在赌卡或黑市交易时，你可以偷偷用下位垃圾素材替换上位素材进行检定，有较高概率不被发现。被发现则直接进入肉搏战。',
-    entries: [],
+    // 2026-09-17 B 级批次①：「偷换素材不被发现」是赌桌叙事，被抓的后果由 AI 演绎。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '体温共享（极地特供）',
@@ -4633,7 +4639,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '制作出的女性卡牌思维方式异于常人，会说一些意义不明的呓语。敌人无法通过读心等方式探知其想法，她的行动模式完全无法预测。',
-    entries: [],
+    // 2026-09-17 B 级批次①：「思维异于常人、无法被读心、行动不可预测」——全是世界的回应方式。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '巫女祈愿',
@@ -4668,7 +4675,14 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'B' as TalentGrade,
     source: 'universal',
     description: '你制作的卡牌效果都极其强大，但都带有一个明显的负面效果。',
-    entries: [],
+    // 2026-09-17 B 级批次②：「效果极强但带负面」= 两态词条必附（强度与代价都要出现）
+    entries: [
+      {
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['极强', '代价'], weight: 3 },
+      },
+    ],
   },
   {
     name: '高跟凶器',
@@ -4709,7 +4723,15 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '制作出的体型娇小的伙伴卡，性格却异常暴躁。她们的攻击速度极快，且有几率让敌人陷入恼火状态（攻击力提升，但防御力大幅下降）。',
-    entries: [],
+    // 2026-09-17 B 级批次②：急速/暴躁词条 + 「恼火」战技（攻击升防御降 → 落成削威胁型 weaken）
+    entries: [
+      {
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['急速', '暴躁'], weight: 2 },
+      },
+      { kind: '战技附加', channel: 'universal', params: { status: '恼火', power: 3, beats: 2 } },
+    ],
   },
   {
     name: '修女的忏悔',
@@ -4784,7 +4806,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你说出的每一个谎言，只要成功骗过对方，就能积累欺诈点数。该点数可用于兑换幻术系技能或让下一次的谎言变得更加天衣无缝。',
-    entries: [],
+    // 2026-09-17 B 级批次①：「骗过即积点数、点数换幻术」的点数账本可以后补，先给声明入口。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '炼金工坊系统',
@@ -4800,7 +4823,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你总能听到各种流言蜚语。每天系统会刷新三条随机情报，可能是某地的宝藏信息，也可能是某位大人物的秘密丑闻。',
-    entries: [],
+    // 2026-09-17 B 级批次①：「每天刷新三条随机情报」是信息供给，归叙事。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '偷窃神手系统',
@@ -4808,14 +4832,16 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你对任何人或魔物进行偷窃时，成功率会得到极大提升，甚至有概率偷到对方正在使用的装备或技能卡。',
-    entries: [],
+    // 2026-09-17 B 级批次①：「偷窃成功率大增、可偷装备」是世界对你的宽容度。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '读心术系统',
     grade: 'B' as TalentGrade,
     source: 'universal',
     description: '你可以消耗MP来读取他人的表层思想，精神力远超对方时，甚至能窥探到深层记忆。',
-    entries: [],
+    // 2026-09-17 B 级批次①：「读表层思想、窥深层记忆」是信息规则，精神力差距由 AI 裁量。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '黄毛必须死系统',
@@ -4823,7 +4849,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '当你遇到企图NTR你的黄毛角色时，你对他的所有伤害提升300%，且他所有判定都会遭遇不幸。',
-    entries: [],
+    // 2026-09-17 B 级批次①：「对他伤害 +300% 且他判定不幸」是对特定对象的叙事放大。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '圣母克星系统',
@@ -4831,7 +4858,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '在面对圣母型角色时，你的所有言行都会被系统自动修正得极具说服力，能轻易地让她们的逻辑崩溃，怀疑人生。',
-    entries: [],
+    // 2026-09-17 B 级批次①：「言行被自动修正得极具说服力」是世界的回应方式。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '反派的自我修养系统',
@@ -4839,7 +4867,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '当你做出符合反派模板的行为时（如威胁、勒索、背叛），系统会根据行为的恶劣程度给予恶人点数。点数可用于在系统商城兑换物品或提升对善良阵营角色的威慑力。',
-    entries: [],
+    // 2026-09-17 B 级批次①：「反派行为给恶人点数」——点数账本可后补，先给声明入口。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '暗影哥特',
@@ -4855,7 +4884,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'B' as TalentGrade,
     source: 'universal',
     description: '制作的生物卡牌，当场上没有其他友方单位时，攻击力和速度提升100%。',
-    entries: [],
+    // 2026-09-17 B 级批次③：生物卡带「独行」印记——场上没有其它友方时效果翻倍。
+    entries: [{ kind: '独行', channel: 'universal', params: {} }],
   },
   {
     name: '高跟践踏',
@@ -4889,14 +4919,17 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'B' as TalentGrade,
     source: 'universal',
     description: '你的幸运属性额外提升20点。赌卡时手气更好。',
-    entries: [],
+    // 2026-09-17 B 级批次②：「赌卡手气更好」= 判定取优（掷两次取高）
+    entries: [{ kind: '判定取优', channel: 'universal', params: {} }],
   },
   {
     name: '精力旺盛',
     grade: 'B' as TalentGrade,
     source: 'universal',
     description: '你的HP和MP上限永久提升20%。',
-    entries: [],
+    // 2026-09-17 B 级批次③：HP 上限 +20%（体魄档位扩容后 20% 入档）。
+    // ⚠️ 「MP 上限 +20%」落不了地——引擎没有 MP 上限的天赋通道，已记入 backlog。
+    entries: [{ kind: '体魄', channel: 'universal', params: { percent: 20 } }],
   },
   {
     name: '墓穴领主呼唤',
@@ -4915,6 +4948,7 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '当你战败时，得到经验值加成，在战败后受到的凌辱越强，提供的经验加成与属性加成便越多。',
+    // 2026-09-17 B 级批次③：战败经验加成（名字钩子，与「世界线的收束点」同族但只管经验）。
     entries: [],
   },
   {
@@ -4922,7 +4956,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'B' as TalentGrade,
     source: 'universal',
     description: '你有九米高。',
-    entries: [],
+    // 2026-09-17 B 级批次①：「你有九米高」是形态事实，世界（NPC、门、床）如何回应由叙事决定。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '鞋袜领域',
@@ -4958,14 +4993,19 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你身上散发的体香能安抚情绪，小幅提升伙伴卡的忠诚度增长速度，对昆虫类魔物有微弱的驱赶效果。',
-    entries: [],
+    // 2026-09-17 B 级批次①：「安抚情绪、驱赶昆虫」是世界对你的气味作何反应。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '耐药性',
     grade: 'B' as TalentGrade,
     source: 'universal',
     description: '你对大部分毒素和诅咒有更高的抗性。使用毒或诅咒素材制卡时不易受到反噬。',
-    entries: [],
+    // 2026-09-17 B 级批次②：「毒/诅咒素材不易反噬」= 成功率加成；抗性细节归叙事
+    entries: [
+      { kind: '成功率加成', channel: 'universal', params: { bonus: 30 } },
+      { kind: '叙事意图', channel: 'universal', params: {} },
+    ],
   },
   {
     name: '母狗化改造',
@@ -5014,7 +5054,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'B' as TalentGrade,
     source: 'universal',
     description: '击败敌人后，你能感知到对方身上是否藏有能取悦你伙伴卡的特殊战利品。',
-    entries: [],
+    // 2026-09-17 B 级批次①：「能感知战利品里有什么」是信息规则。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '母狗契约',
@@ -5022,14 +5063,16 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你可以与自愿的雌性生物签订主奴契约，将其转化为你的专属母狗。该单位无法攻击你，且其部分收益将上缴给你。',
-    entries: [],
+    // 2026-09-17 B 级批次②：「自愿者转化为专属单位」= 捕获（自愿比战败更宽松，语义包含）
+    entries: [{ kind: '捕获', channel: 'universal', params: {} }],
   },
   {
     name: '女王崇拜',
     grade: 'B' as TalentGrade,
     source: 'universal',
     description: '所有女性NPC对你的初始好感度略微提升，尤其是性格强势的女性。',
-    entries: [],
+    // 2026-09-17 B 级批次①：「女性 NPC 初始好感略升」是世界预设的态度。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '高潮链接',
@@ -5037,7 +5080,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你可以链接一个目标，每次你或你的伙伴卡达到高潮时，可汲取对方大量生命值或魔力值。对自愿的目标效果翻倍。',
-    entries: [],
+    // 2026-09-17 B 级批次①：「链接目标、汲取生命」的建立与维持是叙事关系。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '契约奴役',
@@ -5045,7 +5089,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你可以与被击败但未死亡的人形生物签订主奴契约，将其转化为绝对服从的奴隶伙伴卡，奴隶伙伴无法升级，但可以无视规则装备任何装备。',
-    entries: [],
+    // 2026-09-17 B 级批次②：「击败后签主奴契」= 捕获（「无法升级/无视装备规则」由叙事承担）
+    entries: [{ kind: '捕获', channel: 'universal', params: {} }],
   },
   {
     name: '圣母恩泽',
@@ -5174,7 +5219,14 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你的灵魂深处刻着被支配的渴望。制作出的女性伙伴卡必定是抖S女王性格，以支配和惩罚你为乐。战斗中，你每次被她攻击，她都会获得一层可叠加的愉悦Buff。特殊癖好是要求你用主人以外的屈辱性称呼来称呼她。',
-    entries: [],
+    // 2026-09-17 B 级批次②：「产出必是抖S女王」= 性格词条必附
+    entries: [
+      {
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['抖S女王'], weight: 3 },
+      },
+    ],
   },
   {
     name: 'S的刻印',
@@ -5182,7 +5234,14 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你的灵魂深处刻着支配的欲望。制作出的女性伙伴卡必定是抖M女奴性格，以被你支配和惩罚为乐。战斗中，她每次被敌人攻击，都会获得一层可叠加的忍耐Buff。特殊癖好是渴望你为她戴上项圈。',
-    entries: [],
+    // 2026-09-17 B 级批次②：「产出必是抖M女奴」= 性格词条必附
+    entries: [
+      {
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['抖M女奴'], weight: 3 },
+      },
+    ],
   },
   {
     name: '绝对正义',
@@ -5190,7 +5249,15 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你拥有不可动摇的秩序信念。制作出的女性伙伴卡会是铁面判官或圣殿骑士性格，对邪恶阵营的敌人造成额外50%的伤害。她无法执行任何会降低你声望或触犯法律的指令。癖好是会审判你的每一个决定。',
-    entries: [],
+    // 2026-09-17 B 级批次②：判官/秩序性格必附；「对邪恶阵营 +50% 伤害」是阵营规则，归叙事
+    entries: [
+      {
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['铁面判官', '秩序'], weight: 3 },
+      },
+      { kind: '叙事意图', channel: 'universal', params: {} },
+    ],
   },
   {
     name: '角斗女王',
@@ -5220,7 +5287,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '伙伴卡的腰腹和腿部肌肉群异常发达。她可以做出爆发性的垫步和扭身，极大增加近战重击的威力和攻击距离。',
-    entries: [],
+    // 2026-09-17 B 级批次①：「垫步、扭身、增加近战威力与距离」是动作叙事。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '处刑者',
@@ -5285,7 +5353,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'B' as TalentGrade,
     source: 'universal',
     description: '你制作的人偶/魔像类伙伴卡，会拥有更高的人工智能和更细腻的情感模块。',
-    entries: [],
+    // 2026-09-17 B 级批次①：「人偶有更高的智能与情感」是造物的性质，世界如何对待它归叙事。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '展露癖',
@@ -5329,7 +5398,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你对幼态伙伴卡的好感度获取速度加倍。当她们称呼你为爸爸或妈妈时，你和该卡牌都会获得强大的亲情守护buff，并且你的幼态伙伴卡将会无条件答应你的任何要求。',
-    entries: [],
+    // 2026-09-17 B 级批次①：「好感加倍、亲情守护 buff、无条件答应要求」是关系叙事。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '禁忌果实',
@@ -5374,7 +5444,11 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'B' as TalentGrade,
     source: 'universal',
     description: '只可以使用非伙伴卡，战斗中可以将至多一张自身的伙伴卡视作装备卡进行使用。',
-    entries: [],
+    // 2026-09-17 B 级批次②：「只用非伙伴卡」= 成品限定装备卡；「伙伴卡当装备用」归叙事（与傲慢无礼同源）
+    entries: [
+      { kind: '成品限定', channel: 'universal', params: { productClass: '装备' } },
+      { kind: '叙事意图', channel: 'universal', params: {} },
+    ],
   },
   {
     name: '人从众𠈌',
@@ -5394,14 +5468,26 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'B' as TalentGrade,
     source: 'universal',
     description: '你制作的伙伴卡的伙伴必定小且可爱，获得怜悯效果（对手战意减弱）。',
-    entries: [],
+    // 2026-09-17 B 级批次②：娇小/怜悯词条必附；「对手战意减弱」= 威压（敌方威胁降低）
+    entries: [
+      {
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['娇小', '怜悯'], weight: 3 },
+      },
+      { kind: '威压', channel: 'universal', params: { percent: 30 } },
+    ],
   },
   {
     name: '平地摔的馈赠',
     grade: 'B' as TalentGrade,
     source: 'universal',
     description: '每天必定平地摔一次，之后会幸运地遇到一次馈赠，摔得越惨，获得的馈赠越好。',
-    entries: [],
+    // 2026-09-17 B 级批次②：「每天一次馈赠」= 抽奖单抽；「摔得越惨馈赠越好」归叙事
+    entries: [
+      { kind: '抽奖', channel: 'universal', params: { times: 1, perDay: 1 } },
+      { kind: '叙事意图', channel: 'universal', params: {} },
+    ],
   },
   {
     name: '碎嘴鹦鹉',
@@ -6418,7 +6504,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你的幼态伙伴卡在进化时会经历巨大的痛苦，但作为补偿，她们可以从力量、敏捷、智慧中选择一项属性获得永久性的巨额加成。',
-    entries: [],
+    // 2026-09-17 B 级批次②：「进化时获得永久巨额加成」= 自我进化通道（战后成长）
+    entries: [{ kind: '自我进化', channel: 'universal', params: {} }],
   },
   {
     name: '观众席',
@@ -7322,6 +7409,7 @@ export const IMPLEMENTED_ENTRY_KINDS: ReadonlySet<TalentEntryKind> = new Set<Tal
   '模块化',
   '倒影',
   '条件加成',
+  '独行',
   '战技附加',
 ]);
 

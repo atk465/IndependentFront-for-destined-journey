@@ -69,6 +69,7 @@ import {
   collectRuleHooks,
   DAILY_NUKE_WEAKNESS,
   dailyNukePercentOf,
+  defeatExpMultiplierOf,
   expMultiplierOf,
   hasDefeatReward,
   hasOncePerBattleNuke,
@@ -94,6 +95,7 @@ import {
   coerceTwinBonds,
   duelBlocksCard,
   isLazyCard,
+  isLoneCard,
   isModularCard,
   resolveHotSwap,
   resolveLazyCard,
@@ -2934,13 +2936,23 @@ export class GamePipeline {
         // 只放大**召唤/军团卡带来的 buff**——那正是「伙伴卡的攻击力」在拍制里的形态。
         const kindForBonus = cardKindOf(card.词条);
         const isCompanion = kindForBonus === '召唤' || kindForBonus === '军团';
-        const boostedFx = isCompanion
+        // 独行（A「孤狼」）：带「独行」印记的生物卡，场上没有其它友方效果时翻倍。
+        // 「友方效果」= 现存 activeEffects 里除本卡以外的 buff（dot/weaken 是对敌方的，不算友伴）。
+        const alone = isCompanion
+          ? isLoneCard(card) &&
+            !session.activeEffects.some((e) => e.type === 'buff' && e.name !== card.name)
+          : false;
+        let boostedFx = isCompanion
           ? fx.map((e) =>
               e.type === 'buff'
                 ? { ...e, amount: Math.round(e.amount * (1 + deckCond.percent / 100)) }
                 : e,
             )
           : fx;
+        if (alone) {
+          boostedFx = boostedFx.map((e) => ({ ...e, amount: e.amount * 2 }));
+          prepend = [...(prepend ?? []), `▸ 【独行】场上没有其它友方——${card.name} 的效果翻倍`];
+        }
         if (isCompanion && deckCond.percent > 0) {
           prepend = [
             ...(prepend ?? []),
@@ -3201,7 +3213,10 @@ export class GamePipeline {
     const settlement = settleSkirmish(
       session,
       playerC.level,
-      expMultiplierOf(hooks) * nemesisMult.mult,
+      expMultiplierOf(hooks) *
+        nemesisMult.mult *
+        // 败北强化（A「败北强化」）：败北时的经验加成（名字钩子）
+        (session.finished === '败北' ? defeatExpMultiplierOf(hooks) : 1),
     );
     if (!settlement) return;
 

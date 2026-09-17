@@ -14,7 +14,7 @@
 import type { CardItem } from '../types';
 import { CARD_TIERS, type CardTier } from '../field-enums';
 import { EMOTIONS } from './emotion-material';
-import { LAZY_ENTRY, MODULAR_ENTRY } from './battle-rules';
+import { LAZY_ENTRY, LONE_ENTRY, MODULAR_ENTRY } from './battle-rules';
 import { cardKindOf } from './card-kind';
 /** 条目天赋的宽松输入：只看 kind 与 params 里用得上的那几项（不绑死某个窄类型） */
 export interface CraftEntryTalentLike {
@@ -141,6 +141,12 @@ export function applyCraftEntryTalents(
     if (!next.词条.includes(MODULAR_ENTRY)) next.词条 = [...next.词条, MODULAR_ENTRY];
     next = { ...next, data: { ...(next.data ?? {}), 改装槽: slots } };
     notes.push(`【模块化天才】载具卡带 ${slots} 个改装槽——战斗中可热插拔换形态`);
+  }
+
+  // 孤狼（A）：生物卡带「独行」印记——场上没有其它友方时效果翻倍
+  if (entries.some((e) => e.kind === '独行') && (kind === '召唤' || kind === '军团')) {
+    if (!next.词条.includes(LONE_ENTRY)) next.词条 = [...next.词条, LONE_ENTRY];
+    notes.push(`【孤狼】${kind}卡带「${LONE_ENTRY}」印记——独自在场时效果翻倍`);
   }
 
   // 懒惰天才：生物卡

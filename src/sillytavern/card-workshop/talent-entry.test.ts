@@ -120,6 +120,7 @@ describe('TALENT_ENTRY_POOL（单一真源）', () => {
     '模块化',
     '倒影',
     '条件加成',
+    '独行',
   ];
   const ALL_CHANNELS: readonly TalentChannel[] = [
     'creation',

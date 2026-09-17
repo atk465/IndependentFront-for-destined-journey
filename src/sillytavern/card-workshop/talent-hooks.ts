@@ -17,6 +17,7 @@ export type RuleHookKind =
   | 'statMultiplier' // 全属性倍率（女王气场 +50%）
   | 'oncePerBattleNuke' // 每战一次大威力攻击（倒也可斩）
   | 'dailyNuke' // 每日一次极限一击（一拳超人系统）
+  | 'defeatExpMultiplier' // 战败经验倍率（败北强化）
   | 'victoryMaterial' // 胜利时额外素材掉落（素材之王）
   | 'defeatRewardMultiplier'; // 战败奖励倍率（世界线的收束点）
 
@@ -37,6 +38,7 @@ const RULE_HOOKS: Readonly<Record<string, RuleHook[]>> = {
   世界线的收束点: [{ kind: 'defeatRewardMultiplier', value: 1 }],
   倒也可斩: [{ kind: 'oncePerBattleNuke', value: 50 }],
   一拳超人系统: [{ kind: 'dailyNuke', value: 80 }],
+  败北强化: [{ kind: 'defeatExpMultiplier', value: 2 }],
 };
 
 /** 该天赋名是否登记了规则钩子（`hasWorkingMechanic` 的名字钩子路径用） */
@@ -82,6 +84,15 @@ export function hasDefeatReward(hooks: readonly RuleHook[]): boolean {
 /** 是否有每战一次的大招钩子（倒也可斩） */
 export function hasOncePerBattleNuke(hooks: readonly RuleHook[]): boolean {
   return hooks.some((h) => h.kind === 'oncePerBattleNuke');
+}
+
+/**
+ * 战败经验倍率（败北强化；只在 finished === '败北' 时由调用方取用）。
+ * 「受到的凌辱越强加成越多」由叙事演绎——机械侧给一个固定倍率档。
+ */
+export function defeatExpMultiplierOf(hooks: readonly RuleHook[]): number {
+  const v = hooks.find((h) => h.kind === 'defeatExpMultiplier')?.value;
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 1;
 }
 
 /**
