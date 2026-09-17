@@ -84,7 +84,18 @@ import {
   hasTitanPhysique,
   totalIntimidation,
 } from '@engine/card-workshop/talent-rule-modifiers';
-import { canUseToday, coerceLedger, tryUseToday } from '@engine/card-workshop/daily-ledger';
+import {
+  buffActiveToday,
+  canUseToday,
+  coerceBuffs,
+  coerceLedger,
+  tryUseToday,
+} from '@engine/card-workshop/daily-ledger';
+import {
+  COMBAT_CRIT_MULTIPLIER,
+  DAILY_BUFF_COMBAT_CRIT,
+  DAILY_BUFF_CRAFT_LUCK,
+} from '@engine/card-workshop/fortune-dice';
 import type { TalentEntry } from '@engine/card-workshop/talent-entry';
 import { planDefeatCompensation } from '@engine/card-workshop/defeat-compensation';
 import { planSelfEvolution } from '@engine/card-workshop/companion-growth';
@@ -2565,6 +2576,17 @@ export class GamePipeline {
       action = { ...action, power: Math.round(action.power * DAILY_NUKE_WEAKNESS) };
       prepend = [...(prepend ?? []), `▸ 出拳后的虚弱：行动值 ×${DAILY_NUKE_WEAKNESS}`];
     }
+    // 刀刀暴击（好运之骰的 8 点面）：当日战斗行动值 +25%。走 dailyBuffs，跨天自动失效。
+    if (
+      buffActiveToday(
+        coerceBuffs(this.game.saveProfile?.worldFlags?.dailyBuffs),
+        DAILY_BUFF_COMBAT_CRIT,
+        this.currentGameDay(),
+      )
+    ) {
+      action = { ...action, power: Math.round(action.power * COMBAT_CRIT_MULTIPLIER) };
+      prepend = [...(prepend ?? []), `▸ 刀刀暴击（今日）：行动值 ×${COMBAT_CRIT_MULTIPLIER}`];
+    }
     // 环境加成（天赋，如 SS「黑潮之子」）：域/场景卡建立了对应环境时，
     // 防御/闪避应对（= 敏捷与防御那一路）获得档位加成。环境随领域/场景卡存续。
     const envBonuses = envBonusesOf(playerC.talents?.list);
@@ -2916,6 +2938,12 @@ export class GamePipeline {
           worldBooks: this.chainData?.worldBooks,
           presets: this.chainData?.presets,
           talentBias,
+          // 制卡顺利（好运之骰的 5 点面）：当日制卡评级上浮一档。跨天自动失效。
+          fortuneCraftLuck: buffActiveToday(
+            coerceBuffs(this.game.saveProfile?.worldFlags?.dailyBuffs),
+            DAILY_BUFF_CRAFT_LUCK,
+            this.currentGameDay(),
+          ),
         } as any;
         // 禁忌仿卡配方（2026-09-17）：内容仓 cardPool 带 imitation 字段的条目
         const imitationRecipes = parseCatalogData(getContentRegistry().catalog).cardPool.filter(

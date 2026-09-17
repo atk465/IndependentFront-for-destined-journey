@@ -26,7 +26,7 @@ import {
   type FortuneMode,
 } from '@engine/card-workshop/fortune-draw';
 import { cardCatalogToItem, parseCatalogData } from '@engine/start-catalog';
-import { d100 } from '@engine/dice';
+import { d100, rollDie } from '@engine/dice';
 import { buildDemoCardsPatches, buildDemoDeckPatches } from '@engine/card-workshop/demo';
 import { toPlainCardAlbum } from '@engine/card-workshop/album';
 import { planDevour } from '@engine/card-workshop/card-devour';
@@ -54,12 +54,20 @@ import {
 import { entryStrength, hasEntryKind } from '@engine/card-workshop/talent-rule-modifiers';
 import { craftTierCeilingIndex } from '@engine/card-workshop/craft-rank';
 import {
+  coerceBuffs,
   coerceLedger,
+  markBuff,
   remainingToday,
   tryUseToday,
   type DailyLedger,
 } from '@engine/card-workshop/daily-ledger';
+import {
+  FORTUNE_DICE_LEDGER_KEY,
+  isRerollFace,
+  rollFortuneDie,
+} from '@engine/card-workshop/fortune-dice';
 import { planRarityUpgrade } from '@engine/card-workshop/material';
+import { materialNameOf } from '@engine/card-workshop/card-dismantle';
 import type { TalentEntry, TalentEntryKind } from '@engine/card-workshop/talent-entry';
 import { planCommissionDelivery } from '@engine/card-workshop/commission';
 import { getCommissionDefs } from '@engine/commission-runtime';
@@ -751,6 +759,168 @@ export const useGameStore = defineStore('game', () => {
   /**
    * 拆解（SSS「素材之王」非战斗侧）：物品 → 素材（材料）。
    */
+  /**
+   * 好运之骰（SS）：每天一次投十面骰。**十面全部 Code 兑现**（fortune-dice.ts），
+   * AI 只负责把结果写成一段像命运的话——抽奖是唯一的纯随机入口，结果必须可复算。
+   *
+   * 兑现分派：
+   *  - 即时发放：金钱 / 素材 / 卡（走祭坛同一条抽卡内核）/ 等级 / 好感
+   *  - 账本操作：「再来一次」退还今日次数（不写账本）
+   *  - 当日增益：写 worldFlags.dailyBuffs（跨天自动失效）
+   */
+  async function rollFortuneDice(): Promise<{
+    ok: boolean;
+    reason?: string;
+    pip?: number;
+    faceId?: string;
+    tone?: string;
+    text?: string;
+    summary?: string;
+  }> {
+    const playerChar = player.value;
+    if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
+    if (!hasMechanicGate('日掷')) {
+      return { ok: false, reason: '需要天赋【好运之骰】才能投骰' };
+    }
+    const today = currentGameDay();
+    const key = FORTUNE_DICE_LEDGER_KEY;
+    const perDay = strengthOf('日掷', 'perDay');
+    const gate = tryUseToday(dailyLedger(), key, today, perDay, key);
+    if (!gate.ok) return { ok: false, reason: gate.reason };
+
+    const face = rollFortuneDie(rollDie(10));
+    const patches: StatePatch[] = [];
+    const notes: string[] = [];
+    let summary = `【${face.id}】${face.text}`;
+
+    switch (face.reward.kind) {
+      case 'none':
+        break;
+      case 'money': {
+        const next = Math.max(0, Math.round(playerChar.money + face.reward.amount));
+        patches.push({
+          op: 'update_character',
+          target: `characters.${playerChar.name}`,
+          value: { money: next },
+        } as StatePatch);
+        notes.push(`金钱 ${face.reward.amount > 0 ? '+' : ''}${face.reward.amount} → ${next}`);
+        break;
+      }
+      case 'material': {
+        const name = materialNameOf(face.reward.rarity);
+        patches.push({
+          op: 'add_item',
+          target: `characters.${playerChar.name}`,
+          value: {
+            name,
+            quantity: face.reward.copies,
+            type: '材料',
+            rarity: face.reward.rarity,
+          } as unknown as Record<string, unknown>,
+        } as StatePatch);
+        notes.push(`${name} ×${face.reward.copies}`);
+        break;
+      }
+      case 'card': {
+        const pool = parseCatalogData(getContentRegistry().catalog).cardPool.filter(
+          (c) => !c.imitation,
+        );
+        const picked = drawFortuneCard(pool, face.reward.cardTier);
+        if (!picked) {
+          // 卡池为空（未装内容包）——不吞掉这次机会，按「谢谢惠顾」结算
+          summary = `【${face.id}】命运卡堆是空的（需安装内容包）——这一面暂时落空。`;
+          break;
+        }
+        const cardItem = cardCatalogToItem(picked);
+        patches.push({
+          op: 'add_item',
+          target: `characters.${playerChar.name}`,
+          value: cardItem as unknown as Record<string, unknown>,
+        } as StatePatch);
+        // 卡册收录（与祭坛同源：toPlainCardAlbum 净化 reactive proxy，防 DataCloneError）
+        const album = toPlainCardAlbum(
+          playerChar.cardAlbum ?? { owned: [], deck: [], capacity: 60 },
+        );
+        if (!album.owned.includes(cardItem.name)) {
+          patches.push({
+            op: 'update_character',
+            target: `characters.${playerChar.name}`,
+            value: {
+              cardAlbum: {
+                owned: [...album.owned, cardItem.name].slice(0, album.capacity),
+                deck: album.deck,
+                capacity: album.capacity,
+              },
+            },
+          } as StatePatch);
+        }
+        notes.push(`得卡【${cardItem.name}】（${cardItem.cardTier}）`);
+        break;
+      }
+      case 'level': {
+        patches.push({
+          op: 'update_character',
+          target: `characters.${playerChar.name}`,
+          value: { level: playerChar.level + face.reward.steps },
+        } as StatePatch);
+        notes.push(`等级 ${playerChar.level} → ${playerChar.level + face.reward.steps}`);
+        break;
+      }
+      case 'affection': {
+        const affections = (saveProfile.value?.affections ?? {}) as Record<string, number>;
+        const top = Object.entries(affections)
+          .filter(([, v]) => typeof v === 'number' && Number.isFinite(v))
+          .sort((a, b) => b[1] - a[1])[0];
+        if (!top) {
+          summary = `【${face.id}】你还没有任何羁绊可以更近一步——这一面落空。`;
+          break;
+        }
+        const next = Math.min(100, Math.round(top[1] + face.reward.amount));
+        patches.push({
+          op: 'set_variable',
+          target: `profile.affections.${top[0]}`,
+          value: next,
+        } as StatePatch);
+        notes.push(`与【${top[0]}】的好感 ${Math.round(top[1])} → ${next}`);
+        break;
+      }
+      case 'reroll':
+        // 退还今日次数：**不写账本**，等于这一掷没花掉机会
+        break;
+      case 'dailyBuff': {
+        const buffs = markBuff(
+          coerceBuffs(saveProfile.value?.worldFlags?.dailyBuffs),
+          face.reward.key,
+          today,
+        );
+        patches.push({
+          op: 'set_variable',
+          target: `worldFlags.dailyBuffs.${face.reward.key}`,
+          value: buffs[face.reward.key],
+        } as StatePatch);
+        notes.push(`${face.reward.label}（今日有效）`);
+        break;
+      }
+    }
+
+    // 账本：正常消耗一次；「再来一次」不消耗（退还今日机会）
+    if (!isRerollFace(face)) patches.push(dailyUsePatch(key, gate.next));
+    if (notes.length > 0) summary += `\n▸ ${notes.join('；')}`;
+
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState(patches);
+    if (!result.success) return { ok: false, reason: result.errors.join('; ') };
+    await refreshFromDb();
+    return {
+      ok: true,
+      pip: face.pip,
+      faceId: face.id,
+      tone: face.tone,
+      text: face.text,
+      summary,
+    };
+  }
+
   /**
    * 素材点金（S「素材点金」）：每天一次，指定一个素材提升一个品质大档。
    * 每日限次走账本（`worldFlags.dailyUses.素材点金`），第二天自然恢复。
@@ -2567,6 +2737,7 @@ export const useGameStore = defineStore('game', () => {
     contractCard,
     dismantleItem,
     upgradeMaterial,
+    rollFortuneDice,
     dailyRemaining,
     fuseCards,
     hasMechanicGate,

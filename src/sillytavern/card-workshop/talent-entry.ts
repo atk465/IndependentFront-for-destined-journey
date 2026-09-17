@@ -67,7 +67,8 @@ export type TalentEntryKind =
   | '位份' // 可册封位份与皇后（SSS「后宫三千」）
   | '克上' // 攻原生等级高于你的敌人时额外伤害（SS「下克上」）
   | '环境加成' // 特定环境（水下…）由领域/场景卡建立时，防御/闪避应对获得加成（SS「黑潮之子」）
-  | '点金'; // 每日可指定素材提升品质档数（S「素材点金」）
+  | '点金' // 每日可指定素材提升品质档数（S「素材点金」）
+  | '日掷'; // 每日可投一次骰（SS「好运之骰」；S「命运之骰」将来共用此种类）
 
 /** 骨架条目：kind + 预设参数 + 独占渠道标记 */
 export interface TalentEntry {
@@ -320,6 +321,7 @@ export const TALENT_ENTRY_POOL: readonly TalentEntry[] = [
   e({ kind: '克上', channel: 'universal', params: { vsHigherLevel: 30 } }),
   e({ kind: '环境加成', channel: 'universal', params: { env: '水下', percent: 30 } }),
   e({ kind: '点金', channel: 'universal', params: { tierGain: 1, perDay: 1 } }),
+  e({ kind: '日掷', channel: 'universal', params: { perDay: 1 } }),
   e({ kind: '改造', channel: 'story', params: {} }),
   // ── v10 扩容（伙伴卡生成通道，2026-09-17）──
   e({ kind: '捕获', channel: 'story', params: {} }),
@@ -414,6 +416,7 @@ const ENTRY_NUMERIC_TIERS: Partial<
   克上: { vsHigherLevel: [20, 30, 50] },
   环境加成: { percent: [20, 30, 40, 50] },
   点金: { tierGain: [1, 2], perDay: [1, 2] },
+  日掷: { perDay: [1, 2] },
 };
 
 /**
@@ -436,6 +439,7 @@ export const ENTRY_STRENGTH_BASELINE = {
   吞噬: { levelBonus: 1 },
   拆解: { levelBonus: 1 },
   点金: { tierGain: 1, perDay: 1 },
+  日掷: { perDay: 1 },
 } as const;
 
 /** 各种类的必填内容参数（非空字符串；keywords 为字符串数组） */
@@ -492,6 +496,7 @@ const ENTRY_KIND_LIST: readonly TalentEntryKind[] = [
   '克上',
   '环境加成',
   '点金',
+  '日掷',
 ];
 
 /**
@@ -1893,7 +1898,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '每天一次机会，投出一个十面骰子，随机从里面的奖项中获取一项：谢谢惠顾/福缘天降/再来一次/红鸾天喜/提升一级/刀刀暴击/制卡顺利/材料秘境/屠龙宝刀/杂鱼杂鱼。',
-    entries: [],
+    // 2026-09-17：十面全部 Code 兑现（fortune-dice.ts），AI 只负责把它写成一段话。
+    entries: [{ kind: '日掷', channel: 'universal', params: { perDay: 1 } }],
   },
   {
     name: '现代武装',
@@ -6964,6 +6970,7 @@ export const IMPLEMENTED_ENTRY_KINDS: ReadonlySet<TalentEntryKind> = new Set<Tal
   '克上',
   '环境加成',
   '点金',
+  '日掷',
   '战技附加',
 ]);
 

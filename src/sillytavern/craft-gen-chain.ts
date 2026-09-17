@@ -64,6 +64,8 @@ export interface CraftGenRequest {
   presets?: import('./types').AgentPreset[];
   /** 天赋生成倾向段（卡牌工坊 T-S2 路线图实装；无天赋缺省，注入零成本） */
   talentBias?: string;
+  /** 当日「制卡顺利」（好运之骰 5 点面）：产物评级整体上浮一档。缺省 = 不生效 */
+  fortuneCraftLuck?: boolean;
 }
 
 /** Helper: extract attributes from old or new marker shape */
@@ -593,12 +595,38 @@ export function buildCraftPatches(
  *   - narrative: 注入回 story output 的制作叙事
  *   - patches: 提交给 StateManager 的状态变更
  */
+/**
+ * 制作评级上浮一档（纯函数）：大失败 → 失败 → 成功 → 精益求精（封顶）。
+ * 与 `card-fusion.rollCraftRating` 同一套评级枚举，不引入第二套档位。
+ */
+export function liftCraftRating(rating: CraftRating): CraftRating {
+  const order: readonly CraftRating[] = ['大失败', '失败', '成功', '精益求精'];
+  const idx = order.indexOf(rating);
+  if (idx < 0 || idx >= order.length - 1) return rating;
+  return order[idx + 1];
+}
+
 export async function runCraftGenChain(
   request: CraftGenRequest,
   deps: CraftGenDeps,
 ): Promise<CraftGenChainResult> {
   // Step 1: callCraftGenAgent
   const craftOutput = await callCraftGenAgent(request, deps);
+
+  // 好运之骰「制卡顺利」（5 点面）：产物评级整体上浮一档。
+  // 在**评级产生之后、落库之前**改，且写进制作叙事让玩家看到天赋真的生效。
+  if (request.fortuneCraftLuck) {
+    const lifted = liftCraftRating(craftOutput.rating);
+    if (lifted !== craftOutput.rating) {
+      craftOutput.rating = lifted;
+      craftOutput.narrative = [
+        craftOutput.narrative,
+        `【制卡顺利】今日手气极佳——评级上浮一档至「${lifted}」`,
+      ]
+        .filter(Boolean)
+        .join('\n');
+    }
+  }
 
   // Step 2: callItemGenForCraft
   // S4d（2026-08-01 失败品链路）：成功/失败都发 item_gen——

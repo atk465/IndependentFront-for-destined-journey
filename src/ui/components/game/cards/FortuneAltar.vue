@@ -15,6 +15,31 @@ import AppButton from '../../shared/AppButton.vue';
 
 const game = useGameStore();
 
+// ═══ 好运之骰（SS 天赋；十面全部 Code 兑现，见 fortune-dice.ts）═══
+const canRollDice = computed(() => game.hasMechanicGate('日掷'));
+const diceLeft = computed(() => (canRollDice.value ? game.dailyRemaining('好运之骰', 1) : 0));
+const diceBusy = ref(false);
+const diceError = ref('');
+const diceResult = ref<{ pip: number; faceId: string; tone: string; summary: string } | null>(null);
+
+async function rollDice() {
+  if (diceBusy.value || diceLeft.value <= 0) return;
+  diceBusy.value = true;
+  diceError.value = '';
+  const r = await game.rollFortuneDice();
+  diceBusy.value = false;
+  if (!r.ok) {
+    diceError.value = r.reason ?? '投骰失败';
+    return;
+  }
+  diceResult.value = {
+    pip: r.pip ?? 0,
+    faceId: r.faceId ?? '',
+    tone: r.tone ?? '平',
+    summary: r.summary ?? '',
+  };
+}
+
 const mode = ref<FortuneMode>('coin');
 const rolling = ref(false);
 const rollDisplay = ref<number | null>(null);
@@ -131,6 +156,28 @@ async function draw() {
     </div>
 
     <p v-if="error" class="altar-error" role="alert">{{ error }}</p>
+
+    <!-- 好运之骰（SS）：每日一次的十面骰，十面全部 Code 兑现 -->
+    <section v-if="canRollDice" class="altar-dice" aria-label="好运之骰">
+      <h4 class="d-label">好运之骰（天赋：好运之骰）</h4>
+      <p class="altar-verse small">
+        每天一次投十面骰——十面各有各的兑现，底石说完就作数。<b>今日剩余 {{ diceLeft }} 次</b>。
+      </p>
+      <div v-if="diceResult" class="dice-result" :data-tone="diceResult.tone">
+        <span class="dice-pip">{{ diceResult.pip }}</span>
+        <span class="dice-face">{{ diceResult.faceId }}（{{ diceResult.tone }}）</span>
+        <p class="dice-summary">{{ diceResult.summary }}</p>
+      </div>
+      <p v-if="diceError" class="altar-error" role="alert">{{ diceError }}</p>
+      <AppButton
+        variant="primary"
+        :disabled="diceLeft <= 0 || diceBusy"
+        :loading="diceBusy"
+        @click="rollDice"
+      >
+        {{ diceLeft > 0 ? '投十面骰' : '今日已投过' }}
+      </AppButton>
+    </section>
 
     <AppButton variant="primary" :disabled="!canAfford || drawing" :loading="drawing" @click="draw">
       {{

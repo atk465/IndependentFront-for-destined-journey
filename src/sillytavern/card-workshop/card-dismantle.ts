@@ -50,7 +50,8 @@ export interface DismantleValidation {
 }
 
 /** 材料名：按品质给通用素材名（内容侧可再命名） */
-function materialNameOf(rarity: Rarity): string {
+/** 素材命名（拆解与好运之骰的「材料秘境」共用同一口径，避免两套名字） */
+export function materialNameOf(rarity: Rarity): string {
   return `${rarity}素材残片`;
 }
 

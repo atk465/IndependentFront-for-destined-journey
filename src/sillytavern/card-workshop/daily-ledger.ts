@@ -80,6 +80,41 @@ export function markUsed(ledger: DailyLedger | undefined, key: string, today: nu
   return { ...base, [key]: { day, used } };
 }
 
+// ════════════════════════════════════════════════════════════════════
+// 当日增益（worldFlags.dailyBuffs.<key> = gameDay）
+// ════════════════════════════════════════════════════════════════════
+//
+// 与账本同一格思路：存 day 而不是布尔开关，**跨天自动失效**，不需要重置逻辑。
+// 消费者：好运之骰的「刀刀暴击」（战斗）/「制卡顺利」（制卡）。
+
+/** 当日增益表：key → 生效的那个 gameDay */
+export type DailyBuffs = Record<string, number>;
+
+/** 宽松读入 → 归一化增益表（脏值逐条丢弃，绝不抛） */
+export function coerceBuffs(raw: unknown): DailyBuffs {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const out: DailyBuffs = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!key || 非法(value)) continue;
+    out[key] = Math.floor(value as number);
+  }
+  return out;
+}
+
+/** 该当日增益此刻是否生效（只在登记的当天生效） */
+export function buffActiveToday(
+  buffs: DailyBuffs | undefined,
+  key: string,
+  today: number,
+): boolean {
+  return buffs?.[key] === Math.floor(today);
+}
+
+/** 登记一条当日增益（返回新表，不改入参） */
+export function markBuff(buffs: DailyBuffs | undefined, key: string, today: number): DailyBuffs {
+  return { ...(buffs ?? {}), [key]: Math.floor(today) };
+}
+
 /**
  * 判断 + 记账一步到位（调用方最常用的形态）。
  *
