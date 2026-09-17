@@ -88,7 +88,8 @@ export type TalentEntryKind =
   | '炼金' // 伙伴卡踩踏素材炼出全新道具卡（S「足之炼金术」）
   | '真名' // 可念出对方真名造成一次精神冲击（S「真名看破系统」）
   | '模块化' // 载具卡有额外改装槽，战斗中可热插拔换形态（S「模块化天才」）
-  | '倒影'; // 战败可复制敌方招式作制卡蓝本（S「支配者倒影」）
+  | '倒影' // 战败可复制敌方招式作制卡蓝本（S「支配者倒影」）
+  | '条件加成'; // 条件成立（如卡组无伙伴卡）时获得数值加成（A「荒野镖客」等）
 
 /** 骨架条目：kind + 预设参数 + 独占渠道标记 */
 export interface TalentEntry {
@@ -135,7 +136,7 @@ export interface TalentEntry {
     backlash?: number;
     /** 捕获：可捕获的等级差上限（基准 +1） */
     levelBonus?: number;
-    /** 熔炼·缔约 / 结缘：好感阈值（基准 70 / 90） */
+    /** 熔炼·缔约 / 结缘：好感阈值（基准 70 / 90）；条件加成：触发阈值（达到即触发） */
     threshold?: number;
     /** 熔炼·融合 / 越阶：品阶提升档数（基准 1） */
     tierGain?: number;
@@ -193,6 +194,10 @@ export interface TalentEntry {
     swaps?: number;
     /** 炼金：可炼出的最高卡档（0 = 不限） */
     maxTier?: number;
+    /** 条件加成：条件名（内容参数，见 COND_RULES） */
+    cond?: string;
+    /** 条件加成：阈值之上每个的追加 %（触发阈值复用 threshold，语义同为「达到」） */
+    perExtra?: number;
   };
 }
 
@@ -414,6 +419,16 @@ export const TALENT_ENTRY_POOL: readonly TalentEntry[] = [
   e({ kind: '真名', channel: 'universal', params: { shockBase: 20, shockPerLevel: 2 } }),
   e({ kind: '模块化', channel: 'universal', params: { slots: 2, swaps: 1 } }),
   e({ kind: '倒影', channel: 'universal', params: { maxHold: 5 } }),
+  e({
+    kind: '条件加成',
+    channel: 'universal',
+    params: { cond: '无伙伴卡', threshold: 0, percent: 25, perExtra: 0 },
+  }),
+  e({
+    kind: '条件加成',
+    channel: 'universal',
+    params: { cond: '伙伴卡数', threshold: 0, percent: 0, perExtra: 5 },
+  }),
   e({ kind: '改造', channel: 'story', params: {} }),
   // ── v10 扩容（伙伴卡生成通道，2026-09-17）──
   e({ kind: '捕获', channel: 'story', params: {} }),
@@ -529,6 +544,7 @@ const ENTRY_NUMERIC_TIERS: Partial<
   真名: { shockBase: [10, 20], shockPerLevel: [2, 3] },
   模块化: { slots: [1, 2], swaps: [1] },
   倒影: { maxHold: [3, 5, 9] },
+  条件加成: { threshold: [0, 3, 4], percent: [0, 10, 15, 20, 25], perExtra: [0, 2, 5] },
 };
 
 /**
@@ -572,6 +588,7 @@ export const ENTRY_STRENGTH_BASELINE = {
   真名: { shockBase: 20, shockPerLevel: 2 },
   模块化: { slots: 2, swaps: 1 },
   倒影: { maxHold: 5 },
+  条件加成: { threshold: 0, percent: 25, perExtra: 0 },
 } as const;
 
 /** 各种类的必填内容参数（非空字符串；keywords 为字符串数组） */
@@ -582,6 +599,7 @@ const ENTRY_REQUIRED_STRINGS: Partial<Record<TalentEntryKind, readonly string[]>
   配方解锁: ['recipe'],
   战技附加: ['status'],
   环境加成: ['env'],
+  条件加成: ['cond'],
   自身状态: ['status'],
 };
 
@@ -650,6 +668,7 @@ const ENTRY_KIND_LIST: readonly TalentEntryKind[] = [
   '真名',
   '模块化',
   '倒影',
+  '条件加成',
 ];
 
 /**
@@ -691,6 +710,7 @@ const ENTRY_OPTIONAL_NUMERIC: Partial<Record<TalentEntryKind, readonly string[]>
   真名: ['shockBase', 'shockPerLevel'],
   模块化: ['slots', 'swaps'],
   倒影: ['maxHold'],
+  条件加成: ['threshold', 'percent', 'perExtra'],
 };
 
 export function validateTalentEntries(entries: readonly TalentEntry[]): {
@@ -3042,7 +3062,15 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '孤狼的浪漫。在没有【伙伴卡】出战的单人状态下，你的所有基础属性提升25%，暴击率提升15%。',
-    entries: [],
+    // 2026-09-17 A 级批次③：反向条件——卡组里**没有伙伴卡**时全属性 +25%。
+    // 描述里的「暴击率 +15%」在引擎里落不了地（拍制没有暴击维度），已记入 backlog。
+    entries: [
+      {
+        kind: '条件加成',
+        channel: 'universal',
+        params: { cond: '无伙伴卡', threshold: 0, percent: 25, perExtra: 0 },
+      },
+    ],
   },
   {
     name: '西部骑乘位',
@@ -3505,7 +3533,15 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你拥有的母狗单位超过3个时，激活犬舍光环，所有母狗单位的全属性提升10%。每多拥有一个，额外提升2%。',
-    entries: [],
+    // 2026-09-17 A 级批次③：某类单位达到 4 个（= 描述里的「超过 3 个」）→ 全属性 +10%，
+    // 每多一个 +2%。「母狗单位」按词条/卡名含「犬」近似（引擎分不出物种语义）。
+    entries: [
+      {
+        kind: '条件加成',
+        channel: 'universal',
+        params: { cond: '犬类卡数', threshold: 4, percent: 10, perExtra: 2 },
+      },
+    ],
   },
   {
     name: '贡金契约',
@@ -3895,7 +3931,15 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'A' as TalentGrade,
     source: 'universal',
     description: '你场上的伙伴卡数量越多，所有伙伴卡的攻击力越高（每多一张+5%）。',
-    entries: [],
+    // 2026-09-17 A 级批次③：伙伴卡越多，在场助战越强（每张 +5%）。
+    // 落点在**召唤/军团卡的在场 buff 数值**上（见 game-pipeline 的伙伴攻击加成）。
+    entries: [
+      {
+        kind: '条件加成',
+        channel: 'universal',
+        params: { cond: '伙伴卡数', threshold: 0, percent: 0, perExtra: 5 },
+      },
+    ],
   },
   {
     name: '悖论制造者',
@@ -7277,6 +7321,7 @@ export const IMPLEMENTED_ENTRY_KINDS: ReadonlySet<TalentEntryKind> = new Set<Tal
   '真名',
   '模块化',
   '倒影',
+  '条件加成',
   '战技附加',
 ]);
 

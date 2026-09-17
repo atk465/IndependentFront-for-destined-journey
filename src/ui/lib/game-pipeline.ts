@@ -89,6 +89,7 @@ import {
   selfStatusesOf,
   totalSelfStatus,
 } from '@engine/card-workshop/self-status';
+import { totalCondBonus } from '@engine/card-workshop/conditional-bonus';
 import {
   coerceTwinBonds,
   duelBlocksCard,
@@ -2605,10 +2606,20 @@ export class GamePipeline {
     }
     // 规则钩子（名字表）：全属性倍率（女王领域 +50%）——此前 getter 写好了没人调
     const startHooks = collectRuleHooks(playerC.talents?.list);
+    // 条件数值（A 级批次③：荒野镖客 / 战争之王 / 集群母狗）：条件成立才乘。
+    // 与「女王领域」的全属性倍率并进同一条乘法链——都是 statMultiplier 的语义。
+    const condBonus = totalCondBonus(
+      playerC.talents?.list,
+      playerC.cardAlbum?.deck,
+      playerC.inventory,
+    );
     const stats = applyStatMultiplier(
       deriveBaseCombatStats({ attributes: playerC.attributes, level: playerC.level }),
-      statMultiplierOf(startHooks),
+      statMultiplierOf(startHooks) * (1 + condBonus.percent / 100),
     );
+    for (const note of condBonus.notes) {
+      this.emitMessage(`▸ ${note}`, 'assistant');
+    }
     // deck 战斗化（2026-09-17）：卡组战力 → 开战防护加成 + 敌情评估参考
     const deckNames = playerC.cardAlbum?.deck ?? [];
     const deck = deckPower(deckNames, (n) => {
@@ -2911,8 +2922,36 @@ export class GamePipeline {
       // 在场效果 + 战技附加（2026-09-17）：一张卡可以同时带基础效果与战技，
       // 故这里统一用 planEffects 归一成数组（零条 = 无激活）。
       {
+        // 条件加成（A 级批次③）：这里要重算一次——它在另一条方法里，作用域不通用。
+        // 只用到「伙伴卡数」这一条件（战争之王），代价是一次卡组扫描。
+        const deckCond = totalCondBonus(
+          playerC.talents?.list,
+          playerC.cardAlbum?.deck,
+          playerC.inventory,
+        );
         const fx = planEffects(plan);
-        activate = fx.length === 0 ? undefined : fx.length === 1 ? fx[0] : fx;
+        // 战争之王（A 级批次③）：伙伴卡越多，在场助战越强。
+        // 只放大**召唤/军团卡带来的 buff**——那正是「伙伴卡的攻击力」在拍制里的形态。
+        const kindForBonus = cardKindOf(card.词条);
+        const isCompanion = kindForBonus === '召唤' || kindForBonus === '军团';
+        const boostedFx = isCompanion
+          ? fx.map((e) =>
+              e.type === 'buff'
+                ? { ...e, amount: Math.round(e.amount * (1 + deckCond.percent / 100)) }
+                : e,
+            )
+          : fx;
+        if (isCompanion && deckCond.percent > 0) {
+          prepend = [
+            ...(prepend ?? []),
+            `▸ 【条件加成】伙伴 ${deckCond.evals.find((x) => x.met)?.count ?? 0} 张 → 助战 ×${(
+              1 +
+              deckCond.percent / 100
+            ).toFixed(2)}`,
+          ];
+        }
+        activate =
+          boostedFx.length === 0 ? undefined : boostedFx.length === 1 ? boostedFx[0] : boostedFx;
       }
       // 好感共鸣（主人裁定：伙伴卡接入好感度）——打出召唤/军团卡时，同名角色的好感
       // 等级决定威力与在场效果乘区（好感高伙伴卖力；反感以下消极怠工 ×0.8）。
