@@ -90,6 +90,14 @@ import {
   totalSelfStatus,
 } from '@engine/card-workshop/self-status';
 import {
+  coerceTwinBonds,
+  duelBlocksCard,
+  isLazyCard,
+  resolveLazyCard,
+  resolveTwinCombo,
+} from '@engine/card-workshop/battle-rules';
+import { coerceSpirits } from '@engine/card-workshop/behind-spirits';
+import {
   buffActiveToday,
   canUseToday,
   coerceBuffs,
@@ -2257,6 +2265,11 @@ export class GamePipeline {
     return Math.floor(toEpochMinutes(gt) / MINUTES_PER_GAME_DAY);
   }
 
+  /** d100 —— 懒惰摸鱼判定等百分位骰（同一条「骰值调用方供给」铁律） */
+  private rollD100(): number {
+    return 1 + Math.floor(Math.random() * 100);
+  }
+
   /** d20 —— 骰值调用方供给（内核零随机）。MVP 用真随机；接 v3 骰带回放体系为后续工作 */
   private rollD20(): number {
     return 1 + Math.floor(Math.random() * 20);
@@ -2283,7 +2296,82 @@ export class GamePipeline {
       counter: (choice) => this.submitSkirmishCounter(choice),
       nuke: () => this.skirmishNuke(),
       flee: (endReason) => this.fleeSkirmishEncounter(endReason),
+      duel: () => this.declareDuel(),
+      sacrifice: () => this.sacrificeSummon(),
     });
+  }
+
+  /**
+   * 宣战决斗（S「西部决斗礼仪」）：本场禁用伙伴卡，并隔离外部的持续伤害与治疗。
+   * 一次性动作——宣战后不可撤回（描述里就是「强制」）。
+   */
+  private async declareDuel(): Promise<void> {
+    const session = this.game.skirmishSession;
+    const playerC = this.game.player;
+    if (!session || session.finished !== null || !playerC) return;
+    if (session.duel) {
+      this.emitMessage('【决斗】已经在决斗中了。', 'assistant');
+      return;
+    }
+    const has = (playerC.talents?.list ?? []).some((t) =>
+      (t.entries ?? []).some((e) => e.kind === '决斗'),
+    );
+    if (!has) {
+      this.emitMessage('【决斗】需要持有对应天赋。', 'assistant');
+      return;
+    }
+    const noCompanion = entryStrength(playerC.talents?.list, '决斗', 'noCompanion') > 0;
+    this.game.setSkirmishSession({
+      ...session,
+      duel: { noCompanion },
+      log: [
+        ...session.log,
+        '▸ 【西部决斗礼仪】你摘下帽子，把战场划成一个圈——1v1，不容第三人插手' +
+          '（伙伴卡不上场；一切外部伤害与治疗被隔离）',
+      ],
+    });
+    this.emitMessage('▸ 【决斗】已宣战：伙伴卡不上场，外部的持续伤害与治疗被隔离。', 'assistant');
+  }
+
+  /**
+   * 献祭召唤（S「召唤媒介系统」）：献祭当前 HP 的一部分，召唤异世界存在助战数拍。
+   * 代价即时付出（HP），收益是数拍的行动值加成——「不受完全控制」由叙事承担。
+   */
+  private async sacrificeSummon(): Promise<void> {
+    const session = this.game.skirmishSession;
+    const playerC = this.game.player;
+    if (!session || session.finished !== null || !playerC) return;
+    const has = (playerC.talents?.list ?? []).some((t) =>
+      (t.entries ?? []).some((e) => e.kind === '献祭'),
+    );
+    if (!has) {
+      this.emitMessage('【献祭召唤】需要持有对应天赋。', 'assistant');
+      return;
+    }
+    const hpPct = entryStrength(playerC.talents?.list, '献祭', 'hpPct');
+    const beats = entryStrength(playerC.talents?.list, '献祭', 'beats');
+    const mult = entryStrength(playerC.talents?.list, '献祭', 'critMult');
+    const cost = Math.max(1, Math.round((session.playerHp * hpPct) / 100));
+    if (session.playerHp - cost <= 0) {
+      this.emitMessage('【献祭召唤】血不够——再献就死了。', 'assistant');
+      return;
+    }
+    const amount = Math.max(1, Math.round(cost * mult));
+    const next = playBeat(session, { label: '献祭召唤', power: 0, tags: [] }, 1, {
+      prepend: [
+        `▸ 【献祭召唤】割开掌心，献出 ${cost} HP——圈外传来回应（此后 ${beats} 拍行动值 +${amount}）`,
+      ],
+      recoil: cost,
+      activate: {
+        name: '异界召唤物',
+        type: 'buff',
+        amount,
+        beatsLeft: beats,
+      },
+    });
+    this.game.setSkirmishSession(next);
+    this.emitMessage(next.log.slice(session.log.length).join('\n'), 'assistant');
+    if (next.finished) await this.settleAndNarrate(next);
   }
 
   /** 开战：敌情评估预提交整场意图 → 会话入账 → 战报开场注入正文流。
@@ -2314,7 +2402,19 @@ export class GamePipeline {
       const found = playerC.inventory.find((i) => i.name === n);
       return found?.type === '卡牌' ? (found as CardItem) : undefined;
     });
-    const deckGuard = stats.guard + deckGuardBonus(deck);
+    // 身后灵（S「瓦尔哈拉的门票」）：每一枚永久守护按条目档位加防御
+    const spirits = coerceSpirits(this.game.saveProfile?.worldFlags?.behindSpirits);
+    const spiritGuard =
+      spirits.length > 0
+        ? spirits.length * entryStrength(playerC.talents?.list, '成灵', 'guardPerSpirit')
+        : 0;
+    if (spiritGuard > 0) {
+      this.emitMessage(
+        `▸ 【身后灵】${spirits.length} 位旧友在你身后——防御 +${spiritGuard}`,
+        'assistant',
+      );
+    }
+    const deckGuard = stats.guard + deckGuardBonus(deck) + spiritGuard;
     if (deck > 0) {
       this.emitMessage(`【卡组整备】战力 ${deck}，防护 +${deckGuardBonus(deck)}`, 'assistant');
     }
@@ -2488,6 +2588,8 @@ export class GamePipeline {
     let recoil: number | undefined;
     let sealBroke: string | undefined;
     let contract: SkirmishContract | undefined;
+    /** 本拍触发组合技后要落账的卡名（双生羁绊每对每场一次） */
+    let comboFired: string[] | undefined;
     /** 终章（SSS「第六终章」）：持天赋则第 N 拍起自动抹除敌方。
      *  N = 条目 `终章{beats}` 的强度档（缺省基准 6 拍）——档位让更弱的天赋也能共用这条机制。 */
     const finalChapter = (playerC.talents?.list ?? []).some((t) =>
@@ -2526,6 +2628,12 @@ export class GamePipeline {
       const card = found?.type === '卡牌' ? (found as CardItem) : undefined;
       if (!card) {
         this.emitMessage(`【交锋】卡里没有【${choice.name}】。`, 'assistant');
+        return;
+      }
+      // 决斗：伙伴卡（召唤/军团）不上场——判定要用真卡的词条
+      const duelBlocked = duelBlocksCard(card, session.duel);
+      if (duelBlocked.blocked) {
+        this.emitMessage(duelBlocked.reason ?? '决斗中这张卡不能上场。', 'assistant');
         return;
       }
       // 封印卡：这一拍的行动就是启封判定（阶段 2 内核分级：启封/哑火/暴走/反噬）
@@ -2677,14 +2785,51 @@ export class GamePipeline {
         `▸ 下克上：敌方 Lv${session.enemyLevel} 高于你 Lv${playerC.level} → 行动值 +${vsHigh}%`,
       ];
     }
+    // 懒惰天才（S）：带回「懒惰」印记的生物卡按概率摸鱼跳过行动，行动则暴击翻倍。
+    if (choice.kind === '卡') {
+      const playedCard = playerC.inventory.find((i) => i.name === choice.name);
+      const asCard = playedCard?.type === '卡牌' ? (playedCard as CardItem) : undefined;
+      if (asCard && isLazyCard(asCard)) {
+        const outcome = resolveLazyCard(asCard, action.power, this.rollD100(), {
+          skipPct: entryStrength(playerC.talents?.list, '惰性', 'skipPct'),
+          critMult: entryStrength(playerC.talents?.list, '惰性', 'critMult'),
+        });
+        if (outcome.kind !== '正常') {
+          action = { ...action, power: outcome.power };
+          prepend = [...(prepend ?? []), `▸ ${outcome.note}`];
+        }
+      }
+      // 双生羁绊（S）：双生本场已打出过 → 组合技（每对每场一次）
+      if (asCard) {
+        const bonds = coerceTwinBonds(this.game.saveProfile?.worldFlags?.twinBonds);
+        const combo = resolveTwinCombo({
+          card: asCard,
+          bonds,
+          playedCards: session.playedCards,
+          alreadyFired: (session.comboFired ?? []).includes(asCard.name),
+          comboMult: entryStrength(playerC.talents?.list, '羁绊', 'comboMult'),
+        });
+        if (combo.fired) {
+          action = { ...action, power: Math.round(action.power * combo.power) };
+          prepend = [...(prepend ?? []), `▸ ${combo.note}`];
+          comboFired = [...(comboFired ?? []), asCard.name];
+        }
+      }
+    }
     // 免死（绞刑架幸存者）：持天赋且本场没用过 → 允许本拍锁血续战
     const lastStand = this.lastStandOption(playerC, session);
     const next = playBeat(
       session,
       action,
       this.rollSkirmishD20(),
-      prepend || activate || finalChapter || lastStand
-        ? { activate, prepend, ...chapterOpts, ...(lastStand ? { lastStand } : {}) }
+      prepend || activate || finalChapter || lastStand || comboFired
+        ? {
+            activate,
+            prepend,
+            ...chapterOpts,
+            ...(lastStand ? { lastStand } : {}),
+            ...(comboFired ? { comboFired } : {}),
+          }
         : undefined,
     );
     this.game.setSkirmishSession(next);

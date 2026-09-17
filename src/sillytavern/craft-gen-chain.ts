@@ -47,6 +47,8 @@ import { tagInner, tagBlock, parseAttrsStr } from './agent-xml';
 import { matchImitation } from './start-catalog-mechanics';
 import { applyCraftTalentBonus, isDesireDominant } from './card-workshop/craft-talent-bonus';
 import { entryStrength, totalCopies } from './card-workshop/talent-rule-modifiers';
+import { LAZY_ENTRY } from './card-workshop/battle-rules';
+import { cardKindOf } from './card-workshop/card-kind';
 import { cardCatalogToItem } from './start-catalog-mechanics';
 import { extractJsonPayload } from './model-json';
 
@@ -700,6 +702,17 @@ export async function runCraftGenChain(
         desireDominant,
       });
       cardProduct = boosted;
+      // 懒惰天才（S）：产出的**生物卡**（召唤/军团）带「懒惰」印记——
+      // 拍内 50% 摸鱼跳过行动、否则行动值翻倍（见 battle-rules.resolveLazyCard）。
+      if (has('惰性') && cardProduct) {
+        const kind = cardKindOf(cardProduct.词条 ?? []);
+        if (kind === '召唤' || kind === '军团') {
+          if (!(cardProduct.词条 ?? []).includes(LAZY_ENTRY)) {
+            cardProduct = { ...cardProduct, 词条: [...(cardProduct.词条 ?? []), LAZY_ENTRY] };
+          }
+          notes.push(`【懒惰天才】${kind}卡带「${LAZY_ENTRY}」印记——可能摸鱼，但动手就是暴击`);
+        }
+      }
       // 产出数量（2026-09-17）：持「丰饶祝福」这类条目者，每次制作额外产出 n 份
       const copies = totalCopies(talentEntries);
       if (copies > 0) {

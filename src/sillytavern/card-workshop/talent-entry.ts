@@ -74,7 +74,12 @@ export type TalentEntryKind =
   | '抽奖' // 每日 N 连抽，保底不低于自身等级（S「素材十连系统」）
   | '免死' // HP 归零时锁血续战（S「绞刑架幸存者」）
   | '复生' // 败北结算时复苏，不真正死亡（S「再生」）
-  | '自身状态'; // 开战即生效的玩家侧被动（S「蛇符咒」隐身 / S「贝蒙斯坦」吸魔）
+  | '自身状态' // 开战即生效的玩家侧被动（S「蛇符咒」隐身 / S「贝蒙斯坦」吸魔）
+  | '惰性' // 产出的生物卡懒惰：可能摸鱼跳过行动，但行动就暴击/翻倍（S「懒惰天才」）
+  | '羁绊' // 可指定两张伙伴卡建立双生羁绊，并肩时有组合技（S「双生羁绊」）
+  | '成灵' // 可把伙伴卡化为身后灵，永久守护（S「瓦尔哈拉的门票」）
+  | '献祭' // 可献祭自身 HP 召唤存在为你作战（S「召唤媒介系统」）
+  | '决斗'; // 可强制 1v1：禁用伙伴卡、免疫外部伤害与治疗（S「西部决斗礼仪」）
 
 /** 骨架条目：kind + 预设参数 + 独占渠道标记 */
 export interface TalentEntry {
@@ -147,6 +152,18 @@ export interface TalentEntry {
     mpRefill?: number;
     /** 免死：每场可用次数（0 = 不限） */
     perBattle?: number;
+    /** 惰性：摸鱼概率（%） */
+    skipPct?: number;
+    /** 惰性 / 献祭：行动值倍率（不摸鱼时 / 召唤物助战时） */
+    critMult?: number;
+    /** 双生羁绊：组合技的行动值倍率 */
+    comboMult?: number;
+    /** 身后灵：每一枚身后灵提供的防御加成 */
+    guardPerSpirit?: number;
+    /** 献祭召唤：献祭当前 HP 的百分比 */
+    hpPct?: number;
+    /** 决斗：是否禁用在场伙伴卡（1/0） */
+    noCompanion?: number;
   };
 }
 
@@ -350,6 +367,11 @@ export const TALENT_ENTRY_POOL: readonly TalentEntry[] = [
   e({ kind: '复生', channel: 'universal', params: { hpFloor: 1 } }),
   e({ kind: '自身状态', channel: 'universal', params: { status: '隐身', power: 30 } }),
   e({ kind: '自身状态', channel: 'universal', params: { status: '吸魔', power: 30 } }),
+  e({ kind: '惰性', channel: 'universal', params: { skipPct: 50, critMult: 2 } }),
+  e({ kind: '羁绊', channel: 'universal', params: { comboMult: 2 } }),
+  e({ kind: '成灵', channel: 'universal', params: { guardPerSpirit: 3 } }),
+  e({ kind: '献祭', channel: 'universal', params: { hpPct: 30, beats: 3, critMult: 2 } }),
+  e({ kind: '决斗', channel: 'universal', params: { noCompanion: 1 } }),
   e({ kind: '改造', channel: 'story', params: {} }),
   // ── v10 扩容（伙伴卡生成通道，2026-09-17）──
   e({ kind: '捕获', channel: 'story', params: {} }),
@@ -451,6 +473,11 @@ const ENTRY_NUMERIC_TIERS: Partial<
   免死: { hpFloor: [1, 2], mpRefill: [0, 1], perBattle: [1] },
   复生: { hpFloor: [1, 2] },
   自身状态: { power: [10, 20, 30, 40, 50] },
+  惰性: { skipPct: [50], critMult: [2] },
+  羁绊: { comboMult: [2] },
+  成灵: { guardPerSpirit: [3] },
+  献祭: { hpPct: [20, 30, 40], beats: [2, 3], critMult: [2] },
+  决斗: { noCompanion: [0, 1] },
 };
 
 /**
@@ -480,6 +507,11 @@ export const ENTRY_STRENGTH_BASELINE = {
   免死: { hpFloor: 1, mpRefill: 1, perBattle: 1 },
   复生: { hpFloor: 1 },
   自身状态: { power: 30 },
+  惰性: { skipPct: 50, critMult: 2 },
+  羁绊: { comboMult: 2 },
+  成灵: { guardPerSpirit: 3 },
+  献祭: { hpPct: 30, beats: 3, critMult: 2 },
+  决斗: { noCompanion: 1 },
 } as const;
 
 /** 各种类的必填内容参数（非空字符串；keywords 为字符串数组） */
@@ -544,6 +576,11 @@ const ENTRY_KIND_LIST: readonly TalentEntryKind[] = [
   '免死',
   '复生',
   '自身状态',
+  '惰性',
+  '羁绊',
+  '成灵',
+  '献祭',
+  '决斗',
 ];
 
 /**
@@ -571,6 +608,11 @@ const ENTRY_OPTIONAL_NUMERIC: Partial<Record<TalentEntryKind, readonly string[]>
   免死: ['hpFloor', 'mpRefill', 'perBattle'],
   复生: ['hpFloor'],
   自身状态: ['power'],
+  惰性: ['skipPct', 'critMult'],
+  羁绊: ['comboMult'],
+  成灵: ['guardPerSpirit'],
+  献祭: ['hpPct', 'beats', 'critMult'],
+  决斗: ['noCompanion'],
 };
 
 export function validateTalentEntries(entries: readonly TalentEntry[]): {
@@ -2028,7 +2070,9 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '可以强制任何目标与你进行1v1对决。在此期间，双方均无法使用【伙伴卡】，且免疫一切外部伤害与治疗。',
-    entries: [],
+    // 2026-09-17：可宣战进入决斗——禁用伙伴卡（召唤/军团不在场），
+    // 并抑制场地持续伤害与治疗（「免疫一切外部伤害与治疗」）。
+    entries: [{ kind: '决斗', channel: 'universal', params: { noCompanion: 1 } }],
   },
   {
     name: '雌雄双煞',
@@ -2052,7 +2096,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '当你的女性伙伴卡战死时，她的灵魂不会消散，而是化作半透明的女武神幽灵永远绑定在你的身体，成为身后灵。',
-    entries: [],
+    // 2026-09-17：可把伙伴卡化为「身后灵」——卡退场，换一枚永久守护（每枚 +防御）。
+    entries: [{ kind: '成灵', channel: 'universal', params: { guardPerSpirit: 3 } }],
   },
   {
     name: '吞噬之口',
@@ -2178,7 +2223,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '制作的生物卡牌拥有极高的面板属性，但极度懒惰，有50%的几率会摸鱼而跳过行动。但只要它们行动，必定产生暴击或效果翻倍。',
-    entries: [],
+    // 2026-09-17：产出的生物卡带「懒惰」印记——拍内 50% 摸鱼跳过、否则行动值翻倍。
+    entries: [{ kind: '惰性', channel: 'universal', params: { skipPct: 50, critMult: 2 } }],
   },
   {
     name: '克苏鲁的呼唤',
@@ -2344,7 +2390,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你的身体是一个特殊的召唤媒介，可以通过献祭自身的生命值或精神力，召唤出异世界的强大存在为你作战，但召唤物通常不受完全控制。',
-    entries: [],
+    // 2026-09-17：献祭当前 HP 的一部分，召唤存在助战数拍（行动值按倍率加成）。
+    entries: [{ kind: '献祭', channel: 'universal', params: { hpPct: 30, beats: 3, critMult: 2 } }],
   },
   {
     name: '真名看破系统',
@@ -2565,7 +2612,9 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你可以指定两张伙伴卡建立双生羁绊，她们将共享感官和伤害，并能在战斗中释放强大的组合技。',
-    entries: [],
+    // 2026-09-17：可在制卡台为两张伙伴卡缔结双生羁绊；双生同在卡组且先后打出时
+    // 触发组合技（行动值按倍率结算）。
+    entries: [{ kind: '羁绊', channel: 'universal', params: { comboMult: 2 } }],
   },
   {
     name: '素材点金',
@@ -7049,6 +7098,11 @@ export const IMPLEMENTED_ENTRY_KINDS: ReadonlySet<TalentEntryKind> = new Set<Tal
   '免死',
   '复生',
   '自身状态',
+  '惰性',
+  '羁绊',
+  '成灵',
+  '献祭',
+  '决斗',
   '战技附加',
 ]);
 

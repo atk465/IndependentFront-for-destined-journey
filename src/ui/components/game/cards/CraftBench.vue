@@ -466,6 +466,46 @@ async function doAbyss() {
   abyssMsg.value = r.summary ?? '深渊契约已缔结';
 }
 
+// ═══ 双生羁绊区（`羁绊` 条目：S「双生羁绊」）═══
+const canBind = computed(() => game.hasMechanicGate('羁绊'));
+const bindA = ref('');
+const bindB = ref('');
+const bindMsg = ref('');
+const bindErr = ref('');
+/** 已有的羁绊文案（面板展示） */
+const bondList = computed(() => game.twinBonds().map((p) => `${p.a} ⇄ ${p.b}`));
+async function doBind() {
+  bindErr.value = '';
+  bindMsg.value = '';
+  const r = await game.bindTwins(bindA.value, bindB.value);
+  if (!r.ok) {
+    bindErr.value = r.reason ?? '缔结失败';
+    return;
+  }
+  bindMsg.value = r.summary ?? '羁绊已缔结';
+  bindA.value = '';
+  bindB.value = '';
+}
+
+// ═══ 身后灵区（`成灵` 条目：S「瓦尔哈拉的门票」）═══
+const canSpirit = computed(() => game.hasMechanicGate('成灵'));
+const spiritTarget = ref('');
+const spiritMsg = ref('');
+const spiritErr = ref('');
+const spiritList = computed(() => game.behindSpirits());
+async function doSpirit() {
+  if (!spiritTarget.value) return;
+  spiritErr.value = '';
+  spiritMsg.value = '';
+  const r = await game.makeSpirit(spiritTarget.value);
+  if (!r.ok) {
+    spiritErr.value = r.reason ?? '成灵失败';
+    return;
+  }
+  spiritMsg.value = r.summary ?? '她已在你身后';
+  spiritTarget.value = '';
+}
+
 // ═══ 不等价交换区（`置换` 条目：S「不等价交换」）═══
 const canExchange = computed(() => game.hasMechanicGate('置换'));
 const exchangeTarget = ref('');
@@ -1159,6 +1199,58 @@ const RATING_HINT: Record<string, string> = {
         <p v-if="abyssErr" class="clash-warn" role="alert">{{ abyssErr }}</p>
         <AppButton size="sm" variant="primary" :disabled="!abyssPreview?.ok" @click="doAbyss">
           缔结深渊契约
+        </AppButton>
+      </div>
+    </section>
+
+    <!-- 双生羁绊区（门槛：`羁绊` 条目——S「双生羁绊」） -->
+    <section v-if="canBind" class="repair-section" aria-label="双生羁绊">
+      <h4 class="d-label">双生羁绊（天赋：双生羁绊）</h4>
+      <div v-if="smeltables.length < 2" class="empty-tab small">至少需要两张伙伴卡…</div>
+      <div v-else class="slot-card">
+        <div class="slot-price">
+          指定两张伙伴卡结为双生——她们共享感官，<b>先后打出时触发组合技</b>。
+        </div>
+        <div class="slot-head">
+          <select v-model="bindA" class="slot-select" aria-label="第一张伙伴卡">
+            <option value="" disabled>选第一位…</option>
+            <option v-for="c in smeltables" :key="c.name" :value="c.name">{{ c.name }}</option>
+          </select>
+          <select v-model="bindB" class="slot-select" aria-label="第二张伙伴卡">
+            <option value="" disabled>选第二位…</option>
+            <option v-for="c in smeltables" :key="c.name" :value="c.name">{{ c.name }}</option>
+          </select>
+        </div>
+        <p v-if="bondList.length" class="bench-note">已有的双生：{{ bondList.join('；') }}</p>
+        <p v-if="bindMsg" class="bench-note">{{ bindMsg }}</p>
+        <p v-if="bindErr" class="clash-warn" role="alert">{{ bindErr }}</p>
+        <AppButton size="sm" variant="primary" :disabled="!bindA || !bindB" @click="doBind">
+          缔结羁绊
+        </AppButton>
+      </div>
+    </section>
+
+    <!-- 身后灵区（门槛：`成灵` 条目——S「瓦尔哈拉的门票」） -->
+    <section v-if="canSpirit" class="repair-section" aria-label="身后灵">
+      <h4 class="d-label">身后灵（天赋：瓦尔哈拉的门票）</h4>
+      <div v-if="smeltables.length === 0" class="empty-tab small">没有可以送灵的伙伴卡…</div>
+      <div v-else class="slot-card">
+        <div class="slot-price">
+          送一位伙伴成灵——她<b>不再上场</b>，换一枚永远跟在你身后的守护（每枚 +防御）。
+        </div>
+        <div class="slot-head">
+          <select v-model="spiritTarget" class="slot-select" aria-label="选择要送灵的伙伴卡">
+            <option value="" disabled>选择伙伴卡…</option>
+            <option v-for="c in smeltables" :key="c.name" :value="c.name">{{ c.name }}</option>
+          </select>
+        </div>
+        <p v-if="spiritList.length" class="bench-note">
+          现有身后灵 {{ spiritList.length }} 位：{{ spiritList.map((s) => s.name).join('、') }}
+        </p>
+        <p v-if="spiritMsg" class="bench-note">{{ spiritMsg }}</p>
+        <p v-if="spiritErr" class="clash-warn" role="alert">{{ spiritErr }}</p>
+        <AppButton size="sm" variant="primary" :disabled="!spiritTarget" @click="doSpirit">
+          送她成灵
         </AppButton>
       </div>
     </section>

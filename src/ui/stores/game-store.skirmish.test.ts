@@ -51,7 +51,9 @@ describe('交锋拍状态桥', () => {
     const counter = vi.fn(async () => {});
     const flee = vi.fn(async () => {});
     const nuke = vi.fn(async () => {});
-    game.setSkirmishController({ start, counter, flee, nuke });
+    const duel = vi.fn(async () => {});
+    const sacrifice = vi.fn(async () => {});
+    game.setSkirmishController({ start, counter, flee, nuke, duel, sacrifice });
     game.setSkirmishSession(session());
 
     const r = await game.startSkirmish('熔岩巨兽', '灼热盆地');
@@ -72,7 +74,14 @@ describe('交锋拍状态桥', () => {
     expect(r.reason).toContain('尚未就绪');
 
     const start = vi.fn(async () => ({ ok: true }));
-    game.setSkirmishController({ start, counter: vi.fn(), flee: vi.fn(), nuke: vi.fn() });
+    game.setSkirmishController({
+      start,
+      counter: vi.fn(),
+      flee: vi.fn(),
+      duel: vi.fn(),
+      sacrifice: vi.fn(),
+      nuke: vi.fn(),
+    });
     // 挂起请求在 attach 时自动补发（异步触发，不阻塞 attach）
     await vi.waitFor(() => expect(start).toHaveBeenCalledWith('熔岩巨兽', undefined));
   });
@@ -87,7 +96,14 @@ describe('交锋拍状态桥', () => {
       });
       return { ok: true };
     });
-    game.setSkirmishController({ start, counter: vi.fn(), flee: vi.fn(), nuke: vi.fn() });
+    game.setSkirmishController({
+      start,
+      counter: vi.fn(),
+      flee: vi.fn(),
+      duel: vi.fn(),
+      sacrifice: vi.fn(),
+      nuke: vi.fn(),
+    });
 
     const first = game.startSkirmish();
     const second = await game.startSkirmish(); // busy 窗口内的重入
@@ -103,7 +119,9 @@ describe('交锋拍状态桥', () => {
     const counter = vi.fn(async () => {});
     const flee = vi.fn(async () => {});
     const nuke = vi.fn(async () => {});
-    game.setSkirmishController({ start: vi.fn(), counter, flee, nuke });
+    const duel = vi.fn(async () => {});
+    const sacrifice = vi.fn(async () => {});
+    game.setSkirmishController({ start: vi.fn(), counter, flee, nuke, duel, sacrifice });
 
     await game.submitSkirmishCounter({ kind: '卡', name: '燎原符卡' });
     expect(counter).not.toHaveBeenCalled(); // 无账本

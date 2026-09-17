@@ -72,6 +72,10 @@ import type { FortuneDiceTable } from '@engine/card-workshop/fortune-dice';
 import { planRarityUpgrade } from '@engine/card-workshop/material';
 import { planUnequalExchange } from '@engine/card-workshop/unequal-exchange';
 import { floorRarityForLevel, planMaterialGacha } from '@engine/card-workshop/material-gacha';
+import { addSpirit, coerceSpirits } from '@engine/card-workshop/behind-spirits';
+import { TWIN_ENTRY, areTwins, coerceTwinBonds } from '@engine/card-workshop/battle-rules';
+import { cardPower } from '@engine/card-workshop/deck-power';
+import { cardKindOf } from '@engine/card-workshop/card-kind';
 import { materialNameOf } from '@engine/card-workshop/card-dismantle';
 import type { TalentEntry, TalentEntryKind } from '@engine/card-workshop/talent-entry';
 import { planCommissionDelivery } from '@engine/card-workshop/commission';
@@ -209,6 +213,10 @@ export const useGameStore = defineStore('game', () => {
     flee: (endReason?: string) => Promise<void>;
     /** 倒也可斩（SSS）：每场一次的一击 */
     nuke: () => Promise<void>;
+    /** 宣战决斗（S「西部决斗礼仪」） */
+    duel: () => Promise<void>;
+    /** 献祭召唤（S「召唤媒介系统」） */
+    sacrifice: () => Promise<void>;
   } | null>(null);
 
   /** controller 未就绪时点下的开战请求（attach 后自动补发——消灭「点了没反应」的时序窗） */
@@ -220,6 +228,10 @@ export const useGameStore = defineStore('game', () => {
       counter: (choice: SkirmishChoice) => Promise<void>;
       flee: (endReason?: string) => Promise<void>;
       nuke: () => Promise<void>;
+      /** 宣战决斗（S「西部决斗礼仪」） */
+      duel: () => Promise<void>;
+      /** 献祭召唤（S「召唤媒介系统」） */
+      sacrifice: () => Promise<void>;
     } | null,
   ) {
     skirmishController.value = c;
@@ -809,6 +821,129 @@ export const useGameStore = defineStore('game', () => {
   /**
    * 拆解（SSS「素材之王」非战斗侧）：物品 → 素材（材料）。
    */
+  /**
+   * 成灵（S「瓦尔哈拉的门票」）：把一张伙伴卡化为身后灵——卡退场，换一枚永久守护。
+   *
+   * 裁断：引擎里伙伴卡不会在战斗中「战死」（卡没有生命值，也没有战死结算通道），
+   * 所以触发权交回玩家手里。语义仍是「她的灵魂从此跟着你」。
+   */
+  async function makeSpirit(
+    cardName: string,
+  ): Promise<{ ok: boolean; reason?: string; summary?: string }> {
+    const playerChar = player.value;
+    if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
+    if (!hasMechanicGate('成灵')) {
+      return { ok: false, reason: '需要天赋【瓦尔哈拉的门票】' };
+    }
+    const card = playerChar.inventory.find(
+      (i): i is CardItem => i.name === cardName && i.type === '卡牌',
+    );
+    if (!card) return { ok: false, reason: '找不到该伙伴卡' };
+    if (cardKindOf(card.词条 ?? []) !== '召唤') {
+      return { ok: false, reason: `【${cardName}】不是伙伴卡——只有伙伴能成灵` };
+    }
+    const before = coerceSpirits(saveProfile.value?.worldFlags?.behindSpirits);
+    if (before.some((s) => s.name === cardName)) {
+      return { ok: false, reason: `【${cardName}】已经是身后灵了` };
+    }
+    const after = addSpirit(before, { name: cardName, power: cardPower(card) });
+    const album = toPlainCardAlbum(playerChar.cardAlbum ?? { owned: [], deck: [], capacity: 60 });
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState([
+      {
+        op: 'remove_item',
+        target: `characters.${playerChar.name}`,
+        value: { name: cardName, quantity: 1 },
+      },
+      // 卡册同步摘掉（她不在册上了，但永远在你身后）
+      {
+        op: 'update_character',
+        target: `characters.${playerChar.name}`,
+        value: {
+          cardAlbum: {
+            owned: album.owned.filter((n) => n !== cardName),
+            deck: album.deck.filter((n) => n !== cardName),
+            capacity: album.capacity,
+          },
+        },
+      } as StatePatch,
+      { op: 'set_variable', target: 'worldFlags.behindSpirits', value: after } as StatePatch,
+    ]);
+    if (!result.success) return { ok: false, reason: result.errors.join('; ') };
+    await refreshFromDb();
+    return {
+      ok: true,
+      summary: `【${cardName}】化作身后灵——她不再上场，但每一场都在你身后（+${
+        after.length * strengthOf('成灵', 'guardPerSpirit')
+      } 防御）`,
+    };
+  }
+
+  /** 已化灵的名单（面板展示用） */
+  function behindSpirits() {
+    return coerceSpirits(saveProfile.value?.worldFlags?.behindSpirits);
+  }
+
+  /**
+   * 缔结双生羁绊（S「双生羁绊」）：指定两张伙伴卡，她们共享感官——
+   * 先后打出时触发组合技。两张卡都会打上「双生」印记。
+   */
+  async function bindTwins(
+    a: string,
+    b: string,
+  ): Promise<{ ok: boolean; reason?: string; summary?: string }> {
+    const playerChar = player.value;
+    if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
+    if (!hasMechanicGate('羁绊')) return { ok: false, reason: '需要天赋【双生羁绊】' };
+    if (!a || !b) return { ok: false, reason: '要指定两张伙伴卡' };
+    if (a === b) return { ok: false, reason: '同一张卡不能与自己缔结羁绊' };
+    const bonds = coerceTwinBonds(saveProfile.value?.worldFlags?.twinBonds);
+    if (areTwins(bonds, a, b)) return { ok: false, reason: '她们已经结过羁绊了' };
+    const cards = [a, b].map((n) =>
+      playerChar.inventory.find((i): i is CardItem => i.name === n && i.type === '卡牌'),
+    );
+    for (const [i, c] of cards.entries()) {
+      if (!c) return { ok: false, reason: `找不到【${[a, b][i]}】` };
+      if (cardKindOf(c.词条 ?? []) !== '召唤') {
+        return { ok: false, reason: `【${c.name}】不是伙伴卡——羁绊只结在伙伴之间` };
+      }
+    }
+    const next = [...bonds, { a, b }];
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState([
+      // 两张卡都打上「双生」印记（词条是卡的单一真源）
+      ...cards.map((c) => ({
+        op: 'update_item' as const,
+        target: `characters.${playerChar.name}`,
+        value: {
+          name: c!.name,
+          changes: {
+            词条: (c!.词条 ?? []).includes(TWIN_ENTRY) ? c!.词条 : [...(c!.词条 ?? []), TWIN_ENTRY],
+          },
+        },
+      })),
+      { op: 'set_variable', target: 'worldFlags.twinBonds', value: next } as StatePatch,
+    ]);
+    if (!result.success) return { ok: false, reason: result.errors.join('; ') };
+    await refreshFromDb();
+    return { ok: true, summary: `【${a}】与【${b}】结为双生——先后打出时触发组合技` };
+  }
+
+  /** 已缔结的羁绊（面板展示用） */
+  function twinBonds() {
+    return coerceTwinBonds(saveProfile.value?.worldFlags?.twinBonds);
+  }
+
+  /** 宣战决斗（S「西部决斗礼仪」） */
+  async function declareDuel(): Promise<void> {
+    await skirmishController.value?.duel();
+  }
+
+  /** 献祭召唤（S「召唤媒介系统」） */
+  async function sacrificeSummon(): Promise<void> {
+    await skirmishController.value?.sacrifice();
+  }
+
   /**
    * 素材十连（S「素材十连系统」）：每天一次十连抽素材，保底不低于自身等级。
    * 每日限次走账本；保底与突变概率在 material-gacha.ts（纯函数、可复算）。
@@ -2912,6 +3047,12 @@ export const useGameStore = defineStore('game', () => {
     upgradeMaterial,
     exchangeItem,
     drawMaterialTen,
+    makeSpirit,
+    behindSpirits,
+    bindTwins,
+    twinBonds,
+    declareDuel,
+    sacrificeSummon,
     rollFortuneDice,
     ownedDiceTables,
     scarCount,

@@ -105,6 +105,11 @@ describe('TALENT_ENTRY_POOL（单一真源）', () => {
     '免死',
     '复生',
     '自身状态',
+    '惰性',
+    '羁绊',
+    '成灵',
+    '献祭',
+    '决斗',
   ];
   const ALL_CHANNELS: readonly TalentChannel[] = [
     'creation',

@@ -57,6 +57,21 @@ async function doNuke() {
   await game.triggerSkirmishNuke();
 }
 
+/** 决斗宣战（S「西部决斗礼仪」）：本场禁用伙伴卡、隔离外部伤害与治疗 */
+const canDuel = computed(() => game.hasMechanicGate('决斗'));
+const duelAvailable = computed(
+  () => canDuel.value && !!session.value && session.value.finished === null && !session.value.duel,
+);
+async function doDuel() {
+  await game.declareDuel();
+}
+
+/** 献祭召唤（S「召唤媒介系统」）：献祭 HP 换数拍的行动值加成 */
+const canSacrifice = computed(() => game.hasMechanicGate('献祭'));
+async function doSacrifice() {
+  await game.sacrificeSummon();
+}
+
 /** 捕获（SSS「你是我的了」）：战胜后把对手变成伙伴卡 */
 const canCapture = computed(() => game.hasMechanicGate('捕获'));
 const capturing = ref(false);
@@ -191,6 +206,26 @@ function dismiss() {
         @click="onCounter(m)"
       >
         {{ m }}
+      </button>
+      <button
+        v-if="duelAvailable"
+        type="button"
+        class="counter-btn duel"
+        :disabled="game.skirmishBusy"
+        title="1v1：伙伴卡不上场，外部伤害与治疗被隔离"
+        @click="doDuel"
+      >
+        宣战决斗（1v1）
+      </button>
+      <button
+        v-if="canSacrifice"
+        type="button"
+        class="counter-btn sacrifice"
+        :disabled="game.skirmishBusy"
+        title="献祭一部分 HP，召唤存在助战数拍"
+        @click="doSacrifice"
+      >
+        献祭召唤
       </button>
       <button
         type="button"

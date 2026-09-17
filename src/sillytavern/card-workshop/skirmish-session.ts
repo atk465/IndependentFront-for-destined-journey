@@ -25,6 +25,7 @@ import {
   type CounterTag,
 } from './skirmish';
 import { activateListOf, type ActivateInput, type CardInPlayEffect } from './entry-combat';
+import { duelSuppressesEffect, type DuelRules } from './battle-rules';
 import { ENTRY_STRENGTH_BASELINE } from './talent-entry';
 
 /** 会话终局态；null = 交锋中 */
@@ -62,6 +63,13 @@ export interface SkirmishSession {
   nukeUsed?: boolean;
   /** 免死是否已在本场用掉（每场一次的守卫，与 nukeUsed 同款语义） */
   lastStandUsed?: boolean;
+  /**
+   * 决斗规则（S「西部决斗礼仪」宣战后生效）：禁用在场伙伴卡 + 抑制外部伤害/治疗。
+   * 缺省 undefined = 普通战斗，零改写。
+   */
+  duel?: DuelRules;
+  /** 已触发过组合技的双生卡名（每对每场一次的去重账） */
+  comboFired?: string[];
 }
 
 export interface StartSkirmishInput {
@@ -78,6 +86,8 @@ export interface StartSkirmishInput {
    * 缺省空——无自身状态的玩家零改动。
    */
   initialEffects?: readonly CardInPlayEffect[];
+  /** 决斗规则（S「西部决斗礼仪」）：开战即进入 1v1。缺省 = 普通战斗 */
+  duel?: DuelRules;
 }
 
 const clampHp = (n: number, fallback: number): number => {
@@ -109,6 +119,7 @@ export function startSkirmish(input: StartSkirmishInput): SkirmishSession {
     ],
     playedCards: [],
     counteredBeats: 0,
+    ...(input.duel ? { duel: input.duel } : {}),
     activeEffects: (input.initialEffects ?? []).map((e) => ({
       ...e,
       amount: Math.max(0, Math.round(e.amount)),
@@ -192,6 +203,8 @@ export interface BeatOptions {
    * 由调用方按「持天赋 且 本场没用过」决定是否传；不传 = 没有免死。
    */
   lastStand?: { hpFloor: number };
+  /** 本拍触发组合技后要记入账本的卡名（调用方算好，会话只落账） */
+  comboFired?: string[];
 }
 
 export const FINAL_CHAPTER_BEAT = ENTRY_STRENGTH_BASELINE.终章.beats;
@@ -254,13 +267,19 @@ export function playBeat(
     ...result.audit,
   ];
 
-  // 在场持续伤害（领域 DoT）：拍末结算，可收到人头
-  const dotTotal = s.activeEffects
-    .filter((e) => e.type === 'dot')
-    .reduce((sum, e) => sum + Math.max(0, e.amount), 0);
+  // 在场持续伤害（领域 DoT）：拍末结算，可收到人头。
+  // 决斗中场地不在场（免疫一切外部伤害）→ 抑制不结算。
+  const dotSuppressed = duelSuppressesEffect('dot', s.duel);
+  const dotTotal = dotSuppressed
+    ? 0
+    : s.activeEffects
+        .filter((e) => e.type === 'dot')
+        .reduce((sum, e) => sum + Math.max(0, e.amount), 0);
   const enemyHpAfterDot = Math.max(0, result.enemyHp - dotTotal);
   if (dotTotal > 0 && result.enemyHp > 0) {
     lines.push(`▸ 在场持续：敌方 −${dotTotal}（${result.enemyHp} → ${enemyHpAfterDot}）`);
+  } else if (dotSuppressed && s.activeEffects.some((e) => e.type === 'dot')) {
+    lines.push('▸ 【决斗】场地不在场——持续伤害被隔离（免疫一切外部伤害）');
   }
 
   // 倒也可斩 nuke 伤害（拍末追加，可收人头）
@@ -296,9 +315,11 @@ export function playBeat(
   }
 
   // 自身状态·吸魔（regen）：拍末把吸收到的攻击转成 HP 回复（上限 = HP 上限）
-  const regenTotal = s.activeEffects
-    .filter((e) => e.type === 'regen')
-    .reduce((sum, e) => sum + Math.max(0, Math.round(e.amount)), 0);
+  const regenTotal = duelSuppressesEffect('regen', s.duel)
+    ? 0
+    : s.activeEffects
+        .filter((e) => e.type === 'regen')
+        .reduce((sum, e) => sum + Math.max(0, Math.round(e.amount)), 0);
   const playerHpAfterRegen =
     regenTotal > 0
       ? Math.min(s.playerMaxHp, playerHpAfterRecoil + regenTotal)
@@ -353,6 +374,8 @@ export function playBeat(
     beat: s.beat + 1,
     playerHp: playerHpFinal,
     ...(lastStandFires ? { lastStandUsed: true } : {}),
+    ...(opts?.comboFired ? { comboFired: opts.comboFired } : {}),
+    ...(s.duel ? { duel: s.duel } : {}),
     enemyHp: enemyHpFinal,
     log: [...s.log, ...lines],
     playedCards:
