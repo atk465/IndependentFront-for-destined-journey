@@ -68,6 +68,10 @@ export interface SkirmishAssessment {
   /** 敌方总战力（碾压速胜判定的敌方输入；AI 未给 = enemyLevel） */
   enemyPower: number;
   intents: EnemyIntent[];
+  /** 敌方数量（战斗维度：多敌；缺省 1。评估 Agent 可选声明） */
+  enemyCount?: number;
+  /** 敌方体型（战斗维度：体格差压制；缺省「常人」。评估 Agent 可选声明） */
+  enemyScale?: string;
 }
 
 /** 敌情评估 system 提示词（纯函数，测试钉关键约束） */
@@ -82,7 +86,7 @@ export function buildAssessmentMessages(req: SkirmishAssessRequest): Array<{
     '你是铭刻纪元的战斗导演。请为一场即将开始的交锋预提交敌方战斗档案与招式序列。',
     '',
     '硬性规则：',
-    '1. 只输出一个 JSON 对象，不要任何其他文字：{"enemyName":"敌人名","enemyLevel":整数,"enemyHp":整数,"enemyPower":整数,"intents":[{"move":"招式名","threat":整数,"counters":["反制标签"],"hook":"敌方本拍行动钩子"}]}',
+    '1. 只输出一个 JSON 对象，不要任何其他文字：{"enemyName":"敌人名","enemyLevel":整数,"enemyHp":整数,"enemyPower":整数,"enemyCount":整数,"enemyScale":"体型","intents":[{"move":"招式名","threat":整数,"counters":["反制标签"],"hook":"敌方本拍行动钩子"}]}。enemyCount = 敌方数量（1~6，缺省 1）；enemyScale = 敌方体型（小巧/娇小/常人/巨躯/巨像，缺省常人）——只在遭遇明确为多敌或特殊体型时填写。',
     `2. intents 输出 ${intentsCount} 条，代表这名敌人的**招式轮换**——战斗不限拍数，序列打完会按原序循环使用，开战后不可修改。`,
     '3. counters 只能从白名单里选：强攻 / 防御 / 闪避 / 打断（可多选）。含义：玩家的行动若带有其中任一标签，反制会获得加成——这是玩家的读招空间，务必让每式都有可反制面。',
     `4. 威胁标定：玩家的典型行动值约为 ${power}（反制掷骰 = d20 + 行动值 + 克制加成，对上 threat 即反制成功）。请把 threat 设在这个量级：势均力敌 ≈ ${power + 10}，明显弱于玩家 ≈ ${Math.max(1, power - 5)}，头目级 ≈ ${power + 15}。enemyLevel 参考玩家等级 ${plLevel} 上下浮动。enemyHp 决定战斗节奏：这场战斗会打到一方 HP 清空为止，请把 HP 标定成势均力敌或略有压力的量级（约单拍伤害 × 4~8）。`,

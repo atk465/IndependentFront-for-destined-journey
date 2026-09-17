@@ -74,6 +74,12 @@ export interface SkirmishSession {
   trueNameUsed?: boolean;
   /** 模块化热插拔本场已用次数（每场次数由条目限） */
   hotSwapsUsed?: number;
+  /** 技能冷却账：卡名 → 剩余冷却拍数（战斗维度） */
+  cooldowns?: Record<string, number>;
+  /** 敌方数量（战斗维度：多敌；缺省 1） */
+  enemyCount?: number;
+  /** 敌方体型（战斗维度：体格差压制；缺省「常人」） */
+  enemyScale?: string;
 }
 
 export interface StartSkirmishInput {
@@ -92,6 +98,10 @@ export interface StartSkirmishInput {
   initialEffects?: readonly CardInPlayEffect[];
   /** 决斗规则（S「西部决斗礼仪」）：开战即进入 1v1。缺省 = 普通战斗 */
   duel?: DuelRules;
+  /** 敌方数量（战斗维度：多敌；缺省 1） */
+  enemyCount?: number;
+  /** 敌方体型（战斗维度：体格差压制；缺省「常人」） */
+  enemyScale?: string;
 }
 
 const clampHp = (n: number, fallback: number): number => {
@@ -384,6 +394,8 @@ export function playBeat(
     ...(opts?.trueNameUsed ? { trueNameUsed: true } : {}),
     ...(s.duel ? { duel: s.duel } : {}),
     ...(s.hotSwapsUsed ? { hotSwapsUsed: s.hotSwapsUsed } : {}),
+    ...(s.enemyCount !== undefined ? { enemyCount: s.enemyCount } : {}),
+    ...(s.enemyScale !== undefined ? { enemyScale: s.enemyScale } : {}),
     enemyHp: enemyHpFinal,
     log: [...s.log, ...lines],
     playedCards:

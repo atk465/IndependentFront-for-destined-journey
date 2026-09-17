@@ -90,6 +90,16 @@ import {
   selfStatusesOf,
   totalSelfStatus,
 } from '@engine/card-workshop/self-status';
+import {
+  bodyScaleCrushBonus,
+  coerceBodyScale,
+  coerceEnemyCount,
+  isOnCooldown,
+  playerBodyScale,
+  resolveCrit,
+  startCooldown,
+  tickCooldowns,
+} from '@engine/card-workshop/battle-dimensions';
 import { totalCondBonus } from '@engine/card-workshop/conditional-bonus';
 import {
   coerceTwinBonds,
@@ -2707,6 +2717,8 @@ export class GamePipeline {
         enemyHp: assessment.enemyHp,
         guard: deckGuard,
         initialEffects,
+        enemyCount: coerceEnemyCount(assessment.enemyCount),
+        enemyScale: assessment.enemyScale,
       });
       const session = judgeCrush(stats.atk + stats.guard + stats.agi + deck, assessment.enemyPower)
         ? crushFinish(base)
@@ -2841,6 +2853,12 @@ export class GamePipeline {
       }
     }
     if (choice.kind === '卡') {
+      // 技能冷却（战斗维度）：冷却中的卡不能打
+      if (isOnCooldown(session.cooldowns, choice.name)) {
+        const left = session.cooldowns?.[choice.name] ?? 0;
+        this.emitMessage(`【交锋】【${choice.name}】冷却中——还剩 ${left} 拍。`, 'assistant');
+        return;
+      }
       // 会话临时账（真机裁定 2026-09-13）：同一张卡一场只能打出一次
       if (session.playedCards.includes(choice.name)) {
         this.emitMessage(
@@ -3001,6 +3019,41 @@ export class GamePipeline {
       action = { ...action, power: action.power + escalate * session.beat };
       prepend = [`▸ 连战递增：行动值 +${escalate * session.beat}（第 ${session.beat + 1} 拍）`];
     }
+    // 暴击（A/B 战斗维度）：持 `暴击` 条目者，拍内掷 d100 判定暴击。
+    {
+      const critEntry = (playerC.talents?.list ?? [])
+        .flatMap((t) => t.entries ?? [])
+        .find((e) => e.kind === '暴击');
+      if (critEntry) {
+        const crit = resolveCrit(
+          action.power,
+          {
+            chance: Math.max(0, Math.round(Number(critEntry.params.chance) || 0)),
+            mult: Math.max(1, Number(critEntry.params.critPower) || 1.5),
+          },
+          this.rollD100(),
+        );
+        if (crit.crit) {
+          action = { ...action, power: crit.power };
+          prepend = [...(prepend ?? []), `▸ ${crit.note}`];
+        }
+      }
+      // 体格差压制（B「体格差压制」）：敌方体型远小于玩家 → 行动值加成
+      const holdsCrush = (playerC.talents?.list ?? []).some((t) =>
+        (t.entries ?? []).some((e) => e.kind === '体型压制'),
+      );
+      if (holdsCrush && session.enemyScale) {
+        const crush = bodyScaleCrushBonus(
+          playerBodyScale(playerC.level),
+          coerceBodyScale(session.enemyScale),
+          entryStrength(playerC.talents?.list, '体型压制', 'crushPct'),
+        );
+        if (crush.percent > 0) {
+          action = { ...action, power: Math.round(action.power * (1 + crush.percent / 100)) };
+          prepend = [...(prepend ?? []), `▸ ${crush.note}`];
+        }
+      }
+    }
     // 一拳超人系统的代价（SS）：今天已经挥过那一拳 → 当日虚弱（行动值 ×0.5）。
     // 「24 小时」在这套时间里就是「今天」，跨天由 daily-ledger 的 gameDay 比对自动解除。
     if (
@@ -3096,6 +3149,20 @@ export class GamePipeline {
           }
         : undefined,
     );
+    // 技能冷却（战斗维度）：每拍 tick + 打出技能卡时启动冷却
+    let cd = tickCooldowns(session.cooldowns);
+    if (
+      choice.kind === '卡' &&
+      cardKindOf(
+        (playerC.inventory.find((i) => i.name === choice.name) as CardItem | undefined)?.词条 ?? [],
+      ) === '技能'
+    ) {
+      const hasQuick = (playerC.talents?.list ?? []).some((t) =>
+        (t.entries ?? []).some((e) => e.kind === '快咏'),
+      );
+      cd = startCooldown(cd, choice.name, hasQuick ? 1 : 2);
+    }
+    next.cooldowns = cd;
     this.game.setSkirmishSession(next);
     this.emitMessage(next.log.slice(session.log.length).join('\n'), 'assistant');
     // 免死刚发动 → 补上「瞬间获得满额 MP」（会话只记 HP；MP 是角色字段，得在这里落库）
