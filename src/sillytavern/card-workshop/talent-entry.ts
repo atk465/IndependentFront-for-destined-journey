@@ -511,7 +511,7 @@ const ENTRY_NUMERIC_TIERS: Partial<
   日掷: { perDay: [1, 2], faces: [6, 10] },
   烙印: { maxHold: [3, 5, 9] },
   置换: { maxReturn: [1, 2] },
-  抽奖: { times: [10], perDay: [1, 2] },
+  抽奖: { times: [1, 10], perDay: [1, 2] },
   免死: { hpFloor: [1, 2], mpRefill: [0, 1], perBattle: [1] },
   复生: { hpFloor: [1, 2] },
   自身状态: { power: [10, 20, 30, 40, 50] },
@@ -3095,7 +3095,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '伙伴卡能射出几乎看不见的魔力丝线，操控敌人的四肢，使其自相残杀或做出滑稽的动作。她视所有人为自己的提线木偶。',
-    entries: [],
+    // 2026-09-17 A 级批次①：「操控敌人四肢使其自相残杀」是战场叙事，不是拍制数值。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '财务榨取',
@@ -3103,7 +3104,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '制作的伙伴卡会变成女王或大小姐性格，她会不断向你索要金钱。你越上贡，她在战斗中就越强大，并能使用金钱攻击直接对敌人造成财富打击。',
-    entries: [],
+    // 2026-09-17 A 级批次①：「伙伴卡索要金钱、上贡越多越强」——上贡这件事只有叙事能记。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '修女的神圣戒律',
@@ -3299,7 +3301,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你制作的伙伴卡总是会思考一些深刻的问题，比如我为何而战。她们的忠诚度不容易提升，但一旦认可你，将至死不渝，并有概率在战斗中领悟专属技能。',
-    entries: [],
+    // 2026-09-17 A 级批次①：「伙伴思考深刻问题、忠诚难升但至死不渝」是性格叙事。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '量子纠缠',
@@ -3315,7 +3318,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '制卡时，你可以指定一张自己的手牌作为模板，新制成的卡牌有概率复制模板卡的一个词条。',
-    entries: [],
+    // 2026-09-17 A 级批次②：「以手牌为模板复制一个词条」= 吞噬（吃一张卡取它的词条）
+    entries: [{ kind: '吞噬', channel: 'universal', params: {} }],
   },
   {
     name: '赛博格',
@@ -3334,7 +3338,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '在融合阶段，你能模糊地听到素材词条的意愿，更容易找到最和谐的融合路径。使用和谐共鸣流派时，可控失败的概率大幅降低。',
-    entries: [],
+    // 2026-09-17 A 级批次②：「和谐共鸣流派降低可控失败」= 成功率加成
+    entries: [{ kind: '成功率加成', channel: 'universal', params: { bonus: 30 } }],
   },
   {
     name: '王室血誓',
@@ -3370,7 +3375,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '每天可进行一次签到，随机获得卡币、素材或消耗品。连续签到天数越多，出现稀有奖励的概率越高，特定天数更有保底大奖。',
-    entries: [],
+    // 2026-09-17 A 级批次②：每日一次随机奖励，与素材十连同一条抽奖内核（times:1 = 单抽）
+    entries: [{ kind: '抽奖', channel: 'universal', params: { times: 1, perDay: 1 } }],
   },
   {
     name: '美食家系统',
@@ -3386,7 +3392,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你接触到的任何新物种、新素材、新卡牌都会被自动记录在图鉴中。每完成一个分类的图鉴，就能获得一次针对该分类的永久性加成。',
-    entries: [],
+    // 2026-09-17 A 级批次①：「接触即记录、集齐一类给永久加成」——图鉴分类是内容侧的事，机械侧只给声明入口。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '行走印钞机系统',
@@ -3401,7 +3408,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你拥有与生俱来的亲和力，与恶阵营的角色交流时，有更高几率触发特殊剧情，说服他们，甚至让他们弃暗投明，成为你的伙伴。',
-    entries: [],
+    // 2026-09-17 A 级批次①：「与恶阵营交流触发特殊剧情并说服其弃暗投明」——剧情走向归叙事。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '师道尊严系统',
@@ -3417,7 +3425,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你作为队长第一次击杀区域BOSS或副本BOSS时，队伍将获得额外奖励，包括稀有称号、专属装备和大量经验。',
-    entries: [],
+    // 2026-09-17 A 级批次②：首杀额外奖励 = 击杀掠取的缴获（判据是「第一次」由叙事记）
+    entries: [{ kind: '击杀掠取', channel: 'universal', params: { gold: 5 } }],
   },
   {
     name: '任务发布系统',
@@ -3425,7 +3434,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你可以像系统一样，向其他人发布任务。当他们接受并完成后，你可以获得一部分系统奖励，而他们也能得到你设定的报酬。',
-    entries: [],
+    // 2026-09-17 A 级批次①：「像系统一样向他人发布任务」是社交叙事，报酬由玩家自己谈。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '献祭系统',
@@ -3433,7 +3443,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你可以通过献祭物品、卡牌甚至活物来取悦某个未知的存在，以换取力量、知识或实现一个愿望。祭品越珍贵，回报越丰厚。',
-    entries: [],
+    // 2026-09-17 A 级批次①：「献祭物品/活物取悦未知存在」——祭品与回报的对应关系交给叙事。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '催眠大师系统',
@@ -3441,7 +3452,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '通过眼神、声音或特定道具，你可以对他人进行催眠，植入指令或篡改记忆。效果强弱取决于双方的精神力差距。',
-    entries: [],
+    // 2026-09-17 A 级批次①：「催眠他人、植入指令」是社交规则，效果强弱由叙事张力决定。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '神之右手系统',
@@ -3449,7 +3461,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你的右手拥有特殊的力量，无论是制卡、抚摸还是战斗，都能发挥出远超平常的精准度和力量。俗称麒麟臂。',
-    entries: [],
+    // 2026-09-17 A 级批次①：「右手有特殊力量」的落点在制卡/抚摸/战斗三处的叙事表现。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '贪婪系统',
@@ -3457,7 +3470,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你击杀敌人后，战利品的掉落数量和稀有度会得到提升。你还可以指定一件物品，在下一次交易中强买强卖。',
-    entries: [],
+    // 2026-09-17 A 级批次②：战利品掉落提升 = 击杀掠取的缴获
+    entries: [{ kind: '击杀掠取', channel: 'universal', params: { gold: 10 } }],
   },
   {
     name: '等价交换系统',
@@ -3465,7 +3479,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你可以向系统献祭任何物品来换取炼成值。消耗炼成值，你可以指定一个模糊的方向，系统将为你随机生成一件符合描述的物品，品质完全随机。',
-    entries: [],
+    // 2026-09-17 A 级批次②：献祭物品换随机炼成物 = 置换通道（「品质完全随机」正是它的语义）
+    entries: [{ kind: '置换', channel: 'universal', params: { maxReturn: 2 } }],
   },
   {
     name: '万物骸骨',
@@ -3533,7 +3548,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '一颗上古魔种寄生在你的心脏。它时刻引诱你堕落，但也赋予你强大的力量。使用欲望主导流派制卡时，效果和成功率提升，但每次都会侵蚀你的理智。',
-    entries: [],
+    // 2026-09-17 A 级批次②：「使用欲望主导流派时效果与成功率提升」= 欲望主导通道本身（侵蚀理智由叙事承担）
+    entries: [{ kind: '欲望主导', channel: 'universal', params: {} }],
   },
   {
     name: '炼金巧手',
@@ -3566,7 +3582,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'A' as TalentGrade,
     source: 'universal',
     description: '你在黑市中声名远扬，所有交易都能享受折扣，并能接到一些不对外开放的特殊委托。',
-    entries: [],
+    // 2026-09-17 A 级批次①：「黑市折扣与不对外开放的委托」是渠道叙事。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '活体巢穴',
@@ -3714,7 +3731,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你可以通过吃掉卡牌来分解它，获得比普通分解更多的核心素材，并有小概率直接领悟卡牌的部分能力。',
-    entries: [],
+    // 2026-09-17 A 级批次②：「吃掉卡牌分解」= 拆解（拆解本来就是物品→素材）
+    entries: [{ kind: '拆解', channel: 'universal', params: {} }],
   },
   {
     name: '催眠之瞳',
@@ -3722,7 +3740,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你的眼睛拥有微弱的催眠能力，在与NPC交涉时成功率提升。在制卡时，可以对素材进行催眠，使其词条更易于引导。',
-    entries: [],
+    // 2026-09-17 A 级批次①：「交涉成功率提升 + 催眠素材引导词条」——前者叙事，后者由描述交给 AI。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '流体亲和',
@@ -3745,7 +3764,14 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '制卡时，你可以与主素材进行精神共鸣，亲身体验其核心情感，大幅提升保留高品质词条的概率。',
-    entries: [],
+    // 2026-09-17 A 级批次②：「提升保留高品质词条的概率」= 词条加权（权重 3 = 必附）
+    entries: [
+      {
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['共鸣', '澄澈'], weight: 3 },
+      },
+    ],
   },
   {
     name: '血肉炼成',
@@ -3760,7 +3786,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你可以让一张伙伴卡临时附身于你，借用其部分能力和属性，但期间你的身体主导权会受到伙伴卡性格的影响。',
-    entries: [],
+    // 2026-09-17 A 级批次①：「伙伴卡临时附身、主导权受其性格影响」是形态叙事。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '深渊墨水',
@@ -3885,7 +3912,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '每轮对话，群星会告诉你一个关于铭刻纪元的情报。你也可以主动问你想知道的，但需要花费一定代价。',
-    entries: [],
+    // 2026-09-17 A 级批次①：「每轮对话告诉你一个情报」是纯叙事供给，机械侧只提供「把想问的说出来」的入口。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '双生梦魇',
@@ -3901,7 +3929,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你能以童话故事为蓝本制造卡牌，并能自由扭曲其设定，例如制造出猎杀王子的白雪公主或用魔法开办工厂的灰姑娘。',
-    entries: [],
+    // 2026-09-17 A 级批次②：「以童话为蓝本制卡」= 配方解锁
+    entries: [{ kind: '配方解锁', channel: 'universal', params: { recipe: '童话蓝本' } }],
   },
   {
     name: '元素融合',
@@ -3943,7 +3972,15 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '制卡时，你可以明确你创造的卡牌是个性鲜明的领军或是数量众多的士兵，前者必定拥有强大的独特技能并且性格突出，后者则必定带有群体召唤词条，但数值将平均分配至每个单位。',
-    entries: [],
+    // 2026-09-17 A 级批次②：领军/士兵二态 = 成品限定 + 群体召唤词条加权
+    entries: [
+      { kind: '成品限定', channel: 'universal', params: { productClass: '军团卡' } },
+      {
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['群体召唤'], weight: 2 },
+      },
+    ],
   },
   {
     name: '黑死牟',
@@ -3960,7 +3997,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'A' as TalentGrade,
     source: 'universal',
     description: '将等级不大于卡牌的素材其中一项词条，剪为意象妆点卡牌外观。',
-    entries: [],
+    // 2026-09-17 A 级批次②：「剪下素材一项词条妆点卡牌」= 剥离（把词条从素材上取下来）
+    entries: [{ kind: '剥离', channel: 'universal', params: {} }],
   },
   {
     name: '天妒英才',
@@ -3968,7 +4006,16 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你制作的伙伴卡都身患一种残疾，但拥有得天独厚的天赋。生成时等级越高则残疾越重，天赋也越是卓越。',
-    entries: [],
+    // 2026-09-17 A 级批次②（补漏）：伙伴卡必带「残疾」与「卓绝天赋」两态
+    // ——「等级越高残疾越重、天赋越卓越」由叙事按生成等级演绎，机械侧钉住两个词条必附。
+    entries: [
+      { kind: '成品限定', channel: 'universal', params: { productClass: '伙伴卡' } },
+      {
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['残疾', '卓绝天赋'], weight: 3 },
+      },
+    ],
   },
   {
     name: '神匠之手',
@@ -3976,7 +4023,11 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '当你制作装备卡时，装备卡的基础属性将会是素材提供的最大值，有10%的几率使制作的装备提升一个等级。',
-    entries: [],
+    // 2026-09-17 A 级批次②：「装备卡属性取素材最大值」= 成品限定装备卡；「10% 升一档」= 品质突破
+    entries: [
+      { kind: '成品限定', channel: 'universal', params: { productClass: '装备' } },
+      { kind: '品质突破', channel: 'universal', params: { productClass: '装备' } },
+    ],
   },
   {
     name: '蒸汽元素',
@@ -3995,7 +4046,15 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你制得的人物卡有着心理疾病，若是能解决心理疾病则她会获得天真纯洁的特质，若是不能则会获得杀人狂的黑化特质。此心理疾病会传染，但仅会传染到女性人物卡身上。',
-    entries: [],
+    // 2026-09-17 A 级批次②：人物卡必带心理疾病 → 二选一的特质词条走词条加权
+    entries: [
+      { kind: '成品限定', channel: 'universal', params: { productClass: '人物卡' } },
+      {
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['天真纯洁', '黑化'], weight: 2 },
+      },
+    ],
   },
   {
     name: '天生贵胄',
@@ -4013,7 +4072,11 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '只可以使用非伙伴卡，战斗中可以将自身任意张伙伴卡视作装备卡进行使用，可以对敌方至多一张伙伴卡发动，有概率将其视作装备卡装备在自身上。',
-    entries: [],
+    // 2026-09-17 A 级批次②：「只可使用非伙伴卡」= 成品限定装备卡；「把伙伴卡当装备用」是战斗规则，交给叙事
+    entries: [
+      { kind: '成品限定', channel: 'universal', params: { productClass: '装备' } },
+      { kind: '叙事意图', channel: 'universal', params: {} },
+    ],
   },
   {
     name: '厨神？',
@@ -4028,7 +4091,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你的攻击会伴随欧拉欧拉或者木大木大等意义不明的叫声，同时会出现一个其他人看不见的替身攻击敌方。',
-    entries: [],
+    // 2026-09-17 A 级批次①：「他人看不见的替身攻击敌方」——有没有替身只有叙事说得清。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '反间计',
@@ -4036,14 +4100,16 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你可以通过言语描述、虚假情报等任意方式，降低敌方伙伴卡的忠诚度，降低程度决定于你言语的煽动性、逻辑合理性。',
-    entries: [],
+    // 2026-09-17 A 级批次①：「用言语降低敌方伙伴忠诚」的成效取决于煽动性与逻辑，归叙事裁量。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '这他妈就离谱！',
     grade: 'A' as TalentGrade,
     source: 'universal',
     description: '当你将一件事说的越离谱时，NPC将会越相信你的话。你的语言，将引来神灵的关注。',
-    entries: [],
+    // 2026-09-17 A 级批次①：「说得越离谱越可信」是世界的回应方式，不是任何数值。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '深渊之瞳',
@@ -4051,7 +4117,13 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你的双眼适应了深海的黑暗。在水下环境中获得完美的暗视能力，且能看穿一切隐身与幻术效果。在陆地上，你的视力在黑夜中同样优越，但强光会对你造成短暂致盲。',
-    entries: [],
+    // 2026-09-17 A 级批次②（补漏）：复用「环境加成」——水下环境（由领域/场景卡建立）
+    // 成立时获得防御/闪避加成（暗视 = 看得见 = 好躲）；「看穿隐身与幻术」是感知规则，
+    // 交给叙事。
+    entries: [
+      { kind: '环境加成', channel: 'universal', params: { env: '水下', percent: 20 } },
+      { kind: '叙事意图', channel: 'universal', params: {} },
+    ],
   },
 
   // ── v9 第四批 B/A 级全量（主人 2026-09-15；制作专精/形态转化/系统情境，条目映射或纯叙事）──
