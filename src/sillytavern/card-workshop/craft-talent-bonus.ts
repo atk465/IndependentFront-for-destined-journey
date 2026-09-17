@@ -14,6 +14,13 @@
 import type { CardItem } from '../types';
 import { CARD_TIERS, type CardTier } from '../field-enums';
 import { EMOTIONS } from './emotion-material';
+import { LAZY_ENTRY, MODULAR_ENTRY } from './battle-rules';
+import { cardKindOf } from './card-kind';
+/** 条目天赋的宽松输入：只看 kind 与 params 里用得上的那几项（不绑死某个窄类型） */
+export interface CraftEntryTalentLike {
+  name?: string;
+  entries?: readonly { kind: string; params: Record<string, unknown> }[];
+}
 
 /** 入参：产物卡 + 该次制作用到的素材名（用于判定是否「欲望主导」） */
 export interface CraftTalentContext {
@@ -90,6 +97,78 @@ export function applyCraftTalentBonus(
         emotion ? `，汲取「${emotion}」之力` : ''
       }${gained.length ? `（附词条：${gained.join('、')}）` : ''}`,
     );
+  }
+
+  return { card: next, notes };
+}
+
+/**
+ * 制卡侧**条目天赋**的产物加成（2026-09-17 抽取为共用函数）。
+ *
+ * 与 `applyCraftTalentBonus` 的分工：那个管「越阶 / 欲望主导」两个带参数的开关；
+ * 这个管「看一眼条目就打在产物上」的几个印记与数量——
+ *  - **模块化天才**（`模块化`）：装备/载具卡打「模块化」印记 + 改装槽位数
+ *  - **懒惰天才**（`惰性`）：召唤/军团卡打「懒惰」印记
+ *  - **产出数量**（`产出数量`）：额外产出 n 份
+ *  - **战技附加**（`战技附加`）：产物附带一条战斗状态（多条取条目序第一条）
+ *
+ * ⚠️ **制卡主路（card-craft-plan）与 craft_gen 链共用这一个函数**——
+ * 两条路径的加成口径不许漂。改这里就是改两处。
+ *
+ * 纯函数，不改入参。
+ */
+export function applyCraftEntryTalents(
+  card: CardItem,
+  talents: readonly CraftEntryTalentLike[] | undefined,
+): CraftTalentResult {
+  const notes: string[] = [];
+  let next: CardItem = { ...card, 词条: [...(card.词条 ?? [])] };
+  const entries = (talents ?? []).flatMap((t) => t.entries ?? []);
+  const strengthOf = (kind: string, param: string): number => {
+    for (const e of entries) {
+      if (e.kind !== kind) continue;
+      const v = e.params[param];
+      if (typeof v === 'number' && Number.isFinite(v)) return v;
+    }
+    return 0;
+  };
+
+  const kind = cardKindOf(next.词条);
+
+  // 模块化天才：载具/装备卡
+  if (entries.some((e) => e.kind === '模块化') && kind === '装备') {
+    const slots = strengthOf('模块化', 'slots');
+    if (!next.词条.includes(MODULAR_ENTRY)) next.词条 = [...next.词条, MODULAR_ENTRY];
+    next = { ...next, data: { ...(next.data ?? {}), 改装槽: slots } };
+    notes.push(`【模块化天才】载具卡带 ${slots} 个改装槽——战斗中可热插拔换形态`);
+  }
+
+  // 懒惰天才：生物卡
+  if (entries.some((e) => e.kind === '惰性') && (kind === '召唤' || kind === '军团')) {
+    if (!next.词条.includes(LAZY_ENTRY)) next.词条 = [...next.词条, LAZY_ENTRY];
+    notes.push(`【懒惰天才】${kind}卡带「${LAZY_ENTRY}」印记——可能摸鱼，但动手就是暴击`);
+  }
+
+  // 产出数量：额外 n 份
+  const copies = entries
+    .filter((e) => e.kind === '产出数量')
+    .reduce((sum, e) => sum + Math.max(0, Math.round(Number(e.params.copies) || 0)), 0);
+  if (copies > 0) {
+    next = { ...next, quantity: (next.quantity ?? 1) + copies };
+    notes.push(`【产出数量】额外产出 ${copies} 份（共 ${next.quantity} 份）`);
+  }
+
+  // 战技附加：产物带一条战斗状态（取条目序第一条，确定性）
+  const statusEntry = entries.find((e) => e.kind === '战技附加');
+  const status = statusEntry?.params.status;
+  if (typeof status === 'string' && status.trim()) {
+    const 战技 = {
+      status: status.trim(),
+      power: Math.max(0, Math.round(Number(statusEntry!.params.power) || 0)),
+      beats: Math.max(0, Math.round(Number(statusEntry!.params.beats) || 0)),
+    };
+    next = { ...next, 战技 };
+    notes.push(`【战技附加】产物附带战技「${战技.status}」（量 ${战技.power} / ${战技.beats} 拍）`);
   }
 
   return { card: next, notes };

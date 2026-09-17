@@ -45,8 +45,15 @@ function ops(patches: ReturnType<typeof buildCraftPatches>, op: string) {
 
 // ========== buildCraftPatches (纯函数) ==========
 
+/** 门禁标注的取法：真的跑一次 buildCraftPatches，读它改过的 narrative */
+function makeOutputNarrativeWithGate(): string {
+  const out = makeCraftOutput();
+  buildCraftPatches(out, null, '理查德');
+  return out.narrative ?? '';
+}
+
 describe('buildCraftPatches', () => {
-  it('① 无 item_gen 输出 → 产物 1 条 add_item + 经验/FP 奖励', () => {
+  it('① 无 item_gen 输出 → 产物 1 条 add_item；**未经结算则不发经验/FP**（第三档门禁）', () => {
     const patches = buildCraftPatches(makeCraftOutput(), null, '理查德');
 
     const addItems = ops(patches, 'add_item');
@@ -59,17 +66,31 @@ describe('buildCraftPatches', () => {
     // 无装备细化 → 不发 equip_item
     expect(ops(patches, 'equip_item')).toHaveLength(0);
 
-    // 奖励: 经验走 update_character delta（M3），FP 走 delta_variable
-    const deltas = ops(patches, 'delta_variable');
-    expect(deltas).toHaveLength(1);
-    expect(deltas[0].target).toBe('profile.fp');
-    expect(deltas[0].amount).toBe(2);
+    // 🔒 2026-09-17 第三档门禁：没有 settlementPatches = 没走 craft_settle。
+    //    旧契约（`!settlementPatches && expGained > 0` 就发）是 fail-open——
+    //    AI 漏调结算工具时素材一分不扣、奖励却照发（还可能是 AI 编的数）。现在不发，
+    //    并在叙事里留下「未经结算」的标注，让玩家看得见这次没结算。
+    expect(ops(patches, 'delta_variable')).toHaveLength(0);
+    expect(ops(patches, 'update_character')).toHaveLength(0);
+    expect(makeOutputNarrativeWithGate()).toContain('未经结算');
+  });
 
-    const charUpdates = ops(patches, 'update_character');
-    expect(charUpdates).toHaveLength(1);
-    expect(charUpdates[0].target).toBe('characters.理查德');
-    expect(charUpdates[0].value).toEqual({ totalExp: 50 });
-    expect(charUpdates[0].metadata).toEqual({ source: 'craft_gen', delta: true });
+  it('①b 走了结算 → 本函数**不再发奖励**（奖励在结算补丁里，防双发）', () => {
+    const out = makeCraftOutput();
+    (out as any).settlementPatches = [
+      {
+        op: 'remove_item',
+        target: 'characters.理查德',
+        value: { name: '精钢锭', quantity: 1 },
+      },
+    ];
+    const patches = buildCraftPatches(out, null, '理查德');
+
+    // 奖励由 craft_settle 自己的补丁携带；这里若再发一次就是双发（曾经真这么错过）
+    expect(ops(patches, 'delta_variable')).toHaveLength(0);
+    expect(ops(patches, 'update_character')).toHaveLength(0);
+    // 结算过的，不该被打上「未经结算」的标注
+    expect(out.narrative).not.toContain('未经结算');
   });
 
   it('② item_gen equipment 与产物同名 → 不重复 add_item（同名恰好 1 条），单 add_item 带 equippedSlot（M3）', () => {
@@ -254,8 +275,9 @@ describe('buildCraftPatches', () => {
     expect((addItem[0].value as any).name).toBe('精钢长剑');
     expect((addItem[0].value as any).equippedSlot).toBe('武器');
     // 成功仍结算 EXP/FP
-    expect(ops(patches, 'update_character')).toHaveLength(1);
-    expect(ops(patches, 'delta_variable')).toHaveLength(1);
+    // 第三档门禁：exp/fp 与「真的结算过」绑定，这条没带 settlementPatches → 不发奖励
+    expect(ops(patches, 'update_character')).toHaveLength(0);
+    expect(ops(patches, 'delta_variable')).toHaveLength(0);
   });
 
   it('expGained/fpGained 为 0 时不发奖励 patch', () => {

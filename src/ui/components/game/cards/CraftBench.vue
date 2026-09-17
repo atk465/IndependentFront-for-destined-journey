@@ -50,6 +50,7 @@ import {
   type TrainDirection,
 } from '@engine/card-workshop/craft-flow-hooks';
 import { planFootAlchemy } from '@engine/card-workshop/partner-alchemy';
+import { planCardCraft } from '@engine/card-workshop/card-craft-plan';
 import { craftTierCeilingIndex } from '@engine/card-workshop/craft-rank';
 import type { TalentEntry, TalentEntryKind } from '@engine/card-workshop/talent-entry';
 import AppButton from '../../shared/AppButton.vue';
@@ -470,6 +471,60 @@ async function doAbyss() {
     return;
   }
   abyssMsg.value = r.summary ?? '深渊契约已缔结';
+}
+
+// ═══ 制卡区（主路：Code 算完 → AI 只写叙事与命名，2026-09-17 第三档）═══
+//
+// 与「AI 对话里说我要做张卡」那条路的分工：这里玩家**亲手选素材、亲手写下想做成
+// 什么样**，档位/词条/造价/评级/消耗/经验全部由 Code 当场算完（预览就可见），
+// AI 只负责给卡起名和把过程写成一段话。
+const craftMain = ref('');
+const craftSubA = ref('');
+const craftSubB = ref('');
+const craftIntent = ref('');
+const crafting = ref(false);
+const craftMsg = ref('');
+const craftErr = ref('');
+const craftCard_busy = computed(
+  () => crafting.value || !craftMain.value || craftMain.value === craftSubA.value,
+);
+
+/** 预览：与落库同源（planCardCraft 是纯函数，这里先看「会做出什么档次的东西」） */
+const craftPreview = computed(() => {
+  const inv = player.value?.inventory ?? [];
+  if (!craftMain.value) return undefined;
+  return planCardCraft({
+    mainName: craftMain.value,
+    subNames: [craftSubA.value, craftSubB.value].filter((s) => s && s !== craftMain.value),
+    intent: craftIntent.value,
+    inventory: inv,
+    d20: 10, // 预览用中位数骰，实际掷骰在提交时
+    fallbackName: `${craftMain.value}·卡`,
+    talents: [],
+    lift: {},
+  });
+});
+
+async function doCraftCard() {
+  if (!craftMain.value) return;
+  crafting.value = true;
+  craftErr.value = '';
+  craftMsg.value = '';
+  const r = await game.craftCard({
+    mainName: craftMain.value,
+    subNames: [craftSubA.value, craftSubB.value].filter((s) => s && s !== craftMain.value),
+    intent: craftIntent.value,
+  });
+  crafting.value = false;
+  if (!r.ok) {
+    craftErr.value = r.reason ?? '制卡失败';
+    return;
+  }
+  craftMsg.value = `【${r.productName}】${r.tier}／${r.rating}（造价 ${r.cost} GC，经验 +${r.exp}）`;
+  craftMain.value = '';
+  craftSubA.value = '';
+  craftSubB.value = '';
+  craftIntent.value = '';
 }
 
 // ═══ 足之炼金术区（`炼金` 条目：S「足之炼金术」）═══
@@ -1290,6 +1345,59 @@ const RATING_HINT: Record<string, string> = {
         <p v-if="abyssErr" class="clash-warn" role="alert">{{ abyssErr }}</p>
         <AppButton size="sm" variant="primary" :disabled="!abyssPreview?.ok" @click="doAbyss">
           缔结深渊契约
+        </AppButton>
+      </div>
+    </section>
+
+    <!-- 制卡区（主路：Code 算完 → AI 只写叙事与命名） -->
+    <section class="repair-section" aria-label="制卡">
+      <h4 class="d-label">制卡</h4>
+      <div v-if="materials.length === 0" class="empty-tab small">手上一件素材都没有…</div>
+      <div v-else class="slot-card">
+        <div class="slot-price">
+          选素材、写下你想做成什么样——<b>档位/词条/造价/评级由工坊当场定案</b>， AI
+          只负责给它起名、把过程写成一段话。
+        </div>
+        <div class="slot-head">
+          <select v-model="craftMain" class="slot-select" aria-label="选择主素材">
+            <option value="" disabled>主素材…</option>
+            <option v-for="m in materials" :key="m.name" :value="m.name">{{ m.name }}</option>
+          </select>
+          <select v-model="craftSubA" class="slot-select" aria-label="选择副素材甲">
+            <option value="">副素材（可空）…</option>
+            <option v-for="m in materials" :key="m.name" :value="m.name">{{ m.name }}</option>
+          </select>
+          <select v-model="craftSubB" class="slot-select" aria-label="选择副素材乙">
+            <option value="">副素材（可空）…</option>
+            <option v-for="m in materials" :key="m.name" :value="m.name">{{ m.name }}</option>
+          </select>
+        </div>
+        <textarea
+          v-model="craftIntent"
+          class="note-input"
+          rows="2"
+          placeholder="你想做成什么样？（只影响叙事，不改变数值）"
+        ></textarea>
+        <div v-if="craftPreview?.plan" class="craft-preview">
+          <span class="chip">{{ craftPreview.plan.product.cardTier }}</span>
+          <span v-for="w in craftPreview.plan.product.词条" :key="w" class="chip">{{ w }}</span>
+          <span class="chip">造价 {{ craftPreview.plan.cost }} GC</span>
+          <span class="chip">消耗 {{ craftPreview.plan.consumed.join('、') || '无' }}</span>
+          <p class="bench-note">（预览按中位骰；实际评级在提交时掷）</p>
+        </div>
+        <p v-if="craftPreview && !craftPreview.ok" class="clash-warn" role="alert">
+          {{ craftPreview.reason }}
+        </p>
+        <p v-if="craftMsg" class="bench-note">{{ craftMsg }}</p>
+        <p v-if="craftErr" class="clash-warn" role="alert">{{ craftErr }}</p>
+        <AppButton
+          size="sm"
+          variant="primary"
+          :disabled="craftCard_busy"
+          :loading="crafting"
+          @click="doCraftCard"
+        >
+          开始制卡
         </AppButton>
       </div>
     </section>

@@ -58,6 +58,7 @@ import {
 } from '@engine/card-workshop/talent-rule-modifiers';
 import { craftTierCeilingIndex } from '@engine/card-workshop/craft-rank';
 import {
+  buffActiveToday,
   coerceBuffs,
   coerceCounters,
   coerceLedger,
@@ -68,6 +69,7 @@ import {
   type DailyLedger,
 } from '@engine/card-workshop/daily-ledger';
 import { isRerollFace, rollOnTable } from '@engine/card-workshop/fortune-dice';
+import { DAILY_BUFF_CRAFT_LUCK } from '@engine/card-workshop/fortune-dice';
 import type { FortuneDiceTable } from '@engine/card-workshop/fortune-dice';
 import { planRarityUpgrade } from '@engine/card-workshop/material';
 import { planUnequalExchange } from '@engine/card-workshop/unequal-exchange';
@@ -82,6 +84,8 @@ import {
   type TrainDirection,
 } from '@engine/card-workshop/craft-flow-hooks';
 import { planFootAlchemy } from '@engine/card-workshop/partner-alchemy';
+import { planCardCraft } from '@engine/card-workshop/card-craft-plan';
+import { fallbackCraftNarration } from '@engine/card-craft-narrate';
 import { tierForLevel } from '@engine/card-workshop/companion-capture';
 import {
   FACE_SLAP_KEY,
@@ -163,6 +167,34 @@ export type TimelineRestoreResult =
   | { status: 'projection-failed'; error: string };
 
 let rewriteLoadoutImpl: RewriteLoadoutImpl | null = null;
+
+/**
+ * 制卡叙事实现注入缝（2026-09-17 第三档）——制卡本身在 store 里算完，
+ * 只有「请 AI 命名 + 写叙事」这一步需要 endpoint/clientFactory，
+ * 而那是 GamePipeline 装配出来的，所以按同一套缝模式注入。
+ * 未注入时用 Code 兜底叙事——**制卡不因 AI 不可用而失败**。
+ */
+export type CraftNarrateImpl = (req: {
+  saveId: string;
+  provisionalName: string;
+  tier: string;
+  entries: string[];
+  cost: number;
+  rating: string;
+  fusionKind: string;
+  materials: string[];
+  consumed: string[];
+  intent: string;
+  crafterName?: string;
+  talentNotes?: string[];
+}) => Promise<{ name?: string; narrative: string }>;
+
+let craftNarrateImpl: CraftNarrateImpl | null = null;
+
+/** 由 GamePage 在创建 GamePipeline 后调用（与 setRewriteLoadoutImpl 同款） */
+export function setCraftNarrateImpl(impl: CraftNarrateImpl): void {
+  craftNarrateImpl = impl;
+}
 
 /** 由 GamePage 在创建 GamePipeline 后调用，把引擎实现挂进 store（照 scene-image-seams 的缝模式） */
 export function setRewriteLoadoutImpl(impl: RewriteLoadoutImpl): void {
@@ -842,6 +874,167 @@ export const useGameStore = defineStore('game', () => {
   /**
    * 拆解（SSS「素材之王」非战斗侧）：物品 → 素材（材料）。
    */
+  /**
+   * 制卡主路（2026-09-17 第三档）：**Code 侧一次算完，AI 只写叙事与命名**。
+   *
+   * 流程：玩家选素材 + 写「想做成什么样」 → `planCardCraft` 算档位/词条/造价/评级/
+   * 消耗/经验 → 请 AI 命名并写叙事（失败则兜底） → 一次成型落库。
+   *
+   * 数值这条线上 AI 没有位置：漏调工具的失败面随之消失，素材经济不再依赖 AI 的自觉。
+   */
+  async function craftCard(input: {
+    mainName: string;
+    subNames: string[];
+    intent: string;
+  }): Promise<{
+    ok: boolean;
+    reason?: string;
+    productName?: string;
+    tier?: string;
+    rating?: string;
+    cost?: number;
+    exp?: number;
+    audit?: string[];
+    narrative?: string;
+  }> {
+    const playerChar = player.value;
+    if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
+
+    // ① Code 侧算完（骰值在这里掷；planCardCraft 是纯函数）
+    const luckToday = buffActiveToday(
+      coerceBuffs(saveProfile.value?.worldFlags?.dailyBuffs),
+      DAILY_BUFF_CRAFT_LUCK,
+      currentGameDay(),
+    );
+    const { ok, reason, plan } = planCardCraft({
+      mainName: input.mainName,
+      subNames: input.subNames,
+      intent: input.intent,
+      inventory: playerChar.inventory,
+      d20: 1 + Math.floor(Math.random() * 20),
+      fallbackName: `${input.mainName}·卡`,
+      talents: playerChar.talents?.list ?? [],
+      lift: {
+        baseLift: luckToday ? 1 : 0, // 「制卡顺利」+1（烙印是预付流程，不在这里）
+        misfortune: {
+          layers: counterOf(counters(), MISFORTUNE_KEY),
+          maxLift: strengthOf('赌运', 'maxLift'),
+        },
+        rewind: { armed: pendingRewind(), lift: 1 },
+      },
+    });
+    if (!ok || !plan) return { ok: false, reason };
+
+    // ② AI 命名 + 叙事（无工具；失败则兜底，绝不影响产物落库）
+    const materials = [input.mainName, ...input.subNames].filter(Boolean);
+    let productName = plan.product.name;
+    let narrative = '';
+    if (craftNarrateImpl) {
+      try {
+        const said = await craftNarrateImpl({
+          saveId: activeSaveId.value,
+          provisionalName: plan.product.name,
+          tier: plan.product.cardTier,
+          entries: plan.product.词条,
+          cost: plan.cost,
+          rating: plan.rating,
+          fusionKind: plan.product.recipe.fusionKind,
+          materials,
+          consumed: plan.consumed,
+          intent: input.intent,
+          crafterName: playerChar.name,
+          talentNotes: plan.notes,
+        });
+        if (said.name) productName = said.name;
+        narrative = said.narrative;
+      } catch (err) {
+        console.warn('[game-store] 制卡叙事失败（用兜底文案）:', err);
+        narrative = fallbackCraftNarration(plan, materials);
+      }
+    } else {
+      narrative = fallbackCraftNarration(plan, materials);
+    }
+
+    // ③ 一次成型落库：素材消耗 + 产物 + 卡册 + 造价 + 经验（全部 Code 算）
+    const card: CardItem = { ...plan.product, name: productName };
+    const album = toPlainCardAlbum(playerChar.cardAlbum ?? { owned: [], deck: [], capacity: 60 });
+    const patches: StatePatch[] = [
+      ...plan.consumed.map((name) => ({
+        op: 'remove_item' as const,
+        target: `characters.${playerChar.name}`,
+        value: { name, quantity: 1 },
+      })),
+      {
+        op: 'add_item',
+        target: `characters.${playerChar.name}`,
+        value: card as unknown as Record<string, unknown>,
+      },
+      ...(album.owned.includes(productName)
+        ? []
+        : [
+            {
+              op: 'update_character',
+              target: `characters.${playerChar.name}`,
+              value: {
+                cardAlbum: {
+                  owned: [...album.owned, productName].slice(0, album.capacity),
+                  deck: album.deck,
+                  capacity: album.capacity,
+                },
+              },
+            } as StatePatch,
+          ]),
+      {
+        op: 'update_character',
+        target: `characters.${playerChar.name}`,
+        value: { money: Math.max(0, playerChar.money - plan.cost) },
+      } as StatePatch,
+      ...(plan.exp > 0
+        ? [
+            {
+              op: 'update_character',
+              target: `characters.${playerChar.name}`,
+              value: { totalExp: plan.exp },
+              metadata: { delta: true, source: 'card-craft' },
+            } as StatePatch,
+          ]
+        : []),
+      ...(plan.misfortuneConsumed > 0
+        ? [
+            {
+              op: 'set_variable',
+              target: `worldFlags.counters.${MISFORTUNE_KEY}`,
+              value: 0,
+            } as StatePatch,
+          ]
+        : []),
+      ...(plan.rewindUsed
+        ? [
+            {
+              op: 'update_character',
+              target: `characters.${playerChar.name}`,
+              value: { mp: Math.max(0, playerChar.mp - strengthOf('回溯', 'mpCost')) },
+            } as StatePatch,
+            { op: 'set_variable', target: 'worldFlags.pendingRewind', value: false } as StatePatch,
+          ]
+        : []),
+    ];
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState(patches);
+    if (!result.success) return { ok: false, reason: result.errors.join('; ') };
+    await refreshFromDb();
+    return {
+      ok: true,
+      productName,
+      tier: card.cardTier,
+      rating: plan.rating,
+      cost: plan.cost,
+      exp: plan.exp,
+      audit: plan.audit,
+      narrative,
+    };
+  }
+
   /**
    * 足之炼金术（S）：伙伴卡踩踏素材 → 炼出全新道具卡。
    * **素材被消耗、伙伴卡不消耗**（她是踩踏者不是原料）——这是这条天赋的成本。
@@ -3257,6 +3450,7 @@ export const useGameStore = defineStore('game', () => {
     smeltCards,
     contractCard,
     dismantleItem,
+    craftCard,
     upgradeMaterial,
     exchangeItem,
     drawMaterialTen,

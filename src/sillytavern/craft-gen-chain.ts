@@ -45,11 +45,13 @@ import type { ToolExecutionContext } from './types';
 // Q-05：XML / JSON 解析的唯一工具面（参数顺序一律 (source, tag)）
 import { tagInner, tagBlock, parseAttrsStr } from './agent-xml';
 import { matchImitation } from './start-catalog-mechanics';
-import { applyCraftTalentBonus, isDesireDominant } from './card-workshop/craft-talent-bonus';
-import { entryStrength, totalCopies } from './card-workshop/talent-rule-modifiers';
-import { LAZY_ENTRY, MODULAR_ENTRY } from './card-workshop/battle-rules';
+import { entryStrength } from './card-workshop/talent-rule-modifiers';
+import {
+  applyCraftEntryTalents,
+  applyCraftTalentBonus,
+  isDesireDominant,
+} from './card-workshop/craft-talent-bonus';
 import { liftFromMisfortune } from './card-workshop/craft-flow-hooks';
-import { cardKindOf } from './card-workshop/card-kind';
 import { cardCatalogToItem } from './start-catalog-mechanics';
 import { extractJsonPayload } from './model-json';
 
@@ -572,31 +574,20 @@ export function buildCraftPatches(
     }
   }
 
-  // 3. 经验奖励 → update_character delta（M3: 不再走 delta_variable，#12 exp 侧）
-  // S4d：失败/大失败不结算 EXP/FP（craft_gen 失败时 expGained/fpGained 为 0，这里双重保险）
-  if (
-    !craftOutput.settlementPatches &&
-    craftOutput.success &&
-    craftOutput.craftParams.expGained > 0
-  ) {
-    patches.push({
-      op: 'update_character',
-      target: `characters.${characterId}`,
-      value: { totalExp: craftOutput.craftParams.expGained },
-      metadata: { source: 'craft_gen', delta: true },
-    });
-  }
-  // 4. FP 奖励 → delta_variable profile.fp（M5 改 FP op 前保持现状）
-  if (
-    !craftOutput.settlementPatches &&
-    craftOutput.success &&
-    craftOutput.craftParams.fpGained > 0
-  ) {
-    patches.push({
-      op: 'delta_variable',
-      target: 'profile.fp',
-      amount: craftOutput.craftParams.fpGained,
-    });
+  // 3./4. 经验与 FP 奖励
+  // S4d：失败/大失败不结算 EXP/FP（craft_gen 失败时 expGained/fpGained 为 0，双重保险）
+  //
+  // 🔒 2026-09-17（第三档门禁）：**奖励只认「真的结算过」**。
+  //   走了 `craft_settle` → 奖励在它自己的补丁里（所以这两支不该再发，否则双发）；
+  //   没走结算 → **一分不发**，只在叙事里标注。此前那一支
+  //   (`!settlementPatches && expGained > 0`) 会拿 AI 在 <craft_params> 里写的数发奖励——
+  //   Agentic 失败回退 `client.chat`（**无工具**）时，那个数只能由 AI 编。
+  //   卡牌制卡已改走制卡主路（card-craft-plan，Code 侧算完），不再依赖这条链的奖励。
+  const settled = !!(craftOutput.settlementPatches && craftOutput.settlementPatches.length > 0);
+  if (craftOutput.success && !settled && craftOutput.narrative) {
+    craftOutput.narrative = [craftOutput.narrative, '（本次未经结算——不发放奖励，素材也未扣）']
+      .filter(Boolean)
+      .join('\n');
   }
 
   return patches;
@@ -731,53 +722,11 @@ export async function runCraftGenChain(
         desireDominant,
       });
       cardProduct = boosted;
-      // 模块化天才（S）：产出的**载具/装备卡**带「模块化」印记 + 改装槽位数——
-      // 战斗中可热插拔一次（换一种在场形态）。
-      if (has('模块化') && cardProduct) {
-        const kind = cardKindOf(cardProduct.词条 ?? []);
-        if (kind === '装备') {
-          const slots = entryStrength(talentList, '模块化', 'slots');
-          cardProduct = {
-            ...cardProduct,
-            词条: (cardProduct.词条 ?? []).includes(MODULAR_ENTRY)
-              ? cardProduct.词条
-              : [...(cardProduct.词条 ?? []), MODULAR_ENTRY],
-            data: { ...(cardProduct.data ?? {}), 改装槽: slots },
-          };
-          notes.push(`【模块化天才】载具卡带 ${slots} 个改装槽——战斗中可热插拔换形态`);
-        }
-      }
-      // 懒惰天才（S）：产出的**生物卡**（召唤/军团）带「懒惰」印记——
-      // 拍内 50% 摸鱼跳过行动、否则行动值翻倍（见 battle-rules.resolveLazyCard）。
-      if (has('惰性') && cardProduct) {
-        const kind = cardKindOf(cardProduct.词条 ?? []);
-        if (kind === '召唤' || kind === '军团') {
-          if (!(cardProduct.词条 ?? []).includes(LAZY_ENTRY)) {
-            cardProduct = { ...cardProduct, 词条: [...(cardProduct.词条 ?? []), LAZY_ENTRY] };
-          }
-          notes.push(`【懒惰天才】${kind}卡带「${LAZY_ENTRY}」印记——可能摸鱼，但动手就是暴击`);
-        }
-      }
-      // 产出数量（2026-09-17）：持「丰饶祝福」这类条目者，每次制作额外产出 n 份
-      const copies = totalCopies(talentEntries);
-      if (copies > 0) {
-        cardProduct = { ...cardProduct, quantity: (cardProduct.quantity ?? 1) + copies };
-        notes.push(`【产出数量】额外产出 ${copies} 份（共 ${cardProduct.quantity} 份）`);
-      }
-      // 战技附加（2026-09-17）：持该条目的制卡师，产出的卡带一条战斗状态。
-      // 多条时取**条目序第一条**（确定性；融合会把条目去重，正常只有一条）。
-      const statusEntry = talentEntries.find((e: any) => e.kind === '战技附加');
-      if (statusEntry?.params?.status) {
-        const 战技 = {
-          status: String(statusEntry.params.status),
-          power: Math.max(0, Math.round(Number(statusEntry.params.power) || 0)),
-          beats: Math.max(0, Math.round(Number(statusEntry.params.beats) || 0)),
-        };
-        cardProduct = { ...cardProduct, 战技 };
-        notes.push(
-          `【战技附加】产物附带战技「${战技.status}」（量 ${战技.power} / ${战技.beats} 拍）`,
-        );
-      }
+      // 条目天赋的产物加成（模块化/惰性/产出数量/战技附加）——**与制卡主路
+      // （card-craft-plan）共用同一个函数**，两条路径的加成口径只有一份实现。
+      const entryBoost = applyCraftEntryTalents(cardProduct, talentList as never);
+      cardProduct = entryBoost.card;
+      notes.push(...entryBoost.notes);
       // 天赋审计行并入制作叙事（让玩家看到天赋确实生效）
       if (notes.length > 0) {
         craftOutput.narrative = [craftOutput.narrative, ...notes].filter(Boolean).join('\n');

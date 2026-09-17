@@ -129,6 +129,7 @@ import {
   spendCounter,
   tryUseToday,
 } from '@engine/card-workshop/daily-ledger';
+import { CARD_CRAFT_NARRATE_AGENT, runCardCraftNarration } from '@engine/card-craft-narrate';
 import {
   COMBAT_CRIT_MULTIPLIER,
   DAILY_BUFF_COMBAT_CRIT,
@@ -2316,6 +2317,32 @@ export class GamePipeline {
       'assistant',
     );
     return lucky + 2;
+  }
+
+  /**
+   * 制卡叙事（供 store 的注入缝调用）：**只命名 + 写过程，无工具**。
+   * endpoint 解析与侧链同源（本 agent 未配置时落默认池）。
+   */
+  async narrateCardCraft(req: {
+    saveId: string;
+    provisionalName: string;
+    tier: string;
+    entries: string[];
+    cost: number;
+    rating: string;
+    fusionKind: string;
+    materials: string[];
+    consumed: string[];
+    intent: string;
+    crafterName?: string;
+    talentNotes?: string[];
+  }): Promise<{ name?: string; narrative: string }> {
+    const endpoint = this.getEndpointForAgent(CARD_CRAFT_NARRATE_AGENT);
+    if (!endpoint) throw new Error('制卡叙事未解析到 API 池');
+    return runCardCraftNarration(
+      { ...req, endpoint },
+      { clientFactory: (agentId, ep, saveId) => this.getClientFactory()(agentId, ep, saveId) },
+    );
   }
 
   /** 每日账本：今天这个能力还能不能用（跨天自动恢复，见 daily-ledger.ts） */

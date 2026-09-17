@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref, watch } from 'vue';
-import { useGameStore, setRewriteLoadoutImpl } from '../../stores/game-store';
+import { useGameStore, setRewriteLoadoutImpl, setCraftNarrateImpl } from '../../stores/game-store';
 import { useUIStore } from '../../stores/ui-store';
 import { useSettingsStore } from '../../stores/settings-store';
 import { unwireEffectSystem } from '@engine/effect-wiring';
@@ -92,6 +92,11 @@ onMounted(async () => {
         pipeline
           ? pipeline.rewriteLoadoutItem(characterId, target, userDescription)
           : Promise.resolve({ ok: false, reason: '游戏管线还没就绪，稍后再试' }),
+      );
+      // 🆕 制卡主路（2026-09-17 第三档）：制卡在 store 里算完，只有命名与叙事
+      //     需要 endpoint/clientFactory —— 同样走缝注入，store 与面板不碰装配。
+      setCraftNarrateImpl((req) =>
+        pipeline ? pipeline.narrateCardCraft(req) : Promise.reject(new Error('游戏管线还没就绪')),
       );
       // 首次加载 → 自动发送开场 Prompt
       loadingSave.value = false;
