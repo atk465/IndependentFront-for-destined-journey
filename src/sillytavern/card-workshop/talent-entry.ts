@@ -577,14 +577,14 @@ const ENTRY_NUMERIC_TIERS: Partial<
   真名: { shockBase: [10, 20], shockPerLevel: [2, 3] },
   模块化: { slots: [1, 2], swaps: [1] },
   倒影: { maxHold: [3, 5, 9] },
-  条件加成: { threshold: [0, 3, 4], percent: [0, 10, 15, 20, 25], perExtra: [0, 2, 5] },
+  条件加成: { threshold: [0, 1, 3, 4], percent: [0, 10, 15, 20, 25], perExtra: [0, 2, 5] },
   暴击: { chance: [15, 20], critPower: [2] },
   嗜血: { hurtPct: [30], boostPct: [30, 50] },
   处决: { hurtPct: [15], shockPower: [10] },
   群威: { threshold: [2], percent: [10, 15], perExtra: [5] },
   快咏: { percent: [50] },
   体型压制: { crushPct: [20, 30] },
-  狂化: { rageMult: [2] },
+  狂化: { rageMult: [1.5, 2] },
 };
 
 /**
@@ -5617,7 +5617,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '在进行赌卡或黑市讨价还价时，NPC极难看穿你的真实意图和底牌。交易成功率及捡漏捡到神卡的概率小幅提升。',
-    entries: [],
+    // 2026-09-18 C 级批次①：「NPC 看不穿底牌」是赌桌叙事。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '警服崇拜',
@@ -5635,7 +5636,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '火器开火时的硝烟味会让你感到极度兴奋。战斗环境中的火属性魔法或枪械开火频率越高，你的敏捷、攻击力以及欲望值就越高。',
-    entries: [],
+    // 2026-09-18 C 级批次①：「硝烟味让你兴奋」的兴奋度归叙事（火频率判定需战场事件，见③备注）。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '酒馆艳遇体质',
@@ -5643,7 +5645,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '在酒馆或居住区，NPC主动向你搭讪、提供隐藏任务或特殊服务的概率提升。你制作的恢复类卡牌会自带微弱的催情效果。',
-    entries: [],
+    // 2026-09-18 C 级批次①：「NPC 主动搭讪」是世界对你的态度。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '仙人掌绿洲',
@@ -5651,7 +5654,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '在沙漠地形中，你的体液会变得极其甘甜且具有强效恢复能力。你的伙伴卡可以通过吸吮你来快速回复HP和状态。',
-    entries: [],
+    // 2026-09-18 C 级批次①：「沙漠里体液有恢复力」是设定，恢复的落点归叙事。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '劣酒豪客',
@@ -5659,7 +5663,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '饮用劣质酒精类道具后，不仅不会中毒，反而会获得霸体效果，无视所有僵直，但事后有极大几率引发酒后乱性事件。',
-    entries: [],
+    // 2026-09-18 C 级批次①：「劣酒霸体 + 酒后乱性」是饮酒叙事。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '冰霜之子',
@@ -5667,7 +5672,12 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你免疫一切冻伤、减速效果。在雪地环境中，你的隐蔽性极强，且冰属性魔法的MP消耗降低30%。',
-    entries: [],
+    // 2026-09-18 C 级批次③：雪天环境（领域/场景卡的冰词条建立）成立时防御/闪避 +20%；
+    // 「免疫冻伤/减速」「冰魔法 MP-30%」分别缺状态免疫表与 MP 消耗通道，已记 backlog。
+    entries: [
+      { kind: '环境加成', channel: 'universal', params: { env: '雪天', percent: 20 } },
+      { kind: '叙事意图', channel: 'universal', params: {} },
+    ],
   },
   {
     name: '蜜酒豪饮者',
@@ -5675,7 +5685,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '饮用酒精类道具卡后，防御力翻倍，痛觉消失。但会大幅降低你的理智值，极易在酒后对身边的NPC或魔物娘做出野蛮行为。',
-    entries: [],
+    // 2026-09-18 C 级批次①：「防御翻倍、痛觉消失、理智下降」是饮酒叙事（数值面由平衡裁量为纯叙事）。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '极寒凝视',
@@ -5683,7 +5694,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你的眼神冷若冰霜。与你对视的低等级敌人有几率陷入僵直。在交涉时，这种冰冷的气质对某些拥有M体质的NPC有着致命的吸引力。',
-    entries: [],
+    // 2026-09-18 C 级批次①：「对视僵直」是概率叙事、「对 M 质 NPC 有吸引力」是社交叙事。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '冰渊垂钓者',
@@ -5691,7 +5703,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '在冰层上打洞垂钓时，你总能钓上来一些奇奇怪怪的高级素材，包括但不限于深海巨兽的触手、古代冻尸的器官，或是某种滑溜溜的催情海藻。',
-    entries: [],
+    // 2026-09-18 C 级批次①：「冰钓出奇怪素材」是世界给你的馈赠，归叙事。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '冻骨巫医',
@@ -5714,7 +5727,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '使用锁链或项圈将战败的敌人（尤其是高傲的女性）套住拉雪橇时，你的移动速度大幅提升。她们爬得越屈辱，你在冰原上的状态就越好。',
-    entries: [],
+    // 2026-09-18 C 级批次①：「屈辱拉雪橇提升状态」是场景叙事。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '鲸骨束腰',
@@ -5729,7 +5743,12 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'C' as TalentGrade,
     source: 'universal',
     description: '自带极高的天然寒冷抗性，完全免疫冻伤debuff，受到的冰属性伤害降低20%。',
-    entries: [],
+    // 2026-09-18 C 级批次③：雪天环境 +20%（天然寒冷抗性的拍制等价）。
+    // 「免疫冻伤」「冰伤 -20%」缺状态免疫表与伤害类型通道，已记 backlog。
+    entries: [
+      { kind: '环境加成', channel: 'universal', params: { env: '雪天', percent: 20 } },
+      { kind: '叙事意图', channel: 'universal', params: {} },
+    ],
   },
   {
     name: '军靴擦拭工',
@@ -5813,7 +5832,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'C' as TalentGrade,
     source: 'universal',
     description: '你使用任何投掷类道具卡时，其弹道更稳定，射程更远。',
-    entries: [],
+    // 2026-09-18 C 级批次②：「弹道更稳、射程更远」= 投掷类成功率 +20%
+    entries: [{ kind: '成功率加成', channel: 'universal', params: { bonus: 20 } }],
   },
   {
     name: '炎之亲和',
@@ -5897,7 +5917,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '制作出的女性卡牌思维会有些脱线，经常会误解命令或在关键时刻发呆。她们的攻击有一定几率打偏，但也因为这种不确定性，偶尔会歪打正着，打出意想不到的暴击效果。',
-    entries: [],
+    // 2026-09-18 C 级批次①：「思维脱线、偶尔歪打正着」的随机性由叙事演绎（暴击与词条加权另配，见②）。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '元气少女',
@@ -5916,7 +5937,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你制作的装备卡上会多出一个插槽，可以镶嵌其他低等级的技能卡，但稳定性较差，有1%的概率在使用时失效。',
-    entries: [],
+    // 2026-09-18 C 级批次②：「多一个插槽」= 模块化（slots:1 低配档）
+    entries: [{ kind: '模块化', channel: 'universal', params: { slots: 1, swaps: 1 } }],
   },
   {
     name: '艺术家',
@@ -5924,7 +5946,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你制作的卡牌，卡面都异常精美，宛如艺术品。没有任何实际加成，但非常赏心悦目，也更容易卖出高价。',
-    entries: [],
+    // 2026-09-18 C 级批次①：描述明说「没有任何实际加成」——卡面精美与好卖是纯内容。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '足模的骄傲',
@@ -5932,7 +5955,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '制作出的女性卡牌，其脚部被视为一个独立的装备栏，可以额外装备脚链、涂装等特殊道具卡。',
-    entries: [],
+    // 2026-09-18 C 级批次①：「脚部独立装备栏」是设定层，落地需装备系统扩展，先给叙事入口。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '棉袜的温暖',
@@ -5960,7 +5984,11 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你拥有化腐朽为神奇的能力。任何被判定为垃圾或损坏的物品在你手中都有概率被修复或提炼出稀有素材，甚至找到被遗弃的神器。',
-    entries: [],
+    // 2026-09-18 C 级批次②：「垃圾修复/提炼稀有素材」= 拆解 + 叙事
+    entries: [
+      { kind: '拆解', channel: 'universal', params: {} },
+      { kind: '叙事意图', channel: 'universal', params: {} },
+    ],
   },
   {
     name: '深度睡眠系统',
@@ -5968,7 +5996,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你的睡眠质量极高。只要进入深度睡眠，精神力的恢复速度就是常人的三倍，偶尔还会在梦中预见到未来的片段。',
-    entries: [],
+    // 2026-09-18 C 级批次①：「梦中预见未来」是叙事供给（与群星的回想同族）。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '地图全开系统',
@@ -5976,7 +6005,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你进入任何一个新区域，该区域的简易地图都会自动点亮，并标记出危险区域和大致的资源点。',
-    entries: [],
+    // 2026-09-18 C 级批次①：「新区域自动点亮」依赖地图系统的探索状态，先给叙事入口。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '奇迹暖暖系统',
@@ -5984,7 +6014,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你拥有一个无限衣柜，可以随时换上任何风格的服装。搭配不同的服装会获得微小的属性加成或特殊效果。',
-    entries: [],
+    // 2026-09-18 C 级批次①：「无限衣柜 + 搭配加成」是外观系统，先给叙事入口。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '杠精',
@@ -6000,7 +6031,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '倾向于制造拥有工具特性（如钻头、熔炉）的生物卡，它们既能战斗，也能辅助进行工程或锻造活动。',
-    entries: [],
+    // 2026-09-18 C 级批次①：「生物卡带工具特性」是造物设定，辅助工程由叙事演绎。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '不死奴仆',
@@ -6090,7 +6122,14 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '制作出的女性伙伴卡必定是看似纤细却力大无穷的类型。装备重型武器时，不再有敏捷惩罚。',
-    entries: [],
+    // 2026-09-18 C 级批次②：「纤细却力大无穷」= 双态词条必附
+    entries: [
+      {
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['纤细', '怪力'], weight: 3 },
+      },
+    ],
   },
   {
     name: '足技专家',
@@ -6121,7 +6160,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你崇尚公平的对决。制作出的女性伙伴卡必定是武痴性格，热衷于战斗和挑战强者，战斗方式为纯粹的武技或剑术，鄙视使用道具和陷阱。',
-    entries: [],
+    // 2026-09-18 C 级批次①：「武痴性格、鄙视道具」是性格设定（与武者系词条加权同族，先给叙事）。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '炼金术师的探究',
@@ -6137,7 +6177,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你享受风险带来的刺激。制作出的女性伙伴卡性格好赌，战斗技能带有很强的随机性，运气好时能秒杀敌人，运气差时毫无作用。',
-    entries: [],
+    // 2026-09-18 C 级批次①：「技能随机性好时秒人」的随机性由叙事演绎。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '姐姐的守护',
@@ -6166,7 +6207,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'C' as TalentGrade,
     source: 'universal',
     description: '制作出的伙伴卡，其力量和体质成长率会获得小幅提升，身材更倾向于运动型健美。',
-    entries: [],
+    // 2026-09-18 C 级批次②：「力量体质成长小幅提升」= 体魄 20（HP 上限 +20%，取其「体格强化」义）
+    entries: [{ kind: '体魄', channel: 'universal', params: { percent: 20 } }],
   },
   {
     name: '斗殴专家',
@@ -6182,14 +6224,28 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'C' as TalentGrade,
     source: 'universal',
     description: '制作出的伙伴卡身高必定超过平均水平，在面对比自己矮的敌人时，有微小的命中加成。',
-    entries: [],
+    // 2026-09-18 C 级批次②：「对更矮的敌人有命中加成」= 体型压制低配档（20%）
+    entries: [
+      {
+        kind: '体型压制',
+        channel: 'universal',
+        params: { crushPct: 20 },
+      },
+    ],
   },
   {
     name: '重武器亲和',
     grade: 'C' as TalentGrade,
     source: 'universal',
     description: '该伙伴卡在使用双手斧、大剑、战锤等重型武器时，不再有攻击速度惩罚。',
-    entries: [],
+    // 2026-09-18 C 级批次②：「重武器无攻速惩罚」= 重装无惩罚词条必附
+    entries: [
+      {
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['重装无惩罚'], weight: 3 },
+      },
+    ],
   },
   {
     name: '亚马逊血统',
@@ -6291,14 +6347,24 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你可以通过食用新鲜的粪便，恢复少量HP并解除饥饿状态，但会获得口臭debuff，降低魅力。',
-    entries: [],
+    // 2026-09-18 C 级批次①：「吃粪便回血 + 口臭 debuff」是猎奇设定。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '人马一体',
     grade: 'C' as TalentGrade,
     source: 'universal',
     description: '当你骑乘半人马或坐骑类伙伴卡时，你和伙伴的能力将合二为一，全属性提升10%。',
-    entries: [],
+    // 2026-09-18 C 级批次③：「骑乘」条件——近似为「卡组里有坐骑倾向的伙伴卡」，
+    // 真正的骑乘状态（场上单位互乘）属战斗维度扩展后续，已记 backlog。
+    entries: [
+      {
+        kind: '条件加成',
+        channel: 'universal',
+        params: { cond: '伙伴卡数', threshold: 1, percent: 10, perExtra: 0 },
+      },
+      { kind: '叙事意图', channel: 'universal', params: {} },
+    ],
   },
   {
     name: '快速成长',
@@ -6312,14 +6378,16 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'C' as TalentGrade,
     source: 'universal',
     description: '在商店购买物品时，可以获得5%的折扣。',
-    entries: [],
+    // 2026-09-18 C 级批次②：「商店 95 折」——金钱加减的折扣通道还没有，先给叙事入口（backlog：交易折扣）
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '坚韧之躯',
     grade: 'C' as TalentGrade,
     source: 'universal',
     description: '你在卡牌爆炸中有更高的存活几率，受到的伤害降低30%。',
-    entries: [],
+    // 2026-09-18 C 级批次②：「爆炸存活率高」——卡牌爆炸的伤害通道在启封判定里，先给叙事入口
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '野外生存',
@@ -6375,7 +6443,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'C' as TalentGrade,
     source: 'universal',
     description: '修复受损卡牌时，消耗的精神力减少50%。',
-    entries: [],
+    // 2026-09-18 C 级批次②：「修复消耗减半」走修复折扣通道还没有，先给成功率表述（backlog：修复折扣）
+    entries: [{ kind: '成功率加成', channel: 'universal', params: { bonus: 20 } }],
   },
   {
     name: '装备大师',
@@ -6396,14 +6465,16 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'C' as TalentGrade,
     source: 'universal',
     description: '通过舔舐伙伴卡的脚，可以小幅提升其忠诚度，并缓慢培养女王词条。',
-    entries: [],
+    // 2026-09-18 C 级批次①：「舔脚提升忠诚」是互动叙事。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '薛定谔的成功',
     grade: 'C' as TalentGrade,
     source: 'universal',
     description: '制卡完成后，卡牌会处于成功或失败的叠加态，只有在第一次使用时才能确定最终结果。',
-    entries: [],
+    // 2026-09-18 C 级批次②：「叠加态到使用才确定」= 未定态，引擎还没有——先给叙事入口
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '贞操锁爱好者',
@@ -6418,14 +6489,16 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'C' as TalentGrade,
     source: 'universal',
     description: '你在黑暗环境中的视野不受影响。',
-    entries: [],
+    // 2026-09-18 C 级批次①：「黑暗中视野不受影响」是感知规则。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '自我发电',
     grade: 'C' as TalentGrade,
     source: 'universal',
     description: '通过自慰达到高潮可以恢复少量MP，但会进入短暂的贤者时间，全属性降低。',
-    entries: [],
+    // 2026-09-18 C 级批次①：「恢复 MP + 贤者时间」是自循环叙事。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '哥布林杀手',
@@ -6507,7 +6580,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'C' as TalentGrade,
     source: 'universal',
     description: '受到攻击时，你会感到兴奋，并小幅提升攻击速度。',
-    entries: [],
+    // 2026-09-18 C 级批次②：「受击兴奋提升攻速」= 狂化低配档（×1.5）
+    entries: [{ kind: '狂化', channel: 'universal', params: { rageMult: 1.5 } }],
   },
   {
     name: 'S气质',
@@ -6558,7 +6632,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'C' as TalentGrade,
     source: 'universal',
     description: '你就拥有无限的精液，你完全不用担心被榨干了。',
-    entries: [],
+    // 2026-09-18 C 级批次①：「不用担心被榨干」是纯设定。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '污秽洗礼',
@@ -6609,7 +6684,11 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你对血液的气味极度敏感。在半径500米内，只要有生物流血，你就能精准锁定其位置。血量越低的目标，你对其造成的伤害越高。',
-    entries: [],
+    // 2026-09-18 C 级批次②：「感知流血目标」= 鉴定 + 叙事
+    entries: [
+      { kind: '鉴定', channel: 'universal', params: {} },
+      { kind: '叙事意图', channel: 'universal', params: {} },
+    ],
   },
   {
     name: '藤壶寄生',
@@ -6633,7 +6712,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你可以食用任何海洋生物的生肉——无论多么恶心、有毒或腥臭——都不会中毒或生病，反而能恢复少量HP。食用高等级海洋魔物的肉时，有极低概率临时获得该魔物的一项能力。',
-    entries: [],
+    // 2026-09-18 C 级批次①：「吃海洋生肉不中毒、低概率获能力」是进食规则。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '龙涎香鉴定师',
@@ -6641,7 +6721,11 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你拥有鉴定海洋生物遗留物的专业能力。在处理海洋类素材时，你有20%的概率从普通素材中额外发现一个隐藏词条。此外，你在出售海洋素材时价格提升15%。',
-    entries: [],
+    // 2026-09-18 C 级批次②：「鉴定海洋遗留物」= 鉴定；「卖价 +15%」= 击杀掠取低档（gold 5）
+    entries: [
+      { kind: '鉴定', channel: 'universal', params: {} },
+      { kind: '击杀掠取', channel: 'universal', params: { gold: 5 } },
+    ],
   },
 
   // ── v11 第六批 D 级全量（主人 2026-09-15；生存/QoL/风味，entries 全空）──

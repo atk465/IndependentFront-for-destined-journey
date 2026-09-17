@@ -128,6 +128,7 @@ export interface CardInPlayEffect {
  */
 export const ENV_ELEMENTS: Readonly<Record<string, readonly string[]>> = {
   水下: ['水', '冰'],
+  雪天: ['冰'],
 };
 
 /** 这张卡建立的环境（只有领域/场景卡算；无 → undefined） */
