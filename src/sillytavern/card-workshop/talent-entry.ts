@@ -1374,7 +1374,10 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'B' as TalentGrade,
     source: 'universal',
     description: '进行赌卡时，你能感觉到卡牌或素材的真实价值。',
-    entries: [e({ kind: '鉴定', channel: 'universal', params: {} })],
+    entries: [
+      e({ kind: '鉴定', channel: 'universal', params: {} }),
+      e({ kind: '叙事意图', channel: 'universal', params: {} }),
+    ],
   },
   {
     name: '口才',
@@ -5920,7 +5923,11 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'C' as TalentGrade,
     source: 'universal',
     description: '常年的流水线工作经验让你在制作通用型载具卡时，MP消耗略有降低，且成品质量稳定。',
-    entries: [],
+    // 2026-09-18 D 小批：载具品质稳定
+    entries: [
+      { kind: '成品限定', channel: 'universal', params: { productClass: '载具' } },
+      { kind: '成功率加成', channel: 'universal', params: { bonus: 20 } },
+    ],
   },
   {
     name: '深海调试',
@@ -5928,7 +5935,15 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '专精于水下与水面载具，制作的船只或潜艇拥有更好的密封性与抗压性，不易进水或被水压摧毁。',
-    entries: [],
+    // 2026-09-18 D 小批：水下载具专精
+    entries: [
+      { kind: '成品限定', channel: 'universal', params: { productClass: '船只' } },
+      {
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['密封', '抗压'], weight: 2 },
+      },
+    ],
   },
   {
     name: '不稳定化合物',
@@ -6440,7 +6455,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'C' as TalentGrade,
     source: 'universal',
     description: '你所受到的部分伤害会转化为MP恢复，但同时会让你在受伤时发出听起来像高潮的呻吟。',
-    entries: [],
+    // 2026-09-18 D 小批：伤害转 MP 需拍内核 hook（缺量）
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '气味伪装',
@@ -6521,7 +6537,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'C' as TalentGrade,
     source: 'universal',
     description: '你在野外获得草药、矿石等基础素材时，质量小幅提升。',
-    entries: [],
+    // 2026-09-18 D 小批：野外素材质量提升
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '妹妹的祈愿',
@@ -6578,7 +6595,14 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'C' as TalentGrade,
     source: 'universal',
     description: '你穿戴装备卡时，装备的基础属性有5%的额外加成。',
-    entries: [],
+    // 2026-09-18 D 小批：装备基础属性 +5%
+    entries: [
+      {
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['装备加成'], weight: 3 },
+      },
+    ],
   },
   {
     name: '酒豪',
@@ -6644,7 +6668,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '使用价值低于1银币的素材组合制卡时，有几率触发化腐朽为神奇，强制提升成品一个等级。',
-    entries: [],
+    // 2026-09-18 D 小批：低价素材强制升档 = 品质突破变体
+    entries: [{ kind: '品质突破', channel: 'universal', params: { productClass: '廉价' } }],
   },
   {
     name: '人偶外壳',
@@ -6753,7 +6778,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'C' as TalentGrade,
     source: 'universal',
     description: '你很矮，常常被人忽视，存在感减弱，个子越矮幸运值越高。',
-    entries: [],
+    // 2026-09-18 D 小批：存在感减弱+幸运提升
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '无限精液',

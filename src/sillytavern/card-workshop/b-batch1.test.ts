@@ -60,11 +60,10 @@ describe('B 批① —— 纯叙事通道（19 条含赌徒直觉既有风味条
     }
   });
 
-  it('赌徒直觉的「鉴定」是刻意保留的风味条目（感知价值没有数值面）', () => {
+  it('赌徒直觉：鉴定 + 叙事意图（已实装，鉴定是风味 + 叙事是规则）', () => {
     const tpl = getTalentTemplate('赌徒直觉')!;
-    expect(tpl.entries.map((e) => e.kind)).toEqual(['鉴定']);
-    // 鉴定不在已实装表——这条是唯一「挂着风味条目、面板显示仅叙事」的例外
-    expect(hasWorkingMechanic(tpl)).toBe(false);
+    expect(tpl.entries.map((e) => e.kind)).toEqual(['鉴定', '叙事意图']);
+    expect(hasWorkingMechanic(tpl)).toBe(true);
   });
 });
 

@@ -53,18 +53,15 @@ describe('D 级 —— 全量 71/71', () => {
     expect(getTalentTemplate('高人一等')!.entries[0].params).toEqual({ crushPct: 20 }); // C 级② 低配档
   });
 
-  it('鉴定例外：赌徒直觉 / 二手专家 / 鲨鱼嗅觉 / 龙涎香鉴定师 挂了鉴定的四条', () => {
-    // 鉴定是风味条目（无消费方）——
-    // 赌徒直觉单挂（仍是仅叙事，刻意保留）；其余三条补了第二通道才算已实装
-    expect(getTalentTemplate('赌徒直觉')!.entries.map((e) => e.kind)).toEqual(['鉴定']);
-    expect(hasWorkingMechanic(getTalentTemplate('赌徒直觉')!)).toBe(false); // 保留例外
-    for (const name of ['二手专家', '鲨鱼嗅觉', '龙涎香鉴定师']) {
+  it('鉴定 + 第二通道：赌徒直觉 / 二手专家 / 鲨鱼嗅觉 / 龙涎香鉴定师 全部已实装', () => {
+    // 鉴定本身是风味条目（无消费方），但这四条都有第二通道（叙事意图等）
+    for (const name of ['赌徒直觉', '二手专家', '鲨鱼嗅觉', '龙涎香鉴定师']) {
       const tpl = getTalentTemplate(name)!;
       expect(
         tpl.entries.some((e) => e.kind === '鉴定'),
         name,
       ).toBe(true);
-      expect(tpl.entries.length, `${name} 应有第二通道`).toBeGreaterThan(1);
+      expect(tpl.entries.length, name + ' 应有第二通道').toBeGreaterThan(1);
       expect(hasWorkingMechanic(tpl!), name).toBe(true);
     }
   });
