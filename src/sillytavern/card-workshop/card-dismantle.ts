@@ -19,8 +19,13 @@
 import type { InventoryItem } from '../types';
 import { CARD_TIERS, type CardTier, type Rarity } from '../field-enums';
 
-/** 卡牌档位 → 材料品质（5 档映射到 7 级品质的前 5 级，传说封顶） */
-const TIER_TO_RARITY: Record<CardTier, Rarity> = {
+/**
+ * 卡牌档位 → 材料品质（5 档映射到 7 级品质的前 5 级，传说封顶）。
+ *
+ * **单一真源**：拆解、转化（companion-capture）与素材抽奖（material-gacha）共用这一张，
+ * 不给同一条映射留第二份副本。
+ */
+export const TIER_TO_RARITY: Record<CardTier, Rarity> = {
   白铁: '普通',
   青铜: '优良',
   白银: '稀有',

@@ -101,6 +101,10 @@ describe('TALENT_ENTRY_POOL（单一真源）', () => {
     '日掷',
     '烙印',
     '置换',
+    '抽奖',
+    '免死',
+    '复生',
+    '自身状态',
   ];
   const ALL_CHANNELS: readonly TalentChannel[] = [
     'creation',

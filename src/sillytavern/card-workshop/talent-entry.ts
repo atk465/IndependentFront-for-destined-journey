@@ -70,7 +70,11 @@ export type TalentEntryKind =
   | '点金' // 每日可指定素材提升品质档数（S「素材点金」）
   | '日掷' // 每日可投一次骰（SS「好运之骰」十面 / S「命运之骰」六面，靠 faces 分派）
   | '烙印' // 战败累积烙印，制卡时消耗一枚扭转词条冲突（SS「败犬烙印」）
-  | '置换'; // 放弃素材/卡牌，换回 1~2 个同类同品质的回报（S「不等价交换」）
+  | '置换' // 放弃素材/卡牌，换回 1~2 个同类同品质的回报（S「不等价交换」）
+  | '抽奖' // 每日 N 连抽，保底不低于自身等级（S「素材十连系统」）
+  | '免死' // HP 归零时锁血续战（S「绞刑架幸存者」）
+  | '复生' // 败北结算时复苏，不真正死亡（S「再生」）
+  | '自身状态'; // 开战即生效的玩家侧被动（S「蛇符咒」隐身 / S「贝蒙斯坦」吸魔）
 
 /** 骨架条目：kind + 预设参数 + 独占渠道标记 */
 export interface TalentEntry {
@@ -103,7 +107,7 @@ export interface TalentEntry {
     weight?: 1 | 2 | 3;
     /** 形态转化的系列名（猫娘/塞壬/菌娘…） */
     series?: string;
-    /** 战技附加：状态名（中毒/减速/眩晕…） */
+    /** 状态名（**战技附加**：中毒/减速/眩晕…；**自身状态**：隐身/吸魔…） */
     status?: string;
     /** 战技附加：量（DoT 伤害 / 威胁降低值） */
     power?: number;
@@ -135,6 +139,14 @@ export interface TalentEntry {
     maxHold?: number;
     /** 置换：最多换回几份（不等价交换；上限 2） */
     maxReturn?: number;
+    /** 抽奖：每次抽几发（素材十连 = 10） */
+    times?: number;
+    /** 免死：锁血到几点 HP */
+    hpFloor?: number;
+    /** 免死：是否同时回满 MP（1 = 回满 / 0 = 不回） */
+    mpRefill?: number;
+    /** 免死：每场可用次数（0 = 不限） */
+    perBattle?: number;
   };
 }
 
@@ -333,6 +345,11 @@ export const TALENT_ENTRY_POOL: readonly TalentEntry[] = [
   e({ kind: '日掷', channel: 'universal', params: { perDay: 1, faces: 6 } }),
   e({ kind: '烙印', channel: 'universal', params: { maxHold: 9 } }),
   e({ kind: '置换', channel: 'universal', params: { maxReturn: 2 } }),
+  e({ kind: '抽奖', channel: 'universal', params: { times: 10, perDay: 1 } }),
+  e({ kind: '免死', channel: 'universal', params: { hpFloor: 1, mpRefill: 1, perBattle: 1 } }),
+  e({ kind: '复生', channel: 'universal', params: { hpFloor: 1 } }),
+  e({ kind: '自身状态', channel: 'universal', params: { status: '隐身', power: 30 } }),
+  e({ kind: '自身状态', channel: 'universal', params: { status: '吸魔', power: 30 } }),
   e({ kind: '改造', channel: 'story', params: {} }),
   // ── v10 扩容（伙伴卡生成通道，2026-09-17）──
   e({ kind: '捕获', channel: 'story', params: {} }),
@@ -430,6 +447,10 @@ const ENTRY_NUMERIC_TIERS: Partial<
   日掷: { perDay: [1, 2], faces: [6, 10] },
   烙印: { maxHold: [3, 5, 9] },
   置换: { maxReturn: [1, 2] },
+  抽奖: { times: [10], perDay: [1, 2] },
+  免死: { hpFloor: [1, 2], mpRefill: [0, 1], perBattle: [1] },
+  复生: { hpFloor: [1, 2] },
+  自身状态: { power: [10, 20, 30, 40, 50] },
 };
 
 /**
@@ -455,6 +476,10 @@ export const ENTRY_STRENGTH_BASELINE = {
   日掷: { perDay: 1, faces: 10 },
   烙印: { maxHold: 9 },
   置换: { maxReturn: 2 },
+  抽奖: { times: 10, perDay: 1 },
+  免死: { hpFloor: 1, mpRefill: 1, perBattle: 1 },
+  复生: { hpFloor: 1 },
+  自身状态: { power: 30 },
 } as const;
 
 /** 各种类的必填内容参数（非空字符串；keywords 为字符串数组） */
@@ -465,6 +490,7 @@ const ENTRY_REQUIRED_STRINGS: Partial<Record<TalentEntryKind, readonly string[]>
   配方解锁: ['recipe'],
   战技附加: ['status'],
   环境加成: ['env'],
+  自身状态: ['status'],
 };
 
 const ENTRY_KIND_LIST: readonly TalentEntryKind[] = [
@@ -514,6 +540,10 @@ const ENTRY_KIND_LIST: readonly TalentEntryKind[] = [
   '日掷',
   '烙印',
   '置换',
+  '抽奖',
+  '免死',
+  '复生',
+  '自身状态',
 ];
 
 /**
@@ -537,6 +567,10 @@ const ENTRY_OPTIONAL_NUMERIC: Partial<Record<TalentEntryKind, readonly string[]>
   置换: ['maxReturn'],
   吞噬: ['levelBonus'],
   拆解: ['levelBonus'],
+  抽奖: ['times', 'perDay'],
+  免死: ['hpFloor', 'mpRefill', 'perBattle'],
+  复生: ['hpFloor'],
+  自身状态: ['power'],
 };
 
 export function validateTalentEntries(entries: readonly TalentEntry[]): {
@@ -1983,7 +2017,10 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '曾被吊死却奇迹生还。你的颈部极其坚韧，免疫一切窒息、绞杀类伤害。当你的HP归零时，有一次机会以1点HP强行锁血复活，并瞬间获得满额MP。',
-    entries: [],
+    // 2026-09-17：战中免死——HP 归零时锁血到 1 + 回满 MP，每场一次，战斗继续。
+    entries: [
+      { kind: '免死', channel: 'universal', params: { hpFloor: 1, mpRefill: 1, perBattle: 1 } },
+    ],
   },
   {
     name: '西部决斗礼仪',
@@ -2238,7 +2275,9 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '每天获得一次免费的素材十连抽机会，保底获得一张不低于自身等级的稀有素材，有极小概率抽出高阶突变词条。',
-    entries: [],
+    // 2026-09-17：每日十连（worldFlags.dailyUses 记账），保底按玩家等级换算稀有度；
+    // 「极小概率抽出高阶突变词条」走 material-gacha 的突变面。
+    entries: [{ kind: '抽奖', channel: 'universal', params: { times: 10, perDay: 1 } }],
   },
   {
     name: '亲吻女神系统',
@@ -2717,14 +2756,17 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'S' as TalentGrade,
     source: 'universal',
     description: '你的身体拥有极其强大的再生能力，不会真正的死亡，哪怕是变成肉块都能重新活过来。',
-    entries: [],
+    // 2026-09-17：战后复生——败北结算时 HP 不落 0，恢复到 hpFloor（不死之身）。
+    // 与「绞刑架幸存者」分工：那条管**战中**续战，这条管**战后**不真死。
+    entries: [{ kind: '复生', channel: 'universal', params: { hpFloor: 1 } }],
   },
   {
     name: '蛇符咒',
     grade: 'S' as TalentGrade,
     source: 'universal',
     description: '你可以隐身。',
-    entries: [],
+    // 2026-09-17：自身状态「隐身」——开战即整场削敌方威胁（打不中你）。
+    entries: [{ kind: '自身状态', channel: 'universal', params: { status: '隐身', power: 30 } }],
   },
   {
     name: '爬虫王朝',
@@ -2741,7 +2783,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'S' as TalentGrade,
     source: 'universal',
     description: '你可以吸收魔法和远程攻击，将其转换为hp和mp。',
-    entries: [],
+    // 2026-09-17：自身状态「吸魔」——每拍把吸收到的攻击转为 HP 回复。
+    entries: [{ kind: '自身状态', channel: 'universal', params: { status: '吸魔', power: 30 } }],
   },
   {
     name: '痛苦阶梯',
@@ -7002,6 +7045,10 @@ export const IMPLEMENTED_ENTRY_KINDS: ReadonlySet<TalentEntryKind> = new Set<Tal
   '日掷',
   '烙印',
   '置换',
+  '抽奖',
+  '免死',
+  '复生',
+  '自身状态',
   '战技附加',
 ]);
 

@@ -85,6 +85,11 @@ import {
   totalIntimidation,
 } from '@engine/card-workshop/talent-rule-modifiers';
 import {
+  initialSelfEffects,
+  selfStatusesOf,
+  totalSelfStatus,
+} from '@engine/card-workshop/self-status';
+import {
   buffActiveToday,
   canUseToday,
   coerceBuffs,
@@ -2344,15 +2349,28 @@ export class GamePipeline {
         );
       }
       const fearPct = totalIntimidation(flatEntriesOf(talentList));
+      // 自身状态（S「蛇符咒」隐身 / S「贝蒙斯坦」吸魔）：隐身 = 打不中你，
+      // 与威压同一条「缩放敌方威胁」的口径，所以并进同一个百分比一起算。
+      const selfStatuses = selfStatusesOf(talentList);
+      const stealthPct = totalSelfStatus(selfStatuses, 'threatDown');
+      const threatCut = Math.min(90, fearPct + stealthPct);
       const intents =
-        fearPct > 0
+        threatCut > 0
           ? assessment.intents.map((it) => ({
               ...it,
-              threat: Math.max(0, Math.round(it.threat * (1 - fearPct / 100))),
+              threat: Math.max(0, Math.round(it.threat * (1 - threatCut / 100))),
             }))
           : assessment.intents;
-      if (fearPct > 0) {
-        this.emitMessage(`▸ 威压：敌方威胁 −${fearPct}%（全体）`, 'assistant');
+      if (fearPct > 0) this.emitMessage(`▸ 威压：敌方威胁 −${fearPct}%（全体）`, 'assistant');
+      if (stealthPct > 0) {
+        this.emitMessage(`▸ 【自身状态·隐身】敌方威胁 −${stealthPct}%（打不中你）`, 'assistant');
+      }
+      const initialEffects = initialSelfEffects(selfStatuses);
+      if (initialEffects.length > 0) {
+        this.emitMessage(
+          `▸ 【自身状态】${initialEffects.map((e) => e.name).join('、')} 开战即生效`,
+          'assistant',
+        );
       }
       const base = startSkirmish({
         enemyName: assessment.enemyName,
@@ -2362,6 +2380,7 @@ export class GamePipeline {
         playerMaxHp: maxHp,
         enemyHp: assessment.enemyHp,
         guard: deckGuard,
+        initialEffects,
       });
       const session = judgeCrush(stats.atk + stats.guard + stats.agi + deck, assessment.enemyPower)
         ? crushFinish(base)
@@ -2658,15 +2677,47 @@ export class GamePipeline {
         `▸ 下克上：敌方 Lv${session.enemyLevel} 高于你 Lv${playerC.level} → 行动值 +${vsHigh}%`,
       ];
     }
+    // 免死（绞刑架幸存者）：持天赋且本场没用过 → 允许本拍锁血续战
+    const lastStand = this.lastStandOption(playerC, session);
     const next = playBeat(
       session,
       action,
       this.rollSkirmishD20(),
-      prepend || activate || finalChapter ? { activate, prepend, ...chapterOpts } : undefined,
+      prepend || activate || finalChapter || lastStand
+        ? { activate, prepend, ...chapterOpts, ...(lastStand ? { lastStand } : {}) }
+        : undefined,
     );
     this.game.setSkirmishSession(next);
     this.emitMessage(next.log.slice(session.log.length).join('\n'), 'assistant');
+    // 免死刚发动 → 补上「瞬间获得满额 MP」（会话只记 HP；MP 是角色字段，得在这里落库）
+    if (next.lastStandUsed === true && session.lastStandUsed !== true && this.ownsActiveSave) {
+      if (entryStrength(playerC.talents?.list, '免死', 'mpRefill') > 0) {
+        const sm = createStateManager(this.saveId);
+        await sm.commitChatState([
+          {
+            op: 'update_character',
+            target: `characters.${playerC.name}`,
+            value: { mp: playerC.maxMp },
+          } as StatePatch,
+        ]);
+        this.emitMessage('▸ 【绞刑架幸存者】满额 MP 瞬间涌回。', 'assistant');
+      }
+    }
     if (next.finished) await this.settleAndNarrate(next);
+  }
+
+  /** 免死开关：持「免死」条目且本场未用过时给出 hpFloor */
+  private lastStandOption(
+    playerC: NonNullable<typeof this.game.player>,
+    session: SkirmishSession,
+  ): { hpFloor: number } | undefined {
+    if (session.lastStandUsed === true) return undefined;
+    const has = (playerC.talents?.list ?? []).some((t) =>
+      (t.entries ?? []).some((e) => e.kind === '免死'),
+    );
+    if (!has) return undefined;
+    if (entryStrength(playerC.talents?.list, '免死', 'perBattle') <= 0) return undefined;
+    return { hpFloor: entryStrength(playerC.talents?.list, '免死', 'hpFloor') };
   }
 
   /**
@@ -2855,6 +2906,25 @@ export class GamePipeline {
               },
             } as StatePatch);
           }
+        }
+      }
+      // 复生（S「再生」）：败北结算时 HP 不落 0——不死之身，只是这一场输了。
+      // 与「免死」分工：那条管**战中**续战（会话级），这条管**战后**不真死（结算级）。
+      if (session.finished === '败北') {
+        const reviveGate = (playerC.talents?.list ?? []).some((t) =>
+          (t.entries ?? []).some((e) => e.kind === '复生'),
+        );
+        if (reviveGate) {
+          const floor = Math.max(1, entryStrength(playerC.talents?.list, '复生', 'hpFloor'));
+          settlementPatches.push({
+            op: 'update_character',
+            target: `characters.${playerC.name}`,
+            value: { hp: Math.max(floor, session.playerHp) },
+          } as StatePatch);
+          this.emitMessage(
+            `▸ 【再生】肉身重新聚拢——战败，但没有真正死去（HP 保底 ${floor}）。`,
+            'assistant',
+          );
         }
       }
       // 败犬烙印（SS）：每次战败在灵魂上留一枚。累计计数走 worldFlags.counters，

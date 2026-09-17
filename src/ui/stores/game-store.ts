@@ -71,6 +71,7 @@ import { isRerollFace, rollOnTable } from '@engine/card-workshop/fortune-dice';
 import type { FortuneDiceTable } from '@engine/card-workshop/fortune-dice';
 import { planRarityUpgrade } from '@engine/card-workshop/material';
 import { planUnequalExchange } from '@engine/card-workshop/unequal-exchange';
+import { floorRarityForLevel, planMaterialGacha } from '@engine/card-workshop/material-gacha';
 import { materialNameOf } from '@engine/card-workshop/card-dismantle';
 import type { TalentEntry, TalentEntryKind } from '@engine/card-workshop/talent-entry';
 import { planCommissionDelivery } from '@engine/card-workshop/commission';
@@ -808,6 +809,80 @@ export const useGameStore = defineStore('game', () => {
   /**
    * 拆解（SSS「素材之王」非战斗侧）：物品 → 素材（材料）。
    */
+  /**
+   * 素材十连（S「素材十连系统」）：每天一次十连抽素材，保底不低于自身等级。
+   * 每日限次走账本；保底与突变概率在 material-gacha.ts（纯函数、可复算）。
+   */
+  async function drawMaterialTen(): Promise<{
+    ok: boolean;
+    reason?: string;
+    summary?: string;
+    rolls?: { rarity: string; mutated: boolean; mutationEntry?: string }[];
+  }> {
+    const playerChar = player.value;
+    if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
+    if (!hasMechanicGate('抽奖')) {
+      return { ok: false, reason: '需要天赋【素材十连系统】才能抽素材' };
+    }
+    const key = '素材十连';
+    const gate = tryUseToday(
+      dailyLedger(),
+      key,
+      currentGameDay(),
+      strengthOf('抽奖', 'perDay'),
+      key,
+    );
+    if (!gate.ok) return { ok: false, reason: gate.reason };
+
+    const result = planMaterialGacha(
+      strengthOf('抽奖', 'times'),
+      floorRarityForLevel(playerChar.level),
+    );
+
+    // 同稀有度合并成一份 add_item（素材无 id，逻辑键=名字）
+    const byRarity = new Map<string, number>();
+    for (const r of result.rolls) {
+      const name =
+        r.mutated && r.mutationEntry
+          ? `${materialNameOf(r.rarity)}·${r.mutationEntry}`
+          : materialNameOf(r.rarity);
+      byRarity.set(name, (byRarity.get(name) ?? 0) + 1);
+    }
+    const rarityOf = new Map<string, string>();
+    for (const r of result.rolls) {
+      const name =
+        r.mutated && r.mutationEntry
+          ? `${materialNameOf(r.rarity)}·${r.mutationEntry}`
+          : materialNameOf(r.rarity);
+      rarityOf.set(name, r.rarity);
+    }
+
+    const patches: StatePatch[] = [
+      ...[...byRarity.entries()].map(([name, quantity]) => ({
+        op: 'add_item' as const,
+        target: `characters.${playerChar.name}`,
+        value: { name, quantity, type: '材料', rarity: rarityOf.get(name) } as unknown as Record<
+          string,
+          unknown
+        >,
+      })),
+      dailyUsePatch(key, gate.next),
+    ];
+    const sm = createStateManager(activeSaveId.value);
+    const commit = await sm.commitChatState(patches);
+    if (!commit.success) return { ok: false, reason: commit.errors.join('; ') };
+    await refreshFromDb();
+    return {
+      ok: true,
+      summary: `${key}：${result.summary}`,
+      rolls: result.rolls.map((r) => ({
+        rarity: r.rarity,
+        mutated: r.mutated,
+        ...(r.mutationEntry ? { mutationEntry: r.mutationEntry } : {}),
+      })),
+    };
+  }
+
   /**
    * 不等价交换（S「不等价交换」）：放弃一件素材/卡牌，换回 1~2 个同类型、
    * 品质不高于原来的回报。**换亏是设计的一部分**——份数与抽到哪张都由骰值决定。
@@ -2836,6 +2911,7 @@ export const useGameStore = defineStore('game', () => {
     dismantleItem,
     upgradeMaterial,
     exchangeItem,
+    drawMaterialTen,
     rollFortuneDice,
     ownedDiceTables,
     scarCount,

@@ -15,20 +15,12 @@
 import type { CardItem } from '../types';
 import { CARD_TIERS, type CardTier, type Rarity } from '../field-enums';
 import { cardKindOf } from './card-kind';
+import { TIER_TO_RARITY } from './card-dismantle';
 import { isDamaged } from './repair';
 import { ENTRY_STRENGTH_BASELINE } from './talent-entry';
 
 /** 捕获等级差上限的基准（条目 `捕获{levelBonus}` 未声明时用它 = 参数化前行为） */
 const CAPTURE_LEVEL_BONUS = ENTRY_STRENGTH_BASELINE.捕获.levelBonus;
-
-/** 档位 → 材料品质（与拆解同口径） */
-const TIER_TO_RARITY: Record<CardTier, Rarity> = {
-  白铁: '普通',
-  青铜: '优良',
-  白银: '稀有',
-  鎏金: '史诗',
-  星辉: '传说',
-};
 
 /** 等级 → 卡档（与 tier-constants 的 7 层级不同：这是**卡**的五档） */
 export function tierForLevel(level: number): CardTier {

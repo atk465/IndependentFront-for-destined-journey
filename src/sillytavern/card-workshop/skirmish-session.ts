@@ -60,6 +60,8 @@ export interface SkirmishSession {
   contracts?: readonly SkirmishContract[];
   /** 倒也可斩是否已用（每场限一次） */
   nukeUsed?: boolean;
+  /** 免死是否已在本场用掉（每场一次的守卫，与 nukeUsed 同款语义） */
+  lastStandUsed?: boolean;
 }
 
 export interface StartSkirmishInput {
@@ -71,6 +73,11 @@ export interface StartSkirmishInput {
   enemyHp: number;
   enemyMaxHp?: number;
   guard?: number;
+  /**
+   * 开战即生效的在场效果（**自身状态**用，如「吸魔」每拍回血）。
+   * 缺省空——无自身状态的玩家零改动。
+   */
+  initialEffects?: readonly CardInPlayEffect[];
 }
 
 const clampHp = (n: number, fallback: number): number => {
@@ -102,7 +109,11 @@ export function startSkirmish(input: StartSkirmishInput): SkirmishSession {
     ],
     playedCards: [],
     counteredBeats: 0,
-    activeEffects: [],
+    activeEffects: (input.initialEffects ?? []).map((e) => ({
+      ...e,
+      amount: Math.max(0, Math.round(e.amount)),
+      ...(e.beatsLeft !== undefined ? { beatsLeft: Math.max(1, e.beatsLeft) } : {}),
+    })),
     unsealedCards: [],
     finished: null,
   };
@@ -176,6 +187,11 @@ export interface BeatOptions {
   finalChapter?: boolean;
   /** 终章发动拍次（条目 `终章{beats}` 的强度档；缺省 = 基准 6） */
   finalChapterBeats?: number;
+  /**
+   * 免死（S「绞刑架幸存者」）：本拍玩家 HP 会被打到 0 时，锁血到 `hpFloor` 续战。
+   * 由调用方按「持天赋 且 本场没用过」决定是否传；不传 = 没有免死。
+   */
+  lastStand?: { hpFloor: number };
 }
 
 export const FINAL_CHAPTER_BEAT = ENTRY_STRENGTH_BASELINE.终章.beats;
@@ -279,6 +295,31 @@ export function playBeat(
     );
   }
 
+  // 自身状态·吸魔（regen）：拍末把吸收到的攻击转成 HP 回复（上限 = HP 上限）
+  const regenTotal = s.activeEffects
+    .filter((e) => e.type === 'regen')
+    .reduce((sum, e) => sum + Math.max(0, Math.round(e.amount)), 0);
+  const playerHpAfterRegen =
+    regenTotal > 0
+      ? Math.min(s.playerMaxHp, playerHpAfterRecoil + regenTotal)
+      : playerHpAfterRecoil;
+  if (regenTotal > 0 && playerHpAfterRegen > playerHpAfterRecoil) {
+    lines.push(
+      `▸ 【自身状态·吸魔】回复 ${playerHpAfterRegen - playerHpAfterRecoil}（${playerHpAfterRecoil} → ${playerHpAfterRegen}）`,
+    );
+  }
+
+  // 免死（绞刑架幸存者）：HP 本会归零 → 锁血续战（每场一次；MP 回满由调用方落库）
+  const lastStand = opts?.lastStand;
+  const lastStandFires = !!lastStand && playerHpAfterRegen <= 0 && s.lastStandUsed !== true;
+  const playerHpFinal =
+    lastStandFires && lastStand ? Math.max(1, Math.round(lastStand.hpFloor)) : playerHpAfterRegen;
+  if (lastStandFires) {
+    lines.push(
+      `▸ 【绞刑架幸存者】颈上的旧痕绷紧了——锁血至 ${playerHpFinal} HP，你没有倒下（本场仅此一次）`,
+    );
+  }
+
   // 本拍激活的在场卡：效果自下一拍起生效（带持续拍数的每拍递减，归零移除）
   const decremented = s.activeEffects.map((e) =>
     e.beatsLeft !== undefined ? { ...e, beatsLeft: Math.max(0, e.beatsLeft - 1) } : e,
@@ -310,7 +351,8 @@ export function playBeat(
   const next: SkirmishSession = {
     ...s,
     beat: s.beat + 1,
-    playerHp: playerHpAfterRecoil,
+    playerHp: playerHpFinal,
+    ...(lastStandFires ? { lastStandUsed: true } : {}),
     enemyHp: enemyHpFinal,
     log: [...s.log, ...lines],
     playedCards:

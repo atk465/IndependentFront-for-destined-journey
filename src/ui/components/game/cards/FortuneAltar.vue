@@ -52,6 +52,28 @@ async function rollDice(key: string) {
   };
 }
 
+// ═══ 素材十连（S「素材十连系统」；每日一次，保底不低于自身等级）═══
+const canGacha = computed(() => game.hasMechanicGate('抽奖'));
+const gachaLeft = computed(() => (canGacha.value ? game.dailyRemaining('素材十连', 1) : 0));
+const gachaBusy = ref(false);
+const gachaError = ref('');
+const gachaResult = ref<{ summary: string; rolls: { rarity: string; mutated: boolean }[] } | null>(
+  null,
+);
+
+async function drawTen() {
+  if (gachaBusy.value || gachaLeft.value <= 0) return;
+  gachaBusy.value = true;
+  gachaError.value = '';
+  const r = await game.drawMaterialTen();
+  gachaBusy.value = false;
+  if (!r.ok) {
+    gachaError.value = r.reason ?? '十连失败';
+    return;
+  }
+  gachaResult.value = { summary: r.summary ?? '', rolls: r.rolls ?? [] };
+}
+
 const mode = ref<FortuneMode>('coin');
 const rolling = ref(false);
 const rollDisplay = ref<number | null>(null);
@@ -168,6 +190,36 @@ async function draw() {
     </div>
 
     <p v-if="error" class="altar-error" role="alert">{{ error }}</p>
+
+    <!-- 素材十连（S「素材十连系统」）：每日一次，保底不低于自身等级 -->
+    <section v-if="canGacha" class="altar-dice" aria-label="素材十连">
+      <h4 class="d-label">素材十连（天赋：素材十连系统）</h4>
+      <p class="altar-verse small">
+        每天一次免费的素材十连，保底一份不低于你等级的稀有素材。<b>今日剩余 {{ gachaLeft }} 次</b>。
+      </p>
+      <div v-if="gachaResult" class="dice-result">
+        <p class="dice-summary">{{ gachaResult.summary }}</p>
+        <div class="gacha-rolls">
+          <span
+            v-for="(r, i) in gachaResult.rolls"
+            :key="i"
+            class="chip"
+            :data-mutated="r.mutated || undefined"
+          >
+            {{ r.rarity }}{{ r.mutated ? '·突变' : '' }}
+          </span>
+        </div>
+      </div>
+      <p v-if="gachaError" class="altar-error" role="alert">{{ gachaError }}</p>
+      <AppButton
+        variant="primary"
+        :disabled="gachaLeft <= 0 || gachaBusy"
+        :loading="gachaBusy"
+        @click="drawTen"
+      >
+        {{ gachaLeft > 0 ? '十连抽素材' : '今日已抽过' }}
+      </AppButton>
+    </section>
 
     <!-- 每日骰（好运之骰十面 / 命运之骰六面）：骰面全部 Code 兑现 -->
     <section v-if="diceTables.length > 0" class="altar-dice" aria-label="每日骰">
