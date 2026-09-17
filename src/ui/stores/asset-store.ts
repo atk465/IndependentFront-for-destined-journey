@@ -1061,9 +1061,7 @@ export const useAssetStore = defineStore('asset', () => {
     // 同样先写计数、最后翻 phase（见 importZip 开头那段注释）
     const progressBase = progress.base ?? 0;
     progressDone.value = progressBase;
-    progressTotal.value = progress.indeterminate
-      ? 0
-      : progressBase + plan.assets.length;
+    progressTotal.value = progress.indeterminate ? 0 : progressBase + plan.assets.length;
     progressPhase.value = 'write';
 
     let quotaHit = false;
@@ -2124,7 +2122,9 @@ export const useAssetStore = defineStore('asset', () => {
    * "全删/全不删"两种结局，报不出部分成功，而这条路径上如实呈现部分成功比原子性值钱
    * （每条自己的元数据+字节仍然是原子的）。
    */
-  async function deleteAssetsByIds(ids: readonly string[]): Promise<{ ok: number; skipped: number; failed: number }> {
+  async function deleteAssetsByIds(
+    ids: readonly string[],
+  ): Promise<{ ok: number; skipped: number; failed: number }> {
     const res = { ok: 0, skipped: 0, failed: 0 };
     for (const id of ids) {
       const doomed = findAsset(id);

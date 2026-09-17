@@ -1091,8 +1091,6 @@ describe('exportAllData / importAllData', () => {
     }
   });
 
-
-
   it('importAllData 应还原可迁移数据', async () => {
     await saveMemory(makeMemory({ id: 'seed_mem' }));
 
@@ -1679,7 +1677,6 @@ describe('exportAllData / importAllData', () => {
       ]);
     });
   });
-
 });
 
 // ========== v20 contentPacks 表 + 恢复对账（D18 / §5.7） ==========
@@ -2516,7 +2513,15 @@ describe('Asset CRUD (v13)', () => {
         content: '你好',
         timestamp: 1,
       },
-      audioTracks: { id: 'tr1', name: 'tr1', kind: 'music', source: 'blob', tags: [], createdAt: 1, updatedAt: 1 },
+      audioTracks: {
+        id: 'tr1',
+        name: 'tr1',
+        kind: 'music',
+        source: 'blob',
+        tags: [],
+        createdAt: 1,
+        updatedAt: 1,
+      },
       audioBlobs: { id: 'tr1', blob: new Blob(['legacy-audio']) },
       audioPlaylists: { id: 'pl1', name: 'pl1', trackIds: ['tr1'], createdAt: 1, updatedAt: 1 },
       audioHandles: { id: 'library-root', handle: { name: '我的音乐' }, addedAt: 1 },

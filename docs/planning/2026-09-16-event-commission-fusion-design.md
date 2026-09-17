@@ -25,15 +25,15 @@ AI 从 {{COMMISSIONS}} 看到它 → 按名立 quest；玩家炼卡交付
 ```ts
 /** 事件定义里的委托模板（RandomEventDef.commission） */
 interface EventCommissionTemplate extends CommissionDef {
-  ttlDays?: number;   // 有效期（gameDay）；缺省 7 天
+  ttlDays?: number; // 有效期（gameDay）；缺省 7 天
 }
 
 /** 已实例化的动态委托（每存档，落 worldFlags.randomEvents.eventCommissions） */
 interface EventCommission {
-  def: CommissionDef;      // 本体（交付/注入与静态同形状，下游无需知道来源）
-  sourceEvent: string;     // 来源事件名（溯源与同名去重）
-  armedDay: number;        // 触发日（gameDay）
-  expiresDay: number;      // 过期日（armedDay + ttlDays）
+  def: CommissionDef; // 本体（交付/注入与静态同形状，下游无需知道来源）
+  sourceEvent: string; // 来源事件名（溯源与同名去重）
+  armedDay: number; // 触发日（gameDay）
+  expiresDay: number; // 过期日（armedDay + ttlDays）
 }
 ```
 
@@ -41,12 +41,12 @@ interface EventCommission {
 
 ## 纯函数叶（`card-workshop/event-commission.ts`）
 
-| 函数 | 职责 |
-|---|---|
-| `buildEventCommission(tpl, sourceEvent, currentDay)` | 模板实例化：剥 ttlDays、记来源与到期日；currentDay 非法 → null |
-| `isEventCommissionActive(ec, currentDay)` | `currentDay < expiresDay`（触发起 ttlDays 天内有效，到期日当天已过期） |
-| `pruneEventCommissions(list, currentDay)` | 保洁：摘过期、保序 |
-| `eventCommissionDefs(list, currentDay)` | 视图转换：剥溯源字段 → `CommissionDef[]`（交付/注入同形状） |
+| 函数                                                 | 职责                                                                   |
+| ---------------------------------------------------- | ---------------------------------------------------------------------- |
+| `buildEventCommission(tpl, sourceEvent, currentDay)` | 模板实例化：剥 ttlDays、记来源与到期日；currentDay 非法 → null         |
+| `isEventCommissionActive(ec, currentDay)`            | `currentDay < expiresDay`（触发起 ttlDays 天内有效，到期日当天已过期） |
+| `pruneEventCommissions(list, currentDay)`            | 保洁：摘过期、保序                                                     |
+| `eventCommissionDefs(list, currentDay)`              | 视图转换：剥溯源字段 → `CommissionDef[]`（交付/注入同形状）            |
 
 纯度约束：无 I/O、无 Dexie、无 Vue。gameDay 由调用方传入（`Math.floor(toEpochMinutes(gameTime) / MINUTES_PER_GAME_DAY)`，常量已上提 time-system 导出）。
 
@@ -70,9 +70,9 @@ interface EventCommission {
 
 ## 显示与注入
 
-| 消费面 | 处理 |
-|---|---|
-| CommissionBoard.vue | 合并清单（动态在前）+ 动态委托带「事件」标记（title 说明交付后即消失） |
+| 消费面                                         | 处理                                                                                                                       |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| CommissionBoard.vue                            | 合并清单（动态在前）+ 动态委托带「事件」标记（title 说明交付后即消失）                                                     |
 | `{{COMMISSIONS}}` 注入（placeholder-registry） | `game-pipeline.commissionDefsForAI()` 供值 = 动态（gameDay 过滤后）+ 静态（同名去重，动态优先）——AI 看得到才会按名立 quest |
 
 ## 测试

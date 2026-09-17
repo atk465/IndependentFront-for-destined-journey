@@ -224,9 +224,7 @@ describe('占位内容 · agent-config', () => {
 
   it('每个 agent 的 systemPrompt 与 template 都非空', () => {
     for (const [id, agent] of Object.entries(agentConfigRaw.agents)) {
-      expect((agent.systemPrompt as string).trim().length, `${id}.systemPrompt`).toBeGreaterThan(
-        0,
-      );
+      expect((agent.systemPrompt as string).trim().length, `${id}.systemPrompt`).toBeGreaterThan(0);
       // story 的可调面是预设，template 天然为空串（agent-defaults.ts 的约定）
       if (id !== 'story') {
         expect((agent.template as string).trim().length, `${id}.template`).toBeGreaterThan(0);

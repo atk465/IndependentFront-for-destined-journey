@@ -21,6 +21,9 @@ import {
   getTalentTemplate,
   GRADE_PRICE_MULTIPLIER,
   type TalentGrade,
+  getDrawableCatalog,
+  hasWorkingMechanic,
+  IMPLEMENTED_ENTRY_KINDS,
 } from './talent-entry';
 
 const 废弃材料限定: TalentEntry = {
@@ -73,6 +76,27 @@ describe('TALENT_ENTRY_POOL（单一真源）', () => {
     '威压',
     '配方解锁',
     '体魄',
+    '吞噬',
+    '熔炼',
+    '拆解',
+    '融合',
+    '合同',
+    '终章',
+    '叙事意图',
+    '情绪素材',
+    '深渊契约',
+    '改造',
+    '捕获',
+    '孕育',
+    '转化',
+    '越阶',
+    '剥离',
+    '欲望主导',
+    '自我进化',
+    '结缘',
+    '位份',
+    '克上',
+    '环境加成',
   ];
   const ALL_CHANNELS: readonly TalentChannel[] = [
     'creation',
@@ -281,5 +305,82 @@ describe('buildCraftBiasLines —— 炼制倾向汇总（切片 T-S2 实装）'
   it('无天赋 / 空列表 → 空数组（零 token）', async () => {
     expect(buildCraftBiasLines(undefined)).toEqual([]);
     expect(buildCraftBiasLines([])).toEqual([]);
+  });
+});
+
+// ===== 已实装机制判定（2026-09-17：真机抽到「天生剑骨」零机制）=====
+
+describe('hasWorkingMechanic / getDrawableCatalog', () => {
+  it('空 entries（纯描述，如天生剑骨）→ 未实装', () => {
+    expect(hasWorkingMechanic({ name: '天生剑骨（东方）', entries: [] } as never)).toBe(false);
+  });
+
+  it('仅含未落地条目（鉴定）→ 未实装', () => {
+    // 战技附加 2026-09-17 已落地（entry-status.ts 是它的消费方），只剩「鉴定」是纯风味条目
+    expect(IMPLEMENTED_ENTRY_KINDS.has('鉴定' as never)).toBe(false);
+    expect(
+      hasWorkingMechanic({
+        name: 'x',
+        entries: [{ kind: '鉴定', channel: 'universal', params: {} }],
+      } as never),
+    ).toBe(false);
+  });
+
+  it('含任一已实装条目 → 实装（混合情形也算）', () => {
+    expect(
+      hasWorkingMechanic({
+        name: 'y',
+        entries: [
+          { kind: '鉴定', channel: 'universal', params: {} },
+          { kind: '词条加权', channel: 'universal', params: { weight: 1 } },
+        ],
+      } as never),
+    ).toBe(true);
+  });
+
+  it('抽卡池只含机制可用模板，且显著小于捏人全池', () => {
+    const drawable = getDrawableCatalog();
+    expect(drawable.length).toBeGreaterThan(0);
+    expect(drawable.every((t) => hasWorkingMechanic(t))).toBe(true);
+    // 天生剑骨不出现在抽卡池
+    expect(drawable.some((t) => t.name === '天生剑骨（东方）')).toBe(false);
+  });
+
+  it('SS 批次②：这 9 条已补机制，条目种类都是已实装通道', () => {
+    // 判据不是「能抽到」而是「抽到有用」——所以断言具体通道，防止日后被改回纯描述。
+    const 期望: Record<string, TalentEntryKind[]> = {
+      因果炼金术: ['配方解锁'],
+      最终解释权: ['叙事意图'],
+      混沌理论: ['词条加权'],
+      盗火者: ['越阶'],
+      神级选项系统: ['叙事意图'],
+      世界线变动系统: ['叙事意图'],
+      剧本编写系统: ['叙事意图'],
+      词条窃贼: ['吞噬'],
+      '道法自然（东方）': ['词条加权', '叙事意图'],
+    };
+    for (const [name, kinds] of Object.entries(期望)) {
+      const tpl = getTalentTemplate(name);
+      expect(tpl, `${name} 应在目录内`).toBeDefined();
+      expect(tpl!.grade).toBe('SS');
+      expect(
+        tpl!.entries.map((e) => e.kind),
+        `${name} 的条目种类`,
+      ).toEqual(kinds);
+      expect(hasWorkingMechanic(tpl!), `${name} 应判定为已实装`).toBe(true);
+      // 逐条过白名单门禁（AI 零编数同款）
+      expect(validateTalentEntries(tpl!.entries).ok, `${name} 条目应过校验`).toBe(true);
+    }
+  });
+
+  it('批次②的生成倾向上得了炼制提示词（词条加权/配方解锁有消费方）', () => {
+    const lines = buildCraftBiasLines([
+      { name: '混沌理论', entries: getTalentTemplate('混沌理论')!.entries },
+      { name: '因果炼金术', entries: getTalentTemplate('因果炼金术')!.entries },
+      { name: '道法自然（东方）', entries: getTalentTemplate('道法自然（东方）')!.entries },
+    ]);
+    expect(lines).toContain('词条倾向（倾向）：突变、紊乱');
+    expect(lines).toContain('已解锁配方：幸运硬币/厄运护符');
+    expect(lines).toContain('词条倾向（必附）：概念、道韵');
   });
 });

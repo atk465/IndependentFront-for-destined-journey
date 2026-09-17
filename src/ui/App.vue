@@ -78,7 +78,6 @@ void assets.init().catch(() => {
   /* 素材库装不起来不该影响应用启动 */
 });
 
-
 // 懒加载所有页面（和原来 router 一样的异步加载）
 const HomePage = defineAsyncComponent(() => import('./components/home/HomePage.vue'));
 const CreatePage = defineAsyncComponent(() => import('./components/create/CreatePage.vue'));

@@ -19,6 +19,7 @@ import type { CounterTag, SkirmishAction } from './skirmish';
 import { COUNTER_TAGS } from './skirmish';
 import { cardPower } from './deck-power';
 import { cardKindOf } from './card-kind';
+import { cardStatusEffect } from './entry-status';
 
 /** 词条 → 反制标签（单一真源；key 必须与 card-fusion/material 的词条字面一致） */
 export const ENTRY_COMBAT_TABLE: Readonly<Record<string, readonly CounterTag[]>> = {
@@ -113,28 +114,79 @@ export interface CardInPlayEffect {
   amount: number;
   /** 持续拍数（缺省 = 整场）；每拍结束递减，归零移除 */
   beatsLeft?: number;
+  /** 该效果**建立的环境**（只有领域/场景卡会带；环境加成天赋据此判定生效） */
+  env?: string;
 }
 
-/** 八类卡的出牌计划 */
+/**
+ * 环境 → 建立它的元素。领域/场景卡带这些词条时，场上出现对应环境。
+ *
+ * 「深海环境」这类说法在引擎里原本没有载体；裁定（2026-09-17）挂在**领域/场景卡**
+ * 上：水系/冰系的领域或场景卡在场 = 水下环境在场，卡退场环境即散。
+ * 加环境 = 加一行数据。
+ */
+export const ENV_ELEMENTS: Readonly<Record<string, readonly string[]>> = {
+  水下: ['水', '冰'],
+};
+
+/** 这张卡建立的环境（只有领域/场景卡算；无 → undefined） */
+export function environmentOfCard(
+  词条: readonly string[] | null | undefined,
+  kind: string,
+): string | undefined {
+  if (kind !== '领域' && kind !== '场景') return undefined;
+  const words = Array.isArray(词条) ? 词条 : [];
+  for (const [env, elements] of Object.entries(ENV_ELEMENTS)) {
+    if (elements.some((el) => words.includes(el))) return env;
+  }
+  return undefined;
+}
+
+/** 八类卡的出牌计划。`extra` = 卡上「战技附加」带来的第二条在场效果（旧卡无此字段） */
 export type CardPlayPlan =
-  | { mode: '直击'; action: SkirmishAction }
-  | { mode: '在场'; action: SkirmishAction; effect: CardInPlayEffect }
+  | { mode: '直击'; action: SkirmishAction; extra?: CardInPlayEffect }
+  | { mode: '在场'; action: SkirmishAction; effect: CardInPlayEffect; extra?: CardInPlayEffect }
   | { mode: '禁打'; reason: string };
+
+/**
+ * 在场效果入参：单条或数组。**战技附加**会让一张卡同时带基础效果与战技，
+ * 所以「激活」从单条放宽成数组；单条仍是最常见形态，故两种都收。
+ */
+export type ActivateInput = CardInPlayEffect | readonly CardInPlayEffect[];
+
+/** 归一化成数组（调用方懒得判单条/多条时用；测试断言也走这里） */
+export function activateListOf(v: ActivateInput | undefined): CardInPlayEffect[] {
+  if (!v) return [];
+  return Array.isArray(v) ? [...(v as readonly CardInPlayEffect[])] : [v as CardInPlayEffect];
+}
+
+/** 出牌计划里的在场效果（含战技），归一成数组——交给会话层的 activate 通道 */
+export function planEffects(plan: CardPlayPlan): CardInPlayEffect[] {
+  if (plan.mode === '禁打') return [];
+  const list: CardInPlayEffect[] = [];
+  if (plan.mode === '在场') list.push(plan.effect);
+  if (plan.extra) list.push(plan.extra);
+  return list;
+}
 
 /** 八类 → 交锋拍出牌计划（纯函数；数值见矩阵注释） */
 export function cardPlayPlan(
-  card: Pick<CardItem, 'name' | 'cardTier' | '词条' | 'cardPowerBonus'>,
+  card: Pick<CardItem, 'name' | 'cardTier' | '词条' | 'cardPowerBonus' | '战技'>,
   stats: { atk: number },
 ): CardPlayPlan {
   const kind = cardKindOf(card.词条);
   if (kind === '素材') {
     return { mode: '禁打', reason: '素材卡是材料载体，不能在战斗中打出' };
   }
+  // 战技附加（2026-09-17）：制卡时授予的战斗状态，打出此卡即生效（第二条在场效果）
+  const extra = cardStatusEffect(card.战技, card.name);
   if (!IN_PLAY_KINDS.has(kind)) {
-    return { mode: '直击', action: cardCounterAction(card, stats) };
+    return { mode: '直击', action: cardCounterAction(card, stats), ...(extra ? { extra } : {}) };
   }
   const power = cardPower(card);
   const tags = cardCombatTags(card.词条);
+  // 领域/场景卡建立环境（水系/冰系 → 水下）；环境随该效果的生命周期存续
+  const env = environmentOfCard(card.词条, kind);
   let effect: CardInPlayEffect;
   if (kind === '装备' || kind === '召唤' || kind === '军团') {
     effect = { name: card.name, type: 'buff', amount: 2 * power };
@@ -145,6 +197,7 @@ export function cardPlayPlan(
         ? { name: card.name, type: 'dot', amount: 2 * power }
         : { name: card.name, type: 'buff', amount: power };
   }
+  if (env) effect = { ...effect, env };
   const verb =
     kind === '装备'
       ? `装备 ${card.name}`
@@ -157,7 +210,7 @@ export function cardPlayPlan(
     tags,
     cardName: card.name,
   };
-  return { mode: '在场', action, effect };
+  return { mode: '在场', action, effect, ...(extra ? { extra } : {}) };
 }
 
 // ========== 封印卡的交锋拍出牌（启封判定接入拍内，真机积压 2026-09-14） ==========
@@ -184,8 +237,8 @@ export interface SealedPlayResult {
   recoil?: number;
   /** 卡效果是否实际发动（启封/暴走 = true；哑火/反噬 = false） */
   effectFired: boolean;
-  /** 在场卡激活（effectFired 且该卡为在场类时存在） */
-  activate?: CardInPlayEffect;
+  /** 在场卡激活（effectFired 且该卡有在场效果/战技时存在；两条以上时为数组） */
+  activate?: ActivateInput;
 }
 
 const 空过行动 = (label: string): SkirmishAction => ({ label, power: 0, tags: [] });
@@ -241,7 +294,7 @@ export function sealedCardPlay(
       ...(outcome.kind === '暴走' ? { recoil: Math.max(1, Math.ceil(rebound / 2)) } : {}),
     };
   }
-  const activate = plan.mode === '在场' ? plan.effect : undefined;
+  const effects = planEffects(plan);
   return {
     outcome,
     dc,
@@ -249,7 +302,11 @@ export function sealedCardPlay(
     prepend,
     sealBroke: card.name,
     effectFired: true,
-    ...(activate ? { activate } : {}),
+    ...(effects.length === 1
+      ? { activate: effects[0] }
+      : effects.length > 1
+        ? { activate: effects }
+        : {}),
     // 暴走：效果发动但失控反冲（半额反噬伤害）
     ...(outcome.kind === '暴走' ? { recoil: Math.max(1, Math.ceil(rebound / 2)) } : {}),
   };

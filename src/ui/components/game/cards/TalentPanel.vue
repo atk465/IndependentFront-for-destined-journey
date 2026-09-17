@@ -8,9 +8,64 @@
  */
 import { computed, ref } from 'vue';
 import { useGameStore } from '../../../stores/game-store';
-import { fuseEntrySets, type TalentEntry } from '@engine/card-workshop/talent-entry';
+import { useUIStore } from '../../../stores/ui-store';
+import {
+  fuseEntrySets,
+  hasWorkingMechanic,
+  type TalentEntry,
+  type TalentTemplate,
+} from '@engine/card-workshop/talent-entry';
+
+/** 已持有天赋是否含已实装机制（2026-09-17：目录 54% 是纯描述，UI 须区分） */
+/** 纯叙事通道判定（数据驱动）：该天赋含「叙事意图」条目才开放声明入口。
+ *  不硬编码天赋名——加/删叙事型天赋 = 内容侧加删条目，UI 自动跟随。 */
+function isNarrativeTalent(t: { entries: TalentEntry[] }): boolean {
+  return t.entries.some((e) => e.kind === '叙事意图');
+}
+
+const intentTalent = ref<string>('');
+const intentText = ref('');
+const declaring = ref(false);
+
+/** 该天赋当前的叙事意图（有则显示并可撤回） */
+function currentIntent(name: string): string | undefined {
+  const hit = [...game.narrativeIntents].reverse().find((i) => i.talent === name);
+  return hit?.text;
+}
+async function retractIntent(name: string) {
+  const r = await game.clearNarrativeIntent(name);
+  if (!r.ok) ui.toast(r.reason ?? '撤回失败', 'error');
+}
+
+function openIntent(name: string) {
+  intentTalent.value = name;
+  intentText.value = '';
+}
+function cancelIntent() {
+  intentTalent.value = '';
+  intentText.value = '';
+}
+/** 声明落库（纯记不向：进 SaveProfile.narrativeIntents，下一拍生成注入 {{NARRATIVE_INTENTS}}） */
+async function submitIntent() {
+  const text = intentText.value.trim();
+  if (!intentTalent.value || !text) return;
+  declaring.value = true;
+  const r = await game.declareNarrativeIntent({ talent: intentTalent.value, text });
+  declaring.value = false;
+  if (!r.ok) {
+    ui.toast(r.reason ?? '声明失败', 'error');
+    return;
+  }
+  ui.toast(`已记下【${intentTalent.value}】的意图——AI 将据此叙事（不改数值）`, 'success');
+  cancelIntent();
+}
+
+function mechanicBadge(t: { name: string; entries: TalentEntry[] }): string {
+  return hasWorkingMechanic({ name: t.name, entries: t.entries } as TalentTemplate) ? '' : '仅叙事';
+}
 
 const game = useGameStore();
+const ui = useUIStore();
 const talents = computed(() => game.player?.talents ?? { capacity: 3, list: [] });
 
 /** 遗忘确认的两步态 */
@@ -117,16 +172,63 @@ async function onFuse() {
       <li v-for="t in talents.list" :key="t.name" class="talent-item">
         <div class="talent-row">
           <div class="talent-info">
-            <span class="talent-name">{{ t.name }}</span>
+            <span class="talent-name">
+              {{ t.name }}
+              <span
+                v-if="mechanicBadge(t)"
+                class="narration-badge"
+                title="该天赋仅有描述文本，机制尚未实装"
+              >
+                {{ mechanicBadge(t) }}
+              </span>
+            </span>
             <span v-if="t.description" class="talent-desc">{{ t.description }}</span>
             <span class="talent-entries">{{ t.entries.map(entryLine).join('，') }}</span>
+            <span v-if="currentIntent(t.name)" class="talent-intent">
+              当前意图：{{ currentIntent(t.name) }}
+              <button type="button" class="intent-retract" @click="retractIntent(t.name)">
+                撤回
+              </button>
+            </span>
           </div>
+          <button
+            v-if="isNarrativeTalent(t)"
+            type="button"
+            class="talent-btn"
+            @click="openIntent(t.name)"
+          >
+            声明意图
+          </button>
           <button type="button" class="talent-btn" @click="onForget(t.name)">
             {{ forgetCandidate === t.name ? '确认遗忘？' : '遗忘' }}
           </button>
         </div>
       </li>
     </ul>
+
+    <div v-if="intentTalent" class="intent-zone">
+      <p class="intent-title">【{{ intentTalent }}】声明叙事意图</p>
+      <p class="intent-hint">
+        纯叙事通道：只记不向——AI 会据此叙事，引擎不做数值结算（不生成卡、不改属性、不加词条）。
+      </p>
+      <textarea
+        v-model="intentText"
+        class="intent-textarea"
+        rows="3"
+        placeholder="例：本局世界规则——「雷之铭」暂时失效；或：这张卡代表我与她的旧约"
+      ></textarea>
+      <div class="intent-actions">
+        <button
+          type="button"
+          class="talent-btn primary"
+          :disabled="declaring"
+          @click="submitIntent"
+        >
+          {{ declaring ? '声明中…' : '声明' }}
+        </button>
+        <button type="button" class="talent-btn" @click="cancelIntent">取消</button>
+      </div>
+    </div>
 
     <div class="fuse-zone">
       <p class="fuse-title">融合工作台</p>
@@ -328,3 +430,21 @@ async function onFuse() {
   color: var(--theme-error, #cc594b);
 }
 </style>
+.narration-badge { margin-left: 6px; font-size: 0.625rem; font-weight: 700; padding: 0 5px;
+border-radius: 999px; color: var(--theme-text-muted); border: 1px solid var(--theme-card-border);
+background: var(--theme-surface-muted); } .intent-zone { display: flex; flex-direction: column; gap:
+var(--theme-spacing-xs); padding: var(--theme-spacing-sm) var(--theme-spacing-md); margin-block:
+var(--theme-spacing-sm); border: 1px solid color-mix(in srgb, var(--theme-primary) 45%,
+var(--theme-card-border)); border-radius: var(--theme-radius-md); background: color-mix(in srgb,
+var(--theme-primary) 6%, var(--theme-card-bg)); } .intent-title { margin: 0; font-weight: 700;
+font-size: 0.85rem; color: var(--theme-text-primary); } .intent-hint { margin: 0; font-size:
+0.72rem; color: var(--theme-text-muted); line-height: 1.6; } .intent-textarea { width: 100%;
+padding: var(--theme-spacing-sm); border: 1px solid var(--theme-card-border); border-radius:
+var(--theme-radius-sm); background: var(--theme-content-bg, var(--theme-card-bg)); color:
+var(--theme-text-primary); font-family: inherit; font-size: 0.8rem; line-height: 1.6; resize:
+vertical; } .intent-actions { display: flex; gap: var(--theme-spacing-xs); justify-content:
+flex-end; } .talent-intent { display: flex; align-items: center; gap: var(--theme-spacing-xs);
+font-size: 0.72rem; color: var(--theme-text-secondary); line-height: 1.6; } .intent-retract {
+border: 1px solid var(--theme-card-border); border-radius: var(--theme-radius-sm); background:
+transparent; color: var(--theme-text-muted); font-size: 0.65rem; padding: 0 6px; cursor: pointer;
+font-family: inherit; }

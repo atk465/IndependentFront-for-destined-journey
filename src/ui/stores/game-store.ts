@@ -29,6 +29,31 @@ import { cardCatalogToItem, parseCatalogData } from '@engine/start-catalog';
 import { d100 } from '@engine/dice';
 import { buildDemoCardsPatches, buildDemoDeckPatches } from '@engine/card-workshop/demo';
 import { toPlainCardAlbum } from '@engine/card-workshop/album';
+import { planDevour } from '@engine/card-workshop/card-devour';
+import { planEmotionExtract, type Emotion } from '@engine/card-workshop/emotion-material';
+import {
+  planCaptureEnemy,
+  planCorruptCompanion,
+  planOffspring,
+} from '@engine/card-workshop/companion-capture';
+import { buildSummonCompanion } from '@engine/card-workshop/companion';
+import { planStripEntry } from '@engine/card-workshop/card-strip';
+import {
+  planAffectionTribute,
+  planEnthrone,
+  type ConsortRank,
+} from '@engine/card-workshop/companion-growth';
+import { planDismantle } from '@engine/card-workshop/card-dismantle';
+import {
+  planAbyssContract,
+  planContract,
+  planMultiFusion,
+  planReshape,
+  planSmelt,
+} from '@engine/card-workshop/card-smelt';
+import { entryStrength, hasEntryKind } from '@engine/card-workshop/talent-rule-modifiers';
+import { craftTierCeilingIndex } from '@engine/card-workshop/craft-rank';
+import type { TalentEntry, TalentEntryKind } from '@engine/card-workshop/talent-entry';
 import { planCommissionDelivery } from '@engine/card-workshop/commission';
 import { getCommissionDefs } from '@engine/commission-runtime';
 import { isEventCommissionActive } from '@engine/card-workshop/event-commission';
@@ -39,7 +64,14 @@ import {
   getExchangeCatalog,
   talentExchangePrice,
 } from '@engine/card-workshop/talent-entry';
-import { getReputation as getTalentReputation, getProfile, spendFP } from '@engine/save-profile';
+import {
+  getReputation as getTalentReputation,
+  getProfile,
+  spendFP,
+  setNarrativeIntent,
+  getNarrativeIntents,
+  clearNarrativeIntent as clearNarrativeIntentInDb,
+} from '@engine/save-profile';
 import { getContentRegistry } from './content-store';
 import type { CardTier } from '@engine/field-enums';
 import type { SkirmishSession } from '@engine/card-workshop/skirmish-session';
@@ -155,6 +187,8 @@ export const useGameStore = defineStore('game', () => {
     start: (enemyHint?: string, sceneHint?: string) => Promise<{ ok: boolean; reason?: string }>;
     counter: (choice: SkirmishChoice) => Promise<void>;
     flee: (endReason?: string) => Promise<void>;
+    /** 倒也可斩（SSS）：每场一次的一击 */
+    nuke: () => Promise<void>;
   } | null>(null);
 
   /** controller 未就绪时点下的开战请求（attach 后自动补发——消灭「点了没反应」的时序窗） */
@@ -165,6 +199,7 @@ export const useGameStore = defineStore('game', () => {
       start: (enemyHint?: string, sceneHint?: string) => Promise<{ ok: boolean; reason?: string }>;
       counter: (choice: SkirmishChoice) => Promise<void>;
       flee: (endReason?: string) => Promise<void>;
+      nuke: () => Promise<void>;
     } | null,
   ) {
     skirmishController.value = c;
@@ -495,7 +530,10 @@ export const useGameStore = defineStore('game', () => {
       } as StatePatch);
     }
     // 收录进卡册 owned（不自动编组——编组是玩家在卡册的决策）
-    const album = playerChar.cardAlbum ?? { owned: [], deck: [], capacity: 60 };
+    // 🔴 `playerChar` 是 Vue reactive：cardAlbum 成员是 Proxy，直接塞进 patch 会让
+    //    IndexedDB 报 DataCloneError（2026-09-17 真机：祭坛抽卡落库失败）。
+    //    统一走 toPlainCardAlbum 净化（与 updateCardAlbum 同一口径）。
+    const album = toPlainCardAlbum(playerChar.cardAlbum ?? { owned: [], deck: [], capacity: 60 });
     if (!album.owned.includes(cardItem.name)) {
       patches.push({
         op: 'update_character',
@@ -534,6 +572,658 @@ export const useGameStore = defineStore('game', () => {
       d100: roll.total,
       summary,
     };
+  }
+
+  /** 倒也可斩（SSS）：触发每场一次的一击（天赋门槛在编排层校验） */
+  async function triggerSkirmishNuke(): Promise<void> {
+    if (skirmishBusy.value) return;
+    await skirmishController.value?.nuke();
+  }
+
+  /** 天赋门槛：玩家是否持有解锁该机制的天赋（吞噬一切/军团熔炉/素材之王/万物归一/律师函警告/第六终章） */
+  function hasMechanicGate(kind: TalentEntryKind): boolean {
+    return hasEntryKind(player.value?.talents?.list, kind);
+  }
+
+  /**
+   * 强度档取值（2026-09-17 参数化）：同一条机制，SSS 配的档和 SS 配的档可以不同。
+   * 条目声明了该数值就按声明走；没声明则回退基准（= 参数化前的硬编码常量）。
+   * 提交路径与 CraftBench 预览路径必须取同一个值，否则预览与实际不一致。
+   */
+  function strengthOf(kind: TalentEntryKind, param: keyof TalentEntry['params']): number {
+    return entryStrength(player.value?.talents?.list, kind, param);
+  }
+
+  /**
+   * 吞噬（SSS「吞噬一切」）：目标卡吞掉一张卡/一件素材 → 成长 + 随机吸收一个词条。
+   * 燃料被消耗；目标卡更新 cardExp/cardPowerBonus/词条。同窗原子提交。
+   */
+  async function devourCard(
+    targetName: string,
+    fuelName: string,
+  ): Promise<{ ok: boolean; reason?: string; summary?: string }> {
+    const playerChar = player.value;
+    if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
+    if (!hasMechanicGate('吞噬')) {
+      return { ok: false, reason: '需要天赋【吞噬一切】才能启用吞噬' };
+    }
+    const target = playerChar.inventory.find(
+      (i): i is CardItem => i.name === targetName && i.type === '卡牌',
+    );
+    const fuel = playerChar.inventory.find((i) => i.name === fuelName);
+    if (!target) return { ok: false, reason: '找不到目标卡' };
+    if (!fuel) return { ok: false, reason: '找不到燃料' };
+
+    const { ok, reason, plan } = planDevour(
+      target,
+      fuel,
+      Math.random,
+      craftTierCeilingIndex(playerChar.level, strengthOf('吞噬', 'levelBonus')),
+    );
+    if (!ok || !plan) return { ok: false, reason };
+
+    const patches: StatePatch[] = [
+      {
+        op: 'update_item',
+        target: `characters.${playerChar.name}`,
+        value: {
+          name: targetName,
+          changes: {
+            cardExp: plan.cardExp,
+            cardPowerBonus: plan.cardPowerBonus,
+            词条: plan.new词条,
+          },
+        },
+      },
+      {
+        op: 'remove_item',
+        target: `characters.${playerChar.name}`,
+        value: { name: plan.fuelName, quantity: 1 },
+      },
+    ];
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState(patches);
+    if (result.success) await refreshFromDb();
+    return result.success
+      ? { ok: true, summary: plan.summary }
+      : { ok: false, reason: result.errors.join('; ') };
+  }
+
+  /**
+   * 熔炼（SSS「军团熔炉」）：N 张伙伴卡 → 1 张集合体卡（2 源=融合 / ≥3 源=献祭）。
+   */
+  async function smeltCards(
+    sourceNames: string[],
+  ): Promise<{ ok: boolean; reason?: string; summary?: string; productName?: string }> {
+    const playerChar = player.value;
+    if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
+    if (!hasMechanicGate('熔炼')) {
+      return { ok: false, reason: '需要天赋【军团熔炉】才能启用熔炼' };
+    }
+    const sources = sourceNames
+      .map((n) => playerChar.inventory.find((i) => i.name === n))
+      .filter((i): i is InventoryItem => !!i);
+    const { ok, reason, plan } = planSmelt(sources as CardItem[], strengthOf('熔炼', 'tierGain'));
+    if (!ok || !plan) return { ok: false, reason };
+
+    const patches: StatePatch[] = [
+      {
+        op: 'add_item',
+        target: `characters.${playerChar.name}`,
+        value: plan.product as unknown as Record<string, unknown>,
+      },
+      ...plan.consumed.map((name) => ({
+        op: 'remove_item' as const,
+        target: `characters.${playerChar.name}`,
+        value: { name, quantity: 1 },
+      })),
+    ];
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState(patches);
+    if (result.success) await refreshFromDb();
+    return result.success
+      ? { ok: true, summary: plan.summary, productName: plan.productName }
+      : { ok: false, reason: result.errors.join('; ') };
+  }
+
+  /**
+   * 缔约（契约对接好感共鸣）：好感 ≥70 的伙伴卡 → 档位跃迁一阶（持久）。
+   */
+  async function contractCard(
+    cardName: string,
+  ): Promise<{ ok: boolean; reason?: string; summary?: string }> {
+    const playerChar = player.value;
+    if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
+    if (!hasMechanicGate('熔炼')) {
+      return { ok: false, reason: '需要天赋【军团熔炉】才能缔约' };
+    }
+    const card = playerChar.inventory.find(
+      (i): i is CardItem => i.name === cardName && i.type === '卡牌',
+    );
+    if (!card) return { ok: false, reason: '找不到该卡' };
+    const affection = saveProfile.value?.affections?.[cardName];
+    const { ok, reason, plan } = planContract(card, affection, strengthOf('熔炼', 'threshold'));
+    if (!ok || !plan) return { ok: false, reason };
+
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState([
+      {
+        op: 'update_item',
+        target: `characters.${playerChar.name}`,
+        value: { name: cardName, changes: { cardTier: plan.newTier } },
+      },
+    ]);
+    if (result.success) await refreshFromDb();
+    return result.success
+      ? { ok: true, summary: plan.summary }
+      : { ok: false, reason: result.errors.join('; ') };
+  }
+
+  /**
+   * 拆解（SSS「素材之王」非战斗侧）：物品 → 素材（材料）。
+   */
+  async function dismantleItem(
+    itemName: string,
+  ): Promise<{ ok: boolean; reason?: string; summary?: string }> {
+    const playerChar = player.value;
+    if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
+    if (!hasMechanicGate('拆解')) {
+      return { ok: false, reason: '需要天赋【素材之王】才能拆解' };
+    }
+    const item = playerChar.inventory.find((i) => i.name === itemName);
+    if (!item) return { ok: false, reason: '找不到该物品' };
+
+    const { ok, reason, plan } = planDismantle(
+      item,
+      craftTierCeilingIndex(playerChar.level, strengthOf('拆解', 'levelBonus')),
+    );
+    if (!ok || !plan) return { ok: false, reason };
+
+    const patches: StatePatch[] = [
+      {
+        op: 'remove_item',
+        target: `characters.${playerChar.name}`,
+        value: { name: plan.sourceName, quantity: 1 },
+      },
+      ...plan.yields.map((y) => ({
+        op: 'add_item' as const,
+        target: `characters.${playerChar.name}`,
+        value: y as unknown as Record<string, unknown>,
+      })),
+    ];
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState(patches);
+    if (result.success) await refreshFromDb();
+    return result.success
+      ? { ok: true, summary: plan.summary }
+      : { ok: false, reason: result.errors.join('; ') };
+  }
+
+  /**
+   * 多卡融合（SSS「万物归一」）：恰好 3 张任意卡 → 1 张全新卡（继承部分词条 + 随机专属词条）。
+   */
+  async function fuseCards(
+    sourceNames: string[],
+  ): Promise<{ ok: boolean; reason?: string; summary?: string; productName?: string }> {
+    const playerChar = player.value;
+    if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
+    if (!hasMechanicGate('融合')) {
+      return { ok: false, reason: '需要天赋【万物归一】才能多卡融合' };
+    }
+    const sources = sourceNames
+      .map((n) => playerChar.inventory.find((i) => i.name === n))
+      .filter((i): i is InventoryItem => !!i);
+    const { ok, reason, plan } = planMultiFusion(
+      sources as CardItem[],
+      Math.random,
+      strengthOf('融合', 'tierGain'),
+      craftTierCeilingIndex(playerChar.level, strengthOf('融合', 'levelBonus')),
+    );
+    if (!ok || !plan) return { ok: false, reason };
+
+    const patches: StatePatch[] = [
+      {
+        op: 'add_item',
+        target: `characters.${playerChar.name}`,
+        value: plan.product as unknown as Record<string, unknown>,
+      },
+      ...plan.consumed.map((name) => ({
+        op: 'remove_item' as const,
+        target: `characters.${playerChar.name}`,
+        value: { name, quantity: 1 },
+      })),
+    ];
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState(patches);
+    if (result.success) await refreshFromDb();
+    return result.success
+      ? { ok: true, summary: plan.summary, productName: plan.product.name }
+      : { ok: false, reason: result.errors.join('; ') };
+  }
+
+  /**
+   * 情绪素材提取（SSS「七宗罪之主」）：每天每种情绪一次，产出材料供制卡。
+   * 记账落在 SaveProfile.worldFlags.emotionExtract[情绪] = gameDay。
+   */
+  async function extractEmotion(
+    emotion: Emotion,
+  ): Promise<{ ok: boolean; reason?: string; summary?: string }> {
+    const playerChar = player.value;
+    if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
+    if (!hasMechanicGate('情绪素材')) {
+      return { ok: false, reason: '需要天赋【七宗罪之主】才能提取情绪素材' };
+    }
+    const today = currentGameDay();
+    const ledger = (saveProfile.value?.worldFlags?.emotionExtract ?? {}) as Partial<
+      Record<Emotion, number>
+    >;
+    const { ok, reason, plan } = planEmotionExtract(emotion, today, ledger[emotion]);
+    if (!ok || !plan) return { ok: false, reason };
+
+    const patches: StatePatch[] = [
+      {
+        op: 'add_item',
+        target: `characters.${playerChar.name}`,
+        value: { name: plan.materialName, quantity: plan.quantity, type: '材料' },
+      },
+      {
+        op: 'set_variable',
+        target: `worldFlags.emotionExtract.${emotion}`,
+        value: today,
+      } as StatePatch,
+    ];
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState(patches);
+    if (result.success) await refreshFromDb();
+    return result.success
+      ? { ok: true, summary: plan.summary }
+      : { ok: false, reason: result.errors.join('; ') };
+  }
+
+  /**
+   * 深渊契约（SSS「深渊领主」）：深海系伙伴卡 → 获「深海」「深渊压制」词条 + 跃迁一阶。
+   */
+  async function abyssContract(
+    cardName: string,
+  ): Promise<{ ok: boolean; reason?: string; summary?: string }> {
+    const playerChar = player.value;
+    if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
+    if (!hasMechanicGate('深渊契约')) {
+      return { ok: false, reason: '需要天赋【深渊领主】才能缔结深渊契约' };
+    }
+    const card = playerChar.inventory.find(
+      (i): i is CardItem => i.name === cardName && i.type === '卡牌',
+    );
+    if (!card) return { ok: false, reason: '找不到该卡' };
+    const { ok, reason, plan } = planAbyssContract(card, strengthOf('深渊契约', 'percent'));
+    if (!ok || !plan) return { ok: false, reason };
+
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState([
+      {
+        op: 'update_item',
+        target: `characters.${playerChar.name}`,
+        value: {
+          name: cardName,
+          changes: {
+            词条: plan.new词条,
+            ...(plan.upgraded ? { cardTier: plan.newTier } : {}),
+          },
+        },
+      },
+    ]);
+    if (result.success) await refreshFromDb();
+    return result.success
+      ? { ok: true, summary: plan.summary }
+      : { ok: false, reason: result.errors.join('; ') };
+  }
+
+  /**
+   * 肉体改造（SSS「突变巫师」）：把一张卡改写为指定形态系列（追加形态词条）。
+   */
+  async function reshapeCard(
+    cardName: string,
+    series: string,
+  ): Promise<{ ok: boolean; reason?: string; summary?: string }> {
+    const playerChar = player.value;
+    if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
+    if (!hasMechanicGate('改造')) {
+      return { ok: false, reason: '需要天赋【突变巫师】才能改造卡牌形态' };
+    }
+    const card = playerChar.inventory.find(
+      (i): i is CardItem => i.name === cardName && i.type === '卡牌',
+    );
+    if (!card) return { ok: false, reason: '找不到该卡' };
+    const { ok, reason, plan } = planReshape(card, series);
+    if (!ok || !plan) return { ok: false, reason };
+
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState([
+      {
+        op: 'update_item',
+        target: `characters.${playerChar.name}`,
+        value: { name: cardName, changes: { 词条: plan.new词条 } },
+      },
+    ]);
+    if (result.success) await refreshFromDb();
+    return result.success
+      ? { ok: true, summary: plan.summary }
+      : { ok: false, reason: result.errors.join('; ') };
+  }
+
+  /**
+   * 捕获（SSS「你是我的了」）：把刚战胜的敌人变成伙伴卡 + 实体。
+   * 条件：交锋已结束且为胜利/碾压；敌方等级 ≤ 玩家等级+1；未捕获过同名。
+   */
+  async function captureEnemy(): Promise<{ ok: boolean; reason?: string; summary?: string }> {
+    const playerChar = player.value;
+    const session = skirmishSession.value;
+    if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
+    if (!hasMechanicGate('捕获')) {
+      return { ok: false, reason: '需要天赋【你是我的了】才能捕获敌人' };
+    }
+    if (!session) return { ok: false, reason: '没有可捕获的对手（先打一场）' };
+    if (session.finished !== '胜利' && session.finished !== '碾压') {
+      return { ok: false, reason: '只有在战胜之后才谈得上捕获' };
+    }
+    if (playerChar.inventory.some((i) => i.name === session.enemyName)) {
+      return { ok: false, reason: `【${session.enemyName}】已经在你身边了` };
+    }
+    const { ok, reason, plan } = planCaptureEnemy(
+      session.enemyName,
+      session.enemyLevel,
+      playerChar.level,
+      Math.random,
+      strengthOf('捕获', 'levelBonus'),
+    );
+    if (!ok || !plan) return { ok: false, reason };
+
+    // 卡入背包 + 卡册收录 + 实体化（与首召入库同源：type='summon'）
+    const album = toPlainCardAlbum(playerChar.cardAlbum ?? { owned: [], deck: [], capacity: 60 });
+    const patches: StatePatch[] = [
+      {
+        op: 'add_item',
+        target: `characters.${playerChar.name}`,
+        value: plan.card as unknown as Record<string, unknown>,
+      },
+      ...(album.owned.includes(plan.card.name)
+        ? []
+        : [
+            {
+              op: 'update_character' as const,
+              target: `characters.${playerChar.name}`,
+              value: {
+                cardAlbum: {
+                  owned: [...album.owned, plan.card.name].slice(0, album.capacity),
+                  deck: album.deck,
+                  capacity: album.capacity,
+                },
+              },
+            } as StatePatch,
+          ]),
+      {
+        op: 'add_character',
+        target: 'characters',
+        value: buildSummonCompanion({
+          card: plan.card,
+          saveId: activeSaveId.value,
+          playerName: playerChar.name,
+          location: playerChar.location,
+        }) as unknown as Record<string, unknown>,
+      } as StatePatch,
+    ];
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState(patches);
+    if (result.success) await refreshFromDb();
+    return result.success
+      ? { ok: true, summary: plan.summary }
+      : { ok: false, reason: result.errors.join('; ') };
+  }
+
+  /**
+   * 孕育（SSS「种付支配」/「神孕之屌」）：双亲伙伴卡 → 子嗣卡（继承双亲各一词条）。
+   */
+  async function breedCompanions(
+    motherName: string,
+    fatherName: string,
+  ): Promise<{ ok: boolean; reason?: string; summary?: string }> {
+    const playerChar = player.value;
+    if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
+    if (!hasMechanicGate('孕育')) {
+      return { ok: false, reason: '需要天赋【种付支配】或【神孕之屌】才能孕育' };
+    }
+    const find = (n: string) =>
+      playerChar.inventory.find((i): i is CardItem => i.name === n && i.type === '卡牌');
+    const mother = find(motherName);
+    const father = find(fatherName);
+    if (!mother || !father) return { ok: false, reason: '找不到双亲卡' };
+
+    const { ok, reason, plan } = planOffspring(mother, father);
+    if (!ok || !plan) return { ok: false, reason };
+
+    const album = toPlainCardAlbum(playerChar.cardAlbum ?? { owned: [], deck: [], capacity: 60 });
+    const patches: StatePatch[] = [
+      {
+        op: 'add_item',
+        target: `characters.${playerChar.name}`,
+        value: plan.card as unknown as Record<string, unknown>,
+      },
+      ...(album.owned.includes(plan.card.name)
+        ? []
+        : [
+            {
+              op: 'update_character' as const,
+              target: `characters.${playerChar.name}`,
+              value: {
+                cardAlbum: {
+                  owned: [...album.owned, plan.card.name].slice(0, album.capacity),
+                  deck: album.deck,
+                  capacity: album.capacity,
+                },
+              },
+            } as StatePatch,
+          ]),
+    ];
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState(patches);
+    if (result.success) await refreshFromDb();
+    return result.success
+      ? { ok: true, summary: plan.summary }
+      : { ok: false, reason: result.errors.join('; ') };
+  }
+
+  /**
+   * 转化（SSS「变肉便器吧」）：伙伴卡退场，词条逐条兑成素材。
+   */
+  async function corruptCompanion(
+    cardName: string,
+  ): Promise<{ ok: boolean; reason?: string; summary?: string }> {
+    const playerChar = player.value;
+    if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
+    if (!hasMechanicGate('转化')) {
+      return { ok: false, reason: '需要天赋【变肉便器吧】才能转化伙伴卡' };
+    }
+    const card = playerChar.inventory.find(
+      (i): i is CardItem => i.name === cardName && i.type === '卡牌',
+    );
+    if (!card) return { ok: false, reason: '找不到该卡' };
+    const { ok, reason, plan } = planCorruptCompanion(card);
+    if (!ok || !plan) return { ok: false, reason };
+
+    const patches: StatePatch[] = [
+      {
+        op: 'remove_item',
+        target: `characters.${playerChar.name}`,
+        value: { name: plan.sourceName, quantity: 1 },
+      },
+      ...plan.materials.map((m) => ({
+        op: 'add_item' as const,
+        target: `characters.${playerChar.name}`,
+        value: m as unknown as Record<string, unknown>,
+      })),
+    ];
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState(patches);
+    if (result.success) await refreshFromDb();
+    return result.success
+      ? { ok: true, summary: plan.summary }
+      : { ok: false, reason: result.errors.join('; ') };
+  }
+
+  /**
+   * 词条剥离（SSS「词条之王」）：卡上一个词条 → 一份素材，卡保留其余词条。
+   */
+  async function stripEntry(
+    cardName: string,
+    entry: string,
+  ): Promise<{ ok: boolean; reason?: string; summary?: string }> {
+    const playerChar = player.value;
+    if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
+    if (!hasMechanicGate('剥离')) {
+      return { ok: false, reason: '需要天赋【词条之王】才能剥离词条' };
+    }
+    const card = playerChar.inventory.find(
+      (i): i is CardItem => i.name === cardName && i.type === '卡牌',
+    );
+    if (!card) return { ok: false, reason: '找不到该卡' };
+    const { ok, reason, plan } = planStripEntry(card, entry);
+    if (!ok || !plan) return { ok: false, reason };
+
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState([
+      {
+        op: 'update_item',
+        target: `characters.${playerChar.name}`,
+        value: { name: cardName, changes: { 词条: plan.new词条 } },
+      },
+      {
+        op: 'add_item',
+        target: `characters.${playerChar.name}`,
+        value: plan.material as unknown as Record<string, unknown>,
+      },
+    ]);
+    if (result.success) await refreshFromDb();
+    return result.success
+      ? { ok: true, summary: plan.summary }
+      : { ok: false, reason: result.errors.join('; ') };
+  }
+
+  /** 立为「最终兵器」（SSS「最终兵器：她」）：打上标记后每场战斗结束自动进化。 */
+  async function designateFinalWeapon(
+    cardName: string,
+  ): Promise<{ ok: boolean; reason?: string; summary?: string }> {
+    const playerChar = player.value;
+    if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
+    if (!hasMechanicGate('自我进化')) {
+      return { ok: false, reason: '需要天赋【最终兵器：她】' };
+    }
+    const card = playerChar.inventory.find(
+      (i): i is CardItem => i.name === cardName && i.type === '卡牌',
+    );
+    if (!card) return { ok: false, reason: '找不到该卡' };
+    if (!(card.词条 ?? []).includes('召唤')) {
+      return { ok: false, reason: '只有伙伴卡可以被立为最终兵器' };
+    }
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState([
+      {
+        op: 'update_item',
+        target: `characters.${playerChar.name}`,
+        value: {
+          name: cardName,
+          changes: { data: { ...((card.data as object) ?? {}), finalWeapon: true } },
+        },
+      },
+    ]);
+    if (result.success) await refreshFromDb();
+    return result.success
+      ? { ok: true, summary: `【${cardName}】被立为最终兵器——此后每场战斗结束都会自我进化` }
+      : { ok: false, reason: result.errors.join('; ') };
+  }
+
+  /** 结缘（SSS「后宫之主系统」）：好感 ≥90 的伙伴 → 她的一项词条永久归你 + 她得后宫光环。 */
+  async function bondTribute(
+    cardName: string,
+  ): Promise<{ ok: boolean; reason?: string; summary?: string }> {
+    const playerChar = player.value;
+    if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
+    if (!hasMechanicGate('结缘')) {
+      return { ok: false, reason: '需要天赋【后宫之主系统】' };
+    }
+    const card = playerChar.inventory.find(
+      (i): i is CardItem => i.name === cardName && i.type === '卡牌',
+    );
+    if (!card) return { ok: false, reason: '找不到该卡' };
+    const affection = saveProfile.value?.affections?.[cardName];
+    const { ok, reason, plan } = planAffectionTribute(
+      card,
+      affection,
+      strengthOf('结缘', 'threshold'),
+    );
+    if (!ok || !plan) return { ok: false, reason };
+
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState([
+      {
+        op: 'update_item',
+        target: `characters.${playerChar.name}`,
+        value: { name: cardName, changes: { 词条: plan.herNew词条 } },
+      },
+    ]);
+    if (result.success) await refreshFromDb();
+    return result.success
+      ? { ok: true, summary: plan.summary }
+      : { ok: false, reason: result.errors.join('; ') };
+  }
+
+  /** 册封位份（SSS「后宫三千」）：皇后得全卡组伙伴战力 10%（上限 20）。 */
+  async function enthroneCard(
+    cardName: string,
+    rank: ConsortRank,
+  ): Promise<{ ok: boolean; reason?: string; summary?: string }> {
+    const playerChar = player.value;
+    if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
+    if (!hasMechanicGate('位份')) {
+      return { ok: false, reason: '需要天赋【后宫三千】' };
+    }
+    const card = playerChar.inventory.find(
+      (i): i is CardItem => i.name === cardName && i.type === '卡牌',
+    );
+    if (!card) return { ok: false, reason: '找不到该卡' };
+    const deckNames = playerChar.cardAlbum?.deck ?? [];
+    const others = deckNames
+      .filter((n) => n !== cardName)
+      .map((n) => playerChar.inventory.find((i) => i.name === n && i.type === '卡牌'))
+      .filter((c): c is CardItem => !!c);
+    const { ok, reason, plan } = planEnthrone(card, rank, others, strengthOf('位份', 'percent'));
+    if (!ok || !plan) return { ok: false, reason };
+
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState([
+      {
+        op: 'update_item',
+        target: `characters.${playerChar.name}`,
+        value: { name: cardName, changes: { 词条: plan.new词条 } },
+      },
+      ...(plan.bonus > 0
+        ? [
+            {
+              op: 'update_item' as const,
+              target: `characters.${playerChar.name}`,
+              value: {
+                name: cardName,
+                changes: {
+                  cardPowerBonus: Math.max(0, Math.round(card.cardPowerBonus ?? 0)) + plan.bonus,
+                },
+              },
+            } as StatePatch,
+          ]
+        : []),
+    ]);
+    if (result.success) await refreshFromDb();
+    return result.success
+      ? { ok: true, summary: plan.summary }
+      : { ok: false, reason: result.errors.join('; ') };
   }
 
   // === 元数据 ===
@@ -1725,6 +2415,52 @@ export const useGameStore = defineStore('game', () => {
     return result.success ? { ok: true } : { ok: false, error: result.errors.join('; ') };
   }
 
+  /** 当前存档的叙事意图（天赋面板展示用；只读投影）。 */
+  const narrativeIntents = computed(() =>
+    getNarrativeIntents(saveProfile.value ?? ({} as SaveProfile)),
+  );
+
+  /** 撤回某天赋的叙事意图。 */
+  async function clearNarrativeIntent(talent: string): Promise<{ ok: boolean; reason?: string }> {
+    if (!activeSaveId.value) return { ok: false, reason: '无活跃存档' };
+    try {
+      const fresh = await clearNarrativeIntentInDb(activeSaveId.value, talent);
+      saveProfile.value = fresh;
+      return { ok: true };
+    } catch (err) {
+      console.warn('[GameStore] 撤回叙事意图失败:', err);
+      return { ok: false, reason: '落库失败' };
+    }
+  }
+
+  /**
+   * 叙事意图（2026-09-17 纯记不向路线）：玩家在世界规则干预/制卡结果操控/
+   * 禁忌炼金等纯叙事 SSS 天赋下声明的「只记不向」指令，落到 SaveProfile.narrativeIntents。
+   * AI 下一拍生成看到 {{NARRATIVE_INTENTS}} 注入，**不作数值反哺**。
+   */
+  async function declareNarrativeIntent(input: {
+    talent: string;
+    text: string;
+  }): Promise<{ ok: boolean; reason?: string }> {
+    if (!activeSaveId.value || !saveProfile.value) {
+      return { ok: false, reason: '无活跃存档' };
+    }
+    const atMinutes = toEpochMinutes(saveProfile.value.gameTime);
+    try {
+      const fresh = await setNarrativeIntent(activeSaveId.value, {
+        atMinutes,
+        from: 'player',
+        talent: input.talent,
+        text: input.text,
+      });
+      saveProfile.value = fresh;
+      return { ok: true };
+    } catch (err) {
+      console.warn('[GameStore] 叙事意图落库失败（不影响本回合正文）:', err);
+      return { ok: false, reason: '落库失败' };
+    }
+  }
+
   /**
    * 调试面板「下回合触发」：把一条随机事件按 forced 塞进候选池（开发者模式专用）。
    *
@@ -1760,6 +2496,12 @@ export const useGameStore = defineStore('game', () => {
     repairCard,
     quenchCard,
     drawFortune,
+    devourCard,
+    smeltCards,
+    contractCard,
+    dismantleItem,
+    fuseCards,
+    hasMechanicGate,
     seedDemoCards,
     skirmishSession,
     isInCombat,
@@ -1770,11 +2512,25 @@ export const useGameStore = defineStore('game', () => {
     startSkirmish,
     submitSkirmishCounter,
     fleeSkirmish,
+    triggerSkirmishNuke,
     deliverCommission,
     eventCommissions,
     exchangeTalent,
     forgetTalent,
     fuseTalents,
+    declareNarrativeIntent,
+    narrativeIntents,
+    extractEmotion,
+    abyssContract,
+    reshapeCard,
+    captureEnemy,
+    breedCompanions,
+    corruptCompanion,
+    stripEntry,
+    designateFinalWeapon,
+    bondTribute,
+    enthroneCard,
+    clearNarrativeIntent,
     setFuseNamingImpl,
     requestFusionNaming,
     getCommissionDefs,

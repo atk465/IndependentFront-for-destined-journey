@@ -268,7 +268,6 @@ describe('validatePackOrThrow', () => {
     expect(warnings[1].text).toContain('remoteAssets[2]');
   });
 
-
   it('合法分区的书不触发 workshop-partition-rejected', () => {
     const book = makeBook({ partition: 'world_setting' });
     const notes = validatePackOrThrow({ ...minimalPack(), worldBooks: [book] });

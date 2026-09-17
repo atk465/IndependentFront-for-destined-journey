@@ -42,6 +42,45 @@ const cardOptions = computed(() => {
   }));
 });
 
+/** 行为合同（SSS 律师函警告）：本拍出卡时附加的禁条（需持「合同」条目） */
+const CONTRACT_TAGS = ['强攻', '防御', '闪避', '打断'] as const;
+const canContract = computed(() => game.hasMechanicGate('合同'));
+const contractForbidden = ref<'' | (typeof CONTRACT_TAGS)[number]>('');
+
+/** 倒也可斩（SSS）：每场一次的一击。按钮只按「本场未用」显示；
+ *  天赋门槛（oncePerBattleNuke 钩子）由编排层 skirmishNuke 再校验——UI 不越权判天赋。 */
+const nukeAvailable = computed(
+  () => !!session.value && session.value.finished === null && session.value.nukeUsed !== true,
+);
+
+async function doNuke() {
+  await game.triggerSkirmishNuke();
+}
+
+/** 捕获（SSS「你是我的了」）：战胜后把对手变成伙伴卡 */
+const canCapture = computed(() => game.hasMechanicGate('捕获'));
+const capturing = ref(false);
+const captureMsg = ref('');
+const captureErr = ref('');
+/** 可捕获时机：交锋已结束且为胜利/碾压 */
+const captureAvailable = computed(() => {
+  const s = session.value;
+  if (!s || !canCapture.value) return false;
+  if (s.finished !== '胜利' && s.finished !== '碾压') return false;
+  return !(game.player?.inventory ?? []).some((i) => i.name === s.enemyName);
+});
+async function doCapture() {
+  capturing.value = true;
+  captureErr.value = '';
+  captureMsg.value = '';
+  const r = await game.captureEnemy();
+  capturing.value = false;
+  if (!r.ok) {
+    captureErr.value = r.reason ?? '捕获失败';
+    return;
+  }
+  captureMsg.value = r.summary ?? '捕获完成';
+}
 /** 已选中待发动的卡（点卡 → 填宣言 → 发动） */
 const selectedCard = ref<string | null>(null);
 const cardIntentText = ref('');
@@ -63,9 +102,11 @@ function confirmCard() {
     kind: '卡',
     name: selectedCard.value,
     ...(intent ? { intent } : {}),
+    ...(contractForbidden.value ? { contractForbidden: contractForbidden.value } : {}),
   });
   selectedCard.value = null;
   cardIntentText.value = '';
+  contractForbidden.value = '';
 }
 function cancelCard() {
   selectedCard.value = null;
@@ -197,6 +238,32 @@ function dismiss() {
         </button>
         <button type="button" class="counter-btn" @click="cancelCard">取消</button>
       </div>
+      <div v-if="canContract" class="contract-row">
+        <span class="strip-label">行为合同</span>
+        <select
+          v-model="contractForbidden"
+          class="slot-select contract-select"
+          aria-label="合同禁条"
+        >
+          <option value="">（不附加合同）</option>
+          <option v-for="t in CONTRACT_TAGS" :key="t" :value="t">禁止敌方【{{ t }}】</option>
+        </select>
+        <span class="tag-hint">违约 → 敌方受反噬真实伤害</span>
+      </div>
+    </div>
+
+    <div v-if="captureAvailable" class="nuke-row">
+      <button type="button" class="capture-btn" :disabled="capturing" @click="doCapture">
+        {{ capturing ? '捕获中…' : `捕获【${session?.enemyName}】为伙伴` }}
+      </button>
+    </div>
+    <p v-if="captureMsg" class="tag-hint">{{ captureMsg }}</p>
+    <p v-if="captureErr" class="tag-hint">{{ captureErr }}</p>
+
+    <div v-if="nukeAvailable" class="nuke-row">
+      <button type="button" class="nuke-btn" :disabled="game.skirmishBusy" @click="doNuke">
+        倒也可斩（本场一次：半血一击，代价 90% HP）
+      </button>
     </div>
 
     <div
@@ -454,4 +521,16 @@ function dismiss() {
 </style>
 .rec-badge { font-size: 0.625rem; font-weight: 700; padding: 0 5px; border-radius: 999px; color:
 var(--theme-success); border: 1px solid color-mix(in srgb, var(--theme-success) 40%, transparent);
-background: color-mix(in srgb, var(--theme-success) 10%, transparent); }
+background: color-mix(in srgb, var(--theme-success) 10%, transparent); } .contract-row { display:
+flex; align-items: center; gap: var(--theme-spacing-sm); margin-top: var(--theme-spacing-xs);
+flex-wrap: wrap; } .contract-select { max-width: 14rem; } .nuke-row { display: flex;
+justify-content: center; margin-block: var(--theme-spacing-sm); } .nuke-btn { padding: 6px 18px;
+border: 1px solid color-mix(in srgb, var(--theme-error, #e74c3c) 55%, var(--theme-card-border));
+border-radius: var(--theme-radius-md); background: color-mix(in srgb, var(--theme-error, #e74c3c)
+10%, transparent); color: var(--theme-error, #e74c3c); font-weight: 700; font-size: 0.8125rem;
+cursor: pointer; font-family: inherit; } .nuke-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.capture-btn { padding: 6px 18px; border: 1px solid color-mix(in srgb, var(--theme-primary) 55%,
+var(--theme-card-border)); border-radius: var(--theme-radius-md); background: color-mix(in srgb,
+var(--theme-primary) 10%, transparent); color: var(--theme-primary); font-weight: 700; font-size:
+0.8125rem; cursor: pointer; font-family: inherit; } .capture-btn:disabled { opacity: 0.5; cursor:
+not-allowed; }

@@ -11,7 +11,8 @@
  * 确定性契约：纯函数、不 mutate。
  */
 
-import type { TalentEntry } from './talent-entry';
+import type { TalentEntry, TalentEntryKind } from './talent-entry';
+import { ENTRY_STRENGTH_BASELINE } from './talent-entry';
 
 /** 从天赋条目列表中汇总指定 kind 的数值合计 */
 function sumEntries(
@@ -63,4 +64,73 @@ export function hasBetterRoll(entries: readonly TalentEntry[] | undefined): bool
 /** 从玩家天赋条目中检查是否拥有产出数量天赋 */
 export function totalCopies(entries: readonly TalentEntry[] | undefined): number {
   return sumEntries(entries, '产出数量', 'copies');
+}
+
+/**
+ * 玩家是否持有含指定条目种类的天赋（2026-09-17：吞噬/熔炼机制的天赋门槛）。
+ *
+ * 机制即天赋的兑现——「吞噬一切」解锁吞噬台、「军团熔炉」解锁熔炼台。
+ */
+export function hasEntryKind(
+  talents: readonly { entries?: readonly TalentEntry[] }[] | undefined,
+  kind: TalentEntryKind,
+): boolean {
+  for (const t of talents ?? []) {
+    for (const e of t.entries ?? []) {
+      if (e.kind === kind) return true;
+    }
+  }
+  return false;
+}
+
+/** 基准值表的宽松视图（`as const` 的联合键不好索引，这里退化成普通表查） */
+const BASELINE: Partial<Record<string, Partial<Record<string, number>>>> = ENTRY_STRENGTH_BASELINE;
+
+/**
+ * 收集玩家的「环境加成」条目（SS「黑潮之子」等）。
+ *
+ * 环境不是全局状态——它由**领域/场景卡在场**建立（见 entry-combat 的 ENV_ELEMENTS）。
+ * 这里只负责把天赋声明的 (环境名, 百分比) 读出来，是否生效由调用方比对在场效果。
+ */
+export function envBonusesOf(
+  talents: readonly { entries?: readonly TalentEntry[] }[] | undefined,
+): { env: string; percent: number }[] {
+  const out: { env: string; percent: number }[] = [];
+  for (const t of talents ?? []) {
+    for (const e of t.entries ?? []) {
+      if (e.kind !== '环境加成') continue;
+      const env = typeof e.params.env === 'string' ? e.params.env.trim() : '';
+      const percent = e.params.percent;
+      if (!env || typeof percent !== 'number' || !Number.isFinite(percent) || percent <= 0)
+        continue;
+      out.push({ env, percent });
+    }
+  }
+  return out;
+}
+
+/**
+ * 取规则层条目某参数的**强度档值**（2026-09-17 参数化）。
+ *
+ * 口径：命中第一条声明了该数值参数的同类条目；**条目不写该字段 = 取基准值**
+ * （基准 = 参数化之前的硬编码常量，所以存量天赋行为逐位不变）。
+ * 与 `sumEntries` 的「多条累加」不同——阈值/拍数/反噬是**覆盖式**规则参数，
+ * 累加没有意义（两条「终章」不会变成第 12 拍抹除）。
+ *
+ * @param kind 条目种类（如 '终章'）
+ * @param param 参数名（如 'beats'）
+ */
+export function entryStrength(
+  talents: readonly { entries?: readonly TalentEntry[] }[] | undefined,
+  kind: TalentEntryKind,
+  param: keyof TalentEntry['params'],
+): number {
+  for (const t of talents ?? []) {
+    for (const e of t.entries ?? []) {
+      if (e.kind !== kind) continue;
+      const v = e.params[param];
+      if (typeof v === 'number' && Number.isFinite(v)) return v;
+    }
+  }
+  return BASELINE[kind]?.[param as string] ?? 0;
 }

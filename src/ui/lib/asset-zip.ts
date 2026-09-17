@@ -129,10 +129,7 @@ export type { DecodedEntry };
  * 炸掉（取值写错了会得到 `never`）；平行声明两份字符串联合则会静默走偏。
  * 缺的那个 `'suspect-missing-type'` 属于解析层，本模块判不出来。
  */
-type AssetZipWarning = Extract<
-  ImportWarning,
-  'hash-unavailable' | 'suspect-filename-encoding'
->;
+type AssetZipWarning = Extract<ImportWarning, 'hash-unavailable' | 'suspect-filename-encoding'>;
 
 /** 清单元数据 —— 与引擎同一个类型；清单只能**追加**元数据，永不改名改类型（§5.2） */
 export type AssetZipManifestMeta = ImportManifestMeta;
@@ -515,8 +512,7 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
  * 丢缓冲 → 停止 push → reject，只是错误码不同。
  */
 function inflateStreaming(source: Uint8Array, cfg: InflateConfig): Promise<InflateResult> {
-  const { maxEntryBytes, maxTotalBytes, stallTimeoutMs, signal, onProgress } =
-    cfg;
+  const { maxEntryBytes, maxTotalBytes, stallTimeoutMs, signal, onProgress } = cfg;
   return new Promise<InflateResult>((resolve, reject) => {
     const entries: RawEntry[] = [];
     const skippedNoise: string[] = [];

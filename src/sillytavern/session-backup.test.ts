@@ -77,7 +77,6 @@ function makeEntry(uid: number, name: string): WorldBook['entries'][number] {
   };
 }
 
-
 /**
  * 内容包夹具 —— 默认**拥有 `book_core`**，而存档启用了 `system_core:100`，
  * 于是它是「这份存档真的用到的包」（Finding 4 的判据①）。

@@ -43,5 +43,4 @@ describe('SideToolbar developer gate', () => {
     const wrapper = mount(SideToolbar);
     expect(wrapper.get('[data-tool="debug"]').attributes('aria-label')).toBe('调试');
   });
-
 });

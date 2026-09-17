@@ -416,7 +416,6 @@ describe('hasIdentity', () => {
 
 // ---- Ascension tests ----
 
-
 // ---- $char namespace ----
 
 describe('$char namespace', () => {

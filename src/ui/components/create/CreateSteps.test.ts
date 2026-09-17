@@ -1,5 +1,6 @@
 /**
- * CreateSteps.vue — 6 步指示器测试（2026-09-16 精简：9 步 → 6 步）
+ * CreateSteps.vue — 5 步指示器测试
+ * （2026-09-16 精简 9→6 步；2026-09-17 删「启用角色」步 → 5 步）
  * @vitest-environment jsdom
  */
 import { describe, it, expect } from 'vitest';
@@ -7,12 +8,12 @@ import { mount } from '@vue/test-utils';
 import CreateSteps from './CreateSteps.vue';
 
 describe('CreateSteps', () => {
-  it('渲染 6 个步骤按钮', () => {
+  it('渲染 5 个步骤按钮', () => {
     const wrapper = mount(CreateSteps, {
       props: { current: 0 },
     });
     const dots = wrapper.findAll('.step-dot');
-    expect(dots).toHaveLength(6);
+    expect(dots).toHaveLength(5);
   });
 
   it('当前步骤有 active class', () => {
@@ -43,8 +44,7 @@ describe('CreateSteps', () => {
     expect(labels[0].text()).toBe('难度选择');
     expect(labels[1].text()).toBe('基础信息');
     expect(labels[2].text()).toBe('出身天赋');
-    expect(labels[3].text()).toBe('角色启用');
-    expect(labels[4].text()).toBe('装备选择');
-    expect(labels[5].text()).toBe('剧情规划');
+    expect(labels[3].text()).toBe('装备选择');
+    expect(labels[4].text()).toBe('剧情规划');
   });
 });

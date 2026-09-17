@@ -4,9 +4,9 @@ defineProps<{
   total?: number;
 }>();
 
-const STEP_LABELS = ['难度选择', '基础信息', '出身天赋', '角色启用', '装备选择', '剧情规划'];
+const STEP_LABELS = ['难度选择', '基础信息', '出身天赋', '装备选择', '剧情规划'];
 
-const CN_NUM = ['一', '二', '三', '四', '五', '六'];
+const CN_NUM = ['一', '二', '三', '四', '五'];
 </script>
 
 <template>

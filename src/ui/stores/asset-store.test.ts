@@ -61,7 +61,6 @@ vi.mock('@engine/database', async (importOriginal) => {
   };
 });
 
-
 import {
   clearAllData,
   initializeDatabase,
@@ -508,13 +507,11 @@ describe('importZip 的错误与汇总', () => {
     expect(res.ignored).toBeGreaterThanOrEqual(3);
     expect(res.message).toContain('忽略无关文件');
   });
-
 });
 
 // ═══════════════════════════════════════════════════════════
 // 6b. 署名（D10）: 清单带进来 → 落库 → 再随导出带出去
 // ═══════════════════════════════════════════════════════════
-
 
 // ═══════════════════════════════════════════════════════════
 // 6c. 取消 (§7.6)
@@ -580,7 +577,6 @@ describe('importFiles', () => {
     expect(store.assets[0].credit).toBeUndefined();
     expect(store.assets[0].license).toBeUndefined();
   });
-
 });
 
 // ═══════════════════════════════════════════════════════════
@@ -663,7 +659,6 @@ describe('importAny', () => {
     expect(onlyZip.assetsAdded).toBe(1);
     expect(toasts()).toHaveLength(1);
   });
-
 });
 
 // ═══════════════════════════════════════════════════════════

@@ -1808,13 +1808,13 @@ function formatTime(ts: number) {
   }
   .btn-new-game,
   .btn-load,
-    .btn-settings,
+  .btn-settings,
   .btn-ghost {
     transition: none;
   }
   .btn-new-game:hover,
   .btn-load:hover,
-    .btn-settings:hover,
+  .btn-settings:hover,
   .btn-ghost:hover {
     transform: none;
   }

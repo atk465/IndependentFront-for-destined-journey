@@ -8,11 +8,7 @@
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { zipSync, strToU8 } from 'fflate';
-import {
-  readAssetZip,
-  writeAssetZip,
-  AssetZipError,
-} from './asset-zip';
+import { readAssetZip, writeAssetZip, AssetZipError } from './asset-zip';
 
 // ═══════════════════════════════════════════════════════════
 // 辅助
@@ -65,7 +61,6 @@ afterEach(() => {
 // ═══════════════════════════════════════════════════════════
 // 与计划器的契约对接
 // ═══════════════════════════════════════════════════════════
-
 
 // ═══════════════════════════════════════════════════════════
 // 往返
@@ -241,7 +236,6 @@ describe('路径处理', () => {
     // 刻意如此: 目录名在拍平后无意义，拿它当理由丢掉一个正常媒体文件才是数据损失
     expect(result.entries.map((e) => e.path)).toEqual(['苏婉_头像.png']);
   });
-
 });
 
 // ═══════════════════════════════════════════════════════════
@@ -297,7 +291,6 @@ describe('未识别扩展名（噪音）', () => {
     expect(result.skippedNoise).not.toContain('readme');
     expect(result.skippedNoise).not.toContain('readme/');
   });
-
 });
 
 // ═══════════════════════════════════════════════════════════
@@ -693,5 +686,4 @@ describe('manifest.json', () => {
     expect(result.manifest).toBeUndefined();
     expect(result.entries.map((e) => e.path)).toEqual(['a.png']);
   });
-
 });

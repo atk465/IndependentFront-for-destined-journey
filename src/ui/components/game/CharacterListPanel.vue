@@ -19,9 +19,7 @@ const ui = useUIStore();
 // ═══ NPC 列表 ═══
 const selectedIdx = ref(0);
 const showScripts = ref(false);
-const detailTab = ref<'equipment' | 'skills' | 'overview' | 'status' | 'bag'>(
-  'overview',
-);
+const detailTab = ref<'equipment' | 'skills' | 'overview' | 'status' | 'bag'>('overview');
 const selStatusInspected = ref<string | null>(null);
 
 const npcs = computed(() => game.npcs || []);

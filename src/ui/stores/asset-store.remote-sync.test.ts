@@ -35,8 +35,7 @@ vi.mock('./worldbook-store', () => ({
   useWorldBookStore: () => ({ init: worldbookInit, books: worldbookBooks }),
 }));
 
-vi.mock('./workshop-store', () => ({
-}));
+vi.mock('./workshop-store', () => ({}));
 
 /** 注册表那一面的当前值 + 一个可以人为拖住的加载门（单飞用例靠它制造重叠窗口） */
 let registryFace: unknown = [];

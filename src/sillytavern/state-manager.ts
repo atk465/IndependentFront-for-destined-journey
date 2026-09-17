@@ -51,10 +51,7 @@ import { getVar, setVar, delVar, insertVar, applyPathOps } from './var-resolver'
 import { getTierConfig } from './tier-constants';
 // 经验系统改造 v1（2026-08-24）：升级判定归 Code（ADR-11）。resolveLevelUps 负责
 // totalExp 驱动的升级循环。
-import {
-  resolveLevelUps,
-  applyExpFloor,
-} from './exp-table';
+import { resolveLevelUps, applyExpFloor } from './exp-table';
 import { getEngineSettings } from './engine-settings';
 // 并行化改造（docs/planning/2026-08-16-pipeline-parallelism.md）：一切 Dexie 写入
 // 经 per-saveId FIFO 队列串行 —— 锁粒度 = 读-改-写区段，锁内禁止再入队列（铁律②）。
@@ -132,10 +129,7 @@ import {
   rollRandomEvents,
   settleRandomEventTrigger,
 } from './random-event-scheduler';
-import {
-  buildEventCommission,
-  pruneEventCommissions,
-} from './card-workshop/event-commission';
+import { buildEventCommission, pruneEventCommissions } from './card-workshop/event-commission';
 // 地点键与上下文快照的**唯一**实现（写侧与读侧共用，见该模块文件头）
 import { buildRandomEventRollContext } from './random-event-snapshot';
 import {
@@ -2891,10 +2885,9 @@ export class StateManager {
         if (tpl) {
           const fresh = buildEventCommission(tpl, name, currentDay);
           if (fresh) {
-            const kept = pruneEventCommissions(
-              settled.flags.eventCommissions,
-              currentDay,
-            ).filter((ec) => ec.def.name !== tpl.name || ec.sourceEvent !== name);
+            const kept = pruneEventCommissions(settled.flags.eventCommissions, currentDay).filter(
+              (ec) => ec.def.name !== tpl.name || ec.sourceEvent !== name,
+            );
             settled.flags.eventCommissions = [...kept, fresh];
           }
         }

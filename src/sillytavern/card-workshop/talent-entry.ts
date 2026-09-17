@@ -44,7 +44,28 @@ export type TalentEntryKind =
   | '鉴定' // 感知素材真实价值（风味条目，无机械参数）
   | '威压' // 敌方全体属性百分比降低（交锋拍威胁 ×(1−pct/100)）
   | '配方解锁' // 解锁特殊卡牌的制作方法（注入炼制提示词）
-  | '体魄'; // HP 上限百分比提升（交锋拍 maxHp ×(1+pct/100)）
+  | '体魄' // HP 上限百分比提升（交锋拍 maxHp ×(1+pct/100)）
+  | '吞噬' // 卡牌可吞噬其他卡/素材成长（SSS「吞噬一切」；门槛即天赋）
+  | '熔炼' // 可进行伙伴卡熔炼与缔约（SSS「军团熔炉」；门槛即天赋）
+  | '拆解' // 可把物品拆解为素材（SSS「素材之王」）
+  | '融合' // 可把任意三张卡融合为一张（SSS「万物归一」/「鸿图华构」）
+  | '合同' // 生物卡可对敌方施加行为合同，违约反噬（SSS「律师函警告」）
+  | '终章' // 第六次行动时抹除敌方（SSS「第六终章」）
+  | '叙事意图' // 纯叙事通道：可声明「只记不向」的剧作指令（叙事型 SSS 通用）
+  | '情绪素材' // 可提取七种情绪素材（SSS「七宗罪之主」）
+  | '深渊契约' // 可与深海系伙伴卡缔结深渊契约（SSS「深渊领主」）
+  | '改造' // 可把卡牌改写为任意形态（SSS「突变巫师」）
+  | '捕获' // 战胜后可把敌人捕获为伙伴卡（SSS「你是我的了」）
+  | '孕育' // 两张伙伴卡可孕育子嗣卡（SSS「种付支配」「神孕之屌」）
+  | '转化' // 伙伴卡可退场兑成素材（SSS「变肉便器吧」）
+  | '越阶' // 制卡无敌素材等级限制（SSS「卡牌造物主」）
+  | '剥离' // 可剥离卡牌词条为素材（SSS「词条之王」）
+  | '欲望主导' // 以情绪素材制卡时必成且贴合（SSS「欲望魔神」）
+  | '自我进化' // 伙伴卡每次战斗后进化出克制词条（SSS「最终兵器：她」）
+  | '结缘' // 好感达爱恋可永久获得伙伴一项词条（SSS「后宫之主系统」）
+  | '位份' // 可册封位份与皇后（SSS「后宫三千」）
+  | '克上' // 攻原生等级高于你的敌人时额外伤害（SS「下克上」）
+  | '环境加成'; // 特定环境（水下…）由领域/场景卡建立时，防御/闪避应对获得加成（SS「黑潮之子」）
 
 /** 骨架条目：kind + 预设参数 + 独占渠道标记 */
 export interface TalentEntry {
@@ -87,6 +108,20 @@ export interface TalentEntry {
     percent?: number;
     /** 配方解锁：解锁的配方名 */
     recipe?: string;
+    /** 合同：违约反噬伤害（基准 8，见 ENTRY_STRENGTH_BASELINE） */
+    backlash?: number;
+    /** 捕获：可捕获的等级差上限（基准 +1） */
+    levelBonus?: number;
+    /** 熔炼·缔约 / 结缘：好感阈值（基准 70 / 90） */
+    threshold?: number;
+    /** 熔炼·融合 / 越阶：品阶提升档数（基准 1） */
+    tierGain?: number;
+    /** 越阶：是否造价减半（1 = 减半 / 0 = 不减；基准 1） */
+    halveCost?: number;
+    /** 克上：敌方等级高于你时的行动值加成百分比（下克上） */
+    vsHigherLevel?: number;
+    /** 环境加成：环境名（内容参数，如「水下」；由领域/场景卡建立） */
+    env?: string;
   };
 }
 
@@ -233,6 +268,65 @@ export const TALENT_ENTRY_POOL: readonly TalentEntry[] = [
   e({ kind: '防御加值', channel: 'story', params: { amount: 1, excl: '命运宠儿' } }),
   e({ kind: '启封加值', channel: 'exchange', params: { amount: 2, excl: '卡牌宗师' } }),
   e({ kind: '行动值加成', channel: 'exchange', params: { amount: 2, excl: '卡牌宗师' } }),
+  // ── v5 扩容（SSS 天赋补全：形态系列 / 领域词条 / 神性宝具 / 情绪力量，2026-09-17）──
+  e({ kind: '形态转化', channel: 'story', params: { series: '龙娘' } }),
+  e({ kind: '形态转化', channel: 'story', params: { series: '赛马娘' } }),
+  e({ kind: '形态转化', channel: 'story', params: { series: '泰坦' } }),
+  e({ kind: '词条加权', channel: 'story', params: { keywords: ['吞噬'], weight: 3 } }),
+  e({ kind: '词条加权', channel: 'story', params: { keywords: ['领域', '臣服'], weight: 2 } }),
+  e({ kind: '词条加权', channel: 'story', params: { keywords: ['鸿蒙紫气'], weight: 3 } }),
+  e({ kind: '词条加权', channel: 'story', params: { keywords: ['女王', '施虐'], weight: 2 } }),
+  e({
+    kind: '词条加权',
+    channel: 'story',
+    params: { keywords: ['龙裔', '元素亲和'], weight: 2 },
+  }),
+  e({
+    kind: '词条加权',
+    channel: 'story',
+    params: { keywords: ['一心同体', '奔跑'], weight: 3 },
+  }),
+  e({
+    kind: '词条加权',
+    channel: 'story',
+    params: { keywords: ['巨神', '远古血脉'], weight: 2 },
+  }),
+  e({ kind: '词条加权', channel: 'story', params: { keywords: ['一代眷属'], weight: 3 } }),
+  e({
+    kind: '词条加权',
+    channel: 'story',
+    params: { keywords: ['傲慢', '色欲', '嫉妒', '暴怒', '懒惰', '暴食', '贪婪'], weight: 3 },
+  }),
+  e({ kind: '词条加权', channel: 'story', params: { keywords: ['神性'], weight: 3 } }),
+  e({ kind: '词条加权', channel: 'story', params: { keywords: ['宝具', '金色'], weight: 3 } }),
+  e({ kind: '配方解锁', channel: 'story', params: { recipe: '世界之种' } }),
+  // ── v6 扩容（吞噬/熔炼机制门槛，2026-09-17）──
+  e({ kind: '吞噬', channel: 'story', params: {} }),
+  e({ kind: '熔炼', channel: 'story', params: {} }),
+  // ── v7 扩容（拆解/融合/合同/终章门槛，2026-09-17）──
+  e({ kind: '拆解', channel: 'story', params: {} }),
+  e({ kind: '融合', channel: 'story', params: {} }),
+  e({ kind: '合同', channel: 'story', params: {} }),
+  e({ kind: '终章', channel: 'story', params: {} }),
+  // ── v8 扩容（纯叙事通道，2026-09-17）──
+  e({ kind: '叙事意图', channel: 'story', params: {} }),
+  // ── v9 扩容（情绪素材/深渊契约/改造，2026-09-17）──
+  e({ kind: '情绪素材', channel: 'story', params: {} }),
+  e({ kind: '深渊契约', channel: 'story', params: {} }),
+  e({ kind: '克上', channel: 'universal', params: { vsHigherLevel: 30 } }),
+  e({ kind: '环境加成', channel: 'universal', params: { env: '水下', percent: 30 } }),
+  e({ kind: '改造', channel: 'story', params: {} }),
+  // ── v10 扩容（伙伴卡生成通道，2026-09-17）──
+  e({ kind: '捕获', channel: 'story', params: {} }),
+  e({ kind: '孕育', channel: 'story', params: {} }),
+  e({ kind: '转化', channel: 'story', params: {} }),
+  // ── v11 扩容（六条余量 SSS 的通道，2026-09-17）──
+  e({ kind: '越阶', channel: 'story', params: {} }),
+  e({ kind: '剥离', channel: 'story', params: {} }),
+  e({ kind: '欲望主导', channel: 'story', params: {} }),
+  e({ kind: '自我进化', channel: 'story', params: {} }),
+  e({ kind: '结缘', channel: 'story', params: {} }),
+  e({ kind: '位份', channel: 'story', params: {} }),
 ];
 
 /** 参数全等（逐键比较全部已知参数位；新参数加入时同步这里） */
@@ -278,6 +372,8 @@ export function normalizeTalentEntry(entry: TalentEntry): TalentEntry | null {
  * 条目校验 v2（按种类规则校验，取代「逐字命中池」——内容名归 AI，数值档位归 Code）：
  *  - kind 必须是已知条目种类；
  *  - 数值参数必须命中该种类的**档位白名单**（AI 零编数）；
+ *  - **强度档参数可选**：不写该字段 = 取 `ENTRY_STRENGTH_BASELINE` 的基准值
+ *    （存量条目 `params: {}` 因此继续合法，见 ENTRY_OPTIONAL_NUMERIC）；
  *  - 内容参数（材料类/成品类/系列名/配方名/状态名/关键词）为非空字符串即可——名字是内容；
  *  - 未知参数键一律拒绝。
  * normalized = 原样回传（结构已合法；此处不做对象改写）。
@@ -298,7 +394,42 @@ const ENTRY_NUMERIC_TIERS: Partial<
   击杀掠取: { gold: [5, 10] },
   战技附加: { power: [0, 2, 3, 4, 6, 10], beats: [0, 1, 2, 3] },
   词条加权: { weight: [1, 2, 3] },
+  // ── 规则层强度档（2026-09-17 参数化：让 SS 与 SSS 共用机制、档位不同）──
+  终章: { beats: [4, 5, 6] },
+  合同: { backlash: [4, 6, 8, 12] },
+  捕获: { levelBonus: [0, 1, 2] },
+  熔炼: { tierGain: [1, 2], threshold: [50, 70, 90] },
+  结缘: { threshold: [70, 90] },
+  深渊契约: { percent: [20, 40, 60] },
+  位份: { percent: [5, 10, 20] },
+  融合: { tierGain: [1, 2], levelBonus: [0, 1, 2] },
+  越阶: { tierGain: [1, 2], halveCost: [0, 1] },
+  吞噬: { levelBonus: [0, 1, 2] },
+  拆解: { levelBonus: [0, 1, 2] },
+  克上: { vsHigherLevel: [20, 30, 50] },
+  环境加成: { percent: [20, 30, 40, 50] },
 };
+
+/**
+ * 规则层强度档的**基准值**（= 参数化之前的硬编码常量）。
+ *
+ * 条目不写该字段 = 取基准 = 改造前的行为（零回归）；写了 = 按档位生效。
+ * 消费者一律用 `talent-rule-modifiers.entryStrength()` 取值，不要直接读常量。
+ */
+export const ENTRY_STRENGTH_BASELINE = {
+  终章: { beats: 6 },
+  合同: { backlash: 8 },
+  捕获: { levelBonus: 1 },
+  熔炼: { threshold: 70, tierGain: 1 },
+  结缘: { threshold: 90 },
+  深渊契约: { percent: 40 },
+  位份: { percent: 10 },
+  融合: { tierGain: 1, levelBonus: 0 },
+  越阶: { tierGain: 1, halveCost: 1 },
+  // 吞噬/拆解：描述口径都是「不高于你制卡师等级一级」；等级对应见 craft-rank.ts
+  吞噬: { levelBonus: 1 },
+  拆解: { levelBonus: 1 },
+} as const;
 
 /** 各种类的必填内容参数（非空字符串；keywords 为字符串数组） */
 const ENTRY_REQUIRED_STRINGS: Partial<Record<TalentEntryKind, readonly string[]>> = {
@@ -307,6 +438,7 @@ const ENTRY_REQUIRED_STRINGS: Partial<Record<TalentEntryKind, readonly string[]>
   形态转化: ['series'],
   配方解锁: ['recipe'],
   战技附加: ['status'],
+  环境加成: ['env'],
 };
 
 const ENTRY_KIND_LIST: readonly TalentEntryKind[] = [
@@ -331,7 +463,48 @@ const ENTRY_KIND_LIST: readonly TalentEntryKind[] = [
   '威压',
   '配方解锁',
   '体魄',
+  '吞噬',
+  '熔炼',
+  '拆解',
+  '融合',
+  '合同',
+  '终章',
+  '叙事意图',
+  '情绪素材',
+  '深渊契约',
+  '改造',
+  '捕获',
+  '孕育',
+  '转化',
+  '越阶',
+  '剥离',
+  '欲望主导',
+  '自我进化',
+  '结缘',
+  '位份',
+  '克上',
+  '环境加成',
 ];
+
+/**
+ * 强度档参数（**选填**）：不写 = 取基准值。
+ *
+ * 这些字段与上面的必填档位不同——存量 SSS 条目一律 `params: {}`（当年是硬编码），
+ * 参数化不能把它们的合法性打掉。写了就必须命中白名单（AI 零编数照旧）。
+ */
+const ENTRY_OPTIONAL_NUMERIC: Partial<Record<TalentEntryKind, readonly string[]>> = {
+  终章: ['beats'],
+  合同: ['backlash'],
+  捕获: ['levelBonus'],
+  熔炼: ['tierGain', 'threshold'],
+  结缘: ['threshold'],
+  深渊契约: ['percent'],
+  位份: ['percent'],
+  融合: ['tierGain', 'levelBonus'],
+  越阶: ['tierGain', 'halveCost'],
+  吞噬: ['levelBonus'],
+  拆解: ['levelBonus'],
+};
 
 export function validateTalentEntries(entries: readonly TalentEntry[]): {
   ok: boolean;
@@ -342,9 +515,11 @@ export function validateTalentEntries(entries: readonly TalentEntry[]): {
     if (!ENTRY_KIND_LIST.includes(entry.kind)) {
       return { ok: false, reason: `条目种类「${entry.kind}」未知`, normalized: [] };
     }
+    const optional = ENTRY_OPTIONAL_NUMERIC[entry.kind] ?? [];
     const tiers = ENTRY_NUMERIC_TIERS[entry.kind] ?? {};
     for (const [key, allowed] of Object.entries(tiers)) {
       const v = entry.params[key as keyof TalentEntry['params']];
+      if (v === undefined && optional.includes(key)) continue;
       if (
         typeof v !== 'number' ||
         !Number.isFinite(v) ||
@@ -725,7 +900,7 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
   {
     name: '我来!我见!我征服!',
     grade: 'SSS' as TalentGrade,
-    source: 'story',
+    source: 'universal',
     description: '每击败一名目标，你就获得一层征服印记，越战越强。',
     entries: [e({ kind: '连战递增', channel: 'universal', params: { amount: 3 } })],
   },
@@ -940,9 +1115,9 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
   {
     name: '卡牌造物主',
     grade: 'SSS' as TalentGrade,
-    source: 'story',
+    source: 'universal',
     description: '你可以无视素材等级限制进行制卡，精神力消耗为正常制作的1/2。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [e({ kind: '越阶', channel: 'story', params: { tierGain: 1, halveCost: 1 } })], // 「无视素材等级限制」→ 产物越一阶；「精神力消耗 1/2」→ 造价减半
   },
   {
     name: '欲望魔神',
@@ -950,7 +1125,7 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'story',
     description:
       '进行【欲望主导】制卡时，你免疫精神侵蚀，并能汲取大量精神力和欲望能量强化自身，制作出的卡牌一定贴合你的xp。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [e({ kind: '欲望主导', channel: 'story', params: {} })], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: '你是我的了',
@@ -958,7 +1133,7 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'story',
     description:
       '在战斗时，主动使用天赋，有概率将等级高于你一级内的敌人直接变成自己的【伙伴卡】，并且可以选择抹除，保留，修改这个人的意志。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [e({ kind: '捕获', channel: 'story', params: {} })], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: '混沌之心',
@@ -966,7 +1141,7 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'story',
     description:
       '你的制卡结果永远不会是【普通成功】或【可控失败】，只会在【良性突变】和【卡牌爆炸】之间摇摆，概率为1：3。你能从爆炸中吸收混沌能量，永久强化精神力。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [e({ kind: '叙事意图', channel: 'story', params: {} })], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: '种付支配',
@@ -974,7 +1149,7 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'story',
     description:
       '你或你的伙伴可强行令任何被击败的雌性生物受孕。诞下的子嗣将是完全忠于你的全新伙伴卡，并继承双亲的特性，而母体则会沦为精神崩溃的专属生育工具。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [e({ kind: '孕育', channel: 'story', params: {} })], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: '世界线的收束点',
@@ -987,10 +1162,10 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
   {
     name: '万物皆药',
     grade: 'SSS' as TalentGrade,
-    source: 'story',
+    source: 'universal',
     description:
       '你的炼金术已触及法则层面。你可以用"一段记忆"、"一缕悲伤"甚至"一个谎言"作为核心素材，创造出效果扭曲现实、无法预测的禁忌药剂。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [e({ kind: '叙事意图', channel: 'story', params: {} })], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: '神孕之屌',
@@ -998,7 +1173,7 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'story',
     description:
       '你的精液是比你制卡师等级高出一级并可直接使用的制卡素材。任何雌性生物被你内射后，都有极低概率孕育出比你二人中等级较高者高出一级的素材或直接诞生你二人中等级较高者同等级的伙伴卡。此过程无视物种隔离。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [e({ kind: '孕育', channel: 'story', params: {} })], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: '女王领域',
@@ -1006,7 +1181,10 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'story',
     description:
       '你制作的所有女性伙伴卡将自带天生领域，效果各不相同，每个都拥有强大的buff和debuff。领域内，伙伴卡的全属性提升50%，所有敌方单位的全属性降低50%，并且始终携带【臣服】等降低战斗欲望的词条。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [
+      e({ kind: '威压', channel: 'universal', params: { percent: 30 } }),
+      e({ kind: '词条加权', channel: 'story', params: { keywords: ['领域', '臣服'], weight: 2 } }),
+    ], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: '吞噬一切',
@@ -1014,7 +1192,10 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'story',
     description:
       '你的卡牌均带有【吞噬】词条，可以直接吞噬等级不高于你制卡师等级一级的【卡牌】或【素材】成长，在吸收其所有基础属性的同时，还会随机吸收被吞噬者的一个【词条】。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [
+      e({ kind: '吞噬', channel: 'story', params: {} }),
+      e({ kind: '词条加权', channel: 'story', params: { keywords: ['吞噬'], weight: 3 } }),
+    ], // 吞噬机制已实装（card-devour.ts + 制卡台吞噬区，2026-09-17）
   },
   {
     name: '万物归一',
@@ -1022,7 +1203,7 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'story',
     description:
       '你可以将任意三张等级不高于你制卡师等级的卡牌（不论类型）融合成一张全新的、未知的卡牌，新卡牌将继承三张卡牌的部分词条并有概率产生更高级的专属词条。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [e({ kind: '融合', channel: 'story', params: {} })], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: '素材之王',
@@ -1030,7 +1211,7 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'story',
     description:
       '战斗时，你可以主动催动天赋，有概率直接将等级不高于你制卡师等级一级的敌人拆解为【素材】；在非战斗状态下，你也可以消耗精神力将等级不高于你制卡师等级一级的无主物品拆解为【素材】。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [e({ kind: '拆解', channel: 'story', params: {} })], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: '鸿蒙道体（东方）',
@@ -1038,7 +1219,10 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'story',
     description:
       '你是混沌未开时诞生的最初生灵，拥有世间最强的体质。所有经验值获取效率提升100%，能够勘破一切虚妄，制作卡牌的结果只有成功和良性突破，并且每张卡牌都携带【鸿蒙紫气】这一词条。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [
+      e({ kind: '成功率加成', channel: 'universal', params: { bonus: 100 } }),
+      e({ kind: '词条加权', channel: 'story', params: { keywords: ['鸿蒙紫气'], weight: 3 } }),
+    ], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: '女王气场',
@@ -1046,21 +1230,23 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'story',
     description:
       '你制作出的伙伴卡均为性格各异，风格不同但都带有"抖s"，"女王"，"施虐"等词条的女王型【伙伴卡】，拥有很强悍的肉体实力和精神威慑力。每位女王都有自己的骄傲，因此你的卡组只能是单人卡组（仅能拥有一位伙伴卡），但同时，你的所有卡组都将自带【领域卡】和世界观背景故事，直接成为【超级卡组】，但此卡组后续不能额外添加任何卡片。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [
+      e({ kind: '词条加权', channel: 'story', params: { keywords: ['女王', '施虐'], weight: 2 } }),
+    ], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: '词条之王',
     grade: 'SSS' as TalentGrade,
     source: 'story',
     description: '你天生能看到素材中所有隐藏的词条，并且剥离词条时精神力消耗减半。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [e({ kind: '剥离', channel: 'story', params: {} })], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: '进化奇迹',
     grade: 'SSS' as TalentGrade,
     source: 'story',
     description: '你的卡牌在进化时，有50%概率触发【良性突变】。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [e({ kind: '叙事意图', channel: 'story', params: {} })], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: '龙裔之血',
@@ -1068,7 +1254,14 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'story',
     description:
       '你制作的卡牌会转化为高傲的【龙娘/龙男】系列生物，继承龙族的强大元素亲和与肉体力量，但性格极度自负，偶尔会无视你的指令。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [
+      e({ kind: '形态转化', channel: 'story', params: { series: '龙娘' } }),
+      e({
+        kind: '词条加权',
+        channel: 'story',
+        params: { keywords: ['龙裔', '元素亲和'], weight: 2 },
+      }),
+    ], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: '律师函警告',
@@ -1076,15 +1269,15 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'story',
     description:
       '制作的生物卡可以对敌方单位施加一份"行为合同"（如：禁止使用火系技能），若对方违反，则会受到合同约定的巨额反噬真实伤害。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [e({ kind: '合同', channel: 'story', params: {} })], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: '神性火花',
     grade: 'SSS' as TalentGrade,
-    source: 'story',
+    source: 'universal',
     description:
       '使用【传奇】或【神话】级素材时，你必定能引出其核心的【神性词条】，这是制作神卡的唯一门票。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [e({ kind: '词条加权', channel: 'story', params: { keywords: ['神性'], weight: 3 } })], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: '第四面墙',
@@ -1092,7 +1285,7 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'story',
     description:
       '你隐约意识到自己身处的世界的"规则"。制卡时，你可以消耗巨量MP，直接修改一个词条的效果描述。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [e({ kind: '叙事意图', channel: 'story', params: {} })], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: '王之财宝',
@@ -1100,7 +1293,9 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'story',
     description:
       '制卡时有极低概率将主素材升华为【宝具】原型。制作出的装备卡必定拥有至少一条金色词条，且装备时会与使用者灵魂绑定，发挥出超越等级的威力。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [
+      e({ kind: '词条加权', channel: 'story', params: { keywords: ['宝具', '金色'], weight: 3 } }),
+    ], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: '后宫之主系统',
@@ -1108,15 +1303,15 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'exchange',
     description:
       '每当一位女性对你的好感度达到"爱恋"，你就能永久获得她一项最强的天赋或技能，并解锁一个专属的"后宫光环"，所有后宫成员在附近时全属性提升。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [e({ kind: '结缘', channel: 'story', params: {} })], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: '主角光环系统',
     grade: 'SSS' as TalentGrade,
-    source: 'story',
+    source: 'universal',
     description:
       '你是世界的中心。濒死时有极大概率触发奇遇，跳崖必得神功，遇事总有贵人相助，关键战斗中更容易触发顿悟和临场突破。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [e({ kind: '判定取优', channel: 'exchange', params: {} })], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: '轮回圣瞳（东方）',
@@ -1124,7 +1319,7 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'story',
     description:
       '你的双眼能勘破虚妄，洞悉因果。在制卡前，你能预见此次制作的四种结果（大成功、普通成功、可控失败、卡牌爆炸）的模糊画面与概率，并且可以花费所有MP指定结果。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [e({ kind: '判定取优', channel: 'exchange', params: {} })], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: '军团熔炉',
@@ -1132,7 +1327,7 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'story',
     description:
       '你可以将多张【伙伴卡】的灵魂强行熔炼于一炉。通过献祭至少三张伙伴卡，你能将它们的灵魂、天赋和技能糅合成一张全新的、拥有复数天赋的【集合体】或【神格】卡。这是一条通往人造神祇的禁忌之路。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [e({ kind: '熔炼', channel: 'story', params: {} })], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: '机械福音',
@@ -1140,7 +1335,7 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'story',
     description:
       '你能制造并散播一种【机械飞升】病毒。该病毒会感染一切有机生命体，将其DNA改写，不可逆地从分子层面转化为生物机械。你将成为新世界的唯一造物主，所有被转化的生命都将视你为神，组成绝对忠诚的机械军团。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [e({ kind: '叙事意图', channel: 'story', params: {} })], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: '空白卡牌',
@@ -1148,7 +1343,7 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'story',
     description:
       '你能创造出【空白卡牌】。它没有任何属性和描述。在任何对局中，你可以消耗这张卡，将其永久变为你此生亲眼见过的任何一张卡牌的完美复制品，复制品等级和体现出的战力水平永远跟你的等级相等，也可不断成长。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [e({ kind: '叙事意图', channel: 'story', params: {} })], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: '世界之种',
@@ -1156,7 +1351,7 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'story',
     description:
       '你有极小概率制造出名为"世界之种"的特殊领域卡，它是一个可以成长的微缩世界。你在这个世界里是唯一的"神"，可以培养其中的生物，最终将它们转化为你的卡牌。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [e({ kind: '配方解锁', channel: 'story', params: { recipe: '世界之种' } })], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: '作者',
@@ -1164,7 +1359,7 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'story',
     description:
       '你意识到你并非"存在"，而是在"叙述"。你可以通过在脑内书写"旁白"来影响现实。例如，当你描述"他脚下一滑"时，你的敌人真的会平地摔倒。这种力量的滥用会引来世界意志的反噬。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [e({ kind: '叙事意图', channel: 'story', params: {} })], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: '模组加载',
@@ -1172,7 +1367,7 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'exchange',
     description:
       '你可以将其他世界的"设定"或"系统"以模组的形式加载到自己的认知中。例如，加载"宝可梦模组"后，你可以通过精灵球捕捉魔物；加载"老头环模组"后，你可以通过赐福来复活。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [e({ kind: '叙事意图', channel: 'story', params: {} })], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: '玩家',
@@ -1180,7 +1375,7 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'exchange',
     description:
       '你觉醒了"玩家"的本质。你可以看到其他制卡师看不到的隐藏数值、任务线和攻略提示。你甚至可以拥有一个【系统背包】，容量无限，且其中的物品不会被抢夺或损坏。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [e({ kind: '叙事意图', channel: 'story', params: {} })], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: 'GM权限(伪)',
@@ -1188,7 +1383,7 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'exchange',
     description:
       '你每天可以发布三条"指令"，这些指令会以极高的优先级被世界规则执行。例如："/give item [稀有素材] 1"或"/weather clear"或"/kill [指定低等级魔物]"。指令的复杂度越高，成功率越低。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [e({ kind: '叙事意图', channel: 'story', params: {} })], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: '后宫三千',
@@ -1196,7 +1391,7 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'story',
     description:
       '你获得自带世界观和领域卡的超级卡组【后宫宫殿】，召唤卡为【太监】和【宫女】，同时你也只能拥有这一个卡组，你只能制作女性伙伴卡，且由你亲自制作的伙伴卡必定符合你自身的xp，你做出的伙伴卡会自动成为你的妃子，对你的忠诚度锁定100，后宫中含有位份设定，你可以通过封妃的方式为卡组中的伙伴卡提供增益，皇后则是你的卡组核心，获得所有伙伴卡全属性的10%。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [e({ kind: '位份', channel: 'story', params: {} })], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: '闪耀！优骏少女！',
@@ -1204,7 +1399,14 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'story',
     description:
       '你获得自带世界观和领域卡的超级卡组【特雷森学园】，但你有且只能拥有这一个卡组，你只能制作女性伙伴卡，你制作的伙伴卡转化为有少女外观，长有马耳和马尾巴的【赛马娘】系列生物。【赛马娘】必定拥有一个奔跑类词条，并且拥有较低的初始数值和超高的成长能力，可以通过训练无上限的提高能力和获取技能，并带有【一心同体】词条，和你的好感度越高，越能爆发出超出本身数值的战斗力。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [
+      e({ kind: '形态转化', channel: 'story', params: { series: '赛马娘' } }),
+      e({
+        kind: '词条加权',
+        channel: 'story',
+        params: { keywords: ['一心同体', '奔跑'], weight: 3 },
+      }),
+    ], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: '尤格萨隆的低语',
@@ -1212,14 +1414,14 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'story',
     description:
       '你制作时使用了多少词条，卡牌就会由完全随机的生成相应数量的词条组成，与制作词条属性完全无关。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [e({ kind: '叙事意图', channel: 'story', params: {} })], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: '窃智术',
     grade: 'SSS' as TalentGrade,
     source: 'story',
     description: '你可以窃取他人的智力。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [e({ kind: '叙事意图', channel: 'story', params: {} })], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: '泰坦尼亚的血脉觉醒',
@@ -1227,7 +1429,14 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'story',
     description:
       '你制作的女性伙伴卡将直接继承远古泰坦女王的血脉。她的体型可以自由在【常人】和【巨神】（高达50米）之间切换。在巨神形态下，她拥有毁天灭地的力量和极高的抗性，但在常人形态下，她将泰坦之力浓缩于一体，获得无与伦比的爆发速度和格斗技巧。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [
+      e({ kind: '形态转化', channel: 'story', params: { series: '泰坦' } }),
+      e({
+        kind: '词条加权',
+        channel: 'story',
+        params: { keywords: ['巨神', '远古血脉'], weight: 2 },
+      }),
+    ], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: '最终兵器：她',
@@ -1235,7 +1444,7 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'story',
     description:
       '你将创造的不再是伙伴，而是一个拥有自我进化能力的【最终兵器】。她初始能力普通，但拥有【无限适应】天赋。每次战斗结束后，她都会根据战斗数据进行自我优化和改造，进化出克制敌人的能力。假以时日，她将成为一切天敌的克星，所有生命的终点。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [e({ kind: '自我进化', channel: 'story', params: {} })], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: '变肉便器吧',
@@ -1243,7 +1452,7 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'story',
     description:
       '只要是你击败的女性伙伴卡，不会回到原本主人手中，而是根据原本的形态被改造成淫荡的"肉便器"，那个伙伴卡的所有词条可以选择性兑换成对应等级的"色情"词条，被换下来的词条会变成对应的素材，进入背包，你可以为新的色情词条定制一个"调教故事"，你的故事将作为新词条的"根基"，决定其最终形态与效果。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [e({ kind: '转化', channel: 'story', params: {} })], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: '第六终章',
@@ -1251,7 +1460,7 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'story',
     description:
       '战斗时当你的角色和对方角色进入第6次行动，将被即刻抹除，如果同时到达，双方对战的卡牌将被全部融合，制卡师将亲自参与战斗，在此期间不能使用任何卡牌进行战斗，直到一方死亡，那么胜利的一方将获得双方卡牌所全部融合的带有"终末之章"元素的伙伴卡，伙伴卡的模样根据吸收的卡牌进行模拟，词条将全部精炼直到剩下6个融合的最好的词条。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [e({ kind: '终章', channel: 'story', params: {} })], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: '倒也可斩',
@@ -1267,7 +1476,14 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'story',
     description:
       '进行【欲望主导】制卡时，无视精神侵蚀，且你可以从精神侵蚀中提取傲慢，色欲，嫉妒，暴怒，懒惰，暴食和贪婪七种情绪力量化为素材，并使用这七种素材进行【欲望主导】时，可以制造出带有相应情绪力量的卡，这些卡拥有特殊情绪能力，并能通过情绪力量得到强化升级。（使用情绪力量的卡越多，每次提取的情绪力量越多）且提升程度随情绪力量等级提升。【傲慢】必定产生攻击技能，对应攻击，防御特化，攻击技能等级上升。【色欲】必定产生强化性技能，应生命，mp特化，强化性技能等级上升。【嫉妒】必定产生削弱性技能，对应攻击，mp特化，削弱性技能等级上升。【暴怒】必定产生攻击性技能，对应攻击，敏捷特化，攻击性技能等级上升。【懒惰】必定产生防御性技能，对应生命，防御特化，防御性技能等级上升。【暴食】必定产生永久性技能，对应生命，攻击特化，永久性技能等级上升。【贪婪】必定产生抢夺类技能，对应mp，攻击特化，抢夺类技能等级上升。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [
+      e({ kind: '情绪素材', channel: 'story', params: {} }),
+      e({
+        kind: '词条加权',
+        channel: 'story',
+        params: { keywords: ['傲慢', '色欲', '嫉妒', '暴怒', '懒惰', '暴食', '贪婪'], weight: 2 },
+      }),
+    ], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: '七宗罪仆从',
@@ -1275,7 +1491,13 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'story',
     description:
       '你制造的伙伴卡必定含有七种特殊的情绪力量之一，且每日可以产出一种有关这七种情绪力量的素材，素材品质不超过伙伴卡的品质。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [
+      e({
+        kind: '词条加权',
+        channel: 'story',
+        params: { keywords: ['傲慢', '色欲', '嫉妒', '暴怒', '懒惰', '暴食', '贪婪'], weight: 3 },
+      }),
+    ], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: '鸿图华构',
@@ -1283,14 +1505,17 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'story',
     description:
       '你可以无视素材等级限制进行制卡，并能将任意素材/卡牌（不论类型）融合成一张全新的、未知的素材/卡牌。天生能看到素材中所有隐藏的词条，并可直接剔除负面词条，制作卡牌与剥离词条时精神力消耗为正常的1/3。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [e({ kind: '融合', channel: 'story', params: {} })], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: '突变巫师',
     grade: 'SSS' as TalentGrade,
     source: 'story',
     description: '你可以自由自在的操控自己与其他事物的身体，将其改变为任何模样。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [
+      e({ kind: '改造', channel: 'story', params: {} }),
+      e({ kind: '叙事意图', channel: 'story', params: {} }),
+    ], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: '初代血魔',
@@ -1298,14 +1523,16 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'story',
     description:
       '你是「血魔」的始祖，拥有对下位眷属绝对的统治力，可以随意的操控血液进行战斗或者制卡。你制作的生物卡牌会获得"一代眷属"词条，并且他们可以自行转化眷属。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [
+      e({ kind: '词条加权', channel: 'story', params: { keywords: ['一代眷属'], weight: 3 } }),
+    ], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: '卡牌之手',
     grade: 'SSS' as TalentGrade,
     source: 'story',
     description: '你可以将任何拥双手触碰到的物品变成你的卡牌。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [e({ kind: '叙事意图', channel: 'story', params: {} })], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
   {
     name: '深渊领主',
@@ -1313,7 +1540,7 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'story',
     description:
       '你可以与深海中任何超过你等级的巨型魔物建立"深渊契约"。契约成功后，该魔物会化为一张特殊的【伙伴卡】，保留其全部深海词条，且自带"深渊压制"被动——在水下环境中，全属性额外提升40%。',
-    entries: [], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
+    entries: [e({ kind: '深渊契约', channel: 'story', params: {} })], // 规则层：专属钩子待实装（路线图），当前为纯叙事收录
   },
 
   // ── v6 规则层与东方系（主人 2026-09-15 第二批全量收录）──
@@ -1331,7 +1558,9 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '能够制作出短暂操纵"运气"的道具卡。例如，必定成功的【幸运硬币】或必定失败的【厄运护符】，但使用后必然会在其他方面遭到反噬。',
-    entries: [],
+    // 2026-09-17 SS 批次②：配方进炼制提示词（buildCraftBiasLines「已解锁配方」行），
+    // 反噬由描述本身交给 AI 演绎——运气道具卡的「必然反噬」是规则而非数值。
+    entries: [{ kind: '配方解锁', channel: 'universal', params: { recipe: '幸运硬币/厄运护符' } }],
   },
   {
     name: '液体机械',
@@ -1381,7 +1610,9 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '每场战斗一次，你可以重新定义你制作的一张卡牌描述中的一个关键词。例如，将"造成火焰伤害"改为"造成真实伤害"。',
-    entries: [],
+    // 2026-09-17 SS 批次②：纯叙事通道（TalentPanel 开放声明入口 → {{NARRATIVE_INTENTS}}）。
+    // 「改写一个关键词」不是数值改写，正是「只记不向」的标准用例。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '混沌理论',
@@ -1389,14 +1620,20 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '使用【对冲融合】时，素材的冲突值越高，【良性突变】的概率反而越大。你总能在最混乱的能量中找到秩序。',
-    entries: [],
+    // 2026-09-17 SS 批次②：突变方向的**内容**由生成倾向承载——炼制提示词要求产物必带
+    // 「突变/紊乱」类词条，冲突越高时这类词条的兑现越强（数值侧仍是既有融合内核）。
+    entries: [
+      { kind: '词条加权', channel: 'universal', params: { keywords: ['突变', '紊乱'], weight: 2 } },
+    ],
   },
   {
     name: '盗火者',
     grade: 'SS' as TalentGrade,
     source: 'universal',
     description: '越阶挑战时，若挑战成功，制成的卡牌有50%的概率直接提升一个大等级。',
-    entries: [],
+    // 2026-09-17 SS 批次② + 参数化：复用「卡牌造物主」的越阶通道（craft-talent-bonus）。
+    // 与 SSS 的差别就在档位上——盗火者只越一阶、**不享造价减半**（描述里没这一条）。
+    entries: [{ kind: '越阶', channel: 'universal', params: { tierGain: 1, halveCost: 0 } }],
   },
   {
     name: '神级选项系统',
@@ -1404,7 +1641,9 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '在人生的重要十字路口，时间会为你暂停，面前将出现三个选项，每个选项后面都清晰地标注了可能带来的后果。',
-    entries: [],
+    // 2026-09-17 SS 批次②：纯叙事通道——玩家在天赋面板写下「此处应给三个选项」的指令，
+    // AI 在下一拍生成时据此在三岔口给出标注后果的分支。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '一拳超人系统',
@@ -1420,7 +1659,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '当你做出足以影响世界的重大决定时，你能看到数条不同的世界线分支，并选择其中一条进入。',
-    entries: [],
+    // 2026-09-17 SS 批次②：纯叙事通道——重大决定前声明要看的几条分支，AI 据此铺陈。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '剧本编写系统',
@@ -1428,7 +1668,9 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你可以消耗大量精神力，编写一段简短的"剧本"，在未来一段时间内，世界会大概率按照你的剧本发展。',
-    entries: [],
+    // 2026-09-17 SS 批次②：纯叙事通道——「剧本」就是一条长期叙事意图，落 SaveProfile
+    // 后每拍注入 {{NARRATIVE_INTENTS}}，直到玩家撤回。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '天生剑骨（东方）',
@@ -1482,7 +1724,9 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '每天一次，当你接触到不属于自己的【卡牌】或【素材】时，可以从它们身上随机窃取一个【词条】，并附加到自己的任意一张卡牌上。',
-    entries: [],
+    // 2026-09-17 SS 批次②：复用「吞噬一切」的吞噬通道——吃一张卡吸收它的一个词条
+    // 并继承一部分经验，语义上正是「从别处取一个词条装到自己卡上」。
+    entries: [{ kind: '吞噬', channel: 'universal', params: {} }],
   },
   {
     name: '道法自然（东方）',
@@ -1490,7 +1734,12 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你天生与大道相合，制卡时可大幅降低素材间的属性冲突，【对冲融合】的成功率与收益远超常人，万物皆可为你所用，制作的每张卡片都会有一个符合卡片特质的概念性词条。',
-    entries: [],
+    // 2026-09-17 SS 批次②：三句拆两通道——「每张卡必有概念性词条」是硬承诺（权重 3=必附，
+    // 进炼制提示词）；「降低冲突、对冲融合收益」是规则而非数值，走纯叙事通道。
+    entries: [
+      { kind: '词条加权', channel: 'universal', params: { keywords: ['概念', '道韵'], weight: 3 } },
+      { kind: '叙事意图', channel: 'universal', params: {} },
+    ],
   },
   {
     name: '完美人形',
@@ -1514,7 +1763,9 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你的卡牌在攻击实际等级（即不计算任何增益的原生等级）高于自身的敌人时，会获得【克上】效果，无视对方部分防御力并造成额外伤害。等级差距越大，该效果越强。',
-    entries: [],
+    // 2026-09-17：落地为「敌方等级高于你时行动值 +N%」——拍制里没有「防御力」这个量，
+    // 用行动值加成等价兑现「无视防御的额外伤害」。数值档见 ENTRY_NUMERIC_TIERS.克上。
+    entries: [{ kind: '克上', channel: 'universal', params: { vsHigherLevel: 30 } }],
   },
   {
     name: '寄生殖入',
@@ -1538,7 +1789,9 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '卡牌的强度不再取决于材料，而取决于你的"画技"。你亲手绘制的卡面越精美、越富神韵，卡牌的最终能力就越强大。你可以随时修改卡面，从而调整卡牌的技能。',
-    entries: [],
+    // 2026-09-17：复用「突变巫师」的**改造**通道（planReshape）——「随时改卡面调整技能」
+    // 在引擎里就是改写卡的形态/系列。制卡台「形态改造」区对持此条目的玩家开放。
+    entries: [{ kind: '改造', channel: 'universal', params: {} }],
   },
   {
     name: '爱',
@@ -1682,7 +1935,9 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你的身体已经适应了深海的极端环境。你在水下不需要呼吸，免疫水压伤害，且在深海环境中敏捷和防御各提升30%。',
-    entries: [],
+    // 2026-09-17：「深海环境」由**领域/场景卡**建立——水系/冰系领域或场景卡在场时，
+    // 防御/闪避应对获得 +30%（「敏捷和防御各 +30%」的拍制等价兑现）。
+    entries: [{ kind: '环境加成', channel: 'universal', params: { env: '水下', percent: 30 } }],
   },
 
   // ── v7 第三批 S 级全量（主人 2026-09-15；多为规则层/情境层，entries 空 = 纯叙事或见描述）──
@@ -6629,6 +6884,73 @@ export function getCreationCatalog(): TalentTemplate[] {
   return TALENT_CATALOG.filter(
     (t) => !t.fusionOnly && (t.source === 'universal' || t.source === 'creation'),
   );
+}
+
+/**
+ * 已实装机制判定（2026-09-17 真机：玩家抽到「天生剑骨」却发现零机制）。
+ *
+ * 目录共 698 条模板，但**条目类型**并不都有引擎消费方：`战技附加`（交锋拍战技表
+ * 尚未落地）与 `鉴定`（设计上即风味条目，无机械参数）没有消费方；另有 380 条模板
+ * `entries: []`（纯描述，如「天生剑骨（东方）」的本名剑/武器限制均为空）。
+ *
+ * 捏人抽卡是**强制 1 选 1** —— 从 644 池抽 8 个全是可用天赋的概率仅约 0.1%，
+ * 几乎必然混入空效果项。故抽卡池收窄到「至少有一条已实装机制」的模板；
+ * 天赋面板对存量未实装天赋打「仅叙事」标记。
+ *
+ * 加新条目类型时：实现消费方后把 kind 加进本表，即自动回到抽卡池。
+ */
+export const IMPLEMENTED_ENTRY_KINDS: ReadonlySet<TalentEntryKind> = new Set<TalentEntryKind>([
+  '材料限定',
+  '成品限定',
+  '成功率加成',
+  '品质锁定',
+  '品质突破',
+  '启封加值',
+  '行动值加成',
+  '防御加值',
+  '产出数量',
+  '风险系数',
+  '金钱加投',
+  '判定取优',
+  '词条加权',
+  '形态转化',
+  '击杀掠取',
+  '连战递增',
+  '威压',
+  '配方解锁',
+  '体魄',
+  '吞噬',
+  '熔炼',
+  '拆解',
+  '融合',
+  '合同',
+  '终章',
+  '叙事意图',
+  '情绪素材',
+  '深渊契约',
+  '改造',
+  '捕获',
+  '孕育',
+  '转化',
+  '越阶',
+  '剥离',
+  '欲望主导',
+  '自我进化',
+  '结缘',
+  '位份',
+  '克上',
+  '环境加成',
+  '战技附加',
+]);
+
+/** 该模板是否至少有一条已实装机制（抽卡池与面板标记的判据） */
+export function hasWorkingMechanic(tpl: TalentTemplate): boolean {
+  return tpl.entries.some((e) => IMPLEMENTED_ENTRY_KINDS.has(e.kind));
+}
+
+/** 捏人抽卡池：只出机制可用的模板（抽到的天赋保证有效果） */
+export function getDrawableCatalog(): TalentTemplate[] {
+  return getCreationCatalog().filter(hasWorkingMechanic);
 }
 
 /** 声望兑换清单：通用池 + 兑换独占（融合产物/出身/剧情独占除外） */

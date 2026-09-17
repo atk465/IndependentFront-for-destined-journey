@@ -73,6 +73,8 @@ export type SkirmishChoice =
       kind: '卡';
       name: string;
       /** 出卡宣言：这张牌用来做什么（纯叙事素材，进战报供终局记叙参考；数值照常结算） */ intent?: string;
+      /** 行为合同（SSS 律师函警告）：本拍附加的禁条选择；需持有「合同」条目 */
+      contractForbidden?: CounterTag;
     }
   | { kind: '应对'; move: BasicCounter };
 
@@ -142,7 +144,9 @@ export interface ExpAudit {
   /** 等级差修正 = max(0.2, min(2, 1 + (TL − PL) × 0.1)) */
   levelMult: number;
   gradeMult: number;
-  /** 总战斗经验 = round(基础 × 等级差修正 × 评价倍率) */
+  /** 天赋经验倍率（鸿蒙道体 ×2 / 千秋证果 ×5；无天赋 = 1） */
+  talentMult: number;
+  /** 总战斗经验 = round(基础 × 等级差修正 × 评价倍率 × 天赋倍率) */
   total: number;
 }
 
@@ -301,24 +305,40 @@ export function battleExpChain(
   enemyLevel: number,
   playerLevel: number,
   grade: SkirmishGrade,
+  talentMult = 1,
 ): ExpAudit {
   const tl = Number.isFinite(enemyLevel) ? Math.max(1, Math.round(enemyLevel)) : 1;
   const pl = Number.isFinite(playerLevel) ? Math.max(1, Math.round(playerLevel)) : 1;
   const base = EXP_PER_ENEMY_LEVEL * tl;
   const levelMult = Math.max(LEVEL_MULT_MIN, Math.min(LEVEL_MULT_MAX, 1 + (tl - pl) * 0.1));
   const gradeMult = GRADE_MULTIPLIER[grade] ?? GRADE_MULTIPLIER.B;
-  const total = Math.round(base * levelMult * gradeMult);
-  return { enemyLevel: tl, playerLevel: pl, grade, base, levelMult, gradeMult, total };
+  const mult =
+    typeof talentMult === 'number' && Number.isFinite(talentMult) && talentMult > 0
+      ? talentMult
+      : 1;
+  const total = Math.round(base * levelMult * gradeMult * mult);
+  return {
+    enemyLevel: tl,
+    playerLevel: pl,
+    grade,
+    base,
+    levelMult,
+    gradeMult,
+    talentMult: mult,
+    total,
+  };
 }
 
-/** 经验审计行（战报卡终局区，格式被测试钉死） */
+/** 经验审计行（战报卡终局区，格式被测试钉死；天赋倍率 ≠1 时多一行） */
 export function formatExpAudit(a: ExpAudit): string[] {
-  return [
+  const lines = [
     `▸ 基础经验 = ${EXP_PER_ENEMY_LEVEL} × 敌方等级${a.enemyLevel} = ${a.base}`,
     `▸ 等级差修正 = max(${LEVEL_MULT_MIN}, min(${LEVEL_MULT_MAX}, 1+(${a.enemyLevel}−${a.playerLevel})×0.1)) = ×${fmtMult(a.levelMult)}`,
     `▸ 战斗评价 ${a.grade} 级 → ×${fmtMult(a.gradeMult)}`,
-    `▸ 战斗经验 = ${a.total} EXP`,
   ];
+  if (a.talentMult !== 1) lines.push(`▸ 天赋经验倍率 → ×${fmtMult(a.talentMult)}`);
+  lines.push(`▸ 战斗经验 = ${a.total} EXP`);
+  return lines;
 }
 
 // ========== 卡牌经验（参战卡 50% 分成，满管 → 战力 +1 清空重攒） ==========
@@ -334,12 +354,23 @@ export function cardExpGain(playerBattleExp: number): number {
  * （一次巨量经验可以连升多次，永不丢经验）。未知品质按白铁管容兜底。
  */
 export function applyCardExp(spec: CardExpSpec, gain: number): CardExpResult {
+  return growCardByRawExp(spec, cardExpGain(gain));
+}
+
+/**
+ * 卡牌经验入账（**无战斗分成**，原样入账）——吞噬/其他非战斗成长通道用。
+ *
+ * 与 `applyCardExp` 的差别只在于**不乘 `CARD_EXP_SHARE`**：交锋分成是「参战卡分得
+ * 玩家战斗经验的 50%」这条交战规则，而吞噬是直接吃进燃料的全部经验，不该再打 5 折。
+ * 满管溢出循环（卡牌经验 → 战力）是两者的共同内核，只有这一份实现。
+ */
+export function growCardByRawExp(spec: CardExpSpec, rawExp: number): CardExpResult {
   const cap = CARD_EXP_CAP[spec.cardTier] ?? CARD_EXP_CAP['白铁'];
   let exp = Number.isFinite(spec.cardExp) ? Math.max(0, Math.round(spec.cardExp as number)) : 0;
   let bonus = Number.isFinite(spec.cardPowerBonus)
     ? Math.max(0, Math.round(spec.cardPowerBonus as number))
     : 0;
-  exp += cardExpGain(gain);
+  exp += Number.isFinite(rawExp) ? Math.max(0, Math.round(rawExp)) : 0;
   let powerUps = 0;
   while (exp >= cap) {
     exp -= cap;

@@ -43,7 +43,9 @@ const selectedName = ref<string | null>(null);
 const feedback = ref<{ kind: 'ok' | 'err'; msg: string } | null>(null);
 const busy = ref(false);
 
-const selected = computed(() => commissions.value.find((c) => c.name === selectedName.value) ?? null);
+const selected = computed(
+  () => commissions.value.find((c) => c.name === selectedName.value) ?? null,
+);
 
 /** 所选委托的可交付卡：类型/品质/元素验收通过且未损坏的背包卡 */
 const deliverableCards = computed(() => {

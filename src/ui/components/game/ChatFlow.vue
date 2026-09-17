@@ -314,7 +314,6 @@ onUnmounted(() => {
               <span v-if="msg.timestamp" class="bubble-time">{{ formatTime(msg.timestamp) }}</span>
             </div>
           </div>
-
         </template>
 
         <!-- AI 叙事消息 — 只渲染美化正文 -->
@@ -439,7 +438,6 @@ onUnmounted(() => {
         <button class="ctx-item" @click.stop="ctxCopy"><i class="fa-solid fa-copy" /> 复制</button>
       </div>
     </Teleport>
-
   </div>
 </template>
 

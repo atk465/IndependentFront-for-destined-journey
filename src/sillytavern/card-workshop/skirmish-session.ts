@@ -22,8 +22,10 @@ import {
   type ExpAudit,
   type SkirmishAction,
   type SkirmishGrade,
+  type CounterTag,
 } from './skirmish';
-import type { CardInPlayEffect } from './entry-combat';
+import { activateListOf, type ActivateInput, type CardInPlayEffect } from './entry-combat';
+import { ENTRY_STRENGTH_BASELINE } from './talent-entry';
 
 /** 会话终局态；null = 交锋中 */
 export type SkirmishFinish = null | '胜利' | '碾压' | '撤退' | '败北';
@@ -54,6 +56,10 @@ export interface SkirmishSession {
   activeEffects: readonly CardInPlayEffect[];
   /** 本场破封的卡名（结算时同窗持久化 sealed:false） */
   unsealedCards: string[];
+  /** 行为合同（SSS 律师函警告）：禁止敌方某类招式，违反则反噬（2026-09-17） */
+  contracts?: readonly SkirmishContract[];
+  /** 倒也可斩是否已用（每场限一次） */
+  nukeUsed?: boolean;
 }
 
 export interface StartSkirmishInput {
@@ -124,9 +130,36 @@ const withFinish = (
 });
 
 /** 打一拍的附加裁定（启封/在场激活/反冲） */
+/** 一条行为合同：禁止敌方使用带指定反制标签的招式；违反则反噬 */
+export interface SkirmishContract {
+  /** 合同名（叙事用，如「行为合同·禁火」） */
+  name: string;
+  /** 禁止的招式标签（敌方意图 counters 含此标签 = 违约） */
+  forbidden: CounterTag;
+  /** 反噬伤害（真实伤害，不减免） */
+  backlash: number;
+}
+
+/** 违约判定 + 反噬合计（纯函数）：逐条检查敌方本拍意图是否触碰禁条 */
+export function contractBacklash(
+  contracts: readonly SkirmishContract[] | undefined,
+  intent: Pick<EnemyIntent, 'counters'>,
+): { total: number; violated: SkirmishContract[] } {
+  const violated: SkirmishContract[] = [];
+  let total = 0;
+  for (const c of contracts ?? []) {
+    if ((intent.counters ?? []).includes(c.forbidden)) {
+      violated.push(c);
+      total += Math.max(0, Math.round(c.backlash));
+    }
+  }
+  return { total, violated };
+}
+
 export interface BeatOptions {
   /** 本拍打出的在场卡（领域/场景/装备/召唤/军团），效果从下一拍起生效 */
-  activate?: CardInPlayEffect;
+  /** 本拍激活的在场效果（单条；战技附加会带来第二条，故也接受数组） */
+  activate?: ActivateInput;
   /** 启封判定等前置审计行（置于意图行之后、拍审计之前） */
   prepend?: string[];
   /** 暴走/反噬反冲：拍末玩家 HP −n（clamp 0，可致死 → 败北） */
@@ -135,7 +168,19 @@ export interface BeatOptions {
   sealBroke?: string;
   /** 倒也可斩（每场限一次，一次性大招） */
   nuke?: boolean;
+  /** 倒也可斩的抹除强度：按敌方当前 HP 的百分比（缺省 = 基准 50） */
+  nukePercent?: number;
+  /** 本拍登记的行为合同（SSS 律师函警告；从下一拍起判定违约） */
+  contract?: SkirmishContract;
+  /** 第六终章（SSS）：第 N 拍起敌方被即刻抹除（巨额真实伤害，无视一切减免） */
+  finalChapter?: boolean;
+  /** 终章发动拍次（条目 `终章{beats}` 的强度档；缺省 = 基准 6） */
+  finalChapterBeats?: number;
 }
+
+export const FINAL_CHAPTER_BEAT = ENTRY_STRENGTH_BASELINE.终章.beats;
+/** 倒也可斩的抹除百分比基准（50% 敌方当前 HP；由 name 型规则钩子带值，见 talent-hooks） */
+export const NUKE_PERCENT = 50;
 
 /** 打一拍：拍结算 + 记账 + 终局判定（只按 HP 归零终局；拍数不限，招式轮换）。
  *  未开始/已结束/无敌方招式 → 原样返回（幂等） */
@@ -147,10 +192,12 @@ export function playBeat(
 ): SkirmishSession {
   const intent = currentIntent(s);
   if (!intent) return s;
-  const activate = opts?.activate;
 
-  // 倒也可斩：一次性大威力攻击（50% 敌方当前 HP），消耗 90% 玩家 HP/MP
-  const nukeDamage = opts?.nuke === true ? Math.max(1, Math.round(s.enemyHp * 0.5)) : 0;
+  // 倒也可斩：一次性大威力攻击（缺省 50% 敌方当前 HP），消耗 90% 玩家 HP/MP
+  // 🔴 每场限一次（2026-09-17）：session.nukeUsed 守卫，重复请求按未请求处理
+  const nukeRequested = opts?.nuke === true && s.nukeUsed !== true;
+  const nukePct = Math.max(1, Math.round(opts?.nukePercent ?? NUKE_PERCENT));
+  const nukeDamage = nukeRequested ? Math.max(1, Math.round((s.enemyHp * nukePct) / 100)) : 0;
 
   // 在场战技：眩晕（敌方本拍放弃行动）/ 减速（威胁降低），只在剩余拍数内生效
   const live = s.activeEffects.filter((e) => e.beatsLeft === undefined || e.beatsLeft > 0);
@@ -206,6 +253,23 @@ export function playBeat(
     lines.push(`▸ 倒也可斩：敌方 −${nukeDamage}（${enemyHpAfterDot} → ${afterNuke}）`);
   }
 
+  // 行为合同反噬（SSS 律师函警告）：敌方本拍意图触碰禁条 → 真实伤害
+  const contractHit = contractBacklash(s.contracts, intent);
+  const afterContract = Math.max(0, afterNuke - contractHit.total);
+  if (contractHit.total > 0) {
+    lines.push(
+      `▸ 行为合同违约（${contractHit.violated.map((c) => c.name).join('、')}）：敌方 −${contractHit.total} 真实伤害（${afterNuke} → ${afterContract}）`,
+    );
+  }
+
+  // 终章：第 N 拍起敌方被即刻抹除（无视减免；N 缺省 6）
+  const chapterAt = Math.max(1, Math.round(opts?.finalChapterBeats ?? FINAL_CHAPTER_BEAT));
+  const chapterActive = opts?.finalChapter === true && s.beat + 1 >= chapterAt;
+  if (chapterActive && afterContract > 0) {
+    lines.push(`▸ 【第六终章】第 ${s.beat + 1} 次行动——抹除发动：敌方 −${afterContract}（归零）`);
+  }
+  const enemyHpFinal = chapterActive ? 0 : afterContract;
+
   // 暴走/反噬反冲（启封失败的代价）：拍末玩家扣血，可致死
   const recoil = opts?.recoil ?? 0;
   const playerHpAfterRecoil = Math.max(0, result.playerHp - Math.max(0, Math.round(recoil)));
@@ -219,38 +283,35 @@ export function playBeat(
   const decremented = s.activeEffects.map((e) =>
     e.beatsLeft !== undefined ? { ...e, beatsLeft: Math.max(0, e.beatsLeft - 1) } : e,
   );
+  const activateList = activateListOf(opts?.activate);
   const nextEffects = [
     ...decremented.filter((e) => e.beatsLeft === undefined || e.beatsLeft > 0),
-    ...(activate
-      ? [
-          {
-            name: activate.name,
-            type: activate.type,
-            amount: Math.max(0, Math.round(activate.amount)),
-            ...(activate.beatsLeft !== undefined
-              ? { beatsLeft: Math.max(1, activate.beatsLeft) }
-              : {}),
-          },
-        ]
-      : []),
+    ...activateList.map((a) => ({
+      name: a.name,
+      type: a.type,
+      amount: Math.max(0, Math.round(a.amount)),
+      ...(a.beatsLeft !== undefined ? { beatsLeft: Math.max(1, a.beatsLeft) } : {}),
+      // 领域/场景卡建立的环境随效果存续（环境加成天赋据此判定）
+      ...(a.env ? { env: a.env } : {}),
+    })),
   ];
-  if (activate) {
+  for (const a of activateList) {
     const line =
-      activate.type === 'dot'
-        ? `灼烧生效——此后每拍敌方 −${activate.amount}`
-        : activate.type === 'buff'
-          ? `助阵生效——此后每拍行动值 +${activate.amount}`
-          : activate.type === 'weaken'
-            ? `减速生效——此后每拍敌方威胁 −${activate.amount}`
+      a.type === 'dot'
+        ? `灼烧生效——此后每拍敌方 −${a.amount}`
+        : a.type === 'buff'
+          ? `助阵生效——此后每拍行动值 +${a.amount}`
+          : a.type === 'weaken'
+            ? `减速生效——此后每拍敌方威胁 −${a.amount}`
             : `震慑生效——敌方将短暂失去战意`;
-    lines.push(`▸ 【${activate.name}】${line}`);
+    lines.push(`▸ 【${a.name}】${line}`);
   }
 
   const next: SkirmishSession = {
     ...s,
     beat: s.beat + 1,
     playerHp: playerHpAfterRecoil,
-    enemyHp: afterNuke,
+    enemyHp: enemyHpFinal,
     log: [...s.log, ...lines],
     playedCards:
       action.cardName && !s.playedCards.includes(action.cardName)
@@ -262,6 +323,18 @@ export function playBeat(
       opts?.sealBroke && !s.unsealedCards.includes(opts.sealBroke)
         ? [...s.unsealedCards, opts.sealBroke]
         : s.unsealedCards,
+    // 合同登记（同名同禁条不重复；本拍登记的从下一拍才开始判定——本拍已用旧清单判过）
+    ...(opts?.contract
+      ? {
+          contracts: [
+            ...(s.contracts ?? []).filter(
+              (c) => !(c.name === opts.contract!.name && c.forbidden === opts.contract!.forbidden),
+            ),
+            opts.contract,
+          ],
+        }
+      : {}),
+    ...(nukeRequested ? { nukeUsed: true } : {}),
   };
   if (next.enemyHp <= 0) {
     return withFinish(next, '胜利', [`▸ 【${s.enemyName}】倒下——胜利！`]);
@@ -301,7 +374,11 @@ export interface SkirmishSettlement {
   cardExp: { name: string; gain: number }[];
 }
 
-export function settleSkirmish(s: SkirmishSession, playerLevel: number): SkirmishSettlement | null {
+export function settleSkirmish(
+  s: SkirmishSession,
+  playerLevel: number,
+  expMultiplier = 1,
+): SkirmishSettlement | null {
   if (s.finished === null) return null;
   const grade = gradeBattle({
     fled: s.finished === '撤退',
@@ -311,7 +388,7 @@ export function settleSkirmish(s: SkirmishSession, playerLevel: number): Skirmis
     counteredBeats: s.counteredBeats,
     hpLossRatio: s.playerMaxHp > 0 ? (s.playerMaxHp - s.playerHp) / s.playerMaxHp : 1,
   });
-  const exp = battleExpChain(s.enemyLevel, playerLevel, grade);
+  const exp = battleExpChain(s.enemyLevel, playerLevel, grade, expMultiplier);
   const gain = cardExpGain(exp.total);
   const cardExp = s.playedCards.map((name) => ({ name, gain }));
   return {

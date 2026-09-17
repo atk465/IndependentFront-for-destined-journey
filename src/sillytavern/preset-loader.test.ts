@@ -16,6 +16,8 @@ import {
   preprocessPresetForPreview,
   hasSTMacros,
   DEFAULT_STORY_CONTEXT_BLOCK,
+  orderPresetPrompts,
+  DEFAULT_INJECTION_ORDER,
 } from './preset-loader';
 import type { AgentPreset } from './types';
 
@@ -610,5 +612,41 @@ describe('assemblePresetContent (Phase 10 extended)', () => {
     expect(result).not.toContain(DEFAULT_STORY_CONTEXT_BLOCK);
     expect(result).not.toContain('{{NARRATIVE}}');
     expect(result).not.toContain('{{USER_INPUT}}');
+  });
+});
+
+describe('orderPresetPrompts —— 列表顺序真源（2026-09-17）', () => {
+  const A = { identifier: 'a', name: 'A' };
+  const B = { identifier: 'b', name: 'B' };
+  const C = { identifier: 'c', name: 'C' };
+
+  it('prompt_order 优先：按 identifier 序列重排（与数组顺序无关）', () => {
+    const out = orderPresetPrompts(
+      [A, B, C],
+      [{ identifier: 'c' }, { identifier: 'a' }, { identifier: 'b' }],
+    );
+    expect(out.map((x) => x.name)).toEqual(['C', 'A', 'B']);
+  });
+
+  it('未列入 prompt_order 的条目按原数组顺序附于末尾（不丢条目）', () => {
+    const out = orderPresetPrompts([A, B, C], [{ identifier: 'c' }]);
+    expect(out.map((x) => x.name)).toEqual(['C', 'A', 'B']);
+    expect(out).toHaveLength(3);
+  });
+
+  it('无 prompt_order → 退回 injection_order，缺省 100（不是 0）', () => {
+    const p1 = { identifier: 'x', name: 'X' }; // 无 injection_order = 100
+    const p2 = { identifier: 'y', name: 'Y', injection_order: 10 };
+    const p3 = { identifier: 'z', name: 'Z', injection_order: 100 };
+    const out = orderPresetPrompts([p1, p2, p3], null);
+    // Y(10) < X(100, 缺省) == Z(100) —— 缺省值必须与 100 同级而非 0
+    expect(out.map((x) => x.name)).toEqual(['Y', 'X', 'Z']);
+    expect(DEFAULT_INJECTION_ORDER).toBe(100);
+  });
+
+  it('纯函数：不 mutate 入参', () => {
+    const arr = [A, B];
+    orderPresetPrompts(arr, [{ identifier: 'b' }, { identifier: 'a' }]);
+    expect(arr.map((x) => x.name)).toEqual(['A', 'B']);
   });
 });

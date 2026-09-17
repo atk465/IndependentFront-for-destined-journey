@@ -39,8 +39,9 @@ import {
 } from '@engine/card-workshop/skirmish';
 import {
   cardPlayPlan,
+  planEffects,
   sealedCardPlay,
-  type CardInPlayEffect,
+  type ActivateInput,
 } from '@engine/card-workshop/entry-combat';
 import { applyBond, bondForCard, type BondInfo } from '@engine/card-workshop/affection-bond';
 import { cardKindOf } from '@engine/card-workshop/card-kind';
@@ -48,7 +49,12 @@ import { willModifierOf } from '@engine/card-workshop/unsealing';
 import { getCommissionDefs } from '@engine/commission-runtime';
 import { buildCraftBiasLines } from '@engine/card-workshop/talent-entry';
 import { runTalentFusionNaming } from '@engine/card-workshop/talent-naming';
-import { basicCounterAction, deriveCombatStats } from '@engine/card-workshop/derived-stats';
+import {
+  applyStatMultiplier,
+  basicCounterAction,
+  deriveBaseCombatStats,
+  deriveCombatStats,
+} from '@engine/card-workshop/derived-stats';
 import {
   crushFinish,
   fleeSkirmish,
@@ -58,6 +64,27 @@ import {
   type SkirmishSession,
 } from '@engine/card-workshop/skirmish-session';
 import { buildSkirmishSettlementPatches } from '@engine/card-workshop/skirmish-settlement';
+import type { SkirmishContract } from '@engine/card-workshop/skirmish-session';
+import {
+  collectRuleHooks,
+  expMultiplierOf,
+  hasDefeatReward,
+  hasOncePerBattleNuke,
+  hasVictoryMaterial,
+  hpMultiplierOf,
+  nukePercentOf,
+  statMultiplierOf,
+} from '@engine/card-workshop/talent-hooks';
+import {
+  entryStrength,
+  envBonusesOf,
+  hasBetterRoll,
+  hasTitanPhysique,
+  totalIntimidation,
+} from '@engine/card-workshop/talent-rule-modifiers';
+import type { TalentEntry } from '@engine/card-workshop/talent-entry';
+import { planDefeatCompensation } from '@engine/card-workshop/defeat-compensation';
+import { planSelfEvolution } from '@engine/card-workshop/companion-growth';
 import { runSkirmishAssessment, runSkirmishChronicle } from '@engine/card-workshop/skirmish-agent';
 import { AgentClient } from '@engine/agent-client';
 import type { StreamCallbacks } from '@engine/agent-client';
@@ -65,6 +92,10 @@ import { createStateManager } from '@engine/state-manager';
 import { parseCatalogData } from '@engine/start-catalog';
 import { getContentRegistry } from '../stores/content-store';
 import { deckGuardBonus, deckPower } from '@engine/card-workshop/deck-power';
+import { matchFreeCardPlay } from '@engine/card-workshop/free-card-play';
+import { battleReadyCards } from '@engine/card-workshop/deck-power';
+import { cardCombatTags } from '@engine/card-workshop/entry-combat';
+import { runSkirmishIntentResolve } from '@engine/card-workshop/skirmish-agent';
 import { projectStoryOutput, projectStreamingStory } from '@engine/story-output';
 import { loadWorldBooksWithFallback } from '@engine/builtin-worldbooks';
 import { filterBooksByEnabledEntries } from '@engine/worldbook-loader';
@@ -248,6 +279,13 @@ const saveWork = new Map<
 /** A remounted page must read its save only after the previous pipeline drains. */
 export async function waitForGameSaveIdle(saveId: string): Promise<void> {
   while (saveWork.has(saveId)) await saveWork.get(saveId)!.idle;
+}
+
+/** 玩家天赋条目摊平（规则层数值条目一律走条目种类判定，与 UI 同源） */
+function flatEntriesOf(
+  talents: readonly { entries?: readonly TalentEntry[] }[] | undefined,
+): readonly TalentEntry[] {
+  return (talents ?? []).flatMap((t) => t.entries ?? []);
 }
 
 export class GamePipeline {
@@ -997,6 +1035,8 @@ export class GamePipeline {
       // 天赋（卡牌工坊）：玩家 CharacterState.talents 快照（{{TALENT}} 数据源；
       // 玩家无天赋时为 undefined → 块静默，出身必选保证建档即有）。
       talents: this.game.player?.talents,
+      // 叙事意图（纯记不向路线）：每天赋一条当前意图，持续注入（再声明即替换）。
+      narrativeIntents: this.game.saveProfile?.narrativeIntents ?? [],
       randomEventsEnabled: getEngineSettings().randomEventsEnabled,
       combatActive: this.game.isInCombat,
       // 🔴 2026-08-02 修: 初始技能走 item_gen 链路 —— request_dispatcher 的 {{SKILL_STATE}}
@@ -1594,7 +1634,6 @@ export class GamePipeline {
 
       onStateCommitError: (source, errors) => {
         console.error(`[GamePipeline] ${source} 状态提交失败:`, errors);
-        this.emitMessage(`[系统] ${source} 部分状态未能写入: ${errors.join('；')}`, 'assistant');
       },
 
       // === Marker 回调 ===
@@ -2123,12 +2162,26 @@ export class GamePipeline {
     return 1 + Math.floor(Math.random() * 20);
   }
 
+  /**
+   * 交锋用 d20：持「判定取优」条目者掷两次取高（天赋描述原文「判定取优」）。
+   * 非交锋的骰（如启封）不在此列——那条通道有自己的骰带口径。
+   */
+  private rollSkirmishD20(): number {
+    const first = this.rollD20();
+    if (!hasBetterRoll(flatEntriesOf(this.game.player?.talents?.list))) return first;
+    const second = this.rollD20();
+    const best = Math.max(first, second);
+    this.emitMessage(`▸ 判定取优：d20 ${first}/${second} → 取 ${best}`, 'assistant');
+    return best;
+  }
+
   /** 构造时挂交锋编排句柄（UI 的三个入口经 store 委托到这里）。
    *  可选调用：单测的精简 mock store 没有此方法，静默跳过；真实 store 必有。 */
   attachSkirmishController(): void {
     this.game.setSkirmishController?.({
       start: (enemyHint, sceneHint) => this.runSkirmishEncounter(enemyHint, sceneHint),
       counter: (choice) => this.submitSkirmishCounter(choice),
+      nuke: () => this.skirmishNuke(),
       flee: (endReason) => this.fleeSkirmishEncounter(endReason),
     });
   }
@@ -2149,7 +2202,12 @@ export class GamePipeline {
       );
       return { ok: false, reason: 'skirmish_eval 未解析到 API 池（设置 → Agent 配置）' };
     }
-    const stats = deriveCombatStats({ attributes: playerC.attributes, level: playerC.level });
+    // 规则钩子（名字表）：全属性倍率（女王领域 +50%）——此前 getter 写好了没人调
+    const startHooks = collectRuleHooks(playerC.talents?.list);
+    const stats = applyStatMultiplier(
+      deriveBaseCombatStats({ attributes: playerC.attributes, level: playerC.level }),
+      statMultiplierOf(startHooks),
+    );
     // deck 战斗化（2026-09-17）：卡组战力 → 开战防护加成 + 敌情评估参考
     const deckNames = playerC.cardAlbum?.deck ?? [];
     const deck = deckPower(deckNames, (n) => {
@@ -2173,12 +2231,40 @@ export class GamePipeline {
         },
         { clientFactory: this.getClientFactory() },
       );
+      // 规则层数值条目（此前只查了名字钩子，这几条一直是死接线）：
+      //  体魄 → HP 上限 ×(1+percent/100)；威压 → 敌方威胁 ×(1−percent/100)
+      const talentList = playerC.talents?.list;
+      const physiquePct = hasTitanPhysique(flatEntriesOf(talentList))
+        ? entryStrength(talentList, '体魄', 'percent')
+        : 0;
+      const hpMult = hpMultiplierOf(startHooks);
+      const maxHp = Math.round(playerC.maxHp * (1 + physiquePct / 100) * hpMult);
+      if (hpMult !== 1) {
+        this.emitMessage(`▸ 巨人体魄：HP 上限 ×${hpMult}（→ ${maxHp}）`, 'assistant');
+      }
+      if (physiquePct > 0) {
+        this.emitMessage(
+          `▸ 体魄：HP 上限 +${physiquePct}%（${playerC.maxHp} → ${maxHp}）`,
+          'assistant',
+        );
+      }
+      const fearPct = totalIntimidation(flatEntriesOf(talentList));
+      const intents =
+        fearPct > 0
+          ? assessment.intents.map((it) => ({
+              ...it,
+              threat: Math.max(0, Math.round(it.threat * (1 - fearPct / 100))),
+            }))
+          : assessment.intents;
+      if (fearPct > 0) {
+        this.emitMessage(`▸ 威压：敌方威胁 −${fearPct}%（全体）`, 'assistant');
+      }
       const base = startSkirmish({
         enemyName: assessment.enemyName,
         enemyLevel: assessment.enemyLevel,
-        intents: assessment.intents,
-        playerHp: playerC.hp,
-        playerMaxHp: playerC.maxHp,
+        intents,
+        playerHp: Math.min(playerC.hp, maxHp),
+        playerMaxHp: maxHp,
         enemyHp: assessment.enemyHp,
         guard: deckGuard,
       });
@@ -2200,6 +2286,75 @@ export class GamePipeline {
   }
 
   /** 一拍反制：出卡走八类语义矩阵（直击/在场/禁打），基础应对 = 派生值 + 同名标签 */
+  /**
+   * 自由文本提名出卡（2026-09-17 路线图 1.1）：交锋活跃时处理玩家输入。
+   * L1 卡名精确匹配（零延迟）→ L2 AI 意图解析（轻量单轮，skirmish_eval 端点，
+   * 严格 JSON 白名单校验）→ 都不命中返回 false，调用方降级走叙事管线。
+   */
+  async trySkirmishFreeText(text: string): Promise<boolean> {
+    const session = this.game.skirmishSession;
+    if (!session || session.finished !== null) return false;
+    const playerC = this.game.player;
+    if (!playerC) return false;
+
+    const deck = playerC.cardAlbum?.deck ?? [];
+    const ready = battleReadyCards(
+      playerC.inventory.filter((i): i is CardItem => i.type === '卡牌'),
+      deck,
+    ).filter((c) => !session.playedCards.includes(c.name));
+
+    // L1：卡名精确匹配
+    const match = matchFreeCardPlay(text, ready, session.playedCards);
+    if (match.kind === '卡') {
+      this.emitMessage(`【自由提名】打出「${match.choice.name}」`, 'assistant');
+      await this.submitSkirmishCounter(match.choice);
+      return true;
+    }
+    if (match.kind === '应对') {
+      await this.submitSkirmishCounter(match.choice);
+      return true;
+    }
+
+    // L2：AI 意图解析（skirmish_eval 端点；未配置则静默回退叙事）
+    const endpoint = this.getEndpointForAgent('skirmish_eval');
+    if (!endpoint) return false;
+    try {
+      const intent = await runSkirmishIntentResolve(
+        {
+          saveId: this.saveId,
+          endpoint,
+          playerText: text,
+          cards: ready.map((c) => ({
+            name: c.name,
+            tags: cardCombatTags(c.词条),
+          })),
+          intentCounters:
+            session.intents[session.beat % Math.max(1, session.intents.length)]?.counters ?? [],
+        },
+        { clientFactory: this.getClientFactory() },
+      );
+      if (intent.kind === 'none') return false;
+      if (intent.kind === 'counter') {
+        this.emitMessage(`【意图解析】基础应对：${intent.move}`, 'assistant');
+        await this.submitSkirmishCounter({ kind: '应对', move: intent.move });
+        return true;
+      }
+      this.emitMessage(
+        `【意图解析】按你的意思打出「${intent.card}」${intent.declaration ? `——「${intent.declaration}」` : ''}`,
+        'assistant',
+      );
+      await this.submitSkirmishCounter({
+        kind: '卡',
+        name: intent.card,
+        ...(intent.declaration ? { intent: intent.declaration } : {}),
+      });
+      return true;
+    } catch (err) {
+      console.warn('[GamePipeline] L2 意图解析失败，降级叙事:', err);
+      return false;
+    }
+  }
+
   private async submitSkirmishCounter(choice: SkirmishChoice): Promise<void> {
     const session = this.game.skirmishSession;
     const playerC = this.game.player;
@@ -2214,10 +2369,35 @@ export class GamePipeline {
     }
 
     let action: SkirmishAction;
-    let activate: CardInPlayEffect | undefined;
+    let activate: ActivateInput | undefined;
     let prepend: string[] | undefined;
     let recoil: number | undefined;
     let sealBroke: string | undefined;
+    let contract: SkirmishContract | undefined;
+    /** 终章（SSS「第六终章」）：持天赋则第 N 拍起自动抹除敌方。
+     *  N = 条目 `终章{beats}` 的强度档（缺省基准 6 拍）——档位让更弱的天赋也能共用这条机制。 */
+    const finalChapter = (playerC.talents?.list ?? []).some((t) =>
+      (t.entries ?? []).some((e) => e.kind === '终章'),
+    );
+    const chapterOpts = finalChapter
+      ? {
+          finalChapter: true,
+          finalChapterBeats: entryStrength(playerC.talents?.list, '终章', 'beats'),
+        }
+      : {};
+    // 行为合同（SSS 律师函警告）：本拍出卡时登记的禁条；反噬伤害取 `合同{backlash}` 档
+    if (choice.kind === '卡' && choice.contractForbidden) {
+      const hasContractGate = (playerC.talents?.list ?? []).some((t) =>
+        (t.entries ?? []).some((e) => e.kind === '合同'),
+      );
+      if (hasContractGate) {
+        contract = {
+          name: `行为合同·禁${choice.contractForbidden}`,
+          forbidden: choice.contractForbidden,
+          backlash: entryStrength(playerC.talents?.list, '合同', 'backlash'),
+        };
+      }
+    }
     if (choice.kind === '卡') {
       // 会话临时账（真机裁定 2026-09-13）：同一张卡一场只能打出一次
       if (session.playedCards.includes(choice.name)) {
@@ -2239,10 +2419,10 @@ export class GamePipeline {
         const res = sealedCardPlay(
           card,
           deriveCombatStats({ attributes: playerC.attributes, level: playerC.level }),
-          this.rollD20(),
+          this.rollSkirmishD20(),
           willModifierOf(playerC.attributes),
         );
-        const beatDice = this.rollD20();
+        const beatDice = this.rollSkirmishD20();
         const escalateBeat = escalate > 0 && session.beat > 0 ? escalate * session.beat : 0;
         action =
           escalateBeat > 0 && res.action.power > 0
@@ -2276,6 +2456,8 @@ export class GamePipeline {
           prepend,
           recoil,
           sealBroke,
+          ...(contract ? { contract } : {}),
+          ...chapterOpts,
         });
         this.game.setSkirmishSession(next);
         this.emitMessage(next.log.slice(session.log.length).join('\n'), 'assistant');
@@ -2291,8 +2473,11 @@ export class GamePipeline {
         return;
       }
       action = plan.action;
-      if (plan.mode === '在场') {
-        activate = { name: card.name, type: plan.effect.type, amount: plan.effect.amount };
+      // 在场效果 + 战技附加（2026-09-17）：一张卡可以同时带基础效果与战技，
+      // 故这里统一用 planEffects 归一成数组（零条 = 无激活）。
+      {
+        const fx = planEffects(plan);
+        activate = fx.length === 0 ? undefined : fx.length === 1 ? fx[0] : fx;
       }
       // 好感共鸣（主人裁定：伙伴卡接入好感度）——打出召唤/军团卡时，同名角色的好感
       // 等级决定威力与在场效果乘区（好感高伙伴卖力；反感以下消极怠工 ×0.8）。
@@ -2306,7 +2491,10 @@ export class GamePipeline {
         if (action.power > 0)
           action = { ...action, power: applyBond(action.power, bond.multiplier) };
         if (activate)
-          activate = { ...activate, amount: applyBond(activate.amount, bond.multiplier) };
+          activate = (Array.isArray(activate) ? activate : [activate]).map((fx) => ({
+            ...fx,
+            amount: applyBond(fx.amount, bond.multiplier),
+          }));
         prepend = [
           ...(prepend ?? []),
           `▸ 好感共鸣：与【${card.name}】的羁绊（${bond.label} ${bond.affection}）→ 效果 ×${bond.multiplier}`,
@@ -2327,11 +2515,72 @@ export class GamePipeline {
       action = { ...action, power: action.power + escalate * session.beat };
       prepend = [`▸ 连战递增：行动值 +${escalate * session.beat}（第 ${session.beat + 1} 拍）`];
     }
+    // 环境加成（天赋，如 SS「黑潮之子」）：域/场景卡建立了对应环境时，
+    // 防御/闪避应对（= 敏捷与防御那一路）获得档位加成。环境随领域/场景卡存续。
+    const envBonuses = envBonusesOf(playerC.talents?.list);
+    if (envBonuses.length > 0) {
+      const activeEnv = new Set(
+        session.activeEffects.map((e) => e.env).filter((v): v is string => !!v),
+      );
+      const hit = envBonuses.find((b) => activeEnv.has(b.env));
+      const isDefensive =
+        choice.kind === '应对' && (choice.move === '防御' || choice.move === '闪避');
+      if (hit && isDefensive) {
+        action = { ...action, power: Math.round(action.power * (1 + hit.percent / 100)) };
+        prepend = [
+          ...(prepend ?? []),
+          `▸ 环境加成（${hit.env}）：防御/闪避应对行动值 +${hit.percent}%`,
+        ];
+      }
+    }
+    // 下克上（天赋）：敌方原生等级高于你时，行动值按档位加成（「无视部分防御」的等价兑现）
+    const vsHigh = entryStrength(playerC.talents?.list, '克上', 'vsHigherLevel');
+    if (vsHigh > 0 && session.enemyLevel > playerC.level) {
+      const boosted = Math.round(action.power * (1 + vsHigh / 100));
+      action = { ...action, power: boosted };
+      prepend = [
+        ...(prepend ?? []),
+        `▸ 下克上：敌方 Lv${session.enemyLevel} 高于你 Lv${playerC.level} → 行动值 +${vsHigh}%`,
+      ];
+    }
     const next = playBeat(
       session,
       action,
-      this.rollD20(),
-      prepend || activate ? { activate, prepend } : undefined,
+      this.rollSkirmishD20(),
+      prepend || activate || finalChapter ? { activate, prepend, ...chapterOpts } : undefined,
+    );
+    this.game.setSkirmishSession(next);
+    this.emitMessage(next.log.slice(session.log.length).join('\n'), 'assistant');
+    if (next.finished) await this.settleAndNarrate(next);
+  }
+
+  /**
+   * 倒也可斩（SSS）：每场一次的一击（50% 敌方当前 HP，代价 90% 玩家 HP）。
+   * 门槛：talent-hooks 的 oncePerBattleNuke 登记表。
+   */
+  private async skirmishNuke(): Promise<void> {
+    const session = this.game.skirmishSession;
+    const playerC = this.game.player;
+    if (!session || session.finished !== null || !playerC) return;
+    if (session.nukeUsed === true) {
+      this.emitMessage('【倒也可斩】本场已经用过了——这一招一场只出一次。', 'assistant');
+      return;
+    }
+    const hooks = collectRuleHooks(playerC.talents?.list);
+    if (!hasOncePerBattleNuke(hooks)) {
+      this.emitMessage('【倒也可斩】需要持有对应天赋。', 'assistant');
+      return;
+    }
+    const cost = Math.max(1, Math.round(session.playerHp * 0.9));
+    const next = playBeat(
+      session,
+      { label: '倒也可斩', power: 0, tags: [] },
+      this.rollSkirmishD20(),
+      {
+        nuke: true,
+        nukePercent: nukePercentOf(hooks),
+        recoil: cost,
+      },
     );
     this.game.setSkirmishSession(next);
     this.emitMessage(next.log.slice(session.log.length).join('\n'), 'assistant');
@@ -2359,7 +2608,9 @@ export class GamePipeline {
     if (!session.finished) return;
     const playerC = this.game.player;
     if (!playerC) return;
-    const settlement = settleSkirmish(session, playerC.level);
+    // 规则钩子（名字表）：经验倍率（鸿蒙道体 ×2 / 千秋证果 ×5）——此前 getter 写好了没人调
+    const hooks = collectRuleHooks(playerC.talents?.list);
+    const settlement = settleSkirmish(session, playerC.level, expMultiplierOf(hooks));
     if (!settlement) return;
 
     // ① 战斗记叙（一次 AI 调用，只演绎不算数）
@@ -2430,6 +2681,83 @@ export class GamePipeline {
           `【铭法院名录】检测到禁忌仿卡流通：${imitationUsed.join('、')}——声望各 -3，通缉名录已记上一笔。`,
           'assistant',
         );
+      }
+      // 胜利素材（SSS「素材之王」）：胜利/碾压时额外掉一份素材（钩子 getter 此前没人调）
+      if (
+        (session.finished === '胜利' || session.finished === '碾压') &&
+        hasVictoryMaterial(hooks)
+      ) {
+        const drop = `素材·Lv${session.enemyLevel}`;
+        settlementPatches.push({
+          op: 'add_item',
+          target: `characters.${playerC.name}`,
+          value: { name: drop, quantity: 1, type: '材料', rarity: '优良' } as unknown as Record<
+            string,
+            unknown
+          >,
+          metadata: { source: 'talent-victory-material' },
+        } as StatePatch);
+        this.emitMessage(`▸ 【素材之王】缴获素材「${drop}」×1`, 'assistant');
+      }
+      // 自我进化（SSS「最终兵器：她」）：结算时让被立为最终兵器的伙伴卡按战况进化
+      {
+        const hasEvolveGate = (playerC.talents?.list ?? []).some((t) =>
+          (t.entries ?? []).some((e) => e.kind === '自我进化'),
+        );
+        if (hasEvolveGate) {
+          const weapon = playerC.inventory.find(
+            (i) =>
+              i.type === '卡牌' &&
+              (i as CardItem).data &&
+              ((i as CardItem).data as Record<string, unknown>).finalWeapon === true,
+          ) as CardItem | undefined;
+          const evolved = weapon
+            ? planSelfEvolution(weapon, session.enemyName, session.enemyLevel)
+            : undefined;
+          if (evolved?.ok && evolved.plan) {
+            this.emitMessage(`【最终兵器】${evolved.plan.summary}`, 'assistant');
+            settlementPatches.push({
+              op: 'update_item',
+              target: `characters.${playerC.name}`,
+              value: {
+                name: weapon!.name,
+                changes: { 词条: evolved.plan.new词条 },
+              },
+            } as StatePatch);
+          }
+        }
+      }
+      // 战败补偿（SSS「世界线的收束点」）：败北 + 持钩子 → 抽三条「如果你赢了」的 if 线，
+      // 其中一条成真（经验/金钱/素材三选一），并入同窗 patch
+      if (session.finished === '败北' && hasDefeatReward(collectRuleHooks(playerC.talents?.list))) {
+        const plan = planDefeatCompensation(playerC.level);
+        this.emitMessage(plan.summary, 'assistant');
+        const g = plan.granted;
+        if (g.rewardKind === 'exp' && g.exp) {
+          settlementPatches.push({
+            op: 'update_character',
+            target: `characters.${playerC.name}`,
+            value: { totalExp: playerC.totalExp + g.exp },
+            metadata: { delta: true, source: 'defeat_compensation' },
+          } as StatePatch);
+        } else if (g.rewardKind === 'gold' && g.gold) {
+          settlementPatches.push({
+            op: 'update_character',
+            target: `characters.${playerC.name}`,
+            value: { money: g.gold },
+            metadata: { delta: true, source: 'defeat_compensation' },
+          } as StatePatch);
+        } else if (g.material) {
+          settlementPatches.push({
+            op: 'add_item',
+            target: `characters.${playerC.name}`,
+            value: {
+              name: g.material.name,
+              quantity: g.material.quantity,
+              type: '材料',
+            },
+          } as StatePatch);
+        }
       }
       // 击杀掠取（天赋）：胜利/碾压时按条目缴获赏金（delta 入账）
       let killGc = 0;

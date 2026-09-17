@@ -1147,6 +1147,8 @@ export interface CardItem extends InventoryItem {
   cardExp?: number;
   /** 战斗成长累计的卡面战力加成（cardExp 每攒满一管 +1 清空重攒；缺省 0）。旧存档可缺 */
   cardPowerBonus?: number;
+  /** 战技（「战技附加」天赋制卡时授予）：打出此卡时附加的战斗状态。旧存档可缺 */
+  战技?: { status: string; power: number; beats: number };
 }
 
 /** 融合配方（确定性内核 card-fusion.ts 的输入/输出） */
@@ -1654,8 +1656,6 @@ export interface CreatePreset {
   /** 开局购卡（2026-09-16 卡牌化）：旧 equipments/items/skills 三字段退役，加载时容错忽略 */
   cards: CardCatalogItem[];
   plotSettings: PlotSettings | null;
-  /** Phase 10h: 世界书驱动字段 */
-  enabledCharacterEntryUids?: number[];
   /** 角色补充信息 */
   personality?: string;
   physics?: string;
@@ -1879,6 +1879,13 @@ export interface AgentContext {
    * 自带 hp=0/死亡状态可判。🔴 缺席 = 没有已结算战斗记录（零 token，区块整段不出）。
    */
   recentCombat?: RecentCombatInfo;
+  /**
+   * 叙事意图快照（2026-09-17 纯记不向路线）：`{{NARRATIVE_INTENTS}}` 的数据源。
+   * 玩家在世界规则干预/制卡结果操控/禁忌炼金等纯叙事 SSS 下声明、**尚未被本回合消费**的指令。
+   * 🔴 供值在 game-pipeline 的 buildContext —— 与 mapFlags/recentCombat 同一条铁律：
+   *    漏供的症状不是报错，是区块静默消失。缺席（无意图）= 空串零 token。
+   */
+  narrativeIntents?: NarrativeIntent[];
 
   // --- 随机事件 v1（§5.1 读侧）: `{{RANDOM_EVENTS}}` 的三格输入 ---
   /**
@@ -3341,6 +3348,21 @@ export interface CraftProduct {
 /** 🆕 经验档位：normal=普通（世界书系数），easy=简单（高经验系数，主人裁定 2026-08-24） */
 export type ExperienceMode = 'normal' | 'easy';
 
+/**
+ * 叙事意图：玩家为该次出牌或世界事件声明的「只记不向」指令。
+ * 纯叙事路径（不进入数值反哺循环），AI 在 {{NARRATIVE_INTENTS}} 注入下看到。
+ */
+export interface NarrativeIntent {
+  /** 创建时间戳（gameTime.minutes） */
+  atMinutes: number;
+  /** 触发者：玩家 | 天赋名（被动触发，如第六终章演出后才记） */
+  from: 'player' | string;
+  /** 天赋名（如「世界规则干预」「制卡结果操控」「禁忌炼金」） */
+  talent: string;
+  /** 玩家输入的原话（一条意图 = 一条持续有效的叙事规则） */
+  text: string;
+}
+
 export interface SaveProfile {
   saveId: string;
   /** 🆕 经验档位：normal=普通（世界书系数），easy=简单（高经验系数）。旧存档缺失时读取侧 `?? 'normal'` 兜底 */
@@ -3360,6 +3382,12 @@ export interface SaveProfile {
   focusQuest: string;
   /** 好感度映射: characterId → [-100, +100] */
   affections: Record<string, number>;
+  /**
+   * 叙事意图（2026-09-17 纯记不向路线）：玩家在世界规则干预/制卡结果操控/
+   * 禁忌炼金等纯叙事 SSS 天赋下声明的「只记不向」指令。仅作叙事素材——
+   * AI 看到后镜像叙事但不做数值反哺。读侧缺省 []。
+   */
+  narrativeIntents?: NarrativeIntent[];
   /** 🆕 存档级全局游戏时间 */
   gameTime: GameTime;
   /** 🆕 叙事变量唯一真源（user./sys. 命名空间；从快照寄生迁出，规范 §12。M5 接管读写） */

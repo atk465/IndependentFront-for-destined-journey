@@ -12,29 +12,29 @@
 
 ## 裁决记录（按访谈顺序）
 
-| # | 系统 | 裁决 | 提交 | 理由摘要 |
-|---|---|---|---|---|
-| 1 | 社交工坊（浏览/安装/社区分享 + 扩展管理页 + 捏人页工坊轴） | 删 | `665cf8d` | 卡牌工坊核心玩法零依赖；DB v25 删 `workshopProjects` 表；`creative_workshop` 分区从 `WorldBookPartition` 移除 |
-| 2 | CG 图鉴 | 删 | `f73bee3` | 依赖已删的图像生成；gallery modal 与工具入口一并摘除 |
-| 3 | 音频系统 + 迷你播放器 | 删 | `ffeef8c` | 无播放需求；`<play_audio>` 标记链全删；素材 zip 的音频半边剥离（mp3 按噪音跳过）；`audio-names.ts` **保留**（MIME 工具被素材系统共用）；DB v25 补删音频四表 |
-| 4 | AI 图像生成（含角色外貌链） | 删，**立绘素材库保留** | `e46474e` | 出图链（anlas/quota/dialect/providers/scene-image）+ 外貌三件套（唯一读者是出图 prompt）一起下线；`resolveSceneWeather` 上提 `lib/scene-weather.ts`（地图仍用）；内容注册表删第 7 面 imageDialects；DB v26 删四表 |
-| 5 | 命运契约 | 删 | `c1f14e1` | 主人裁定「专属词条交给好感度解决」；`FateContract` 降级为老档兼容形状（可选字段零读写口）；`save-profile` 三函数本就零消费者 |
-| 6 | 登神长阶 | **A 方案**：删飞升叙事、留等级层数值 | `e700e16` | 等级 `level` 直接进交锋数值（`derived-stats` atk=2×str+level）必须留；飞升闸门（`canPassAscensionGate`/`resolveAscensionFlyup`/`canBreakthrough`）+ NPC 神位/道途/神国字段删除；升级循环收敛为「totalExp 攒够即升」 |
-| 7 | combat-v3 战斗引擎残余 | 删 | `25d9ed4` `94a2608` | 交锋（SKIRMISH_DEFAULT）全面接管，v3 休眠 0 触达；**回滚开关失效**——卡牌工坊全绑交锋，回 v3 = 回到没有卡牌战斗的游戏。**精确切割**：`EffectAutomaton` DSL 全套类型（WindowKey/EffectIntent/ModifierSlot/SummonedUnitDefinition/DeckCardData）迁入 `types.ts`（卡片词条共用）；v3 内核/协调器/回放/UI（~3 万行）删除 |
-| 8 | 回合活动账本 UI | 删 UI 留数据 | `055fa37` | `agentActivityRuns` 数据链完整保留（活动指示器 `thinkingText` / 防并发判据仍在消费）；删 TurnActivityLedger.vue + ChatFlow 挂载 + retry 链 |
+| #   | 系统                                                       | 裁决                                 | 提交                | 理由摘要                                                                                                                                                                                                                                                                                                            |
+| --- | ---------------------------------------------------------- | ------------------------------------ | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | 社交工坊（浏览/安装/社区分享 + 扩展管理页 + 捏人页工坊轴） | 删                                   | `665cf8d`           | 卡牌工坊核心玩法零依赖；DB v25 删 `workshopProjects` 表；`creative_workshop` 分区从 `WorldBookPartition` 移除                                                                                                                                                                                                       |
+| 2   | CG 图鉴                                                    | 删                                   | `f73bee3`           | 依赖已删的图像生成；gallery modal 与工具入口一并摘除                                                                                                                                                                                                                                                                |
+| 3   | 音频系统 + 迷你播放器                                      | 删                                   | `ffeef8c`           | 无播放需求；`<play_audio>` 标记链全删；素材 zip 的音频半边剥离（mp3 按噪音跳过）；`audio-names.ts` **保留**（MIME 工具被素材系统共用）；DB v25 补删音频四表                                                                                                                                                         |
+| 4   | AI 图像生成（含角色外貌链）                                | 删，**立绘素材库保留**               | `e46474e`           | 出图链（anlas/quota/dialect/providers/scene-image）+ 外貌三件套（唯一读者是出图 prompt）一起下线；`resolveSceneWeather` 上提 `lib/scene-weather.ts`（地图仍用）；内容注册表删第 7 面 imageDialects；DB v26 删四表                                                                                                   |
+| 5   | 命运契约                                                   | 删                                   | `c1f14e1`           | 主人裁定「专属词条交给好感度解决」；`FateContract` 降级为老档兼容形状（可选字段零读写口）；`save-profile` 三函数本就零消费者                                                                                                                                                                                        |
+| 6   | 登神长阶                                                   | **A 方案**：删飞升叙事、留等级层数值 | `e700e16`           | 等级 `level` 直接进交锋数值（`derived-stats` atk=2×str+level）必须留；飞升闸门（`canPassAscensionGate`/`resolveAscensionFlyup`/`canBreakthrough`）+ NPC 神位/道途/神国字段删除；升级循环收敛为「totalExp 攒够即升」                                                                                                 |
+| 7   | combat-v3 战斗引擎残余                                     | 删                                   | `25d9ed4` `94a2608` | 交锋（SKIRMISH_DEFAULT）全面接管，v3 休眠 0 触达；**回滚开关失效**——卡牌工坊全绑交锋，回 v3 = 回到没有卡牌战斗的游戏。**精确切割**：`EffectAutomaton` DSL 全套类型（WindowKey/EffectIntent/ModifierSlot/SummonedUnitDefinition/DeckCardData）迁入 `types.ts`（卡片词条共用）；v3 内核/协调器/回放/UI（~3 万行）删除 |
+| 8   | 回合活动账本 UI                                            | 删 UI 留数据                         | `055fa37`           | `agentActivityRuns` 数据链完整保留（活动指示器 `thinkingText` / 防并发判据仍在消费）；删 TurnActivityLedger.vue + ChatFlow 挂载 + retry 链                                                                                                                                                                          |
 
 ## 明确保留（同轮访谈裁定）
 
-| 系统 | 裁决 | 备注 |
-|---|---|---|
-| 地图系统 + 剧情线系统 + 美化系统 | 留（第一轮） | 主人「地图后面会做」 |
-| 立绘素材库（asset 系统） | 留 | `audio-names.ts` MIME 工具被它共用 |
-| 快照系统 | 留 | 交锋结算的撤销/回退依赖 |
-| 记忆系统 | 留 + 向量召回补齐 | 见 `2026-09-16-memory-vector-recall.md` |
-| 随机事件系统 | 留 + 与委托板融合 | 见 `2026-09-16-event-commission-fusion-design.md` |
-| 好感度系统 | 留 + 伙伴卡接入 | 见 `2026-09-16-affection-bond-design.md` |
-| EJS 脚本 / DebugPanel / 角色UI / 玩家人格 / 场景面板 | 留 | 主人批量裁决「剩下的都留着」 |
-| 回合活动账本 UI | 删 UI 留数据 | 唯一的「部分删」项 |
+| 系统                                                 | 裁决              | 备注                                              |
+| ---------------------------------------------------- | ----------------- | ------------------------------------------------- |
+| 地图系统 + 剧情线系统 + 美化系统                     | 留（第一轮）      | 主人「地图后面会做」                              |
+| 立绘素材库（asset 系统）                             | 留                | `audio-names.ts` MIME 工具被它共用                |
+| 快照系统                                             | 留                | 交锋结算的撤销/回退依赖                           |
+| 记忆系统                                             | 留 + 向量召回补齐 | 见 `2026-09-16-memory-vector-recall.md`           |
+| 随机事件系统                                         | 留 + 与委托板融合 | 见 `2026-09-16-event-commission-fusion-design.md` |
+| 好感度系统                                           | 留 + 伙伴卡接入   | 见 `2026-09-16-affection-bond-design.md`          |
+| EJS 脚本 / DebugPanel / 角色UI / 玩家人格 / 场景面板 | 留                | 主人批量裁决「剩下的都留着」                      |
+| 回合活动账本 UI                                      | 删 UI 留数据      | 唯一的「部分删」项                                |
 
 ## 兼容性契约（老档安全）
 

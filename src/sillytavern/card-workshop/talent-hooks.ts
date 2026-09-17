@@ -34,7 +34,7 @@ const RULE_HOOKS: Readonly<Record<string, RuleHook[]>> = {
   女王领域: [{ kind: 'statMultiplier', value: 1.5 }],
   素材之王: [{ kind: 'victoryMaterial', value: 1 }],
   世界线的收束点: [{ kind: 'defeatRewardMultiplier', value: 1 }],
-  倒也可斩: [{ kind: 'oncePerBattleNuke', value: 0 }],
+  倒也可斩: [{ kind: 'oncePerBattleNuke', value: 50 }],
 };
 
 /** 收集玩家天赋列表中的全部规则钩子（去重同名天赋，但不同天赋同钩子可叠加） */
@@ -70,4 +70,20 @@ export function hasVictoryMaterial(hooks: readonly RuleHook[]): boolean {
 /** 是否有战败奖励钩子（世界线的收束点） */
 export function hasDefeatReward(hooks: readonly RuleHook[]): boolean {
   return hooks.some((h) => h.kind === 'defeatRewardMultiplier');
+}
+
+/** 是否有每战一次的大招钩子（倒也可斩） */
+export function hasOncePerBattleNuke(hooks: readonly RuleHook[]): boolean {
+  return hooks.some((h) => h.kind === 'oncePerBattleNuke');
+}
+
+/**
+ * 大招的抹除强度：按敌方当前 HP 的百分比（2026-09-17 参数化）。
+ *
+ * 钩子的 `value` 就是档位值——同一条「每战一次大招」机制，SSS 可以给 50%、
+ * 更弱的档位给 30%，不必各写一个天赋名分支。
+ */
+export function nukePercentOf(hooks: readonly RuleHook[]): number {
+  const v = hooks.find((h) => h.kind === 'oncePerBattleNuke')?.value;
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 50;
 }

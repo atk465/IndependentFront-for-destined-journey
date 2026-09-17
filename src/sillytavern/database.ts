@@ -1028,7 +1028,6 @@ async function doImportAllData(
       }
     }
   });
-
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -2000,4 +1999,3 @@ export async function getAssetBlob(id: string): Promise<Blob | undefined> {
   const record = await getDatabase().assetBlobs.get(id);
   return record?.blob;
 }
-

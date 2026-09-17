@@ -7,12 +7,12 @@
 
 向量召回管线**骨架早已接好**，本次盘点确认了四个「已有」：
 
-| 环节 | 现状 |
-|---|---|
-| summary 落库算向量 | `summarizeAndSave` → `computeEmbeddingWithMeta` → `memory.embedding + embeddingMeta` 原子成对（F09）—— game-pipeline `persistMemorySummary` 已传 `buildEmbeddingEndpoint()` |
-| 向量检索 | `memory-store.recallMemories(saveId, query, topK, endpoint)`：查询端嵌一次 → 逐条分区（compatible/missing/incompatible/invalid）→ compatible 按余弦降序 → 不足槽位由 fallback（重要度+时间）补齐 |
-| 自动路由 | orchestrator `callAgent`：`memory_recall` 且（模型名含 `embedding` 或 `apiType === 'embedding'`）→ `callMemoryRecallEmbedding`（不经 LLM） |
-| 降级路径 | 查询端失败 → 全量 fallback（score=0，不伪装余弦分）—— 端点未配置时的既有行为 |
+| 环节               | 现状                                                                                                                                                                                             |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| summary 落库算向量 | `summarizeAndSave` → `computeEmbeddingWithMeta` → `memory.embedding + embeddingMeta` 原子成对（F09）—— game-pipeline `persistMemorySummary` 已传 `buildEmbeddingEndpoint()`                      |
+| 向量检索           | `memory-store.recallMemories(saveId, query, topK, endpoint)`：查询端嵌一次 → 逐条分区（compatible/missing/incompatible/invalid）→ compatible 按余弦降序 → 不足槽位由 fallback（重要度+时间）补齐 |
+| 自动路由           | orchestrator `callAgent`：`memory_recall` 且（模型名含 `embedding` 或 `apiType === 'embedding'`）→ `callMemoryRecallEmbedding`（不经 LLM）                                                       |
+| 降级路径           | 查询端失败 → 全量 fallback（score=0，不伪装余弦分）—— 端点未配置时的既有行为                                                                                                                     |
 
 **唯一真缺口**：旧记忆 `embedding === undefined` → 每次召回都归 `missing` → fallback 排序（重要度+时间），**永远进不了 compatible 段**。没有回填机制，这批记忆永远吃不到语义检索。
 

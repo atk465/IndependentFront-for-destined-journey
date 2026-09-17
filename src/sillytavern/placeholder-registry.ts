@@ -1050,6 +1050,29 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
   },
 
   /**
+   * {{NARRATIVE_INTENTS}} — 玩家声明的「只记不向」叙事意图（2026-09-17）。
+   *
+   * 数据来自 `ctx.narrativeIntents`（buildContext 只供**未消费**条目）。
+   * 出口：无意图 / 战斗会话活跃 → 空串（零 token，照 TALENT 口径）。
+   *
+   * 🔴 **纯叙事通道**：这些意图对 AI 是**剧作指令**（世界规则怎么变、这张卡代表什么、
+   *    炼金要用什么当素材），引擎**不做任何数值反哺** —— 不生成卡、不改属性、不加词条。
+   *    AI 只把意图化进叙事，落到正文里即可。
+   */
+  NARRATIVE_INTENTS: (ctx, _config, _params) => {
+    if (ctx.combatActive === true) return '';
+    const intents = ctx.narrativeIntents;
+    if (!intents || intents.length === 0) return '';
+    const lines = intents.map((i) => `- 【${i.talent}】${String(i.text ?? '').trim()}`);
+    return [
+      '<叙事意图>',
+      '玩家以下列意图干预叙事（仅作剧作指令，引擎不作数值结算——不因此生成卡牌/改变属性）：',
+      ...lines,
+      '</叙事意图>',
+    ].join('\n');
+  },
+
+  /**
    * {{RECENT_COMBAT}} — 最近一场**已结算**战斗的事实块（2026-08-13 真机 debug）。
    *
    * 数据来自 `ctx.recentCombat`（game-pipeline 战斗终局时记录，内存级）。request_dispatcher

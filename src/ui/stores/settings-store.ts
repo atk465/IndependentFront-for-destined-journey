@@ -307,7 +307,6 @@ function getDefaults(): UiSettings {
     // 玩家改名/改过/删掉的远程素材槽位（「别再下回来」的备忘）。空 = 一个都没动过；
     // 每次同步后按当前声明清单收拢，不会无限长。见 settings-types.ts 那条注释。
     remoteAssetTombstones: [],
-
   };
 }
 
@@ -335,7 +334,6 @@ export const useSettingsStore = defineStore('settings', () => {
   //    每个 Agent 的模型/提示词会当场显示成默认值。
   //    它是纯内存重排、无 I/O、幂等，所以这里同步跑没有代价。
   migrateLegacyAgentMaps(merged);
-
 
   // Phase 0: 内置世界书合并已搬去 worldbook-store 的 init()（设计 D4 第 6 步）——
   // 必须在 localStorage→Dexie 迁移**之后**、针对 Dexie 执行，否则会把内置书写回

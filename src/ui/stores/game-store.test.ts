@@ -169,7 +169,6 @@ function makeChar(overrides: Partial<CharacterState> = {}): CharacterState {
   });
 }
 
-
 function makeStore() {
   setActivePinia(createPinia());
   return useGameStore();

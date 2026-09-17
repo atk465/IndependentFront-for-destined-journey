@@ -50,8 +50,7 @@ describe('NEUTRAL_BRANDING', () => {
     }
   });
 
-  it('🔴 默认不带社区源 —— 引擎自己不指向任何工坊（D41）', () => {
-  });
+  it('🔴 默认不带社区源 —— 引擎自己不指向任何工坊（D41）', () => {});
 
   it('剧情大纲示例默认为空 —— 它讲的是某个具体世界，不该由引擎编一份', () => {
     expect(NEUTRAL_BRANDING.plotTemplate).toEqual([]);

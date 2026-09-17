@@ -245,7 +245,7 @@ export async function persistRemoveQuest(saveId: string, questName: string): Pro
 // ═══════════════════════════════════════════════════════════
 
 import type { Quest } from './types';
-import { createDefaultQuest } from './types';
+import { createDefaultQuest, type NarrativeIntent } from './types';
 
 /** 获取所有任务 */
 export function getQuests(profile: SaveProfile): Record<string, Quest> {
@@ -662,4 +662,41 @@ export function addReputation(profile: SaveProfile, amount: number): SaveProfile
   const next = Number.isFinite(amount) ? amount : 0;
   profile.reputation = Math.max(0, base + next);
   return profile;
+}
+
+/**
+ * 叙事意图（2026-09-17 纯记不向路线）：玩家在制卡/世界书等节点输入的
+ * 「只记不向」指令，落到 `SaveProfile.narrativeIntents`，由 {{NARRATIVE_INTENTS}}
+ * 注入给 AI 作剧作指令（引擎**不作数值反哺**）。
+ *
+ * 语义：**每个天赋保留一条当前意图**（再声明即替换）——「世界规则干预」这类
+ * 声明本质是持续有效的规则，不该一次性消费；每天赋一条同时保证注入块有界。
+ */
+export function getNarrativeIntents(profile: SaveProfile): NarrativeIntent[] {
+  return profile.narrativeIntents ?? [];
+}
+
+/** 声明（或替换）某天赋的当前叙事意图，返回刷新后的 profile。 */
+export async function setNarrativeIntent(
+  saveId: string,
+  intent: NarrativeIntent,
+): Promise<SaveProfile> {
+  return withSaveWriteLock(saveId, async () => {
+    const fresh = await getProfile(saveId);
+    const list = (fresh.narrativeIntents ?? []).filter((i) => i.talent !== intent.talent);
+    list.push(intent);
+    fresh.narrativeIntents = list;
+    await updateProfile(fresh);
+    return fresh;
+  }) as Promise<SaveProfile>;
+}
+
+/** 清空一条意图（天赋面板的「撤回」）。 */
+export async function clearNarrativeIntent(saveId: string, talent: string): Promise<SaveProfile> {
+  return withSaveWriteLock(saveId, async () => {
+    const fresh = await getProfile(saveId);
+    fresh.narrativeIntents = (fresh.narrativeIntents ?? []).filter((i) => i.talent !== talent);
+    await updateProfile(fresh);
+    return fresh;
+  }) as Promise<SaveProfile>;
 }

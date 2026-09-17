@@ -14,7 +14,12 @@ import type { InventoryItem } from '@engine/types';
 
 const mockGame: {
   player: { inventory: InventoryItem[]; name: string } | null;
-} = reactive({ player: null });
+  hasMechanicGate: (kind: string) => boolean;
+} = reactive({
+  player: null,
+  // 天赋门槛（2026-09-17）：默认未持有——吞噬/熔炼区在测试里不渲染
+  hasMechanicGate: (_kind: string) => false,
+});
 
 vi.mock('../../../stores/game-store', () => ({ useGameStore: () => mockGame }));
 

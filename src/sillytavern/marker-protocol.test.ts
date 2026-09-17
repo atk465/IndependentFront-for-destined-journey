@@ -364,7 +364,6 @@ describe('MARKER_TAGS', () => {
     expect(MARKER_TAGS).toContain('combat_trigger');
     expect(MARKER_TAGS).toContain('char_detect');
   });
-
 });
 
 // ========== MARKER_TAG_SET 常量 ==========
@@ -387,8 +386,6 @@ describe('MARKER_TAG_SET', () => {
     expect(MARKER_TAG_SET.has('thinking')).toBe(false);
   });
 });
-
-
 
 // ========== 随机事件 v1: <event_trigger>（设计 §5.2） ==========
 

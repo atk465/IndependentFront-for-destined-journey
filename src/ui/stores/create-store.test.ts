@@ -780,13 +780,12 @@ describe('stepValid 步骤验证', () => {
     await expect(store.startJourney()).rejects.toThrow('请先分配全部基础属性点和额外属性点');
   });
 
-  it('Step 2 出身天赋必选（提前到基础信息之后，供剧情规划参照）；Steps 3-5 均可跳', () => {
+  it('Step 2 出身天赋必选（提前到基础信息之后，供剧情规划参照）；Steps 3-4 均可跳', () => {
     expect(store.stepValid[2]).toBe(false); // 出身天赋未选
     store.selectedCreationTalent = '封印亲和';
     expect(store.stepValid[2]).toBe(true);
     expect(store.stepValid[3]).toBe(true);
     expect(store.stepValid[4]).toBe(true);
-    expect(store.stepValid[5]).toBe(true);
   });
 });
 
@@ -1926,25 +1925,5 @@ describe('localStorage 草稿 save/restore/clear', () => {
     expect(localStorage.getItem(DRAFT_KEY)).not.toBeNull();
     store.clearDraft();
     expect(localStorage.getItem(DRAFT_KEY)).toBeNull();
-  });
-});
-
-// ===== 世界书启用轴（角色多选；命定核心轴已随精简下线） =====
-
-describe('buildEnabledWorldBookEntries 启用轴', () => {
-  let store: ReturnType<typeof useCreateStore>;
-
-  beforeEach(() => {
-    store = makeStore();
-  });
-
-  it('勾选角色 → character:uid', () => {
-    store.toggleCharacterEntry(313);
-    const ids = store.buildEnabledWorldBookEntries();
-    expect(ids).toContain('character:313');
-  });
-
-  it('都没选 → 空列表', () => {
-    expect(store.buildEnabledWorldBookEntries()).toEqual([]);
   });
 });

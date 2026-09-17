@@ -176,7 +176,6 @@ describe('buildProfileFields', () => {
   });
 });
 
-
 describe('splitInventory', () => {
   it('按 equippedSlot 非空分家', () => {
     const { equipped, carried } = splitInventory([

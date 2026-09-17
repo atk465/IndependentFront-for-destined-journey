@@ -45,6 +45,8 @@ import type { ToolExecutionContext } from './types';
 // Q-05：XML / JSON 解析的唯一工具面（参数顺序一律 (source, tag)）
 import { tagInner, tagBlock, parseAttrsStr } from './agent-xml';
 import { matchImitation } from './start-catalog-mechanics';
+import { applyCraftTalentBonus, isDesireDominant } from './card-workshop/craft-talent-bonus';
+import { entryStrength, totalCopies } from './card-workshop/talent-rule-modifiers';
 import { cardCatalogToItem } from './start-catalog-mechanics';
 import { extractJsonPayload } from './model-json';
 
@@ -645,6 +647,45 @@ export async function runCraftGenChain(
         rating: craftOutput.rating,
         materialSpecs: resolveMaterialSpecs(materialNames, owner?.inventory ?? []),
       });
+    }
+    // 制卡侧天赋加成（2026-09-17）：越阶（卡牌造物主）/ 欲望主导（欲望魔神）。
+    // 天赋门槛按**条目种类**判定（与 UI 同源），无天赋时两个开关皆关 → 零改动。
+    // 越阶档数走 `越阶{tierGain}` 强度档（缺省基准 1 档）。
+    if (cardProduct) {
+      const talentList = owner?.talents?.list ?? [];
+      const talentEntries = talentList.flatMap((t: any) => t.entries ?? []);
+      const has = (kind: string) => talentEntries.some((e: any) => e.kind === kind);
+      const desireDominant = has('欲望主导') && isDesireDominant(materialNames);
+      const { card: boosted, notes } = applyCraftTalentBonus(cardProduct, materialNames, {
+        tierGain: has('越阶') ? entryStrength(talentList, '越阶', 'tierGain') : 0,
+        halveCost: has('越阶') && entryStrength(talentList, '越阶', 'halveCost') > 0,
+        desireDominant,
+      });
+      cardProduct = boosted;
+      // 产出数量（2026-09-17）：持「丰饶祝福」这类条目者，每次制作额外产出 n 份
+      const copies = totalCopies(talentEntries);
+      if (copies > 0) {
+        cardProduct = { ...cardProduct, quantity: (cardProduct.quantity ?? 1) + copies };
+        notes.push(`【产出数量】额外产出 ${copies} 份（共 ${cardProduct.quantity} 份）`);
+      }
+      // 战技附加（2026-09-17）：持该条目的制卡师，产出的卡带一条战斗状态。
+      // 多条时取**条目序第一条**（确定性；融合会把条目去重，正常只有一条）。
+      const statusEntry = talentEntries.find((e: any) => e.kind === '战技附加');
+      if (statusEntry?.params?.status) {
+        const 战技 = {
+          status: String(statusEntry.params.status),
+          power: Math.max(0, Math.round(Number(statusEntry.params.power) || 0)),
+          beats: Math.max(0, Math.round(Number(statusEntry.params.beats) || 0)),
+        };
+        cardProduct = { ...cardProduct, 战技 };
+        notes.push(
+          `【战技附加】产物附带战技「${战技.status}」（量 ${战技.power} / ${战技.beats} 拍）`,
+        );
+      }
+      // 天赋审计行并入制作叙事（让玩家看到天赋确实生效）
+      if (notes.length > 0) {
+        craftOutput.narrative = [craftOutput.narrative, ...notes].filter(Boolean).join('\n');
+      }
     }
   }
 

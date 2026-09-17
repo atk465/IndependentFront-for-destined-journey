@@ -25,9 +25,6 @@ import CommissionBoard from './cards/CommissionBoard.vue';
 import TalentPanel from './cards/TalentPanel.vue';
 import CraftBench from './cards/CraftBench.vue';
 import SkirmishPanel from './combat/SkirmishPanel.vue';
-import { matchFreeCardPlay } from '@engine/card-workshop/free-card-play';
-import { battleReadyCards } from '@engine/card-workshop/deck-power';
-import type { CardItem } from '@engine/types';
 
 const game = useGameStore();
 const ui = useUIStore();
@@ -206,25 +203,12 @@ onBeforeUnmount(() => {
 });
 
 async function handleSend(content: string) {
-  // 🔴 交锋活跃分流（2026-09-17 路线图 1.1 L1）：自由文本提名出卡。
-  //  命中可出卡名 → 直接走 submitSkirmishCounter（与面板点选同路）；
-  //  基础应对词 → 应对；否则照旧走叙事管线（交锋中的自由对话不禁止）。
-  if (game.skirmishSession && !game.skirmishSession.finished && !game.isGenerating) {
-    const session = game.skirmishSession;
-    const deck = game.player?.cardAlbum?.deck ?? [];
-    const all: CardItem[] = (game.player?.inventory ?? []).filter(
-      (i): i is CardItem => i.type === '卡牌',
-    );
-    const match = matchFreeCardPlay(content, battleReadyCards(all, deck), session.playedCards);
-    if (match.kind === '卡') {
-      ui.toast(`自由提名：打出「${match.choice.name}」`, 'info');
-      await game.submitSkirmishCounter(match.choice);
-      return;
-    }
-    if (match.kind === '应对') {
-      await game.submitSkirmishCounter(match.choice);
-      return;
-    }
+  // 🔴 交锋活跃分流（2026-09-17 路线图 1.1）：自由文本提名出卡。
+  //  L1 卡名精确匹配 + L2 AI 意图解析都在 pipeline.trySkirmishFreeText 内；
+  //  返回 false（没有出牌/应对意思）→ 照旧走叙事管线，交锋中的自由对话不禁止。
+  if (pipeline && game.skirmishSession && !game.skirmishSession.finished && !game.isGenerating) {
+    const handled = await pipeline.trySkirmishFreeText(content);
+    if (handled) return;
   }
 
   // 🔴 2026-09-13 真机：这两个守卫原先**静默 return** —— 一旦某个请求长时间不返回

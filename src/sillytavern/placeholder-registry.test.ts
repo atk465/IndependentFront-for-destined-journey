@@ -1718,3 +1718,30 @@ describe('SKILL_STATE', () => {
     expect(out).toContain('开局初始技能声明');
   });
 });
+
+describe('NARRATIVE_INTENTS —— 纯叙事通道（2026-09-17）', () => {
+  it('无意图 → 空串（零 token，照 TALENT/RECENT_COMBAT 口径）', () => {
+    expect(PLACEHOLDER_REGISTRY['NARRATIVE_INTENTS'](mockCtx(), mockConfig())).toBe('');
+  });
+
+  it('有意图 → <叙事意图> 块，含天赋名与原文，并声明不做数值结算', () => {
+    const ctx = mockCtx({
+      narrativeIntents: [
+        { atMinutes: 100, from: 'player', talent: '世界规则干预', text: '本局雷之铭失效' },
+      ],
+    });
+    const out = PLACEHOLDER_REGISTRY['NARRATIVE_INTENTS'](ctx, mockConfig());
+    expect(out).toContain('<叙事意图>');
+    expect(out).toContain('世界规则干预');
+    expect(out).toContain('本局雷之铭失效');
+    expect(out).toContain('不作数值结算');
+  });
+
+  it('战斗会话活跃 → 静默（照 TALENT 口径）', () => {
+    const ctx = mockCtx({
+      combatActive: true,
+      narrativeIntents: [{ atMinutes: 1, from: 'player', talent: '作者', text: 'x' }],
+    });
+    expect(PLACEHOLDER_REGISTRY['NARRATIVE_INTENTS'](ctx, mockConfig())).toBe('');
+  });
+});

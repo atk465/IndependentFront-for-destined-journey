@@ -117,7 +117,7 @@ export function createEmptyContentRegistry(): ContentRegistry {
     namePools: undefined,
     markers: undefined,
     branding: undefined,
-      mapPack: undefined,
+    mapPack: undefined,
     randomEvents: undefined,
     commissions: undefined,
     remoteAssets: undefined,

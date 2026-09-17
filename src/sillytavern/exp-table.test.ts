@@ -188,9 +188,7 @@ describe('resolveLevelUps —— 升级循环', () => {
     expect(res.levelsGained).toBe(0);
     expect(res.freeAttrPoints).toBe(0);
   });
-
 });
-
 
 // ========== 模式系数表（简单/普通分档） ==========
 

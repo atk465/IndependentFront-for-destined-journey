@@ -6,6 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import type { SkirmishFinish } from './skirmish-session';
 import {
+  contractBacklash,
   startSkirmish,
   currentIntent,
   playBeat,
@@ -319,5 +320,61 @@ describe('在场战技 v2 —— 减速/眩晕/持续拍数（截图灵感波）
     expect(activated.activeEffects).toHaveLength(1);
     const second = playBeat(activated, 防御, 10);
     expect(second.activeEffects).toHaveLength(0); // beatsLeft 1 → 本拍用掉后归零移除
+  });
+});
+
+// ===== 新增机制（2026-09-17）：合同反噬 / 倒也可斩一次守卫 / 第六终章 =====
+
+describe('契约/改写机制', () => {
+  it('行为合同：敌方意图触碰禁条 → 反噬真实伤害', () => {
+    // 第一拍打出召唤卡并登记「禁止打断」合同（敌方第 1 拍意图 counters 含打断）
+    const s1 = playBeat(开战(), 卡行动, 20, {
+      contract: { name: '行为合同·禁打断', forbidden: '打断', backlash: 8 },
+    });
+    // 下一拍（敌方意图轮换到第 2 条：counters=['闪避']）→ 不违约
+    const s2 = playBeat(s1, 应对, 20);
+    expect(s2.log.join('\n')).not.toContain('行为合同违约');
+    // 再一拍轮回到第 1 条（含打断）→ 违约反噬
+    const s3 = playBeat(s2, 应对, 20);
+    expect(s3.log.join('\n')).toContain('行为合同违约');
+  });
+
+  it('倒也可斩：每场限一次（第二次按未请求处理）', () => {
+    const s1 = playBeat(开战(), 应对, 20, { nuke: true });
+    expect(s1.nukeUsed).toBe(true);
+    expect(s1.log.join('\n')).toContain('倒也可斩');
+    const s2 = playBeat(s1, 应对, 20, { nuke: true });
+    // 第二次数值上不再触发（HP 差额只来自常规结算）
+    expect(s2.log.join('\n').split('倒也可斩').length - 1).toBe(
+      s1.log.join('\n').split('倒也可斩').length - 1,
+    );
+  });
+
+  it('第六终章：第 6 拍起敌方被抹除（HP 归零 → 胜利）', () => {
+    // 轻击（低行动值 + 低骰）让敌方活过前 5 拍——终章只在第 6 拍发动
+    const 轻击 = { label: '轻推', power: 1, tags: [] };
+    let s = 开战();
+    for (let i = 0; i < 5; i++) s = playBeat(s, 轻击, 1, { finalChapter: true });
+    expect(s.finished).toBeNull();
+    expect(s.log.join('\n')).not.toContain('第六终章');
+    const last = playBeat(s, 轻击, 1, { finalChapter: true });
+    expect(last.enemyHp).toBe(0);
+    expect(last.finished).toBe('胜利');
+    expect(last.log.join('\n')).toContain('第六终章');
+  });
+});
+
+describe('contractBacklash（纯函数）', () => {
+  const 合同 = { name: '行为合同·禁强攻', forbidden: '强攻' as const, backlash: 8 };
+
+  it('敌方意图触发禁条 → 反噬合计', () => {
+    const r = contractBacklash([合同], { counters: ['强攻'] });
+    expect(r.total).toBe(8);
+    expect(r.violated).toHaveLength(1);
+  });
+
+  it('未触发 → 0；无合同 → 0', () => {
+    expect(contractBacklash([合同], { counters: ['防御'] }).total).toBe(0);
+    expect(contractBacklash(undefined, { counters: ['强攻'] }).total).toBe(0);
   });
 });

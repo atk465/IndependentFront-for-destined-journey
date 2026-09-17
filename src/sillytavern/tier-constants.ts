@@ -192,4 +192,3 @@ export function getCombatCoefficient(tier: number): number {
   const cfg = getTierConfig(tier);
   return cfg?.combatCoefficient ?? 2.0;
 }
-

@@ -36,8 +36,7 @@ const STREAM_CONTROL_TAGS = ['maintext', 'play_audio', 'event_trigger', ...CONTR
 const LEGACY_MARKER_TAGS = ['play_audio', 'scene_image'] as const;
 const LEGACY_MARKER_RE = new RegExp(
   LEGACY_MARKER_TAGS.map(
-    (tag) =>
-      `<${tag}[^>]*\/>|<${tag}[^>]*>[\s\S]*?<\/${tag}\s*>|<${tag}[^>]*>`,
+    (tag) => `<${tag}[^>]*\/>|<${tag}[^>]*>[\s\S]*?<\/${tag}\s*>|<${tag}[^>]*>`,
   ).join('|'),
   'gi',
 );

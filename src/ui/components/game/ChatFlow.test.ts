@@ -187,7 +187,6 @@ describe('ChatFlow 右键菜单 — user 消息', () => {
   });
 });
 
-
 // 🆕 思考中指示（2026-08-12）：生成态、正文未出时显示当前 Agent 活动
 describe('ChatFlow 思考中指示', () => {
   it('isGenerating 且无 streamingText → 显示思考中（含当前 Agent 活动文案）', async () => {

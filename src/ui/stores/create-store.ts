@@ -44,6 +44,7 @@ import type { AgentContext } from '@engine/types';
 import { createDefaultTime, formatGameTime, GAME_EPOCH_YEAR } from '@engine/time-system';
 import {
   getCreationCatalog,
+  getDrawableCatalog,
   talentExchangePrice,
   type TalentTemplate,
 } from '@engine/card-workshop/talent-entry';
@@ -75,8 +76,7 @@ import { useWorldBookStore } from './worldbook-store';
 import { getAgentSettings } from './agent-settings';
 // 🆕 F10（2026-09-04）：plot_outline 端点解析与 game-pipeline 走同一个 fail-closed 解析器
 import { resolveAgentEndpoint } from '../lib/endpoint-resolver';
-import { filterBooksByEnabledEntries } from '@engine/worldbook-loader';
-import type { WorldBook, WorldBookEntry } from '@engine/types';
+import type { WorldBook } from '@engine/types';
 
 // ===== 类型 =====
 
@@ -117,13 +117,12 @@ export const useCreateStore = defineStore('create', () => {
     0: difficulty.value !== null,
     1: name.value.trim().length > 0 && race.value !== '' && attributesFullyAllocated.value,
     2: selectedCreationTalent.value !== null, // 出身天赋（7 选 1 必选；第 3 步，供剧情规划参照）
-    3: true, // 角色启用（可选）
-    4: true, // 装备选择
-    5: true, // 剧情规划
+    3: true, // 装备选择
+    4: true, // 剧情规划
   }));
 
   function nextStep() {
-    if (currentStep.value < 5 && stepValid.value[currentStep.value]) currentStep.value++;
+    if (currentStep.value < 4 && stepValid.value[currentStep.value]) currentStep.value++;
   }
   function prevStep() {
     if (currentStep.value > 0) currentStep.value--;
@@ -387,57 +386,6 @@ export const useCreateStore = defineStore('create', () => {
   const remainingPoints = computed(() => reincarnationPoints.value - totalCost.value);
 
   // ═══════════════════════════════════════════════════════
-  // Phase 10h: 世界书驱动的角色启用
-  // ═══════════════════════════════════════════════════════
-
-  /** character 世界书条目列表（可启用角色） */
-  const characterEntries = ref<WorldBookEntry[]>([]);
-
-  /** 勾选的 character entry uids */
-  const enabledCharacterEntryUids = ref<Set<number>>(new Set());
-
-  /**
-   * 加载 character 条目。
-   *
-   * Phase 0 起改读 worldbook-store（Dexie 全量：内置 + 用户导入/编辑 + 将来的工坊书），
-   * 不再直读 `data/worldbooks/*.json` —— 此前用户在设置页对内置书的编辑
-   * 进不了捏人页。store 为空（IndexedDB 不可用）时仍回落 fetch 本地 JSON。
-   */
-  async function loadWorldBookEntries() {
-    try {
-      const wb = useWorldBookStore();
-      await wb.init();
-      const books = await loadWorldBooksWithFallback(wb.books as WorldBook[]);
-      characterEntries.value = books
-        .filter((b) => b.partition === 'character')
-        .flatMap((b) => b.entries);
-    } catch {
-      // fetch 不可用时静默跳过，保持空数组
-      characterEntries.value = [];
-    }
-  }
-
-  /** toggle 勾选角色 */
-  function toggleCharacterEntry(uid: number) {
-    const next = new Set(enabledCharacterEntryUids.value);
-    if (next.has(uid)) {
-      next.delete(uid);
-    } else {
-      next.add(uid);
-    }
-    enabledCharacterEntryUids.value = next;
-  }
-
-  /** 构建存档用的世界书条目 ID 列表（partition:uid 格式） */
-  function buildEnabledWorldBookEntries(): string[] {
-    const ids: string[] = [];
-    for (const uid of enabledCharacterEntryUids.value) {
-      ids.push(`character:${uid}`);
-    }
-    return ids;
-  }
-
-  // ═══════════════════════════════════════════════════════
   // ═══════════════════════════════════════════════════════
   // 开局购卡 (→ 开场卡面叙事 + CharacterState 卡组直落)
   // 2026-09-16 卡牌化：旧 CDN 装备/道具/技能目录（旧体系形状、经 item_gen 生成旧版
@@ -451,7 +399,8 @@ export const useCreateStore = defineStore('create', () => {
   /** 随机天赋_offer（2026-09-16）：洗牌捏人池取前 8（池不足 8 全出），可重抽换一批 */
   const talentOffers = ref<TalentTemplate[]>([]);
   function rollTalentOffers() {
-    const pool = [...getCreationCatalog()];
+    // 只从机制可用的池抽（2026-09-17：存量目录 54% 纯描述，强制 1 选 1 抽不实干天赋）
+    const pool = [...getDrawableCatalog()];
     for (let i = pool.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [pool[i], pool[j]] = [pool[j], pool[i]];
@@ -782,9 +731,7 @@ export const useCreateStore = defineStore('create', () => {
       if (cfg && cfg.worldBookIds?.length) {
         filtered = all.filter((wb) => cfg.worldBookIds!.includes(wb.id));
       }
-      // 对齐游戏页面：只注入用户在捏人页勾选的角色
-      const enabledEntries = buildEnabledWorldBookEntries();
-      return filterBooksByEnabledEntries(filtered, enabledEntries);
+      return filtered;
     } catch {
       return [];
     }
@@ -1440,6 +1387,80 @@ export const useCreateStore = defineStore('create', () => {
       );
     }
 
+    // 种族/地点/天赋定制开场（2026-09-17：按种族与出身地生成差异化开场叙事）
+    const raceFlavor: Record<string, string> = {
+      精灵: '你的耳尖在晨风里微微颤动——风之铭的嫡裔，天生对铭文的波动敏感。',
+      兽族: '你的兽裔血脉让你在交锋时直觉比思考更快——有时这是好事，有时不是。',
+      血族: '日光刺眼。你眯起眼睛，用斗篷的阴影遮住半张脸——这是血族在本国行走的标准姿态。',
+      矮人: '你的矮壮身形在人群中毫不起眼，但腰间那把祖传的锻造锤比你更有名气。',
+      人鱼: '你离水的日子已经超过了一年——鳞片在腿侧若隐若现，提醒你大海还在等你。',
+      翼民: '你背后的羽翼收拢在斗篷下。在帝国的城市里，展翅是需要许可证的。',
+      虫族: '你外骨骼的接缝处偶尔发出细微的咔嗒声——那是虫巢铭阵在远方的共鸣。',
+      菌族: '你皮肤上淡绿色的孢子纹路在潮湿的天气里会微微发光——这是菌族的荣，也是被城市人侧目的原因。',
+      蛛族: '你的指尖有细小的倒钩——那是蛛后血脉的印记。丝缚术你从小就会，但城市里不常用。',
+      晶蜥族: '你的鳞片在阳光下折射出微弱的七彩——那是铭石矿脉赋予晶蜥族的天然庇护。',
+      半人马: '你的四蹄踏在石板路上的声音比别人重一倍——但这让你在商队里永远是最可靠的护卫。',
+      半身人: '你矮小的身形让你在某些场合被忽视——但在需要钻窄门、走暗巷的时候，这是天赋。',
+      天族: '你的气质在人群中格外显眼——天族的铭文是正体，一笔一画都带着秩序的重量。',
+      魔族: '你的瞳孔在暗处会微微泛红——魔族的连笔铭文让你天生擅长打破规则。',
+      霜巨人: '你的身形比周围的人高出两个头——这既是威慑，也是你在城市里找不到合适床铺的原因。',
+      巨龙: '你很少在人前显出真身。在这个大陆上，巨龙是活着的传说——而你就是传说本身。',
+      古龙: '你比成文史更古老。你的记忆是碎片——但每一块碎片都比这个国家的全部历史更重。',
+      亚龙: '龙血稀释后的印记在你的臂上隐约可见。你不是纯血，但你的爪子依然锋利。',
+      北境龙裔: '你的竖瞳在人群中格外醒目——北境龙裔的血脉让你的吐息已经有了雏形。',
+      愿灵: '你从某个强烈的祈愿中诞生。被记得多久，你就存在多久——这是你的力量，也是你的枷锁。',
+      构装体:
+        '你是由魔力驱动的非生命造物。你的每一个动作都精确遵循造物者铭下的指令——直到你开始产生自己的意志。',
+      元素生物:
+        '你的身体由纯粹元素构成。在人群中你总是保持着元素的形态——火、水、风或土，任选其一。',
+      植物生物: '你的皮肤泛着草木的青绿色，指尖偶尔会长出嫩芽。你对季节和土壤的感知远超常人。',
+      光翅妖精:
+        '你只有巴掌大，透明的羽翅在阳光下近乎隐形。你迷恋歌声和新奇的故事——这也是你走出森林的原因。',
+      不定形生物:
+        '你的身体没有固定形状——你可以拟态成任何你见过的人或物。这在社交中是天赋，在自我认知中是诅咒。',
+    };
+    const raceKey = race.value === '自定义' ? '' : race.value;
+    if (raceKey && raceFlavor[raceKey]) {
+      lines.push(raceFlavor[raceKey]);
+    }
+
+    const locationFlavor: Record<string, string> = {
+      艾瑟嘉德: '艾瑟嘉德的冒险者公会门口永远排着长队——你从队伍旁边走过，选择了自己的路。',
+      '帝都·冕京':
+        '帝都·冕京的街比你想象的宽——铭法院的尖顶在雾里若隐若现，那是这个帝国最接近天空的建筑。',
+      灰笺矿区:
+        '灰笺矿脉的矿工们从你身边经过，身上带着石粉和铁锈的味道。矿脉深处的铭文在山体里隐隐脉动。',
+      灰笺老街: '灰笺老街的石板路被几十年的矿车压出了深深的车辙。老街上的每一块招牌都是一个故事。',
+      '诺瓦·瓦伦蒂亚城':
+        '诺瓦·瓦伦蒂亚城的卡匠工坊区传来火印淬卡的嘶响——这里是半个大陆的卡牌铸造中心。',
+    };
+    for (const [k, v] of Object.entries(locationFlavor)) {
+      if (startLocation.value.includes(k)) {
+        lines.push(v);
+        break;
+      }
+    }
+
+    // 出身天赋定制
+    if (selectedCreationTalent.value) {
+      const talentFlavor: Record<string, string> = {
+        节俭持家: '你总能把垃圾变成不那么垃圾的东西——这是你从生活中磨出来的本能。',
+        摩托小子: '你只对结构简单的双轮魔动车感兴趣——且颇有手感。',
+        封印亲和: '封印物在你面前总是格外温顺——你甚至觉得它们有点可怜。',
+        斗志昂扬: '你出手永远带着三分先声——不是狂妄，是习惯。',
+        铜筋铁骨: '硬挨一下，不丢人——这是你的信条。',
+        卡牌大师: '启封与出手，一气呵成——你的手指比你的大脑更懂卡。',
+        天才卡师: '你天生就是吃这碗饭的。',
+        '我来!我见!我征服!': '你来了。你见了。接下来，你要征服。',
+        卡牌造物主: '你不是在制卡——你是在创造生命。',
+        主角光环系统: '命运偶尔也会偏心——而你就是那个被偏心的人。',
+        神性火花: '你的灵魂深处有一粒不会熄灭的火——那是天道的余烬。',
+        万物皆药: '在你的手里，万物皆是药——毒草是解药，解药是毒药，全看你怎么用。',
+      };
+      const tf = talentFlavor[selectedCreationTalent.value];
+      if (tf) lines.push(tf);
+    }
+
     // 收尾：约束首轮叙事流程 —— 先以开局背景为舞台重新演绎（既定事实不变），再自然续写。
     // 🔴 这一句同时是 `{{SKILL_STATE}}` 从开场消息里截取初始技能声明的结束边界
     //    （placeholder-registry 的 isNaturalOpeningSkillEnd），改措辞要同步改那里。
@@ -1498,7 +1519,8 @@ export const useCreateStore = defineStore('create', () => {
         userName: '玩家',
         gameStartTime: new Date().toISOString(),
         totalTurns: 0,
-        enabledWorldBookEntries: buildEnabledWorldBookEntries(), // 🆕
+        // 空数组 = 引擎按条目 enabled 全量注入（「启用角色」步已删除，不再做存档级收窄）
+        enabledWorldBookEntries: [],
         openingPrompt: openingPrompt, // 🆕
         openingPromptConsumed: false, // 🆕
         plotSettings: JSON.parse(JSON.stringify(plotSettings.value)), // §5.2: 本档剧情配置随档落库（含雷点）
@@ -1627,7 +1649,6 @@ export const useCreateStore = defineStore('create', () => {
       },
       cards: [...selectedCards.value],
       plotSettings: plotSettings.value,
-      enabledCharacterEntryUids: [...enabledCharacterEntryUids.value],
       personality: personality.value,
       physics: physics.value,
       backstory: backstory.value,
@@ -1662,9 +1683,6 @@ export const useCreateStore = defineStore('create', () => {
     for (const card of data.cards ?? []) {
       if (!canSelectCard(card)) continue;
       selectedCards.value = [...selectedCards.value, card];
-    }
-    if (data.enabledCharacterEntryUids) {
-      enabledCharacterEntryUids.value = new Set(data.enabledCharacterEntryUids);
     }
     personality.value = data.personality || '';
     physics.value = data.physics || '';
@@ -1754,8 +1772,6 @@ export const useCreateStore = defineStore('create', () => {
     plotEventsPerChapter.value = 0;
     initPlotDefaultsFromSettings();
     showPresetModal.value = false;
-    enabledCharacterEntryUids.value = new Set();
-    characterEntries.value = [];
     selectedCreationTalent.value = null;
     talentOffers.value = [];
   }
@@ -1834,11 +1850,6 @@ export const useCreateStore = defineStore('create', () => {
     totalCost,
     remainingPoints,
     // Phase 10h: 世界书驱动
-    characterEntries,
-    enabledCharacterEntryUids,
-    loadWorldBookEntries,
-    toggleCharacterEntry,
-    buildEnabledWorldBookEntries,
     // P1-5: 工坊项目启用轴（项目级多选）
     // 开局购卡 (→ 卡组直落)
     selectedCards,

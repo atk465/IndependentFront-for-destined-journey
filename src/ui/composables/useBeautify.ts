@@ -2,7 +2,7 @@
  * useBeautify — 文本美化 composable（从 ChatFlow.vue 抽出，CombatMessageFlow 复用）
  *
  * 职责：按当前存档合并预设规则与用户规则，供统一 narrative renderer 编译。
- * autoEnable 解析以当前存档为准（命定核心/启用角色的世界书条目 uid），
+ * autoEnable 解析以当前存档为准（存档级启用的世界书条目 uid），
  * 与 BeautifierSection 同口径：美化绑定**启用的世界书条目**，不按角色名。
  *
  * 对齐 docs/design.md §2.5（首行缩进）/ §1（叙事衬线）。

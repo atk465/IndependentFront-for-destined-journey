@@ -12,6 +12,7 @@ import {
   cardPlayPlan,
   IN_PLAY_KINDS,
   sealedCardPlay,
+  activateListOf,
 } from './entry-combat';
 
 describe('ENTRY_COMBAT_TABLE（单一真源）', () => {
@@ -108,8 +109,16 @@ describe('cardPlayPlan —— 八类卡语义矩阵（真机裁定 2026-09-13）
   it('领域（防系/风元素）→ 在场 buff 卡力', () => {
     const plan = cardPlayPlan(卡({ name: '静水湖畔', 词条: ['地景', '水'] }), stats);
     expect(plan.mode).toBe('在场');
+    // 水系领域卡会建立「水下」环境（2026-09-17：环境加成天赋据此判定生效）
     if (plan.mode === '在场')
-      expect(plan.effect).toEqual({ name: '静水湖畔', type: 'buff', amount: 3 });
+      expect(plan.effect).toEqual({ name: '静水湖畔', type: 'buff', amount: 3, env: '水下' });
+  });
+
+  it('领域（无关系元素）→ 在场 buff 卡力，且不带环境标记', () => {
+    const plan = cardPlayPlan(卡({ name: '风蚀高地', 词条: ['地景', '风'] }), stats);
+    expect(plan.mode).toBe('在场');
+    if (plan.mode === '在场')
+      expect(plan.effect).toEqual({ name: '风蚀高地', type: 'buff', amount: 3 });
   });
   it('装备 → 在场 buff 2×卡力；召唤 → 登场直击 + 助战 buff', () => {
     const equip = cardPlayPlan(卡({ name: '秘银长剑', 词条: ['装备', '金'] }), stats);
@@ -159,7 +168,7 @@ describe('sealedCardPlay —— 封印卡的交锋拍启封（积压 2026-09-14�
     expect(r.sealBroke).toBe('远古巨兽·岩爪');
     expect(r.recoil).toBeUndefined();
     expect(r.prepend[0]).toContain('→ 启封');
-    expect(r.activate?.name).toBe('远古巨兽·岩爪'); // 召唤 = 在场助战
+    expect(activateListOf(r.activate)[0]?.name).toBe('远古巨兽·岩爪'); // 召唤 = 在场助战
   });
 
   it('哑火 → 本拍空过（行动值 0、无标签、不记已用、不破封）', () => {

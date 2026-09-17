@@ -34,6 +34,14 @@ export function deriveCombatStats(input: {
   attributes?: Record<string, number>;
   level?: number;
 }): DerivedCombatStats {
+  return applyStatMultiplier(deriveBaseCombatStats(input), 1);
+}
+
+/** 基础派生（不含天赋倍率） */
+export function deriveBaseCombatStats(input: {
+  attributes?: Record<string, number>;
+  level?: number;
+}): DerivedCombatStats {
   const str = attrOf(input.attributes, 'str');
   const con = attrOf(input.attributes, 'con');
   const dex = attrOf(input.attributes, 'dex');
@@ -45,6 +53,26 @@ export function deriveCombatStats(input: {
     atk: 2 * str + level,
     guard: 2 * con + Math.floor(level / 2),
     agi: 2 * dex + Math.floor(level / 2),
+  };
+}
+
+/**
+ * 全属性倍率（规则钩子 `statMultiplier`，如 SSS「女王领域」+50%）。
+ * 倍率 1 = 原样（零改动）；脏值按 1。
+ */
+export function applyStatMultiplier(
+  stats: DerivedCombatStats,
+  multiplier: number,
+): DerivedCombatStats {
+  const m =
+    typeof multiplier === 'number' && Number.isFinite(multiplier) && multiplier > 0
+      ? multiplier
+      : 1;
+  if (m === 1) return stats;
+  return {
+    atk: Math.round(stats.atk * m),
+    guard: Math.round(stats.guard * m),
+    agi: Math.round(stats.agi * m),
   };
 }
 

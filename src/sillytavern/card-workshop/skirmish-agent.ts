@@ -19,6 +19,11 @@
 import type { ApiEndpoint } from '../types';
 import { parseModelJson } from '../model-json';
 import { MAX_INTENTS, type EnemyIntent } from './skirmish';
+import {
+  buildIntentResolveMessages,
+  parseIntentResponse,
+  type ParsedIntent,
+} from './free-card-play';
 import { coerceIntents } from './skirmish';
 
 // ========== 依赖缝 ==========
@@ -130,6 +135,33 @@ export function parseSkirmishAssessment(raw: string): SkirmishAssessment | null 
 }
 
 /** 敌情评估调用（一次 chat）。错误/垃圾输出抛错——由集成层决定重试或中止开战 */
+export interface SkirmishIntentRequest {
+  saveId: string;
+  endpoint: ApiEndpoint;
+  playerText: string;
+  cards: ReadonlyArray<{ name: string; tags: readonly string[] }>;
+  intentCounters: readonly string[];
+}
+
+/** L2 意图解析：轻量单轮调用 + 严格 JSON 校验。解析失败/动作非法一律 { kind:'none' }，
+ *  由调用方降级为叙事，绝不 throw。镜像 runSkirmishAssessment 的调用形态。 */
+export async function runSkirmishIntentResolve(
+  req: SkirmishIntentRequest,
+  deps: SkirmishAgentDeps,
+): Promise<ParsedIntent> {
+  const client = deps.clientFactory('skirmish_eval', req.endpoint, req.saveId);
+  const result = await client.chat({
+    messages: buildIntentResolveMessages({
+      playerText: req.playerText,
+      cards: req.cards,
+      intentCounters: req.intentCounters,
+    }),
+  });
+  if (result.error) return { kind: 'none' };
+  const raw = result.output ?? result.rawResponse ?? '';
+  return parseIntentResponse(raw, req.cards, []);
+}
+
 export async function runSkirmishAssessment(
   req: SkirmishAssessRequest,
   deps: SkirmishAgentDeps,

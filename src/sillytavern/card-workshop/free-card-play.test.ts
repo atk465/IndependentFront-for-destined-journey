@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { matchFreeCardPlay, recommendCards } from './free-card-play';
+import {
+  buildIntentResolveMessages,
+  matchFreeCardPlay,
+  parseIntentResponse,
+  recommendCards,
+} from './free-card-play';
 import type { CardItem } from '../types';
 
 const 卡 = (name: string, tier: CardItem['cardTier'], 词条: string[]): CardItem => ({
@@ -88,5 +93,58 @@ describe('recommendCards（L3 推荐徽章）', () => {
       ['带打断的卡'],
     );
     expect(rows[0].recommended).toBe(false);
+  });
+});
+
+// ===== L2 AI 意图解析（提示词构建 + 严格 JSON 校验）=====
+
+describe('buildIntentResolveMessages', () => {
+  it('消息组含卡名单/意图反制/玩家原话与 none 兜底指令', () => {
+    const msgs = buildIntentResolveMessages({
+      playerText: '用火那招烧它',
+      cards: [{ name: '凝神一击', tags: ['强攻'] }],
+      intentCounters: ['打断'],
+    });
+    expect(msgs).toHaveLength(2);
+    expect(msgs[0].content).toContain('none');
+    expect(msgs[1].content).toContain('凝神一击');
+    expect(msgs[1].content).toContain('打断');
+    expect(msgs[1].content).toContain('用火那招烧它');
+  });
+});
+
+describe('parseIntentResponse（严格白名单）', () => {
+  const hand = [卡('凝神一击', '白铁', ['火', '技能'])];
+
+  it('合法 play_card → 出卡 + 宣言', () => {
+    const r = parseIntentResponse(
+      '{"action":"play_card","card":"凝神一击","declaration":"烧它"}',
+      hand,
+      [],
+    );
+    expect(r.kind).toBe('play_card');
+    if (r.kind === 'play_card') expect(r.declaration).toBe('烧它');
+  });
+
+  it('卡名不在可出集合 → none（白名单硬校验）', () => {
+    const r = parseIntentResponse('{"action":"play_card","card":"不存在的卡"}', hand, []);
+    expect(r.kind).toBe('none');
+  });
+
+  it('已打出过的卡 → none', () => {
+    const r = parseIntentResponse('{"action":"play_card","card":"凝神一击"}', hand, ['凝神一击']);
+    expect(r.kind).toBe('none');
+  });
+
+  it('合法 counter → 应对；非法 move → none', () => {
+    expect(parseIntentResponse('{"action":"counter","move":"防御"}', hand, []).kind).toBe(
+      'counter',
+    );
+    expect(parseIntentResponse('{"action":"counter","move":"勾拳"}', hand, []).kind).toBe('none');
+  });
+
+  it('坏 JSON / none → none（不抛）', () => {
+    expect(parseIntentResponse('not json at all', hand, []).kind).toBe('none');
+    expect(parseIntentResponse('{"action":"none"}', hand, []).kind).toBe('none');
   });
 });
