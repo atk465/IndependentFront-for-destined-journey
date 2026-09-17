@@ -48,6 +48,7 @@ import { matchImitation } from './start-catalog-mechanics';
 import { applyCraftTalentBonus, isDesireDominant } from './card-workshop/craft-talent-bonus';
 import { entryStrength, totalCopies } from './card-workshop/talent-rule-modifiers';
 import { LAZY_ENTRY } from './card-workshop/battle-rules';
+import { liftFromMisfortune } from './card-workshop/craft-flow-hooks';
 import { cardKindOf } from './card-workshop/card-kind';
 import { cardCatalogToItem } from './start-catalog-mechanics';
 import { extractJsonPayload } from './model-json';
@@ -72,6 +73,13 @@ export interface CraftGenRequest {
    *  - 「败犬烙印」消耗一枚：+2 档（「化腐朽为神奇」）
    */
   ratingLift?: number;
+  /** 赌徒谬论：当前厄运层数与单次上浮上限（缺省 = 无此天赋） */
+  misfortuneLayers?: number;
+  misfortuneMaxLift?: number;
+  /** 时间回溯：本次制卡失败时是否回溯重裁一次（预付开关；MP 由 pipeline 扣） */
+  rewindArmed?: boolean;
+  /** 回溯每次重裁上浮档数（缺省 1） */
+  rewindLift?: number;
 }
 
 /** Helper: extract attributes from old or new marker shape */
@@ -180,6 +188,10 @@ export interface CraftGenChainResult {
   patches: StatePatch[];
   craftOutput: CraftGenOutput;
   itemOutput: ItemGenOutput | null;
+  /** 赌徒谬论：本次用掉了几层厄运（pipeline 据此清零计数） */
+  misfortuneConsumed?: number;
+  /** 时间回溯：本次是否真的回溯过（pipeline 据此扣 MP） */
+  rewindUsed?: boolean;
 }
 
 // ========== Public API ==========
@@ -624,6 +636,8 @@ export async function runCraftGenChain(
 
   // 评级上浮（好运之骰「制卡顺利」+1 / 败犬烙印「扭转冲突」+2）：
   // 在**评级产生之后、落库之前**改，且写进制作叙事让玩家看到天赋真的生效。
+  let misfortuneConsumed = 0;
+  let rewindUsed = false;
   const lift = Math.max(0, Math.round(request.ratingLift ?? 0));
   if (lift > 0) {
     const lifted = liftCraftRating(craftOutput.rating, lift);
@@ -634,6 +648,21 @@ export async function runCraftGenChain(
         lift >= 2
           ? `【败犬烙印】你烧掉一枚烙印，强行扭转了这条命运线——评级上浮至「${lifted}」`
           : `【制卡顺利】今日手气极佳——评级上浮一档至「${lifted}」`,
+      ]
+        .filter(Boolean)
+        .join('\n');
+    }
+  }
+
+  // 时间回溯：**失败才触发**（成功时不浪费玩家的预付与精神力）
+  if (request.rewindArmed && !craftOutput.success) {
+    const lifted = liftCraftRating(craftOutput.rating, Math.max(1, request.rewindLift ?? 1));
+    if (lifted !== craftOutput.rating) {
+      craftOutput.rating = lifted;
+      rewindUsed = true;
+      craftOutput.narrative = [
+        craftOutput.narrative,
+        `【时间回溯】你把这一刻倒回去重来了一次——评级改写为「${lifted}」`,
       ]
         .filter(Boolean)
         .join('\n');
@@ -740,6 +769,23 @@ export async function runCraftGenChain(
     }
   }
 
+  // 赌徒谬论：厄运只在**对冲融合（相克）**上兑现，用掉即清空。
+  // 放在这里是因为要读产物卡的 `recipe.fusionKind`（融合内核算好的），
+  // 而产物卡是在上面那个天赋块里才建出来的。
+  if (cardProduct && (request.misfortuneLayers ?? 0) > 0) {
+    const rolled = liftFromMisfortune({
+      layers: request.misfortuneLayers ?? 0,
+      isClashFusion: cardProduct.recipe?.fusionKind === '相克',
+      maxLift: request.misfortuneMaxLift ?? 3,
+    });
+    if (rolled.lift > 0) {
+      const lifted = liftCraftRating(craftOutput.rating, rolled.lift);
+      if (lifted !== craftOutput.rating) craftOutput.rating = lifted;
+      misfortuneConsumed = rolled.consumed;
+      craftOutput.narrative = [craftOutput.narrative, rolled.note].filter(Boolean).join('\n');
+    }
+  }
+
   const patches = [
     ...(craftOutput.settlementPatches ?? []),
     ...buildCraftPatches(craftOutput, itemOutput, characterId, cardProduct),
@@ -755,6 +801,8 @@ export async function runCraftGenChain(
     patches,
     craftOutput,
     itemOutput,
+    ...(misfortuneConsumed > 0 ? { misfortuneConsumed } : {}),
+    ...(rewindUsed ? { rewindUsed } : {}),
   };
 }
 

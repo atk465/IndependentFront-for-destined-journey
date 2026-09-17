@@ -44,6 +44,11 @@ import {
   type ConsortRank,
 } from '@engine/card-workshop/companion-growth';
 import { entryStrength } from '@engine/card-workshop/talent-rule-modifiers';
+import {
+  TRAIN_DIRECTIONS,
+  planTrain,
+  type TrainDirection,
+} from '@engine/card-workshop/craft-flow-hooks';
 import { craftTierCeilingIndex } from '@engine/card-workshop/craft-rank';
 import type { TalentEntry, TalentEntryKind } from '@engine/card-workshop/talent-entry';
 import AppButton from '../../shared/AppButton.vue';
@@ -464,6 +469,46 @@ async function doAbyss() {
     return;
   }
   abyssMsg.value = r.summary ?? '深渊契约已缔结';
+}
+
+// ═══ 调教区（`调教` 条目：S「调教大师系统」）═══
+const canTrain = computed(() => game.hasMechanicGate('调教'));
+const trainTarget = ref('');
+const trainDirection = ref<TrainDirection>('忠犬');
+const trainMsg = ref('');
+const trainErr = ref('');
+const misfortunes = computed(() => (game.hasMechanicGate('赌运') ? game.misfortuneLayers() : 0));
+/** 已调教到顶的伙伴不再列出（planTrain 会拒，这里提前过滤免得点了报错） */
+const trainables = computed(() => smeltables.value.filter((c) => planTrain(c, '忠犬', 99).ok));
+async function doTrain() {
+  if (!trainTarget.value) return;
+  trainErr.value = '';
+  trainMsg.value = '';
+  const r = await game.trainCompanion(trainTarget.value, trainDirection.value);
+  if (!r.ok) {
+    trainErr.value = r.reason ?? '调教失败';
+    return;
+  }
+  trainMsg.value = r.summary ?? '调教完成';
+}
+
+// ═══ 时间回溯预付（`回溯` 条目：S「时间回溯」）═══
+const canRewind = computed(() => game.hasMechanicGate('回溯'));
+const rewindArmed = computed(() => (canRewind.value ? game.pendingRewind() : false));
+const rewindBusy = ref(false);
+const rewindMsg = ref('');
+const rewindErr = ref('');
+async function toggleRewind(use: boolean) {
+  rewindBusy.value = true;
+  rewindErr.value = '';
+  rewindMsg.value = '';
+  const r = await game.setPendingRewind(use);
+  rewindBusy.value = false;
+  if (!r.ok) {
+    rewindErr.value = r.reason ?? '操作失败';
+    return;
+  }
+  rewindMsg.value = use ? '下一次制卡若失败，将回溯重裁一次（扣精神力）' : '已取消回溯';
 }
 
 // ═══ 双生羁绊区（`羁绊` 条目：S「双生羁绊」）═══
@@ -1199,6 +1244,60 @@ const RATING_HINT: Record<string, string> = {
         <p v-if="abyssErr" class="clash-warn" role="alert">{{ abyssErr }}</p>
         <AppButton size="sm" variant="primary" :disabled="!abyssPreview?.ok" @click="doAbyss">
           缔结深渊契约
+        </AppButton>
+      </div>
+    </section>
+
+    <!-- 调教区（门槛：`调教` 条目——S「调教大师系统」） -->
+    <section v-if="canTrain" class="repair-section" aria-label="调教伙伴卡">
+      <h4 class="d-label">调教（天赋：调教大师系统）</h4>
+      <div v-if="trainables.length === 0" class="empty-tab small">没有可调教的伙伴卡…</div>
+      <div v-else class="slot-card">
+        <div class="slot-price">
+          调教塑造她的性格与能力——<b>每级 +1 卡面战力</b>，方向在第一次调教时定下。
+          <span v-if="misfortunes > 0"
+            >当前厄运 <b>{{ misfortunes }}</b> 层（下一次对冲融合会替你押上）。</span
+          >
+        </div>
+        <div class="slot-head">
+          <select v-model="trainTarget" class="slot-select" aria-label="选择要调教的伙伴卡">
+            <option value="" disabled>选择伙伴卡…</option>
+            <option v-for="c in trainables" :key="c.name" :value="c.name">{{ c.name }}</option>
+          </select>
+          <select v-model="trainDirection" class="slot-select" aria-label="调教方向">
+            <option v-for="d in TRAIN_DIRECTIONS" :key="d" :value="d">{{ d }}</option>
+          </select>
+        </div>
+        <p v-if="trainMsg" class="bench-note">{{ trainMsg }}</p>
+        <p v-if="trainErr" class="clash-warn" role="alert">{{ trainErr }}</p>
+        <AppButton size="sm" variant="primary" :disabled="!trainTarget" @click="doTrain">
+          调教一次
+        </AppButton>
+      </div>
+    </section>
+
+    <!-- 时间回溯预付（门槛：`回溯` 条目——S「时间回溯」） -->
+    <section v-if="canRewind" class="repair-section" aria-label="时间回溯">
+      <h4 class="d-label">时间回溯（天赋：时间回溯）</h4>
+      <div class="slot-card">
+        <div class="slot-price">
+          预付一次回溯：<b>下一次制卡若失败</b>，把那一刻倒回去重裁一次——代价是精神力。
+          成功时不触发、也不扣。
+        </div>
+        <p v-if="rewindArmed" class="bench-note">已预付：下一次制卡失败时会回溯。</p>
+        <p v-if="rewindMsg" class="bench-note">{{ rewindMsg }}</p>
+        <p v-if="rewindErr" class="clash-warn" role="alert">{{ rewindErr }}</p>
+        <AppButton
+          v-if="!rewindArmed"
+          size="sm"
+          variant="primary"
+          :disabled="rewindBusy"
+          @click="toggleRewind(true)"
+        >
+          预付回溯
+        </AppButton>
+        <AppButton v-else size="sm" :disabled="rewindBusy" @click="toggleRewind(false)">
+          取消预付
         </AppButton>
       </div>
     </section>

@@ -96,6 +96,11 @@ import {
   resolveLazyCard,
   resolveTwinCombo,
 } from '@engine/card-workshop/battle-rules';
+import {
+  MISFORTUNE_KEY,
+  MISFORTUNE_PER_FAILURE,
+  isGreatFailure,
+} from '@engine/card-workshop/craft-flow-hooks';
 import { coerceSpirits } from '@engine/card-workshop/behind-spirits';
 import {
   buffActiveToday,
@@ -113,6 +118,7 @@ import {
   DAILY_BUFF_CRAFT_LUCK,
 } from '@engine/card-workshop/fortune-dice';
 import type { TalentEntry } from '@engine/card-workshop/talent-entry';
+import type { CraftRating } from '@engine/types';
 import { planDefeatCompensation } from '@engine/card-workshop/defeat-compensation';
 import { planSelfEvolution } from '@engine/card-workshop/companion-growth';
 import { runSkirmishAssessment, runSkirmishChronicle } from '@engine/card-workshop/skirmish-agent';
@@ -2188,6 +2194,74 @@ export class GamePipeline {
   // busy 守卫在 store 入口，本层不再自行判忙。
 
   /**
+   * 制卡流程挂钩的落账（赌徒谬论 / 时间回溯）：
+   *  - 大失败 → 厄运 +1（累计计数，不随天失效）
+   *  - 本次用掉了几层厄运 → 清零
+   *  - 真的回溯过 → 扣精神力 + 清掉预付开关
+   */
+  private async settleCraftFlowHooks(
+    result: { misfortuneConsumed?: number; rewindUsed?: boolean; craftOutput: { rating: string } },
+    talentList: readonly { entries?: readonly TalentEntry[] }[] | undefined,
+    playerName: string | undefined,
+  ): Promise<void> {
+    if (!this.ownsActiveSave) return;
+    const flags = this.game.saveProfile?.worldFlags;
+    const counters = coerceCounters(flags?.counters);
+    const patches: StatePatch[] = [];
+
+    // 赌徒谬论：大失败叠厄运（持条目才有），上限走 `赌运{maxHold}`
+    const holdsGamble = flatEntriesOf(talentList).some((e) => e.kind === '赌运');
+    if (holdsGamble && isGreatFailure(result.craftOutput.rating as CraftRating)) {
+      const cap = entryStrength(talentList, '赌运', 'maxHold');
+      const before = counterOf(counters, MISFORTUNE_KEY);
+      const next = Math.min(cap > 0 ? cap : 5, before + MISFORTUNE_PER_FAILURE);
+      if (next > before) {
+        patches.push({
+          op: 'set_variable',
+          target: `worldFlags.counters.${MISFORTUNE_KEY}`,
+          value: next,
+        } as StatePatch);
+        this.emitMessage(
+          `▸ 【赌徒谬论】大失败——厄运 +1（${before} → ${next} 层）。下一次对冲融合会替你押上。`,
+          'assistant',
+        );
+      }
+    }
+    // 厄运用掉即清空（描述是「提高**下一次**」）
+    if ((result.misfortuneConsumed ?? 0) > 0) {
+      patches.push({
+        op: 'set_variable',
+        target: `worldFlags.counters.${MISFORTUNE_KEY}`,
+        value: 0,
+      } as StatePatch);
+    }
+    // 时间回溯：真的回溯了才扣精神力，并清掉预付开关
+    if (result.rewindUsed) {
+      const playerC = this.game.player;
+      const cost = Math.max(0, entryStrength(talentList, '回溯', 'mpCost'));
+      if (playerC && cost > 0) {
+        patches.push({
+          op: 'update_character',
+          target: `characters.${playerName}`,
+          value: { mp: Math.max(0, playerC.mp - cost) },
+        } as StatePatch);
+        this.emitMessage(`▸ 【时间回溯】精神力 −${cost}`, 'assistant');
+      }
+      patches.push({
+        op: 'set_variable',
+        target: 'worldFlags.pendingRewind',
+        value: false,
+      } as StatePatch);
+    }
+    if (patches.length === 0) return;
+    const sm = createStateManager(this.saveId);
+    const committed = await sm.commitChatState(patches);
+    if (!committed.success) {
+      console.warn('[GamePipeline] 制卡流程挂钩落账失败:', committed.errors);
+    }
+  }
+
+  /**
    * 本次制卡的评级上浮档数，并在必要时**真正扣掉一枚败犬烙印**。
    *
    * 两个来源叠加：当日「制卡顺利」+1 档；玩家预付了烙印则再 +2 档（扣一枚、
@@ -3230,6 +3304,15 @@ export class GamePipeline {
           // 制卡评级上浮：当日「制卡顺利」+1 档；预付了败犬烙印则再 +2 档。
           // 烙印在这里**真正扣掉**（预付开关随之清零），扣不动就退化成 +1。
           ratingLift: await this.consumeCraftLift(),
+          // 赌徒谬论：厄运层数与单次上限（只在**对冲融合/相克**上兑现，用掉即清空）
+          misfortuneLayers: counterOf(
+            coerceCounters(this.game.saveProfile?.worldFlags?.counters),
+            MISFORTUNE_KEY,
+          ),
+          misfortuneMaxLift: entryStrength(playerTalentList, '赌运', 'maxLift'),
+          // 时间回溯：预付开关（失败才触发，成功不浪费）
+          rewindArmed: this.game.saveProfile?.worldFlags?.pendingRewind === true,
+          rewindLift: 1,
         } as any;
         // 禁忌仿卡配方（2026-09-17）：内容仓 cardPool 带 imitation 字段的条目
         const imitationRecipes = parseCatalogData(getContentRegistry().catalog).cardPool.filter(
@@ -3244,6 +3327,7 @@ export class GamePipeline {
         if (result.narrative) {
           this.emitMessage(result.narrative, 'assistant');
         }
+        await this.settleCraftFlowHooks(result, playerTalentList, this.game.player?.name);
       } catch (err) {
         if (isAbortError(err)) {
           this.clearAgentActivityStatus('craft_gen', undefined, runActivityId);

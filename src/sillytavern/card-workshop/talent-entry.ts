@@ -79,7 +79,10 @@ export type TalentEntryKind =
   | '羁绊' // 可指定两张伙伴卡建立双生羁绊，并肩时有组合技（S「双生羁绊」）
   | '成灵' // 可把伙伴卡化为身后灵，永久守护（S「瓦尔哈拉的门票」）
   | '献祭' // 可献祭自身 HP 召唤存在为你作战（S「召唤媒介系统」）
-  | '决斗'; // 可强制 1v1：禁用伙伴卡、免疫外部伤害与治疗（S「西部决斗礼仪」）
+  | '决斗' // 可强制 1v1：禁用伙伴卡、免疫外部伤害与治疗（S「西部决斗礼仪」）
+  | '赌运' // 对冲融合大失败叠厄运，厄运抬高下一次的评级（S「赌徒谬论」）
+  | '调教' // 可调教伙伴卡：等级越高潜力激发越彻底（S「调教大师系统」）
+  | '回溯'; // 制卡失败时可回溯重裁一次，代价大量精神力（S「时间回溯」）
 
 /** 骨架条目：kind + 预设参数 + 独占渠道标记 */
 export interface TalentEntry {
@@ -140,7 +143,7 @@ export interface TalentEntry {
     perDay?: number;
     /** 日掷：骰面数（6 = 命运之骰 / 10 = 好运之骰；决定用哪张面表） */
     faces?: number;
-    /** 烙印：可持有的烙印上限（败犬烙印；超出不再累积） */
+    /** 烙印 / 赌运：累计计数可堆叠的上限（超出不再累积） */
     maxHold?: number;
     /** 置换：最多换回几份（不等价交换；上限 2） */
     maxReturn?: number;
@@ -164,6 +167,12 @@ export interface TalentEntry {
     hpPct?: number;
     /** 决斗：是否禁用在场伙伴卡（1/0） */
     noCompanion?: number;
+    /** 赌运：单次最多上浮的档数（堆叠上限复用 maxHold，与烙印同义） */
+    maxLift?: number;
+    /** 调教：可调教的最高等级（每级 + 卡面战力） */
+    maxLevel?: number;
+    /** 回溯：每次回溯的精神力消耗 */
+    mpCost?: number;
   };
 }
 
@@ -372,6 +381,9 @@ export const TALENT_ENTRY_POOL: readonly TalentEntry[] = [
   e({ kind: '成灵', channel: 'universal', params: { guardPerSpirit: 3 } }),
   e({ kind: '献祭', channel: 'universal', params: { hpPct: 30, beats: 3, critMult: 2 } }),
   e({ kind: '决斗', channel: 'universal', params: { noCompanion: 1 } }),
+  e({ kind: '赌运', channel: 'universal', params: { maxHold: 5, maxLift: 3 } }),
+  e({ kind: '调教', channel: 'universal', params: { maxLevel: 3 } }),
+  e({ kind: '回溯', channel: 'universal', params: { mpCost: 30 } }),
   e({ kind: '改造', channel: 'story', params: {} }),
   // ── v10 扩容（伙伴卡生成通道，2026-09-17）──
   e({ kind: '捕获', channel: 'story', params: {} }),
@@ -478,6 +490,9 @@ const ENTRY_NUMERIC_TIERS: Partial<
   成灵: { guardPerSpirit: [3] },
   献祭: { hpPct: [20, 30, 40], beats: [2, 3], critMult: [2] },
   决斗: { noCompanion: [0, 1] },
+  赌运: { maxHold: [3, 5, 9], maxLift: [1, 2, 3] },
+  调教: { maxLevel: [2, 3, 5] },
+  回溯: { mpCost: [20, 30, 50] },
 };
 
 /**
@@ -512,6 +527,9 @@ export const ENTRY_STRENGTH_BASELINE = {
   成灵: { guardPerSpirit: 3 },
   献祭: { hpPct: 30, beats: 3, critMult: 2 },
   决斗: { noCompanion: 1 },
+  赌运: { maxHold: 5, maxLift: 3 },
+  调教: { maxLevel: 3 },
+  回溯: { mpCost: 30 },
 } as const;
 
 /** 各种类的必填内容参数（非空字符串；keywords 为字符串数组） */
@@ -581,6 +599,9 @@ const ENTRY_KIND_LIST: readonly TalentEntryKind[] = [
   '成灵',
   '献祭',
   '决斗',
+  '赌运',
+  '调教',
+  '回溯',
 ];
 
 /**
@@ -613,6 +634,9 @@ const ENTRY_OPTIONAL_NUMERIC: Partial<Record<TalentEntryKind, readonly string[]>
   成灵: ['guardPerSpirit'],
   献祭: ['hpPct', 'beats', 'critMult'],
   决斗: ['noCompanion'],
+  赌运: ['maxHold', 'maxLift'],
+  调教: ['maxLevel'],
+  回溯: ['mpCost'],
 };
 
 export function validateTalentEntries(entries: readonly TalentEntry[]): {
@@ -2251,7 +2275,9 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '使用【对冲融合】流派时，每次大失败都会为你叠加一层厄运，每层厄运都会显著提高下一次对冲融合的大成功概率。此天赋是赌徒的福音，也是非酋的诅咒。',
-    entries: [],
+    // 2026-09-17：对冲融合（相克）大失败 → 叠厄运；下一次对冲融合按层数上浮评级，
+    // 用掉即清空。厄运是**累计计数**（不随天失效）。
+    entries: [{ kind: '赌运', channel: 'universal', params: { maxHold: 5, maxLift: 3 } }],
   },
   {
     name: '巨人的宠爱',
@@ -2382,7 +2408,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你制作或捕获的女性伙伴卡，可以通过调教来塑造其性格和能力。无论是培养成忠犬还是女王，都由你决定。调教程度越高，她们的潜力激发得越彻底。',
-    entries: [],
+    // 2026-09-17：制卡台可调教伙伴卡——每级 +卡面战力，并把方向写成词条（忠犬/女王）。
+    entries: [{ kind: '调教', channel: 'universal', params: { maxLevel: 3 } }],
   },
   {
     name: '召唤媒介系统',
@@ -2439,7 +2466,10 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '制卡失败时，你可以选择回溯时间，消耗大量精神力重新进行一次制卡过程，所有素材和状态将返回至制卡前。',
-    entries: [],
+    // 2026-09-17：制卡失败时回溯重裁一次（评级上浮一档），代价是大量精神力。
+    // 注意：引擎的制卡**不扣素材**（见 backlog），所以「素材返回制卡前」无从落地；
+    // 落地的是「重来一次」那一半。
+    entries: [{ kind: '回溯', channel: 'universal', params: { mpCost: 30 } }],
   },
   {
     name: '魂之烙印',
@@ -2552,14 +2582,6 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     // 2026-09-17：复用「欲望魔神」的欲望主导通道——这是同一条通道的**失败分支**，
     // 持此条目即可用情绪素材做主素材制卡（惩罚转化由描述交给 AI 演绎）。
     entries: [{ kind: '欲望主导', channel: 'universal', params: {} }],
-  },
-  {
-    name: '调教大师系统',
-    grade: 'S' as TalentGrade,
-    source: 'universal',
-    description:
-      '你制作或捕获的女性伙伴卡，可以通过调教来塑造其性格和能力。无论是培养成忠犬还是女王，都由你决定。调教程度越高，她们的潜力激发得越彻底。',
-    entries: [],
   },
   {
     name: '不等价交换',
@@ -7103,6 +7125,9 @@ export const IMPLEMENTED_ENTRY_KINDS: ReadonlySet<TalentEntryKind> = new Set<Tal
   '成灵',
   '献祭',
   '决斗',
+  '赌运',
+  '调教',
+  '回溯',
   '战技附加',
 ]);
 

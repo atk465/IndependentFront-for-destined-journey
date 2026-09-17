@@ -110,6 +110,9 @@ describe('TALENT_ENTRY_POOL（单一真源）', () => {
     '成灵',
     '献祭',
     '决斗',
+    '赌运',
+    '调教',
+    '回溯',
   ];
   const ALL_CHANNELS: readonly TalentChannel[] = [
     'creation',

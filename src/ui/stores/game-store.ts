@@ -76,6 +76,11 @@ import { addSpirit, coerceSpirits } from '@engine/card-workshop/behind-spirits';
 import { TWIN_ENTRY, areTwins, coerceTwinBonds } from '@engine/card-workshop/battle-rules';
 import { cardPower } from '@engine/card-workshop/deck-power';
 import { cardKindOf } from '@engine/card-workshop/card-kind';
+import {
+  MISFORTUNE_KEY,
+  planTrain,
+  type TrainDirection,
+} from '@engine/card-workshop/craft-flow-hooks';
 import { materialNameOf } from '@engine/card-workshop/card-dismantle';
 import type { TalentEntry, TalentEntryKind } from '@engine/card-workshop/talent-entry';
 import { planCommissionDelivery } from '@engine/card-workshop/commission';
@@ -821,6 +826,78 @@ export const useGameStore = defineStore('game', () => {
   /**
    * 拆解（SSS「素材之王」非战斗侧）：物品 → 素材（材料）。
    */
+  /**
+   * 调教伙伴卡（S「调教大师系统」）：每级 +1 卡面战力，方向词条（忠犬/女王）在
+   * 第一次调教时定下。调教度存卡的 `data.调教`，战力增量走既有的 cardPowerBonus。
+   */
+  async function trainCompanion(
+    cardName: string,
+    direction: TrainDirection,
+  ): Promise<{ ok: boolean; reason?: string; summary?: string }> {
+    const playerChar = player.value;
+    if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
+    if (!hasMechanicGate('调教')) {
+      return { ok: false, reason: '需要天赋【调教大师系统】' };
+    }
+    const card = playerChar.inventory.find(
+      (i): i is CardItem => i.name === cardName && i.type === '卡牌',
+    );
+    if (!card) return { ok: false, reason: '找不到该伙伴卡' };
+    if (cardKindOf(card.词条 ?? []) !== '召唤') {
+      return { ok: false, reason: `【${cardName}】不是伙伴卡——调教只对伙伴有效` };
+    }
+    const { ok, reason, plan } = planTrain(card, direction, strengthOf('调教', 'maxLevel'));
+    if (!ok || !plan) return { ok: false, reason };
+
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState([
+      {
+        op: 'update_item',
+        target: `characters.${playerChar.name}`,
+        value: {
+          name: cardName,
+          changes: {
+            cardPowerBonus: (card.cardPowerBonus ?? 0) + plan.powerGain,
+            data: { ...(card.data ?? {}), 调教: plan.to },
+          },
+        },
+      },
+    ]);
+    if (!result.success) return { ok: false, reason: result.errors.join('; ') };
+    await refreshFromDb();
+    return { ok: true, summary: plan.summary };
+  }
+
+  /** 标记「下一次制卡失败时回溯」（S「时间回溯」） */
+  async function setPendingRewind(use: boolean): Promise<{ ok: boolean; reason?: string }> {
+    if (!activeSaveId.value) return { ok: false, reason: '无活跃存档' };
+    const playerChar = player.value;
+    if (use && !hasMechanicGate('回溯')) return { ok: false, reason: '需要天赋【时间回溯】' };
+    if (use) {
+      const cost = strengthOf('回溯', 'mpCost');
+      if ((playerChar?.mp ?? 0) < cost) {
+        return { ok: false, reason: `精神力不足（需 ${cost} MP）` };
+      }
+    }
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState([
+      { op: 'set_variable', target: 'worldFlags.pendingRewind', value: use } as StatePatch,
+    ]);
+    if (!result.success) return { ok: false, reason: result.errors.join('; ') };
+    await refreshFromDb();
+    return { ok: true };
+  }
+
+  /** 下一次制卡是否已预付回溯 */
+  function pendingRewind(): boolean {
+    return saveProfile.value?.worldFlags?.pendingRewind === true;
+  }
+
+  /** 厄运层数（赌徒谬论；面板展示用） */
+  function misfortuneLayers(): number {
+    return counterOf(counters(), MISFORTUNE_KEY);
+  }
+
   /**
    * 成灵（S「瓦尔哈拉的门票」）：把一张伙伴卡化为身后灵——卡退场，换一枚永久守护。
    *
@@ -3047,6 +3124,10 @@ export const useGameStore = defineStore('game', () => {
     upgradeMaterial,
     exchangeItem,
     drawMaterialTen,
+    trainCompanion,
+    setPendingRewind,
+    pendingRewind,
+    misfortuneLayers,
     makeSpirit,
     behindSpirits,
     bindTwins,
