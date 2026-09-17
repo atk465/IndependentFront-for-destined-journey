@@ -15,7 +15,12 @@ import { useGameStore } from '../../../stores/game-store';
 import { cardTierVar } from '../../../lib/quality-colors';
 import type { CardItem, InventoryItem } from '@engine/types';
 import { fuse } from '@engine/card-workshop/card-fusion';
-import { ELEMENT_KEYWORDS, deriveElements, toMaterial } from '@engine/card-workshop/material';
+import {
+  ELEMENT_KEYWORDS,
+  deriveElements,
+  planRarityUpgrade,
+  toMaterial,
+} from '@engine/card-workshop/material';
 import type { MaterialSpec } from '@engine/card-workshop/card-fusion';
 import { REPAIR_RECIPE, isDamaged, planQuench, planRepair } from '@engine/card-workshop/repair';
 import type { RepairPlan } from '@engine/card-workshop/repair';
@@ -459,6 +464,36 @@ async function doAbyss() {
     return;
   }
   abyssMsg.value = r.summary ?? '深渊契约已缔结';
+}
+
+// ═══ 素材点金区（`点金` 条目：S「素材点金」；每日账本的首个消费者）═══
+
+const canPointGold = computed(() => game.hasMechanicGate('点金'));
+/** 今日剩余次数（跨天自动恢复；账本在 store 里读 saveProfile.worldFlags.dailyUses） */
+const pointGoldLeft = computed(() => (canPointGold.value ? game.dailyRemaining('素材点金', 1) : 0));
+const pointGoldTarget = ref('');
+const pointGoldMsg = ref('');
+const pointGoldErr = ref('');
+/** 可点金的素材：材料类且未到顶（「唯一」品质点不动） */
+const pointables = computed<InventoryItem[]>(() =>
+  materials.value.filter((m) => planRarityUpgrade(m, 1).ok),
+);
+const pointGoldPreview = computed(() => {
+  const m = pointables.value.find((x) => x.name === pointGoldTarget.value);
+  if (!m) return undefined;
+  return planRarityUpgrade(m, 1);
+});
+async function doPointGold() {
+  if (!pointGoldTarget.value) return;
+  pointGoldErr.value = '';
+  pointGoldMsg.value = '';
+  const r = await game.upgradeMaterial(pointGoldTarget.value);
+  if (!r.ok) {
+    pointGoldErr.value = r.reason ?? '点金失败';
+    return;
+  }
+  pointGoldMsg.value = r.summary ?? '点金完成';
+  pointGoldTarget.value = '';
 }
 
 // ═══ 形态改造区（`改造` 条目：SSS「突变巫师」/ SS「画师」）═══
@@ -1078,6 +1113,38 @@ const RATING_HINT: Record<string, string> = {
         <p v-if="abyssErr" class="clash-warn" role="alert">{{ abyssErr }}</p>
         <AppButton size="sm" variant="primary" :disabled="!abyssPreview?.ok" @click="doAbyss">
           缔结深渊契约
+        </AppButton>
+      </div>
+    </section>
+
+    <!-- 素材点金区（门槛：`点金` 条目——S「素材点金」；每日一次走账本） -->
+    <section v-if="canPointGold" class="repair-section" aria-label="素材点金">
+      <h4 class="d-label">素材点金（天赋：素材点金）</h4>
+      <div v-if="pointables.length === 0" class="empty-tab small">
+        没有可点金的素材（材料类且未到最高品质）…
+      </div>
+      <div v-else class="slot-card">
+        <div class="slot-price">
+          每天一次，把一个素材的品质提升一个大档。<b>今日剩余 {{ pointGoldLeft }} 次</b>。
+        </div>
+        <div class="slot-head">
+          <select v-model="pointGoldTarget" class="slot-select" aria-label="选择要点金的素材">
+            <option value="" disabled>选择素材…</option>
+            <option v-for="m in pointables" :key="m.name" :value="m.name">
+              {{ m.name }}（{{ m.rarity ?? '普通' }}）
+            </option>
+          </select>
+        </div>
+        <p v-if="pointGoldPreview?.plan" class="bench-note">{{ pointGoldPreview.plan.summary }}</p>
+        <p v-if="pointGoldMsg" class="bench-note">{{ pointGoldMsg }}</p>
+        <p v-if="pointGoldErr" class="clash-warn" role="alert">{{ pointGoldErr }}</p>
+        <AppButton
+          size="sm"
+          variant="primary"
+          :disabled="!pointGoldPreview?.plan || pointGoldLeft <= 0"
+          @click="doPointGold"
+        >
+          点金
         </AppButton>
       </div>
     </section>

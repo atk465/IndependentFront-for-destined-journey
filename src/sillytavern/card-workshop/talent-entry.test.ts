@@ -97,6 +97,7 @@ describe('TALENT_ENTRY_POOL（单一真源）', () => {
     '位份',
     '克上',
     '环境加成',
+    '点金',
   ];
   const ALL_CHANNELS: readonly TalentChannel[] = [
     'creation',
@@ -344,6 +345,23 @@ describe('hasWorkingMechanic / getDrawableCatalog', () => {
     expect(drawable.every((t) => hasWorkingMechanic(t))).toBe(true);
     // 天生剑骨不出现在抽卡池
     expect(drawable.some((t) => t.name === '天生剑骨（东方）')).toBe(false);
+  });
+
+  it('名字钩子路径：条目为空但规则层挂了名字 → 也算已实装', () => {
+    // 这三条的效果由 Code 直接算（talent-hooks 的登记表），与条目无关；
+    // 只看条目会把它们误标「仅叙事」并踢出抽卡池。
+    for (const name of ['世界线的收束点', '倒也可斩', '一拳超人系统']) {
+      const tpl = getTalentTemplate(name);
+      expect(tpl, name).toBeDefined();
+      expect(tpl!.entries, `${name} 确实没有条目`).toEqual([]);
+      expect(hasWorkingMechanic(tpl!), `${name} 应算已实装`).toBe(true);
+    }
+  });
+
+  it('两条路径都对才不误判：没条目也没钩子的仍是「仅叙事」', () => {
+    const tpl = getTalentTemplate('天生剑骨（东方）')!;
+    expect(tpl.entries).toEqual([]);
+    expect(hasWorkingMechanic(tpl)).toBe(false);
   });
 
   it('SS 批次②：这 9 条已补机制，条目种类都是已实装通道', () => {

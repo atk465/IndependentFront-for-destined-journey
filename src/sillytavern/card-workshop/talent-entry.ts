@@ -14,6 +14,7 @@
  */
 
 import { RARITY_LEVELS, type Rarity } from '../field-enums';
+import { hasRuleHook } from './talent-hooks';
 
 /** 渠道（可扩展枚举：加渠道 = 加值 + 数据表加行） */
 export type TalentChannel = 'creation' | 'story' | 'exchange' | 'fusion' | 'universal';
@@ -65,7 +66,8 @@ export type TalentEntryKind =
   | '结缘' // 好感达爱恋可永久获得伙伴一项词条（SSS「后宫之主系统」）
   | '位份' // 可册封位份与皇后（SSS「后宫三千」）
   | '克上' // 攻原生等级高于你的敌人时额外伤害（SS「下克上」）
-  | '环境加成'; // 特定环境（水下…）由领域/场景卡建立时，防御/闪避应对获得加成（SS「黑潮之子」）
+  | '环境加成' // 特定环境（水下…）由领域/场景卡建立时，防御/闪避应对获得加成（SS「黑潮之子」）
+  | '点金'; // 每日可指定素材提升品质档数（S「素材点金」）
 
 /** 骨架条目：kind + 预设参数 + 独占渠道标记 */
 export interface TalentEntry {
@@ -122,6 +124,8 @@ export interface TalentEntry {
     vsHigherLevel?: number;
     /** 环境加成：环境名（内容参数，如「水下」；由领域/场景卡建立） */
     env?: string;
+    /** 点金：每日可用次数 */
+    perDay?: number;
   };
 }
 
@@ -315,6 +319,7 @@ export const TALENT_ENTRY_POOL: readonly TalentEntry[] = [
   e({ kind: '深渊契约', channel: 'story', params: {} }),
   e({ kind: '克上', channel: 'universal', params: { vsHigherLevel: 30 } }),
   e({ kind: '环境加成', channel: 'universal', params: { env: '水下', percent: 30 } }),
+  e({ kind: '点金', channel: 'universal', params: { tierGain: 1, perDay: 1 } }),
   e({ kind: '改造', channel: 'story', params: {} }),
   // ── v10 扩容（伙伴卡生成通道，2026-09-17）──
   e({ kind: '捕获', channel: 'story', params: {} }),
@@ -408,6 +413,7 @@ const ENTRY_NUMERIC_TIERS: Partial<
   拆解: { levelBonus: [0, 1, 2] },
   克上: { vsHigherLevel: [20, 30, 50] },
   环境加成: { percent: [20, 30, 40, 50] },
+  点金: { tierGain: [1, 2], perDay: [1, 2] },
 };
 
 /**
@@ -429,6 +435,7 @@ export const ENTRY_STRENGTH_BASELINE = {
   // 吞噬/拆解：描述口径都是「不高于你制卡师等级一级」；等级对应见 craft-rank.ts
   吞噬: { levelBonus: 1 },
   拆解: { levelBonus: 1 },
+  点金: { tierGain: 1, perDay: 1 },
 } as const;
 
 /** 各种类的必填内容参数（非空字符串；keywords 为字符串数组） */
@@ -484,6 +491,7 @@ const ENTRY_KIND_LIST: readonly TalentEntryKind[] = [
   '位份',
   '克上',
   '环境加成',
+  '点金',
 ];
 
 /**
@@ -1987,7 +1995,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '伙伴卡能将嘴或下体变得巨大，直接【活吞】体型较小的敌人。被吞噬的敌人会在其体内被缓慢消化，成为她的养分。',
-    entries: [],
+    // 2026-09-17：复用「吞噬一切」的吞噬通道——活吞敌人并消化成养分就是吞噬的语义本身。
+    entries: [{ kind: '吞噬', channel: 'universal', params: {} }],
   },
   {
     name: '支配者倒影',
@@ -2069,7 +2078,12 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '制作卷轴类道具卡时，有极小概率发生奇迹突变，使卷轴效果升华为更高阶的魔法，甚至可能随机召唤出强大的存在。',
-    entries: [],
+    // 2026-09-17：成品限定（卷轴类）+ 品质越一级——「极小概率升华到更高阶」在引擎里
+    // 就是域限定的品质突破（对消爆发的同一条通道）。
+    entries: [
+      { kind: '成品限定', channel: 'universal', params: { productClass: '卷轴' } },
+      { kind: '品质突破', channel: 'universal', params: { productClass: '卷轴' } },
+    ],
   },
   {
     name: '共生体',
@@ -2246,7 +2260,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你能在关键时刻看到弹幕或旁白，提前预知接下来的剧情走向或敌人的技能。但强行改变剧情会遭到世界意志的反噬。',
-    entries: [],
+    // 2026-09-17 SS/S 批次：「提前预知剧情走向」是标准纯叙事指令；「强行改变遭反噬」由描述交给 AI。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '调教大师系统',
@@ -2387,7 +2402,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '当你击败神圣、纯洁属性的雌性单位时，有50%的几率使其堕落，转化为属性相反的淫魔或荡妇，并有极高概率直接收为伙伴卡。',
-    entries: [],
+    // 2026-09-17：复用「你是我的了」的捕获通道——战胜后转化为伙伴卡，语义吻合（堕落 = 转化属性）。
+    entries: [{ kind: '捕获', channel: 'universal', params: {} }],
   },
   {
     name: '混沌赌徒',
@@ -2419,7 +2435,9 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你的身体对异性/同性有天然吸引力。进行欲望主导制卡时，失败的惩罚会转化为对你身体的快感奖励。',
-    entries: [],
+    // 2026-09-17：复用「欲望魔神」的欲望主导通道——这是同一条通道的**失败分支**，
+    // 持此条目即可用情绪素材做主素材制卡（惩罚转化由描述交给 AI 演绎）。
+    entries: [{ kind: '欲望主导', channel: 'universal', params: {} }],
   },
   {
     name: '调教大师系统',
@@ -2485,7 +2503,9 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'S' as TalentGrade,
     source: 'universal',
     description: '每天一次，你可以指定一个素材，使其品质提升一个大等级（如黑铁到青铜）。',
-    entries: [],
+    // 2026-09-17：每日账本的首个消费者——「每天一次」由 worldFlags.dailyUses 记账，
+    // 升档本身走 material.planRarityUpgrade（素材品质 +1 档，封顶不越界）。
+    entries: [{ kind: '点金', channel: 'universal', params: { tierGain: 1, perDay: 1 } }],
   },
   {
     name: '堕落之种',
@@ -2571,7 +2591,9 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你深知痛苦是最高效的燃料。制卡时可对其施虐，大幅降低初始忠诚度或增加一个负面词条，以此为代价强制提升该卡牌一个大等级。',
-    entries: [],
+    // 2026-09-17：复用「品质越一级」的域突破通道——代价（降忠诚/加负面词条）
+    // 由描述交给 AI 演绎，机械侧就是「产物越一阶」。
+    entries: [{ kind: '品质突破', channel: 'universal', params: { productClass: '痛苦淬炼' } }],
   },
   {
     name: '自体熔炉',
@@ -2772,7 +2794,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'S' as TalentGrade,
     source: 'universal',
     description: '你向别人立下的flag从不让人失望，以各种奇怪的形式。',
-    entries: [],
+    // 2026-09-17 SS/S 批次：「立下的 flag 从不让人失望」是纯叙事规则，正好是「只记不向」的用例。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '脏枪小子',
@@ -6940,12 +6963,25 @@ export const IMPLEMENTED_ENTRY_KINDS: ReadonlySet<TalentEntryKind> = new Set<Tal
   '位份',
   '克上',
   '环境加成',
+  '点金',
   '战技附加',
 ]);
 
-/** 该模板是否至少有一条已实装机制（抽卡池与面板标记的判据） */
+/**
+ * 该模板是否至少有一条已实装机制（抽卡池与面板标记的判据）。
+ *
+ * 两条判定路径，缺一不可：
+ *  - **条目路径**：entries 里有已实装种类（绝大多数天赋走这条）；
+ *  - **名字钩子路径**：`talent-hooks.ts` 的规则层登记表里挂了它的名字
+ *    （世界线的收束点/倒也可斩/一拳超人系统——这几条的效果是 Code 直接算的，
+ *    但与条目无关，只看条目会把它们误标成「仅叙事」并踢出抽卡池）。
+ *
+ * 依赖方向：本模块 → talent-hooks（单向）。talent-hooks 不得反向 import 本模块，
+ * 否则成环。
+ */
 export function hasWorkingMechanic(tpl: TalentTemplate): boolean {
-  return tpl.entries.some((e) => IMPLEMENTED_ENTRY_KINDS.has(e.kind));
+  if (tpl.entries.some((e) => IMPLEMENTED_ENTRY_KINDS.has(e.kind))) return true;
+  return hasRuleHook(tpl.name);
 }
 
 /** 捏人抽卡池：只出机制可用的模板（抽到的天赋保证有效果） */

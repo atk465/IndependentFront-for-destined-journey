@@ -53,6 +53,13 @@ import {
 } from '@engine/card-workshop/card-smelt';
 import { entryStrength, hasEntryKind } from '@engine/card-workshop/talent-rule-modifiers';
 import { craftTierCeilingIndex } from '@engine/card-workshop/craft-rank';
+import {
+  coerceLedger,
+  remainingToday,
+  tryUseToday,
+  type DailyLedger,
+} from '@engine/card-workshop/daily-ledger';
+import { planRarityUpgrade } from '@engine/card-workshop/material';
 import type { TalentEntry, TalentEntryKind } from '@engine/card-workshop/talent-entry';
 import { planCommissionDelivery } from '@engine/card-workshop/commission';
 import { getCommissionDefs } from '@engine/commission-runtime';
@@ -586,6 +593,28 @@ export const useGameStore = defineStore('game', () => {
   }
 
   /**
+   * 每日账本读取（2026-09-17）：存档落点 `worldFlags.dailyUses.<key>`，
+   * 与情绪素材的 `worldFlags.emotionExtract` 同一格。旧档/脏值一律由 coerceLedger 兜底。
+   */
+  function dailyLedger(): DailyLedger {
+    return coerceLedger(saveProfile.value?.worldFlags?.dailyUses);
+  }
+
+  /** 记一次每日使用（走既有 set_variable 通道，不新增 SaveProfile 字段） */
+  function dailyUsePatch(key: string, next: DailyLedger): StatePatch {
+    return {
+      op: 'set_variable',
+      target: `worldFlags.dailyUses.${key}`,
+      value: next[key],
+    } as StatePatch;
+  }
+
+  /** 该天赋今日还能不能用（perDay 从条目档位取，缺省 1） */
+  function dailyRemaining(key: string, perDay = 1): number {
+    return remainingToday(dailyLedger(), key, currentGameDay(), perDay);
+  }
+
+  /**
    * 强度档取值（2026-09-17 参数化）：同一条机制，SSS 配的档和 SS 配的档可以不同。
    * 条目声明了该数值就按声明走；没声明则回退基准（= 参数化前的硬编码常量）。
    * 提交路径与 CraftBench 预览路径必须取同一个值，否则预览与实际不一致。
@@ -722,6 +751,43 @@ export const useGameStore = defineStore('game', () => {
   /**
    * 拆解（SSS「素材之王」非战斗侧）：物品 → 素材（材料）。
    */
+  /**
+   * 素材点金（S「素材点金」）：每天一次，指定一个素材提升一个品质大档。
+   * 每日限次走账本（`worldFlags.dailyUses.素材点金`），第二天自然恢复。
+   */
+  async function upgradeMaterial(
+    itemName: string,
+  ): Promise<{ ok: boolean; reason?: string; summary?: string }> {
+    const playerChar = player.value;
+    if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
+    if (!hasMechanicGate('点金')) {
+      return { ok: false, reason: '需要天赋【素材点金】才能启用点金' };
+    }
+    const item = playerChar.inventory.find((i) => i.name === itemName);
+    if (!item) return { ok: false, reason: '找不到该素材' };
+
+    const key = '素材点金';
+    const perDay = strengthOf('点金', 'perDay');
+    const gate = tryUseToday(dailyLedger(), key, currentGameDay(), perDay, key);
+    if (!gate.ok) return { ok: false, reason: gate.reason };
+
+    const { ok, reason, plan } = planRarityUpgrade(item, strengthOf('点金', 'tierGain'));
+    if (!ok || !plan) return { ok: false, reason };
+
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState([
+      {
+        op: 'update_item',
+        target: `characters.${playerChar.name}`,
+        value: { name: itemName, changes: { rarity: plan.to } },
+      },
+      dailyUsePatch(key, gate.next),
+    ]);
+    if (!result.success) return { ok: false, reason: result.errors.join('; ') };
+    await refreshFromDb();
+    return { ok: true, summary: plan.summary };
+  }
+
   async function dismantleItem(
     itemName: string,
   ): Promise<{ ok: boolean; reason?: string; summary?: string }> {
@@ -2500,6 +2566,8 @@ export const useGameStore = defineStore('game', () => {
     smeltCards,
     contractCard,
     dismantleItem,
+    upgradeMaterial,
+    dailyRemaining,
     fuseCards,
     hasMechanicGate,
     seedDemoCards,

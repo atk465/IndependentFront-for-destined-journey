@@ -16,6 +16,7 @@ export type RuleHookKind =
   | 'companionLimitOverride' // 伙伴卡数量上限覆写（最终兵器=1，女王气场=1）
   | 'statMultiplier' // 全属性倍率（女王气场 +50%）
   | 'oncePerBattleNuke' // 每战一次大威力攻击（倒也可斩）
+  | 'dailyNuke' // 每日一次极限一击（一拳超人系统）
   | 'victoryMaterial' // 胜利时额外素材掉落（素材之王）
   | 'defeatRewardMultiplier'; // 战败奖励倍率（世界线的收束点）
 
@@ -35,7 +36,13 @@ const RULE_HOOKS: Readonly<Record<string, RuleHook[]>> = {
   素材之王: [{ kind: 'victoryMaterial', value: 1 }],
   世界线的收束点: [{ kind: 'defeatRewardMultiplier', value: 1 }],
   倒也可斩: [{ kind: 'oncePerBattleNuke', value: 50 }],
+  一拳超人系统: [{ kind: 'dailyNuke', value: 80 }],
 };
+
+/** 该天赋名是否登记了规则钩子（`hasWorkingMechanic` 的名字钩子路径用） */
+export function hasRuleHook(talentName: string | undefined): boolean {
+  return !!talentName && Array.isArray(RULE_HOOKS[talentName]);
+}
 
 /** 收集玩家天赋列表中的全部规则钩子（去重同名天赋，但不同天赋同钩子可叠加） */
 export function collectRuleHooks(talents: readonly { name: string }[] | undefined): RuleHook[] {
@@ -76,6 +83,20 @@ export function hasDefeatReward(hooks: readonly RuleHook[]): boolean {
 export function hasOncePerBattleNuke(hooks: readonly RuleHook[]): boolean {
   return hooks.some((h) => h.kind === 'oncePerBattleNuke');
 }
+
+/**
+ * 每日一击的档位（一拳超人系统；0 = 无此钩子）。
+ *
+ * 与「倒也可斩」的区别在**限次口径**：倒也可斩每场一次（会话级 `nukeUsed`），
+ * 一拳超人每天一次（跨战斗，走 daily-ledger 的 `worldFlags.dailyUses`）。
+ */
+export function dailyNukePercentOf(hooks: readonly RuleHook[]): number {
+  const v = hooks.find((h) => h.kind === 'dailyNuke')?.value;
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0;
+}
+
+/** 每日一击出手后的虚弱系数（24h 内行动值打折；主人裁定 2026-09-17） */
+export const DAILY_NUKE_WEAKNESS = 0.5;
 
 /**
  * 大招的抹除强度：按敌方当前 HP 的百分比（2026-09-17 参数化）。

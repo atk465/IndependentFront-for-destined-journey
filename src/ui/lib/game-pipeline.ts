@@ -67,6 +67,8 @@ import { buildSkirmishSettlementPatches } from '@engine/card-workshop/skirmish-s
 import type { SkirmishContract } from '@engine/card-workshop/skirmish-session';
 import {
   collectRuleHooks,
+  DAILY_NUKE_WEAKNESS,
+  dailyNukePercentOf,
   expMultiplierOf,
   hasDefeatReward,
   hasOncePerBattleNuke,
@@ -82,6 +84,7 @@ import {
   hasTitanPhysique,
   totalIntimidation,
 } from '@engine/card-workshop/talent-rule-modifiers';
+import { canUseToday, coerceLedger, tryUseToday } from '@engine/card-workshop/daily-ledger';
 import type { TalentEntry } from '@engine/card-workshop/talent-entry';
 import { planDefeatCompensation } from '@engine/card-workshop/defeat-compensation';
 import { planSelfEvolution } from '@engine/card-workshop/companion-growth';
@@ -2157,6 +2160,44 @@ export class GamePipeline {
   // UI 经 game-store 三入口（startSkirmish/submitSkirmishCounter/fleeSkirmish）进来，
   // busy 守卫在 store 入口，本层不再自行判忙。
 
+  /** 每日账本：今天这个能力还能不能用（跨天自动恢复，见 daily-ledger.ts） */
+  private canUseDaily(key: string, perDay = 1): boolean {
+    const ledger = coerceLedger(this.game.saveProfile?.worldFlags?.dailyUses);
+    return canUseToday(ledger, key, this.currentGameDay(), perDay);
+  }
+
+  /** 记一次每日使用（落 worldFlags.dailyUses.<key>；失败只告警不打断战斗） */
+  private async markDailyUsed(key: string, perDay = 1): Promise<void> {
+    if (!this.ownsActiveSave) return;
+    const today = this.currentGameDay();
+    const gate = tryUseToday(
+      coerceLedger(this.game.saveProfile?.worldFlags?.dailyUses),
+      key,
+      today,
+      perDay,
+      key,
+    );
+    if (!gate.ok) return;
+    const sm = createStateManager(this.saveId);
+    const result = await sm.commitChatState([
+      {
+        op: 'set_variable',
+        target: `worldFlags.dailyUses.${key}`,
+        value: gate.next[key],
+      } as StatePatch,
+    ]);
+    if (!result.success) {
+      console.warn('[GamePipeline] 每日账本记账失败:', result.errors);
+    }
+  }
+
+  /** 当前 gameDay（与 store 的 currentGameDay 同一公式） */
+  private currentGameDay(): number {
+    const gt = this.game.saveProfile?.gameTime;
+    if (!gt) return 0;
+    return Math.floor(toEpochMinutes(gt) / MINUTES_PER_GAME_DAY);
+  }
+
   /** d20 —— 骰值调用方供给（内核零随机）。MVP 用真随机；接 v3 骰带回放体系为后续工作 */
   private rollD20(): number {
     return 1 + Math.floor(Math.random() * 20);
@@ -2515,6 +2556,15 @@ export class GamePipeline {
       action = { ...action, power: action.power + escalate * session.beat };
       prepend = [`▸ 连战递增：行动值 +${escalate * session.beat}（第 ${session.beat + 1} 拍）`];
     }
+    // 一拳超人系统的代价（SS）：今天已经挥过那一拳 → 当日虚弱（行动值 ×0.5）。
+    // 「24 小时」在这套时间里就是「今天」，跨天由 daily-ledger 的 gameDay 比对自动解除。
+    if (
+      dailyNukePercentOf(collectRuleHooks(playerC.talents?.list)) > 0 &&
+      !this.canUseDaily('一拳超人系统')
+    ) {
+      action = { ...action, power: Math.round(action.power * DAILY_NUKE_WEAKNESS) };
+      prepend = [...(prepend ?? []), `▸ 出拳后的虚弱：行动值 ×${DAILY_NUKE_WEAKNESS}`];
+    }
     // 环境加成（天赋，如 SS「黑潮之子」）：域/场景卡建立了对应环境时，
     // 防御/闪避应对（= 敏捷与防御那一路）获得档位加成。环境随领域/场景卡存续。
     const envBonuses = envBonusesOf(playerC.talents?.list);
@@ -2555,34 +2605,49 @@ export class GamePipeline {
   }
 
   /**
-   * 倒也可斩（SSS）：每场一次的一击（50% 敌方当前 HP，代价 90% 玩家 HP）。
-   * 门槛：talent-hooks 的 oncePerBattleNuke 登记表。
+   * 一次性大招。两条天赋共用这一条通道，**限次口径不同**：
+   *  - 倒也可斩（SSS）：每场一次（会话级 `nukeUsed`），缺省 50% 敌方当前 HP
+   *  - 一拳超人系统（SS）：每天一次（daily-ledger 的 `worldFlags.dailyUses`），缺省 80%
+   * 两者都有时每日口径优先（更严的那条说了算），出手后同样消耗 90% 玩家 HP。
    */
   private async skirmishNuke(): Promise<void> {
     const session = this.game.skirmishSession;
     const playerC = this.game.player;
     if (!session || session.finished !== null || !playerC) return;
-    if (session.nukeUsed === true) {
-      this.emitMessage('【倒也可斩】本场已经用过了——这一招一场只出一次。', 'assistant');
-      return;
-    }
     const hooks = collectRuleHooks(playerC.talents?.list);
-    if (!hasOncePerBattleNuke(hooks)) {
+    const dailyPct = dailyNukePercentOf(hooks);
+    const perBattle = hasOncePerBattleNuke(hooks);
+    if (dailyPct <= 0 && !perBattle) {
       this.emitMessage('【倒也可斩】需要持有对应天赋。', 'assistant');
       return;
     }
+    const daily = dailyPct > 0;
+    if (daily) {
+      if (!this.canUseDaily('一拳超人系统')) {
+        this.emitMessage(
+          '【一拳超人系统】今天的那一拳已经挥过了——明天再来（今日行动值处于虚弱）。',
+          'assistant',
+        );
+        return;
+      }
+    } else if (session.nukeUsed === true) {
+      this.emitMessage('【倒也可斩】本场已经用过了——这一招一场只出一次。', 'assistant');
+      return;
+    }
+    const pct = daily ? dailyPct : nukePercentOf(hooks);
     const cost = Math.max(1, Math.round(session.playerHp * 0.9));
     const next = playBeat(
       session,
-      { label: '倒也可斩', power: 0, tags: [] },
+      { label: daily ? '一拳超人' : '倒也可斩', power: 0, tags: [] },
       this.rollSkirmishD20(),
       {
         nuke: true,
-        nukePercent: nukePercentOf(hooks),
+        nukePercent: pct,
         recoil: cost,
       },
     );
     this.game.setSkirmishSession(next);
+    if (daily) await this.markDailyUsed('一拳超人系统');
     this.emitMessage(next.log.slice(session.log.length).join('\n'), 'assistant');
     if (next.finished) await this.settleAndNarrate(next);
   }
