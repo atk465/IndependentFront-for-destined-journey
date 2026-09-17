@@ -3200,7 +3200,16 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'A' as TalentGrade,
     source: 'universal',
     description: '当你处于【骑乘】状态时，你的攻击必定暴击，且腰部与大腿力量绵绵不绝。',
-    entries: [],
+    // 2026-09-18 状态批次：「骑乘暴击」——骑乘状态缺量，降档叙事 + 条件加成近似
+    // （卡组有伙伴 = 可能骑乘），真骑乘判定记 backlog。
+    entries: [
+      {
+        kind: '条件加成',
+        channel: 'universal',
+        params: { cond: '伙伴卡数', threshold: 1, percent: 10, perExtra: 0 },
+      },
+      { kind: '叙事意图', channel: 'universal', params: {} },
+    ],
   },
   {
     name: '狂野女牛仔',
@@ -4371,7 +4380,12 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '在冰雪环境中，只要你与另一名处于脱衣状态的伙伴卡紧密相拥，双方的HP和MP将以极快的速度恢复，且会大幅增加羁绊与发情值。',
-    entries: [],
+    // 2026-09-18 状态批次：雪天环境 +20%（环境表已有「雪天」）；
+    // 「相拥恢复 HP/MP」「羁绊/发情值」由叙事演绎（HP/MP 双回复需脱战系统）。
+    entries: [
+      { kind: '环境加成', channel: 'universal', params: { env: '雪天', percent: 20 } },
+      { kind: '叙事意图', channel: 'universal', params: {} },
+    ],
   },
   {
     name: '卢恩符文刻印',
@@ -4379,7 +4393,16 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你可以将古代卢恩符文直接刻在自己或伙伴卡的肉体上。每刻印一个符文，全属性提升5%，但被刻印部位会变得极其敏感，受到触摸时会产生强烈的快感与硬直。',
-    entries: [],
+    // 2026-09-18 状态批次：「每刻一符全属性+5%」→ 条件加成近似（刻印计数
+    // 走 counters，与烙印/厄运同族），「敏感部位」由叙事演绎。
+    entries: [
+      {
+        kind: '条件加成',
+        channel: 'universal',
+        params: { cond: '伙伴卡数', threshold: 0, percent: 0, perExtra: 5 },
+      },
+      { kind: '叙事意图', channel: 'universal', params: {} },
+    ],
   },
   {
     name: '盾女之誓',
@@ -4387,7 +4410,16 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '当你的队伍中存在持盾牌的女性伙伴卡时，你受到的所有物理伤害由她代为承受。每次成功格挡，都会加深她对你的依赖与服从。',
-    entries: [],
+    // 2026-09-18 状态批次：「持盾伙伴代受伤害」→ 条件加成（有伙伴时防御提升），
+    // 伤害转移本身是反制系统的扩展，记 backlog。
+    entries: [
+      {
+        kind: '条件加成',
+        channel: 'universal',
+        params: { cond: '伙伴卡数', threshold: 1, percent: 15, perExtra: 0 },
+      },
+      { kind: '叙事意图', channel: 'universal', params: {} },
+    ],
   },
   {
     name: '雪崩之势',
@@ -5175,7 +5207,17 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '当你的女性伙伴卡满血时，所有等级低于或等于她的敌人初次登场时有50%概率陷入恐惧状态1回合。',
-    entries: [],
+    // 2026-09-18 状态批次：「满血伙伴卡开战恐惧」→ 会话级近似——满血判定用
+    // companionWear（≥90 = 满血），恐惧 = 敌方威胁降低（weaken 的开战版）。
+    // 概率判定（50%）由调用方掷骰。
+    entries: [
+      {
+        kind: '群威',
+        channel: 'universal',
+        params: { threshold: 2, percent: 15, perExtra: 5 },
+      },
+      { kind: '叙事意图', channel: 'universal', params: {} },
+    ],
   },
   {
     name: '丝袜收藏家',
@@ -5316,7 +5358,16 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '制作出的女性伙伴卡会因战场上的流血而兴奋。战场上每有一个单位进入流血状态，她的所有技能效果提升5%，最多叠加10次。',
-    entries: [],
+    // 2026-09-18 状态批次：「战场流血叠层」→ 战技附加（流血 power 2 beats 3），
+    // 叠层计数由叙事拿捏（引擎没有流血层数追踪）。
+    entries: [
+      { kind: '战技附加', channel: 'universal', params: { status: '流血', power: 2, beats: 3 } },
+      {
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['血之歌'], weight: 2 },
+      },
+    ],
   },
   {
     name: '醉拳仙灵',
@@ -5500,7 +5551,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'B' as TalentGrade,
     source: 'universal',
     description: '在战斗中，你装备越暴露，你的攻击力和暴击率就越高。',
-    entries: [],
+    // 2026-09-18 状态批次：「暴露度」引擎无此量，降档纯叙事。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '痛苦转化（被动）',

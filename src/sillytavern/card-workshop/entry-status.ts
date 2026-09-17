@@ -30,6 +30,9 @@ export const STATUS_TYPE_OVERRIDE: Readonly<Record<string, CardInPlayEffect['typ
   麻痹: 'stun',
   定身: 'stun',
   僵直: 'stun',
+  滑倒: 'stun',
+  恐惧: 'weaken',
+  诅咒: 'weaken',
 };
 
 /** 单张卡携带的战技（写进 `CardItem.战技`） */
