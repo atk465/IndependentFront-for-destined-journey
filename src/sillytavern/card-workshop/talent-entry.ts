@@ -1360,7 +1360,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '介绍文字就是干巴巴的数据和公式，但效果稳定可靠。',
-    entries: [],
+    // 2026-09-18 D 级批次①：「干巴巴的数据公式但稳定可靠」是卡面风味。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '赌徒直觉',
@@ -5864,7 +5865,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'C' as TalentGrade,
     source: 'universal',
     description: '你制作的药水和炸弹效果总是随机上下浮动，偶尔有惊喜，但更多的是惊吓。',
-    entries: [],
+    // 2026-09-18 D 级批次②：「效果随机上下浮动」= 风险系数（本就实装的那个）
+    entries: [{ kind: '风险系数', channel: 'universal', params: { risk: 20 } }],
   },
   {
     name: '紧急维修套件',
@@ -6424,7 +6426,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'C' as TalentGrade,
     source: 'universal',
     description: '你和你的伙伴卡获取经验值的速度提升15%。',
-    entries: [],
+    // 2026-09-18 D 级批次②：「经验获取 +15%」需通用经验倍率钩子（缺量），先给叙事入口
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '讨价还价',
@@ -6511,7 +6514,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'C' as TalentGrade,
     source: 'universal',
     description: '你酒量很好，可以通过喝酒快速恢复少量精神力，但有可能会进入醉酒状态。',
-    entries: [],
+    // 2026-09-18 D 级批次①：「喝酒回精神但可能醉酒」= 醉酒二态（缺量），先给叙事入口。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '足下臣服',
@@ -6729,7 +6733,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你对各种体液有特殊癖好。战斗中收集到的不同体液可以作为添加剂在制卡时使用，为卡牌附加各种意想不到的微弱效果。',
-    entries: [],
+    // 2026-09-18 D 级批次①：「体液作制卡添加剂」= 体液类别（缺量），先给叙事入口。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '鲨鱼嗅觉',
@@ -6788,7 +6793,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '在沙漠、戈壁等恶劣干旱地形中，水分流失速度减半，移动速度不受地形惩罚减免，且极易发现隐藏的地下水脉。',
-    entries: [],
+    // 2026-09-18 D 级批次①：「干旱地形水分减半流失、发现地下水脉」是生存叙事。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '黄沙迷彩',
@@ -6796,7 +6802,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '在沙尘暴或沙漠环境中，只要你静止不动，就会自动进入隐身状态，非常适合用于发起偷袭或进行偷窥。',
-    entries: [],
+    // 2026-09-18 D 级批次①：「沙尘暴静止即隐身」是环境叙事。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '凛冬冬眠',
@@ -6804,7 +6811,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '在寒冷环境中睡眠时，你的伤势恢复速度是平时的五倍，甚至能断肢再生。但睡眠期间你将完全失去反抗能力，任由身边的伙伴卡摆布。',
-    entries: [],
+    // 2026-09-18 D 级批次②续：「寒冷睡眠五倍恢复/断肢再生」是极端生存叙事（完全失去反抗是代价）。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '人间烟灰缸',
@@ -6812,7 +6820,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '伙伴卡有吸烟的习惯，并且会把烟头摁在你或敌人的身上。这是一种纯粹的羞辱技能，伤害不高，但侮辱性极强。',
-    entries: [],
+    // 2026-09-18 D 级批次①：「烟头摁在身上」是羞辱互动，伤害不高的那部分由叙事拿捏。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '家政达人',
@@ -6820,42 +6829,58 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '擅长制作各种生活类伙伴卡，如会自动打扫的扫帚仆人、会自动烹饪的厨刀小人，毫无战斗力，但能极大提升生活品质。',
-    entries: [],
+    // 2026-09-18 D 级批次②：「生活类伙伴卡」= 成品限定生活 + 叙事（生活质量由叙事演绎）
+    entries: [
+      { kind: '成品限定', channel: 'universal', params: { productClass: '生活' } },
+      { kind: '叙事意图', channel: 'universal', params: {} },
+    ],
   },
   {
     name: '回收利用',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '使用任何道具卡后，有微小几率回收一部分基础素材。',
-    entries: [],
+    // 2026-09-18 D 级批次②续：「道具用后回收素材」需要消耗品回收事件，缺量，先给叙事入口。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '逃脱烟幕',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '制作烟雾弹类道具卡时，烟雾的遮蔽效果会更好一些。',
-    entries: [],
+    // 2026-09-18 D 级批次②：「烟雾遮蔽效果更好」= 烟幕类成功率 20
+    entries: [{ kind: '成功率加成', channel: 'universal', params: { bonus: 20 } }],
   },
   {
     name: '小发明家',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '你总喜欢在道具卡里加一些没什么用但很有趣的小功能，比如会唱歌的炸弹。',
-    entries: [],
+    // 2026-09-18 D 级批次①：「会唱歌的炸弹」是趣味设定。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '厨师',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '能将普通的食材制作成提供微弱、短效增益的食物道具，至少味道还不错。',
-    entries: [],
+    // 2026-09-18 D 级批次②：「食材做成食物道具」= 成品限定食物 + 美味词条
+    entries: [
+      { kind: '成品限定', channel: 'universal', params: { productClass: '食物' } },
+      {
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['美味'], weight: 2 },
+      },
+    ],
   },
   {
     name: '文科生',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '你制作的卡牌，介绍文字写得天花乱坠，充满诗意，但实际效果往往平平无奇。',
-    entries: [],
+    // 2026-09-18 D 级批次①：「文字天花乱坠但效果平平」是卡面风味。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '野猪骑士',
@@ -6863,7 +6888,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你骑乘猪科生物时获得额外的亲和加成——坐骑不会尥蹶子把你甩下来，且冲锋伤害提升15%。如果你的伙伴卡和猪有关，它的忠诚度永远不会低于100。',
-    entries: [],
+    // 2026-09-18 D 级批次①：「猪坐骑不尥蹶子 + 冲锋加成」是骑乘叙事（忠诚不低于 100 由叙事记）。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '踩蚁的乐趣',
@@ -6871,7 +6897,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '制作出的卡牌在面对昆虫类或体型极小的敌人时，攻击力会莫名提升50%。她们单纯地享受踩扁小东西的快感。',
-    entries: [],
+    // 2026-09-18 D 级批次②续：「对体型极小敌人 +50%」需要对敌体型判定（敌方体型已有，但「昆虫类」分类缺），先给叙事入口。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '贤者时间系统',
@@ -6879,63 +6906,80 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '在你高潮射精后的五分钟内，你将进入贤者模式，所有欲望消失，逻辑思维能力和计算能力提升到极致，如同一个绝对理性的机器。',
-    entries: [],
+    // 2026-09-18 D 级批次②续：「贤者模式逻辑思维极致」是状态叙事。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '亡者低语',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '制作亡灵卡牌时，能听到它们的低语，更容易制造出拥有特殊记忆或技能的亡灵。',
-    entries: [],
+    // 2026-09-18 D 级批次①：「听到亡灵低语、造出特殊记忆亡灵」由叙事演绎。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '风之语者',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '制作的飞行单位或风元素卡牌，飞行速度和灵活性获得小幅提升。',
-    entries: [],
+    // 2026-09-18 D 级批次①：「飞行单位更快更灵活」由叙事演绎。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '匠人之手',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '制造出的装备卡外观会格外精致，虽然属性不变，但在交易时能卖出更高的价格。',
-    entries: [],
+    // 2026-09-18 D 级批次②：「装备卡外观精致」= 精致词条
+    entries: [
+      {
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['精致'], weight: 2 },
+      },
+    ],
   },
   {
     name: '巨力崇拜',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '倾向于制造拥有巨力词条的卡牌，它们攻击更高，但攻击速度和命中率会下降。',
-    entries: [],
+    // 2026-09-18 D 级批次①：「巨力词条高攻低速」是材料口味叙事。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '暗影仆从',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '制作的刺客或侦察型伙伴卡，在阴影中的潜行能力获得小幅提升。',
-    entries: [],
+    // 2026-09-18 D 级批次①：「阴影中潜行提升」由叙事演绎。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '圣光亲和',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '倾向于制造治疗与祝福类卡牌，对亡灵单位的伤害有额外加成。',
-    entries: [],
+    // 2026-09-18 D 级批次①：「治疗祝福倾向、对亡灵加伤」由叙事演绎。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '腐败之触',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '使用带毒或腐烂的材料时，能更有效地提取毒素，制成的卡牌大概率附加中毒效果。',
-    entries: [],
+    // 2026-09-18 D 级批次②：「带毒材料大概率附加中毒」= 战技附加（中毒 2/2 拍）
+    entries: [
+      { kind: '战技附加', channel: 'universal', params: { status: '中毒', power: 2, beats: 2 } },
+    ],
   },
   {
     name: '战场工程师',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '擅长制作陷阱、路障、简易炮台等功能性构装体卡牌。',
-    entries: [],
+    // 2026-09-18 D 级批次①：「陷阱路障炮台构装」是功能造物叙事。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '石之心',
@@ -6943,133 +6987,174 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '使用岩石、矿物类材料时，更容易制造出拥有更高HP和坚韧词条的伙伴卡，但敏捷通常偏低。',
-    entries: [],
+    // 2026-09-18 D 级批次①：「岩石材料更高 HP 但低敏捷」是材料口味叙事。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '嗜血本能',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '制造野兽卡时，有微小概率出现嗜血词条，击杀单位后回复少量生命。',
-    entries: [],
+    // 2026-09-18 D 级批次①：「击杀回血」的微量回复由叙事拿捏。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '尖锐化',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '使用兽牙、利爪材料时，更容易为武器卡附加微量的破甲效果。',
-    entries: [],
+    // 2026-09-18 D 级批次①：「兽牙利爪附加破甲」——破甲维度未落地，先给叙事入口。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '寒气入门',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '使用冰霜材料时，有微小概率为攻击附加短暂的寒冷效果，略微降低目标攻速。',
-    entries: [],
+    // 2026-09-18 D 级批次①：「冰霜附加寒冷降攻速」由叙事演绎（攻速维度未落地）。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '毒素入门',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '使用毒囊等材料时，有微小概率附加中毒效果，造成极微弱的持续伤害。',
-    entries: [],
+    // 2026-09-18 D 级批次①：「毒囊附加中毒」的微量持续伤由叙事拿捏（战技附加另有硬版）。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '白给之人',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '无论你的实力有多么强大，每次战斗你都注定败北。',
-    entries: [],
+    // 2026-09-18 D 级批次②：「注定败北」是设计梗——保留纯风味；「战败经验加成」那半用叙事补
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '蛮力种子',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '制作出的伙伴卡基础攻击力微量提升，且在行动时倾向于使用更直接的暴力手段。',
-    entries: [],
+    // 2026-09-18 D 级批次②续：「直球暴力倾向」= 蛮力/直球词条（强倾向）
+    entries: [
+      {
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['蛮力', '直球'], weight: 2 },
+      },
+    ],
   },
   {
     name: '踢击入门',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '伙伴卡的踢击伤害比普通攻击略高。',
-    entries: [],
+    // 2026-09-18 D 级批次②续：「踢击伤害略高」= 踢击词条（倾向）
+    entries: [
+      {
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['踢击'], weight: 2 },
+      },
+    ],
   },
   {
     name: '抽象派',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '你制作的卡面充满艺术气息，也许会有意想不到的效果。',
-    entries: [],
+    // 2026-09-18 D 级批次①：「卡面有艺术气息、有意想不到的效果」由叙事演绎。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '只是个面瘫',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '你是个面瘫，对普通敌人产生威慑效果，但对某些敌人会使其增强战意。',
-    entries: [],
+    // 2026-09-18 D 级批次①：「威慑普通敌人、增强某些敌人战意」是世界对你的脸的回应。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '冷笑话',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '你的笑话很冷，让人遍体生寒、行动迟缓，但你会因为自己的笑话笑个不停。',
-    entries: [],
+    // 2026-09-18 D 级批次①：「笑话很冷让人迟缓」是世界对冷笑话的惩罚式回应。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '播种九子',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '你不是龙，但你依然跟龙一样淫乱，并且与你性交过的对象必定会产下九个子嗣。',
-    entries: [],
+    // 2026-09-18 D 级批次①：「性交过必产九子」是设定层事实。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '你真帅',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '你很帅，经此而已。',
-    entries: [],
+    // 2026-09-18 D 级批次①：描述只有一句「你很帅，经此而已」——纯风味本尊。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '矿工之友',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '在矿场搜集素材时，效率略有提升，有小概率发现伴生矿。',
-    entries: [],
+    // 2026-09-18 D 级批次②续：「矿场效率提升、发现伴生矿」= 采集动作（缺量），先给叙事入口。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '森林向导',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '在森林地形中，你的移动速度提升10%，且不易遭遇低级魔物骚扰。',
-    entries: [],
+    // 2026-09-18 D 级批次①：「森林移动 +10%、不遇低级魔物」是旅行叙事。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '沼泽适应',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '在沼泽地形中，你的移动速度不会受到影响。',
-    entries: [],
+    // 2026-09-18 D 级批次①：「沼泽移动不受影响」是旅行叙事。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '二手专家',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '你在购买二手卡牌或素材时，有微小概率发现其隐藏的价值。',
-    entries: [],
+    // 2026-09-18 D 级批次②续：「发现二手隐藏价值」= 鉴定（感知真实价值，与赌徒直觉同族）
+    entries: [
+      { kind: '鉴定', channel: 'universal', params: {} },
+      // 鉴定是风味条目（无消费方），补一条叙事意图让这条真的算「已实装」
+      { kind: '叙事意图', channel: 'universal', params: {} },
+    ],
   },
   {
     name: '刺绣爱好者',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '你制作的装备卡会带有刺绣元素，外观更美丽，并获得微弱的属性加成（如防御+1）。',
-    entries: [],
+    // 2026-09-18 D 级批次②：「刺绣元素 + 微弱属性」= 刺绣词条
+    entries: [
+      {
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['刺绣'], weight: 2 },
+      },
+    ],
   },
   {
     name: '气味控',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '你对气味很敏感，可以通过闻伙伴卡穿过的衣物来判断其当前的情绪状态。',
-    entries: [],
+    // 2026-09-18 D 级批次①：「闻衣物判断情绪」是感知规则。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '捆绑初学者',
@@ -7077,56 +7162,73 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你获得了束缚绳（饰品）（黑铁）装备卡的制作方法，可以百分百成功制作束缚绳卡牌，有较低概率在战斗中束缚敌人一回合或作为情趣道具。',
-    entries: [],
+    // 2026-09-18 D 级批次②续：「束缚绳 100% 成功」= 配方解锁 + 成功率 100
+    entries: [
+      { kind: '配方解锁', channel: 'universal', params: { recipe: '束缚绳' } },
+      { kind: '成功率加成', channel: 'universal', params: { bonus: 100 } },
+    ],
   },
   {
     name: '耐寒',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '在雪山等寒冷环境下，体力消耗速度减缓。',
-    entries: [],
+    // 2026-09-18 D 级批次①：「寒冷环境体力消耗减缓」是生存叙事。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '耐热',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '在火山口等炎热环境下，体力消耗速度减缓。',
-    entries: [],
+    // 2026-09-18 D 级批次①：「炎热环境体力消耗减缓」是生存叙事。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '动物亲和',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '普通的野兽不会主动攻击你。',
-    entries: [],
+    // 2026-09-18 D 级批次②续：「野兽不主动攻击」是生态规则。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '姐姐的呼唤',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '你制作的卡牌有高概率让伙伴卡拥有温柔体贴的御姐性格。',
-    entries: [],
+    // 2026-09-18 D 级批次②：「温柔御姐性格」= 词条必附
+    entries: [
+      {
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['御姐', '温柔'], weight: 3 },
+      },
+    ],
   },
   {
     name: '美食家',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '能通过烹饪制作出带有微弱buff的食物，效果持续时间很短。',
-    entries: [],
+    // 2026-09-18 D 级批次①：「烹饪出带微弱 buff 的食物」= 食物类别（缺量），先给叙事入口。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '抗干扰',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '在嘈杂的环境中制卡，你的专注度不会受到太大影响。',
-    entries: [],
+    // 2026-09-18 D 级批次①：「嘈杂环境专注不受影响」是环境规则。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '胶衣爱好者',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '穿着或制作胶衣类装备卡时，你会感到安心，精神力消耗速度降低5%。',
-    entries: [],
+    // 2026-09-18 D 级批次①：「穿胶衣安心、精神消耗降低」是着装叙事。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '完美主义',
@@ -7134,7 +7236,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '制卡时，你会下意识地将能量调整到最完美状态，这会略微增加制卡时间，但小幅提高成功率。',
-    entries: [],
+    // 2026-09-18 D 级批次②：「下意识调整到完美状态，小幅提高成功率」= 成功率 20
+    entries: [{ kind: '成功率加成', channel: 'universal', params: { bonus: 20 } }],
   },
   {
     name: '玉足祈福',
@@ -7142,7 +7245,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你可以命令伙伴卡用她们的脚为你的下体进行抛光。此行为能小幅提升你制作卡牌的成功率。',
-    entries: [],
+    // 2026-09-18 D 级批次②：「小幅提升制卡成功率」= 成功率 20
+    entries: [{ kind: '成功率加成', channel: 'universal', params: { bonus: 20 } }],
   },
   {
     name: '黄金祝福',
@@ -7150,28 +7254,38 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '在制卡的关键时刻，若有伙伴卡对你进行排尿，则有小概率使卡牌的某个词条品质提升一级。',
-    entries: [],
+    // 2026-09-18 D 级批次②：「小概率词条升档」= 成功率 20（词条升档仍缺通道，叙事补）
+    entries: [{ kind: '成功率加成', channel: 'universal', params: { bonus: 20 } }],
   },
   {
     name: '肠道探险家',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '你对生物的消化系统有特殊理解，可以用于治疗伙伴或对敌人造成难以忍受的内部骚扰。',
-    entries: [],
+    // 2026-09-18 D 级批次②续：「消化系统理解用于治疗/骚扰」由叙事演绎。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '命名修正',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '为卡牌起一个与其实际能力完全相反的名字，可以使其获得一个隐藏的反转效果。',
-    entries: [],
+    // 2026-09-18 D 级批次②续：「反名得反转效果」需要反转词条层（缺量），先给叙事入口。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '扁平化设计',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '你制作的所有伙伴卡都是2D纸片人形态，物理防御极低，但对能量攻击有微弱抗性。',
-    entries: [],
+    // 2026-09-18 D 级批次②续：「2D 纸片人形态」= 扁平/纸片词条必附（物防极低能量抗性由叙事演绎）
+    entries: [
+      {
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['扁平', '纸片'], weight: 3 },
+      },
+    ],
   },
   {
     name: '滑溜溜',
@@ -7179,7 +7293,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '获得体液地雷技能卡的制作方法。在地面留下一滩难以察觉的液体（同时最多三个），敌人踩上后有极高几率滑倒，并沾染上气味。',
-    entries: [],
+    // 2026-09-18 D 级批次②续：「体液地雷技能卡」= 配方解锁
+    entries: [{ kind: '配方解锁', channel: 'universal', params: { recipe: '体液地雷' } }],
   },
   {
     name: '羞耻回响',
@@ -7187,7 +7302,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '获得嘲讽胖次装备卡的制作方法。一条画着鬼脸的内裤，被攻击命中时会发出响亮的嘲讽声，小幅吸引敌人仇恨。',
-    entries: [],
+    // 2026-09-18 D 级批次②续：「嘲讽胖次装备卡」= 配方解锁
+    entries: [{ kind: '配方解锁', channel: 'universal', params: { recipe: '嘲讽胖次' } }],
   },
   {
     name: '失语之咒',
@@ -7195,7 +7311,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '获得淫语诅咒技能卡的制作方法。使目标在接下来的一分钟内，说出的所有话语都会自动变成不堪入耳的淫言秽语，对施法者有奇效。',
-    entries: [],
+    // 2026-09-18 D 级批次②续：「淫语诅咒技能卡」= 配方解锁
+    entries: [{ kind: '配方解锁', channel: 'universal', params: { recipe: '淫语诅咒' } }],
   },
   {
     name: '丝袜即是正义',
@@ -7203,7 +7320,14 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '将丝绸、蛛丝等材料作为辅助素材，制成的伙伴卡会自动生成各种款式的丝袜作为初始装备。',
-    entries: [],
+    // 2026-09-18 D 级批次②：「丝绸蛛丝自动生成丝袜」= 词条必附
+    entries: [
+      {
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['丝袜'], weight: 3 },
+      },
+    ],
   },
   {
     name: '辣妹养成',
@@ -7211,14 +7335,28 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '使用宝石、香料、丝绸等艳丽的素材，容易制造出肤色健康、性格开放、喜欢打扮的辣妹伙伴卡。',
-    entries: [],
+    // 2026-09-18 D 级批次②：「艳丽素材出辣妹」= 性格外观词条必附
+    entries: [
+      {
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['辣妹', '开放'], weight: 3 },
+      },
+    ],
   },
   {
     name: '触手共鸣',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '使用章鱼、水母等软体生物素材，伙伴卡不仅可能拥有触手，性格也会变得黏人、痴缠。',
-    entries: [],
+    // 2026-09-18 D 级批次②：「软体素材出触手黏人」= 词条必附
+    entries: [
+      {
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['触手', '黏人'], weight: 3 },
+      },
+    ],
   },
   {
     name: '无口之声',
@@ -7226,21 +7364,36 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '在绝对安静的环境下，不发一言地完成制卡，伙伴卡有较高概率成为情感不外露的无口少女。',
-    entries: [],
+    // 2026-09-18 D 级批次②：「静默制卡出无口少女」= 词条必附
+    entries: [
+      {
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['无口'], weight: 3 },
+      },
+    ],
   },
   {
     name: '元气注入',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '在阳光明媚的早晨，一边做着广播体操一边制卡，能显著提升伙伴卡成为元气少女的概率。',
-    entries: [],
+    // 2026-09-18 D 级批次②：「晨间广播体操出元气少女」= 词条必附
+    entries: [
+      {
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['元气'], weight: 3 },
+      },
+    ],
   },
   {
     name: '自慰熟练',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '在非战斗状态下，你的自慰速度提升50%，并能更快地进入贤者时间以抵抗精神攻击。',
-    entries: [],
+    // 2026-09-18 D 级批次②续：「自慰速度 +50%、更快贤者时间」由叙事演绎。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '酒鬼的诞生',
@@ -7248,7 +7401,14 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '使用任何含酒精的液体作为融合剂，伙伴卡都会有嗜酒的特性，喝醉后会展现出隐藏的另一面性格。',
-    entries: [],
+    // 2026-09-18 D 级批次②：「酒精融合剂出嗜酒」= 词条必附
+    entries: [
+      {
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['嗜酒'], weight: 3 },
+      },
+    ],
   },
   {
     name: '恋物癖之心',
@@ -7256,14 +7416,22 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '获得原味收集技能卡的制作方法。（一次性卡牌）可以从敌人身上窃取一件穿过的内衣或袜子，该物品可作为下次欲望主导制卡的微弱增幅素材。',
-    entries: [],
+    // 2026-09-18 D 级批次②续：「原味收集技能卡」= 配方解锁
+    entries: [{ kind: '配方解锁', channel: 'universal', params: { recipe: '原味收集' } }],
   },
   {
     name: '格斗熟练',
     grade: 'D' as TalentGrade,
     source: 'universal',
     description: '你的伙伴卡有更强的近身搏斗能力。',
-    entries: [],
+    // 2026-09-18 D 级批次②续：「近身搏斗更强」= 格斗词条（倾向）
+    entries: [
+      {
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['格斗'], weight: 2 },
+      },
+    ],
   },
 
   // ── v12 第七批 E 级全量（主人 2026-09-15；纯风味/QoL，entries 全空）──
