@@ -113,6 +113,11 @@ import {
   shouldMarkNemesis,
 } from '@engine/card-workshop/conditional-exp';
 import {
+  addBlueprint,
+  coerceBlueprints,
+  pickCopyTarget,
+} from '@engine/card-workshop/opponent-blueprints';
+import {
   coerceTrueNames,
   hasTrueName,
   rememberTrueName,
@@ -3272,6 +3277,36 @@ export class GamePipeline {
                 changes: { 词条: evolved.plan.new词条 },
               },
             } as StatePatch);
+          }
+        }
+      }
+      // 支配者倒影（S）：战败时抄下敌方**威胁最高的一式**作制卡蓝本。
+      //    自动记下并给可见提示——复制本身没代价，用不用在制卡时决定。
+      if (session.finished === '败北') {
+        const holdsMirror = flatEntriesOf(playerC.talents?.list).some((e) => e.kind === '倒影');
+        if (holdsMirror) {
+          const target = pickCopyTarget(session.intents);
+          if (target) {
+            const before = coerceBlueprints(this.game.saveProfile?.worldFlags?.skillBlueprints);
+            const cap = Math.max(1, entryStrength(playerC.talents?.list, '倒影', 'maxHold'));
+            const after = addBlueprint(
+              before.length >= cap ? before.slice(before.length - cap + 1) : before,
+              {
+                name: target.move,
+                from: session.enemyName,
+                day: this.currentGameDay(),
+                threat: target.threat,
+              },
+            );
+            settlementPatches.push({
+              op: 'set_variable',
+              target: 'worldFlags.skillBlueprints',
+              value: after,
+            } as StatePatch);
+            this.emitMessage(
+              `▸ 【支配者倒影】你记住了【${session.enemyName}】的「${target.move}」（威胁 ${target.threat}）——制卡时可以拿它当蓝本。`,
+              'assistant',
+            );
           }
         }
       }

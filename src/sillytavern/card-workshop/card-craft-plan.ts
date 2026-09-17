@@ -34,6 +34,7 @@ import {
 } from './craft-talent-bonus';
 import { liftCraftRating } from '../craft-gen-chain';
 import { liftFromMisfortune } from './craft-flow-hooks';
+import { blueprintCraftBonus } from './opponent-blueprints';
 
 // ════════════════════════════════════════════════════════════════════
 // 数值表（初稿，数值总表终审对象）
@@ -116,6 +117,8 @@ export interface CardCraftPlan {
   notes: string[];
   /** 审计链（逐条可复算） */
   audit: string[];
+  /** 支配者倒影：本次是否真的用了蓝本（调用方据此消耗掉那一份） */
+  blueprintUsed: boolean;
   /** 赌徒谬论用掉了几层厄运（调用方据此清零） */
   misfortuneConsumed: number;
   /** 时间回溯是否真的发动（调用方据此扣 MP、清预付开关） */
@@ -138,6 +141,11 @@ export interface CardCraftInput {
   talents?: readonly { name?: string; entries?: readonly TalentEntry[] }[];
   /** 评级上浮上下文 */
   lift?: CraftLiftContext;
+  /**
+   * 技能蓝本（S「支配者倒影」）：从败仗里抄来的敌方招式。
+   * 用了它 → 产物**定格为技能卡** + 评级上浮一档（照成名招式做，比凭空摸索稳）。
+   */
+  blueprint?: { name: string };
 }
 
 /** 从天赋列表摊平条目 */
@@ -229,7 +237,25 @@ export function planCardCraft(input: CardCraftInput): {
     }
   }
 
-  // ④ 制卡侧条目加成（越阶 / 惰性 / 模块化 / 战技附加 / 产出数量 / 欲望主导）
+  // ④ 技能蓝本（支配者倒影）：定格为技能卡 + 评级上浮一档
+  let blueprintUsed = false;
+  if (input.blueprint?.name) {
+    const bonus = blueprintCraftBonus();
+    if (!card.词条.includes(bonus.formEntry)) {
+      card = { ...card, 词条: [bonus.formEntry, ...card.词条] };
+    }
+    if (!card.recipe) card = { ...card, recipe: base.recipe };
+    // 形态换成技能卡后，融合类型字段保留（那是「怎么做的」，不是「做成了什么」）
+    const lifted = liftCraftRating(rating, bonus.ratingLift);
+    if (lifted !== rating) {
+      rating = lifted;
+      blueprintUsed = true;
+      audit.push(`${bonus.note}（蓝本：${input.blueprint.name}）`);
+    }
+    notes.push(bonus.note);
+  }
+
+  // ⑤ 制卡侧条目加成（越阶 / 惰性 / 模块化 / 战技附加 / 产出数量 / 欲望主导）
   //    —— 与 `craft_gen` 链共用同一个函数，两条路径的加成口径不会漂。
   const talentList = input.talents ?? [];
   const entries = flatEntries(talentList);
@@ -245,14 +271,14 @@ export function planCardCraft(input: CardCraftInput): {
   card = entryBoost.card;
   notes.push(...entryBoost.notes);
 
-  // ⑤ 评级与档位落回卡上（词条/档位可能已被越阶改过）
+  // ⑥ 评级与档位落回卡上（词条/档位可能已被越阶改过）
   card = { ...card, recipe: { ...card.recipe, rating } };
   if (rating === '大失败' || rating === '失败') {
     // 失败品不是成品：保留卡（残料也是东西），但不封印、不视为高阶
     card = { ...card, sealed: false };
   }
 
-  // ⑥ 消耗与经验（Code 定）
+  // ⑦ 消耗与经验（Code 定）
   const consumed = consumedByRating(rating, mainName, unique.slice(1));
   const exp = craftExpFor(card.cardTier, rating);
   audit.push(`消耗：${consumed.join('、') || '（无）'}`);
@@ -271,6 +297,7 @@ export function planCardCraft(input: CardCraftInput): {
       audit,
       misfortuneConsumed,
       rewindUsed,
+      blueprintUsed,
     },
   };
 }

@@ -118,6 +118,7 @@ describe('TALENT_ENTRY_POOL（单一真源）', () => {
     '炼金',
     '真名',
     '模块化',
+    '倒影',
   ];
   const ALL_CHANNELS: readonly TalentChannel[] = [
     'creation',

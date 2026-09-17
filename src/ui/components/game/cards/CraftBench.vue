@@ -482,12 +482,15 @@ const craftMain = ref('');
 const craftSubA = ref('');
 const craftSubB = ref('');
 const craftIntent = ref('');
+const craftBlueprint = ref('');
 const crafting = ref(false);
 const craftMsg = ref('');
 const craftErr = ref('');
 const craftCard_busy = computed(
   () => crafting.value || !craftMain.value || craftMain.value === craftSubA.value,
 );
+/** 手上的技能蓝本（S「支配者倒影」） */
+const blueprints = computed(() => game.skillBlueprints());
 
 /** 预览：与落库同源（planCardCraft 是纯函数，这里先看「会做出什么档次的东西」） */
 const craftPreview = computed(() => {
@@ -502,6 +505,7 @@ const craftPreview = computed(() => {
     fallbackName: `${craftMain.value}·卡`,
     talents: [],
     lift: {},
+    ...(craftBlueprint.value ? { blueprint: { name: craftBlueprint.value } } : {}),
   });
 });
 
@@ -514,6 +518,7 @@ async function doCraftCard() {
     mainName: craftMain.value,
     subNames: [craftSubA.value, craftSubB.value].filter((s) => s && s !== craftMain.value),
     intent: craftIntent.value,
+    ...(craftBlueprint.value ? { blueprintName: craftBlueprint.value } : {}),
   });
   crafting.value = false;
   if (!r.ok) {
@@ -525,6 +530,7 @@ async function doCraftCard() {
   craftSubA.value = '';
   craftSubB.value = '';
   craftIntent.value = '';
+  craftBlueprint.value = '';
 }
 
 // ═══ 足之炼金术区（`炼金` 条目：S「足之炼金术」）═══
@@ -1372,6 +1378,17 @@ const RATING_HINT: Record<string, string> = {
             <option v-for="m in materials" :key="m.name" :value="m.name">{{ m.name }}</option>
           </select>
         </div>
+        <select
+          v-if="blueprints.length > 0"
+          v-model="craftBlueprint"
+          class="slot-select"
+          aria-label="选择技能蓝本"
+        >
+          <option value="">不用蓝本…</option>
+          <option v-for="b in blueprints" :key="b.name" :value="b.name">
+            {{ b.name }}（抄自 {{ b.from }}）
+          </option>
+        </select>
         <textarea
           v-model="craftIntent"
           class="note-input"

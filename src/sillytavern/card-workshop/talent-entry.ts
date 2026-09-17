@@ -87,7 +87,8 @@ export type TalentEntryKind =
   | '打脸' // 被嘲讽后打赢：海量经验 + 打脸点数（S「打脸升级系统」）
   | '炼金' // 伙伴卡踩踏素材炼出全新道具卡（S「足之炼金术」）
   | '真名' // 可念出对方真名造成一次精神冲击（S「真名看破系统」）
-  | '模块化'; // 载具卡有额外改装槽，战斗中可热插拔换形态（S「模块化天才」）
+  | '模块化' // 载具卡有额外改装槽，战斗中可热插拔换形态（S「模块化天才」）
+  | '倒影'; // 战败可复制敌方招式作制卡蓝本（S「支配者倒影」）
 
 /** 骨架条目：kind + 预设参数 + 独占渠道标记 */
 export interface TalentEntry {
@@ -412,6 +413,7 @@ export const TALENT_ENTRY_POOL: readonly TalentEntry[] = [
   e({ kind: '炼金', channel: 'universal', params: { maxTier: 3 } }),
   e({ kind: '真名', channel: 'universal', params: { shockBase: 20, shockPerLevel: 2 } }),
   e({ kind: '模块化', channel: 'universal', params: { slots: 2, swaps: 1 } }),
+  e({ kind: '倒影', channel: 'universal', params: { maxHold: 5 } }),
   e({ kind: '改造', channel: 'story', params: {} }),
   // ── v10 扩容（伙伴卡生成通道，2026-09-17）──
   e({ kind: '捕获', channel: 'story', params: {} }),
@@ -526,6 +528,7 @@ const ENTRY_NUMERIC_TIERS: Partial<
   炼金: { maxTier: [2, 3] },
   真名: { shockBase: [10, 20], shockPerLevel: [2, 3] },
   模块化: { slots: [1, 2], swaps: [1] },
+  倒影: { maxHold: [3, 5, 9] },
 };
 
 /**
@@ -568,6 +571,7 @@ export const ENTRY_STRENGTH_BASELINE = {
   炼金: { maxTier: 3 },
   真名: { shockBase: 20, shockPerLevel: 2 },
   模块化: { slots: 2, swaps: 1 },
+  倒影: { maxHold: 5 },
 } as const;
 
 /** 各种类的必填内容参数（非空字符串；keywords 为字符串数组） */
@@ -645,6 +649,7 @@ const ENTRY_KIND_LIST: readonly TalentEntryKind[] = [
   '炼金',
   '真名',
   '模块化',
+  '倒影',
 ];
 
 /**
@@ -685,6 +690,7 @@ const ENTRY_OPTIONAL_NUMERIC: Partial<Record<TalentEntryKind, readonly string[]>
   炼金: ['maxTier'],
   真名: ['shockBase', 'shockPerLevel'],
   模块化: ['slots', 'swaps'],
+  倒影: ['maxHold'],
 };
 
 export function validateTalentEntries(entries: readonly TalentEntry[]): {
@@ -2186,7 +2192,9 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你崇拜着将你踩在脚下的强者。被敌人击败后，你可以复制对方的一个技能，并以此为蓝本，在制卡时创造出一张全新的技能卡。',
-    entries: [],
+    // 2026-09-17：战败时自动抄下敌方**威胁最高的一式**作蓝本（上限走 `倒影{maxHold}`）；
+    // 制卡时选用蓝本 → 产物定格为技能卡 + 评级上浮一档，用掉即扣。
+    entries: [{ kind: '倒影', channel: 'universal', params: { maxHold: 5 } }],
   },
   {
     name: '天气掌控者',
@@ -7196,6 +7204,7 @@ export const IMPLEMENTED_ENTRY_KINDS: ReadonlySet<TalentEntryKind> = new Set<Tal
   '炼金',
   '真名',
   '模块化',
+  '倒影',
   '战技附加',
 ]);
 

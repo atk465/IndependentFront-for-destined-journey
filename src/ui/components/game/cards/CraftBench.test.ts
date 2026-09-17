@@ -15,10 +15,13 @@ import type { InventoryItem } from '@engine/types';
 const mockGame: {
   player: { inventory: InventoryItem[]; name: string } | null;
   hasMechanicGate: (kind: string) => boolean;
+  skillBlueprints: () => { name: string; from: string }[];
 } = reactive({
   player: null,
   // 天赋门槛（2026-09-17）：默认未持有——吞噬/熔炼区在测试里不渲染
   hasMechanicGate: (_kind: string) => false,
+  // 技能蓝本（S「支配者倒影」）：默认空——制卡区不渲染蓝本选择器
+  skillBlueprints: () => [],
 });
 
 vi.mock('../../../stores/game-store', () => ({ useGameStore: () => mockGame }));

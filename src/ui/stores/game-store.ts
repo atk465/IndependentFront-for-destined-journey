@@ -85,6 +85,7 @@ import {
 } from '@engine/card-workshop/craft-flow-hooks';
 import { planFootAlchemy } from '@engine/card-workshop/partner-alchemy';
 import { planCardCraft } from '@engine/card-workshop/card-craft-plan';
+import { coerceBlueprints, consumeBlueprint } from '@engine/card-workshop/opponent-blueprints';
 import { fallbackCraftNarration } from '@engine/card-craft-narrate';
 import { tierForLevel } from '@engine/card-workshop/companion-capture';
 import {
@@ -886,6 +887,8 @@ export const useGameStore = defineStore('game', () => {
     mainName: string;
     subNames: string[];
     intent: string;
+    /** 技能蓝本名（S「支配者倒影」；用掉即从账上扣） */
+    blueprintName?: string;
   }): Promise<{
     ok: boolean;
     reason?: string;
@@ -910,6 +913,7 @@ export const useGameStore = defineStore('game', () => {
       mainName: input.mainName,
       subNames: input.subNames,
       intent: input.intent,
+      ...(input.blueprintName ? { blueprint: { name: input.blueprintName } } : {}),
       inventory: playerChar.inventory,
       d20: 1 + Math.floor(Math.random() * 20),
       fallbackName: `${input.mainName}·卡`,
@@ -996,6 +1000,19 @@ export const useGameStore = defineStore('game', () => {
               target: `characters.${playerChar.name}`,
               value: { totalExp: plan.exp },
               metadata: { delta: true, source: 'card-craft' },
+            } as StatePatch,
+          ]
+        : []),
+      // 支配者倒影：蓝本用掉即扣
+      ...(plan.blueprintUsed && input.blueprintName
+        ? [
+            {
+              op: 'set_variable',
+              target: 'worldFlags.skillBlueprints',
+              value: consumeBlueprint(
+                coerceBlueprints(saveProfile.value?.worldFlags?.skillBlueprints),
+                input.blueprintName,
+              ),
             } as StatePatch,
           ]
         : []),
@@ -1180,6 +1197,11 @@ export const useGameStore = defineStore('game', () => {
   /** 当前宿敌（面板展示用） */
   function currentNemesis() {
     return coerceNemesis(saveProfile.value?.worldFlags?.nemesis);
+  }
+
+  /** 手上有哪些技能蓝本（面板展示与制卡选择用） */
+  function skillBlueprints() {
+    return coerceBlueprints(saveProfile.value?.worldFlags?.skillBlueprints);
   }
 
   /** 已记住的真名（面板展示用） */
@@ -3455,6 +3477,7 @@ export const useGameStore = defineStore('game', () => {
     exchangeItem,
     drawMaterialTen,
     footAlchemy,
+    skillBlueprints,
     redeemFaceSlap,
     faceSlapPoints,
     currentNemesis,
