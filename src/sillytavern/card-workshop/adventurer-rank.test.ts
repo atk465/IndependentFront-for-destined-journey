@@ -2,11 +2,7 @@
  * adventurer-rank.test.ts —— 冒险者等级 = 声望派生（阈值表 + 边界）
  */
 import { describe, it, expect } from 'vitest';
-import {
-  ADVENTURER_RANK_TIERS,
-  nextRankGap,
-  rankForReputation,
-} from './adventurer-rank';
+import { ADVENTURER_RANK_TIERS, nextRankGap, rankForReputation } from './adventurer-rank';
 
 describe('rankForReputation', () => {
   it('阈值边界：恰好达到 min 即晋升', () => {

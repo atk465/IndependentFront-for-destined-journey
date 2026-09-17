@@ -32,7 +32,9 @@ export function buildEventCommission(
   if (typeof currentDay !== 'number' || !Number.isFinite(currentDay)) return null;
   const day = Math.floor(currentDay);
   const ttl =
-    typeof template.ttlDays === 'number' && Number.isFinite(template.ttlDays) && template.ttlDays > 0
+    typeof template.ttlDays === 'number' &&
+    Number.isFinite(template.ttlDays) &&
+    template.ttlDays > 0
       ? Math.floor(template.ttlDays)
       : EVENT_COMMISSION_DEFAULT_TTL_DAYS;
   const { ttlDays: _ttl, ...def } = template;
@@ -65,6 +67,9 @@ function eventCommissionToDef(ec: EventCommission): CommissionDef {
 }
 
 /** 动态委托清单 → 定义视图清单（保序） */
-export function eventCommissionDefs(list: readonly EventCommission[] | undefined, currentDay: number): CommissionDef[] {
+export function eventCommissionDefs(
+  list: readonly EventCommission[] | undefined,
+  currentDay: number,
+): CommissionDef[] {
   return pruneEventCommissions(list, currentDay).map(eventCommissionToDef);
 }

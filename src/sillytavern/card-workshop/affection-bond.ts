@@ -66,7 +66,10 @@ export interface BondInfo {
  * 伙伴卡的共鸣判定：卡名即角色名，查好感账本。
  * 无记录 → null（中立，不出审计行 —— 沉默的多数不值得一行字）。
  */
-export function bondForCard(cardName: string, affections: AffectionMap | undefined): BondInfo | null {
+export function bondForCard(
+  cardName: string,
+  affections: AffectionMap | undefined,
+): BondInfo | null {
   const raw = affections?.[cardName];
   if (typeof raw !== 'number' || !Number.isFinite(raw)) return null;
   const affection = clampAffection(raw);
