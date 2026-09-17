@@ -3558,7 +3558,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'A' as TalentGrade,
     source: 'universal',
     description: '你每走一公里，系统就会自动生成一定数量的卡币。你的等级越高，每公里的汇率也越高。',
-    entries: [],
+    // 2026-09-18 缺量批次：移动距离（缺量），先给叙事入口。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '反派洗白系统',
@@ -4508,7 +4509,11 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你制作的载具都能进行过载操作，短时间内爆发远超常规的性能，但会持续损失耐久度，甚至导致引擎永久性损伤。',
-    entries: [],
+    // 2026-09-18 缺量批次：载具过载操作（战斗内短时爆发 + 耐久消耗）缺战斗 hook，先叙事。
+    entries: [
+      { kind: '成品限定', channel: 'universal', params: { productClass: '载具' } },
+      { kind: '叙事意图', channel: 'universal', params: {} },
+    ],
   },
   {
     name: '幽灵船长',
@@ -6698,7 +6703,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '当你的伙伴卡或你自身被敌人的污物类技能命中时，不仅免疫其负面效果，反而会恢复少量MP，并暂时提升对腐蚀和精神攻击的抗性。',
-    entries: [],
+    // 2026-09-18 缺量批次：污物技能类别（缺量），先给叙事入口。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '小小守护者',
