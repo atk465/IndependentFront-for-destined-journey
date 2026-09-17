@@ -15,24 +15,36 @@ import AppButton from '../../shared/AppButton.vue';
 
 const game = useGameStore();
 
-// ═══ 好运之骰（SS 天赋；十面全部 Code 兑现，见 fortune-dice.ts）═══
-const canRollDice = computed(() => game.hasMechanicGate('日掷'));
-const diceLeft = computed(() => (canRollDice.value ? game.dailyRemaining('好运之骰', 1) : 0));
-const diceBusy = ref(false);
+// ═══ 每日骰（SS 好运之骰十面 / S 命运之骰六面；骰面全部 Code 兑现，见 fortune-dice.ts）═══
+// 两张表可能同时持有，所以按**列表**渲染，每张各有各的今日次数。
+const diceTables = computed(() => (game.hasMechanicGate('日掷') ? game.ownedDiceTables() : []));
+const diceBusy = ref('');
 const diceError = ref('');
-const diceResult = ref<{ pip: number; faceId: string; tone: string; summary: string } | null>(null);
+const diceResult = ref<{
+  key: string;
+  pip: number;
+  faceId: string;
+  tone: string;
+  summary: string;
+} | null>(null);
 
-async function rollDice() {
-  if (diceBusy.value || diceLeft.value <= 0) return;
-  diceBusy.value = true;
+/** 该表的今日剩余次数 */
+function diceLeft(key: string): number {
+  return game.dailyRemaining(key, 1);
+}
+
+async function rollDice(key: string) {
+  if (diceBusy.value || diceLeft(key) <= 0) return;
+  diceBusy.value = key;
   diceError.value = '';
-  const r = await game.rollFortuneDice();
-  diceBusy.value = false;
+  const r = await game.rollFortuneDice(key);
+  diceBusy.value = '';
   if (!r.ok) {
     diceError.value = r.reason ?? '投骰失败';
     return;
   }
   diceResult.value = {
+    key,
     pip: r.pip ?? 0,
     faceId: r.faceId ?? '',
     tone: r.tone ?? '平',
@@ -157,26 +169,34 @@ async function draw() {
 
     <p v-if="error" class="altar-error" role="alert">{{ error }}</p>
 
-    <!-- 好运之骰（SS）：每日一次的十面骰，十面全部 Code 兑现 -->
-    <section v-if="canRollDice" class="altar-dice" aria-label="好运之骰">
-      <h4 class="d-label">好运之骰（天赋：好运之骰）</h4>
-      <p class="altar-verse small">
-        每天一次投十面骰——十面各有各的兑现，底石说完就作数。<b>今日剩余 {{ diceLeft }} 次</b>。
-      </p>
-      <div v-if="diceResult" class="dice-result" :data-tone="diceResult.tone">
-        <span class="dice-pip">{{ diceResult.pip }}</span>
-        <span class="dice-face">{{ diceResult.faceId }}（{{ diceResult.tone }}）</span>
-        <p class="dice-summary">{{ diceResult.summary }}</p>
+    <!-- 每日骰（好运之骰十面 / 命运之骰六面）：骰面全部 Code 兑现 -->
+    <section v-if="diceTables.length > 0" class="altar-dice" aria-label="每日骰">
+      <h4 class="d-label">每日骰</h4>
+      <div v-for="t in diceTables" :key="t.key" class="dice-block">
+        <p class="altar-verse small">
+          <b>{{ t.label }}</b
+          >（{{ t.faces }} 面）——每天一次，骰面各有各的兑现，底石说完就作数。 今日剩余
+          <b>{{ diceLeft(t.key) }}</b> 次。
+        </p>
+        <div
+          v-if="diceResult && diceResult.key === t.key"
+          class="dice-result"
+          :data-tone="diceResult.tone"
+        >
+          <span class="dice-pip">{{ diceResult.pip }}</span>
+          <span class="dice-face">{{ diceResult.faceId }}（{{ diceResult.tone }}）</span>
+          <p class="dice-summary">{{ diceResult.summary }}</p>
+        </div>
+        <AppButton
+          variant="primary"
+          :disabled="diceLeft(t.key) <= 0 || diceBusy === t.key"
+          :loading="diceBusy === t.key"
+          @click="rollDice(t.key)"
+        >
+          {{ diceLeft(t.key) > 0 ? `投${t.label}` : '今日已投过' }}
+        </AppButton>
       </div>
       <p v-if="diceError" class="altar-error" role="alert">{{ diceError }}</p>
-      <AppButton
-        variant="primary"
-        :disabled="diceLeft <= 0 || diceBusy"
-        :loading="diceBusy"
-        @click="rollDice"
-      >
-        {{ diceLeft > 0 ? '投十面骰' : '今日已投过' }}
-      </AppButton>
     </section>
 
     <AppButton variant="primary" :disabled="!canAfford || drawing" :loading="drawing" @click="draw">

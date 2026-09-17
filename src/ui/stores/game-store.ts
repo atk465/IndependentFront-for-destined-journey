@@ -51,22 +51,26 @@ import {
   planReshape,
   planSmelt,
 } from '@engine/card-workshop/card-smelt';
-import { entryStrength, hasEntryKind } from '@engine/card-workshop/talent-rule-modifiers';
+import {
+  diceTablesOf,
+  entryStrength,
+  hasEntryKind,
+} from '@engine/card-workshop/talent-rule-modifiers';
 import { craftTierCeilingIndex } from '@engine/card-workshop/craft-rank';
 import {
   coerceBuffs,
+  coerceCounters,
   coerceLedger,
+  counterOf,
   markBuff,
   remainingToday,
   tryUseToday,
   type DailyLedger,
 } from '@engine/card-workshop/daily-ledger';
-import {
-  FORTUNE_DICE_LEDGER_KEY,
-  isRerollFace,
-  rollFortuneDie,
-} from '@engine/card-workshop/fortune-dice';
+import { isRerollFace, rollOnTable } from '@engine/card-workshop/fortune-dice';
+import type { FortuneDiceTable } from '@engine/card-workshop/fortune-dice';
 import { planRarityUpgrade } from '@engine/card-workshop/material';
+import { planUnequalExchange } from '@engine/card-workshop/unequal-exchange';
 import { materialNameOf } from '@engine/card-workshop/card-dismantle';
 import type { TalentEntry, TalentEntryKind } from '@engine/card-workshop/talent-entry';
 import { planCommissionDelivery } from '@engine/card-workshop/commission';
@@ -622,6 +626,51 @@ export const useGameStore = defineStore('game', () => {
     return remainingToday(dailyLedger(), key, currentGameDay(), perDay);
   }
 
+  /** 玩家持有的骰表（好运之骰十面 / 命运之骰六面——可能同时持有两张） */
+  function ownedDiceTables(): FortuneDiceTable[] {
+    return diceTablesOf(player.value?.talents?.list);
+  }
+
+  /** 累计计数（不随天失效）：如【败犬烙印】 */
+  function counters(): Record<string, number> {
+    return coerceCounters(saveProfile.value?.worldFlags?.counters);
+  }
+
+  /** 败犬烙印当前持有数 */
+  function scarCount(): number {
+    return counterOf(counters(), '败犬烙印');
+  }
+
+  /**
+   * 标记「下一次制卡消耗一枚烙印」。
+   *
+   * 制卡由叙事驱动（AI 在正文里出制卡意图），玩家无法在那一刻点按钮——
+   * 所以做成**预付开关**：先勾上，下一次制卡时引擎自动扣一枚并把评级上浮两档。
+   */
+  async function setPendingScar(use: boolean): Promise<{ ok: boolean; reason?: string }> {
+    if (!activeSaveId.value) return { ok: false, reason: '无活跃存档' };
+    if (use && !hasMechanicGate('烙印')) {
+      return { ok: false, reason: '需要天赋【败犬烙印】' };
+    }
+    if (use && scarCount() <= 0) return { ok: false, reason: '烙印已经用完了' };
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState([
+      {
+        op: 'set_variable',
+        target: 'worldFlags.pendingScar',
+        value: use,
+      } as StatePatch,
+    ]);
+    if (!result.success) return { ok: false, reason: result.errors.join('; ') };
+    await refreshFromDb();
+    return { ok: true };
+  }
+
+  /** 下一次制卡是否已预付烙印 */
+  function pendingScar(): boolean {
+    return saveProfile.value?.worldFlags?.pendingScar === true;
+  }
+
   /**
    * 强度档取值（2026-09-17 参数化）：同一条机制，SSS 配的档和 SS 配的档可以不同。
    * 条目声明了该数值就按声明走；没声明则回退基准（= 参数化前的硬编码常量）。
@@ -760,6 +809,51 @@ export const useGameStore = defineStore('game', () => {
    * 拆解（SSS「素材之王」非战斗侧）：物品 → 素材（材料）。
    */
   /**
+   * 不等价交换（S「不等价交换」）：放弃一件素材/卡牌，换回 1~2 个同类型、
+   * 品质不高于原来的回报。**换亏是设计的一部分**——份数与抽到哪张都由骰值决定。
+   */
+  async function exchangeItem(
+    itemName: string,
+  ): Promise<{ ok: boolean; reason?: string; summary?: string }> {
+    const playerChar = player.value;
+    if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
+    if (!hasMechanicGate('置换')) {
+      return { ok: false, reason: '需要天赋【不等价交换】才能置换' };
+    }
+    const item = playerChar.inventory.find((i) => i.name === itemName);
+    if (!item) return { ok: false, reason: '找不到该物品' };
+
+    const pool = parseCatalogData(getContentRegistry().catalog).cardPool.filter(
+      (c) => !c.imitation,
+    );
+    const { ok, reason, plan } = planUnequalExchange(
+      item as unknown as Parameters<typeof planUnequalExchange>[0],
+      pool,
+      Math.random,
+      strengthOf('置换', 'maxReturn'),
+    );
+    if (!ok || !plan) return { ok: false, reason };
+
+    const patches: StatePatch[] = [
+      {
+        op: 'remove_item',
+        target: `characters.${playerChar.name}`,
+        value: { name: plan.sourceName, quantity: 1 },
+      },
+      ...plan.gains.map((g) => ({
+        op: 'add_item' as const,
+        target: `characters.${playerChar.name}`,
+        value: g as unknown as Record<string, unknown>,
+      })),
+    ];
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState(patches);
+    if (!result.success) return { ok: false, reason: result.errors.join('; ') };
+    await refreshFromDb();
+    return { ok: true, summary: plan.summary };
+  }
+
+  /**
    * 好运之骰（SS）：每天一次投十面骰。**十面全部 Code 兑现**（fortune-dice.ts），
    * AI 只负责把结果写成一段像命运的话——抽奖是唯一的纯随机入口，结果必须可复算。
    *
@@ -768,7 +862,7 @@ export const useGameStore = defineStore('game', () => {
    *  - 账本操作：「再来一次」退还今日次数（不写账本）
    *  - 当日增益：写 worldFlags.dailyBuffs（跨天自动失效）
    */
-  async function rollFortuneDice(): Promise<{
+  async function rollFortuneDice(tableKey: string): Promise<{
     ok: boolean;
     reason?: string;
     pip?: number;
@@ -780,15 +874,19 @@ export const useGameStore = defineStore('game', () => {
     const playerChar = player.value;
     if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
     if (!hasMechanicGate('日掷')) {
-      return { ok: false, reason: '需要天赋【好运之骰】才能投骰' };
+      return { ok: false, reason: '需要持有能投骰的天赋' };
     }
+    // 该表必须是玩家**真的持有**的那张（防止 UI 被绕过后投出不存在的骰子）
+    const table = ownedDiceTables().find((t) => t.key === tableKey);
+    if (!table) return { ok: false, reason: `你没有【${tableKey}】这枚骰子` };
+
     const today = currentGameDay();
-    const key = FORTUNE_DICE_LEDGER_KEY;
+    const key = table.key;
     const perDay = strengthOf('日掷', 'perDay');
     const gate = tryUseToday(dailyLedger(), key, today, perDay, key);
     if (!gate.ok) return { ok: false, reason: gate.reason };
 
-    const face = rollFortuneDie(rollDie(10));
+    const face = rollOnTable(table, rollDie(table.faces));
     const patches: StatePatch[] = [];
     const notes: string[] = [];
     let summary = `【${face.id}】${face.text}`;
@@ -2737,7 +2835,12 @@ export const useGameStore = defineStore('game', () => {
     contractCard,
     dismantleItem,
     upgradeMaterial,
+    exchangeItem,
     rollFortuneDice,
+    ownedDiceTables,
+    scarCount,
+    setPendingScar,
+    pendingScar,
     dailyRemaining,
     fuseCards,
     hasMechanicGate,

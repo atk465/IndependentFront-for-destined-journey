@@ -10,6 +10,10 @@
  * 为什么不是「一次性消费」而是「按天记账」：这些能力（素材点金/每日一击/每日骰）
  * 第二天就该恢复——记账要能自然过期，所以存的是 **gameDay**，不是布尔开关。
  *
+ * 本模块同时托管**不随天失效的累计计数**（counters 段，如败犬烙印）：
+ * 它们是同一族「存档账本原语」，分两个文件会让人找两次。区别只在语义——
+ * daily 段比对 gameDay，counter 段只累加/消耗。
+ *
  * 纯度约束：纯函数、不 mutate 入参、不读时钟（today 一律由调用方传入）。
  */
 
@@ -139,4 +143,63 @@ export function tryUseToday(
   }
   const next = markUsed(ledger, key, today);
   return { ok: true, next, remaining: remainingToday(next, key, today, cap) };
+}
+
+// ════════════════════════════════════════════════════════════════════
+// 累计计数（**不**随天失效）：worldFlags.counters.<key> = number
+// ════════════════════════════════════════════════════════════════════
+//
+// 与 daily 段的区别只有一条：**不比对 gameDay**。用于「战败累计烙印」这类
+// 跨战斗攒出来的资源——攒多少就是多少，明天不会清零。
+
+/** 计数表：key → 累计值 */
+export type Counters = Record<string, number>;
+
+/** 宽松读入 → 归一化计数表（脏值逐条丢弃，绝不抛） */
+export function coerceCounters(raw: unknown): Counters {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const out: Counters = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!key || 非法(value)) continue;
+    out[key] = Math.max(0, Math.floor(value as number));
+  }
+  return out;
+}
+
+/** 当前累计值（缺省 0） */
+export function counterOf(counters: Counters | undefined, key: string): number {
+  const v = counters?.[key];
+  return typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.floor(v)) : 0;
+}
+
+/** 累加（返回新表，不改入参；delta 为负时按消耗处理并 clamp 到 0） */
+export function addCounter(counters: Counters | undefined, key: string, delta: number): Counters {
+  const step = Number.isFinite(delta) ? Math.round(delta) : 0;
+  const next = Math.max(0, counterOf(counters, key) + step);
+  return { ...(counters ?? {}), [key]: next };
+}
+
+/**
+ * 消耗计数（判断 + 扣减一步到位）。
+ *
+ * @returns ok=false 时 next 原样返回，reason 可直接给玩家看
+ */
+export function spendCounter(
+  counters: Counters | undefined,
+  key: string,
+  amount = 1,
+  label = key,
+): { ok: boolean; next: Counters; reason?: string; left: number } {
+  const need = Math.max(1, Math.round(amount) || 1);
+  const have = counterOf(counters, key);
+  if (have < need) {
+    return {
+      ok: false,
+      next: counters ?? {},
+      reason: `【${label}】不足（当前 ${have}，需要 ${need}）`,
+      left: have,
+    };
+  }
+  const next = addCounter(counters, key, -need);
+  return { ok: true, next, left: counterOf(next, key) };
 }

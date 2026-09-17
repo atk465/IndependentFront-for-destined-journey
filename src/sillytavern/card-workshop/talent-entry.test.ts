@@ -99,6 +99,8 @@ describe('TALENT_ENTRY_POOL（单一真源）', () => {
     '环境加成',
     '点金',
     '日掷',
+    '烙印',
+    '置换',
   ];
   const ALL_CHANNELS: readonly TalentChannel[] = [
     'creation',

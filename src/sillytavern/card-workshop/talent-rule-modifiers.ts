@@ -13,6 +13,7 @@
 
 import type { TalentEntry, TalentEntryKind } from './talent-entry';
 import { ENTRY_STRENGTH_BASELINE } from './talent-entry';
+import { diceTableByFaces, type FortuneDiceTable } from './fortune-dice';
 
 /** 从天赋条目列表中汇总指定 kind 的数值合计 */
 function sumEntries(
@@ -104,6 +105,31 @@ export function envBonusesOf(
       if (!env || typeof percent !== 'number' || !Number.isFinite(percent) || percent <= 0)
         continue;
       out.push({ env, percent });
+    }
+  }
+  return out;
+}
+
+/**
+ * 收集玩家持有的骰表（`日掷{faces}` → 面表）。
+ *
+ * 两条天赋（好运之骰十面 / 命运之骰六面）共用 `日掷` 种类，靠 faces 分派；
+ * 玩家可能同时持有两张，所以这里返回**列表**而不是单张——面板一次列出全部。
+ * 重复持有同一 faces 只算一张。
+ */
+export function diceTablesOf(
+  talents: readonly { entries?: readonly TalentEntry[] }[] | undefined,
+): FortuneDiceTable[] {
+  const seen = new Set<string>();
+  const out: FortuneDiceTable[] = [];
+  for (const t of talents ?? []) {
+    for (const e of t.entries ?? []) {
+      if (e.kind !== '日掷') continue;
+      const faces = e.params.faces;
+      const table = diceTableByFaces(typeof faces === 'number' ? faces : 10);
+      if (!table || seen.has(table.key)) continue;
+      seen.add(table.key);
+      out.push(table);
     }
   }
   return out;

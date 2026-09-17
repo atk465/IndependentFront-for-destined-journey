@@ -64,8 +64,12 @@ export interface CraftGenRequest {
   presets?: import('./types').AgentPreset[];
   /** 天赋生成倾向段（卡牌工坊 T-S2 路线图实装；无天赋缺省，注入零成本） */
   talentBias?: string;
-  /** 当日「制卡顺利」（好运之骰 5 点面）：产物评级整体上浮一档。缺省 = 不生效 */
-  fortuneCraftLuck?: boolean;
+  /**
+   * 产物评级上浮档数（缺省 0 = 不生效）。两个来源共用这一个旋钮：
+   *  - 「制卡顺利」（好运之骰 5 点面 / 命运之骰 5 点面）：+1 档
+   *  - 「败犬烙印」消耗一枚：+2 档（「化腐朽为神奇」）
+   */
+  ratingLift?: number;
 }
 
 /** Helper: extract attributes from old or new marker shape */
@@ -596,14 +600,17 @@ export function buildCraftPatches(
  *   - patches: 提交给 StateManager 的状态变更
  */
 /**
- * 制作评级上浮一档（纯函数）：大失败 → 失败 → 成功 → 精益求精（封顶）。
+ * 制作评级上浮 n 档（纯函数）：大失败 → 失败 → 成功 → 精益求精（封顶不越界）。
  * 与 `card-fusion.rollCraftRating` 同一套评级枚举，不引入第二套档位。
+ *
+ * @param steps 上浮档数（缺省 1）：制卡顺利 +1 / 败犬烙印 +2
  */
-export function liftCraftRating(rating: CraftRating): CraftRating {
+export function liftCraftRating(rating: CraftRating, steps = 1): CraftRating {
   const order: readonly CraftRating[] = ['大失败', '失败', '成功', '精益求精'];
   const idx = order.indexOf(rating);
-  if (idx < 0 || idx >= order.length - 1) return rating;
-  return order[idx + 1];
+  if (idx < 0) return rating;
+  const n = Math.max(0, Math.round(steps));
+  return order[Math.min(idx + n, order.length - 1)];
 }
 
 export async function runCraftGenChain(
@@ -613,15 +620,18 @@ export async function runCraftGenChain(
   // Step 1: callCraftGenAgent
   const craftOutput = await callCraftGenAgent(request, deps);
 
-  // 好运之骰「制卡顺利」（5 点面）：产物评级整体上浮一档。
+  // 评级上浮（好运之骰「制卡顺利」+1 / 败犬烙印「扭转冲突」+2）：
   // 在**评级产生之后、落库之前**改，且写进制作叙事让玩家看到天赋真的生效。
-  if (request.fortuneCraftLuck) {
-    const lifted = liftCraftRating(craftOutput.rating);
+  const lift = Math.max(0, Math.round(request.ratingLift ?? 0));
+  if (lift > 0) {
+    const lifted = liftCraftRating(craftOutput.rating, lift);
     if (lifted !== craftOutput.rating) {
       craftOutput.rating = lifted;
       craftOutput.narrative = [
         craftOutput.narrative,
-        `【制卡顺利】今日手气极佳——评级上浮一档至「${lifted}」`,
+        lift >= 2
+          ? `【败犬烙印】你烧掉一枚烙印，强行扭转了这条命运线——评级上浮至「${lifted}」`
+          : `【制卡顺利】今日手气极佳——评级上浮一档至「${lifted}」`,
       ]
         .filter(Boolean)
         .join('\n');

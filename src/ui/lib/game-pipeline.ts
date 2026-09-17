@@ -88,7 +88,10 @@ import {
   buffActiveToday,
   canUseToday,
   coerceBuffs,
+  coerceCounters,
   coerceLedger,
+  counterOf,
+  spendCounter,
   tryUseToday,
 } from '@engine/card-workshop/daily-ledger';
 import {
@@ -2171,6 +2174,46 @@ export class GamePipeline {
   // UI 经 game-store 三入口（startSkirmish/submitSkirmishCounter/fleeSkirmish）进来，
   // busy 守卫在 store 入口，本层不再自行判忙。
 
+  /**
+   * 本次制卡的评级上浮档数，并在必要时**真正扣掉一枚败犬烙印**。
+   *
+   * 两个来源叠加：当日「制卡顺利」+1 档；玩家预付了烙印则再 +2 档（扣一枚、
+   * 清掉预付开关）。烙印不足时只退化成 +1，绝不吞掉玩家的预付意图而不做事。
+   */
+  private async consumeCraftLift(): Promise<number> {
+    const flags = this.game.saveProfile?.worldFlags;
+    const lucky = buffActiveToday(
+      coerceBuffs(flags?.dailyBuffs),
+      DAILY_BUFF_CRAFT_LUCK,
+      this.currentGameDay(),
+    )
+      ? 1
+      : 0;
+    if (flags?.pendingScar !== true || !this.ownsActiveSave) return lucky;
+
+    const spend = spendCounter(coerceCounters(flags?.counters), '败犬烙印', 1, '败犬烙印');
+    if (!spend.ok) return lucky;
+
+    const sm = createStateManager(this.saveId);
+    const result = await sm.commitChatState([
+      {
+        op: 'set_variable',
+        target: 'worldFlags.counters.败犬烙印',
+        value: spend.left,
+      } as StatePatch,
+      { op: 'set_variable', target: 'worldFlags.pendingScar', value: false } as StatePatch,
+    ]);
+    if (!result.success) {
+      console.warn('[GamePipeline] 烙印扣除失败:', result.errors);
+      return lucky;
+    }
+    this.emitMessage(
+      `▸ 【败犬烙印】烧掉一枚烙印（余 ${spend.left}）——这一次制卡受它庇佑。`,
+      'assistant',
+    );
+    return lucky + 2;
+  }
+
   /** 每日账本：今天这个能力还能不能用（跨天自动恢复，见 daily-ledger.ts） */
   private canUseDaily(key: string, perDay = 1): boolean {
     const ledger = coerceLedger(this.game.saveProfile?.worldFlags?.dailyUses);
@@ -2814,6 +2857,37 @@ export class GamePipeline {
           }
         }
       }
+      // 败犬烙印（SS）：每次战败在灵魂上留一枚。累计计数走 worldFlags.counters，
+      // **不随天失效**——攒着，直到制卡时烧掉一枚扭转命运。
+      if (session.finished === '败北') {
+        const scarGate = (playerC.talents?.list ?? []).some((t) =>
+          (t.entries ?? []).some((e) => e.kind === '烙印'),
+        );
+        if (scarGate) {
+          const before = counterOf(
+            coerceCounters(this.game.saveProfile?.worldFlags?.counters),
+            '败犬烙印',
+          );
+          const cap = entryStrength(playerC.talents?.list, '烙印', 'maxHold');
+          const next = Math.min(cap > 0 ? cap : 9, before + 1);
+          if (next > before) {
+            settlementPatches.push({
+              op: 'set_variable',
+              target: 'worldFlags.counters.败犬烙印',
+              value: next,
+            } as StatePatch);
+            this.emitMessage(
+              `▸ 【败犬烙印】这一败在你灵魂上留下一枚烙印（${before} → ${next}）——制卡时可烧掉一枚扭转词条冲突。`,
+              'assistant',
+            );
+          } else {
+            this.emitMessage(
+              `▸ 【败犬烙印】烙印已满（${before}/${cap}）——先烧掉几枚再用。`,
+              'assistant',
+            );
+          }
+        }
+      }
       // 战败补偿（SSS「世界线的收束点」）：败北 + 持钩子 → 抽三条「如果你赢了」的 if 线，
       // 其中一条成真（经验/金钱/素材三选一），并入同窗 patch
       if (session.finished === '败北' && hasDefeatReward(collectRuleHooks(playerC.talents?.list))) {
@@ -2938,12 +3012,9 @@ export class GamePipeline {
           worldBooks: this.chainData?.worldBooks,
           presets: this.chainData?.presets,
           talentBias,
-          // 制卡顺利（好运之骰的 5 点面）：当日制卡评级上浮一档。跨天自动失效。
-          fortuneCraftLuck: buffActiveToday(
-            coerceBuffs(this.game.saveProfile?.worldFlags?.dailyBuffs),
-            DAILY_BUFF_CRAFT_LUCK,
-            this.currentGameDay(),
-          ),
+          // 制卡评级上浮：当日「制卡顺利」+1 档；预付了败犬烙印则再 +2 档。
+          // 烙印在这里**真正扣掉**（预付开关随之清零），扣不动就退化成 +1。
+          ratingLift: await this.consumeCraftLift(),
         } as any;
         // 禁忌仿卡配方（2026-09-17）：内容仓 cardPool 带 imitation 字段的条目
         const imitationRecipes = parseCatalogData(getContentRegistry().catalog).cardPool.filter(

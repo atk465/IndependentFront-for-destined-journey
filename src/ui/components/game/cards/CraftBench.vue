@@ -466,6 +466,52 @@ async function doAbyss() {
   abyssMsg.value = r.summary ?? '深渊契约已缔结';
 }
 
+// ═══ 不等价交换区（`置换` 条目：S「不等价交换」）═══
+const canExchange = computed(() => game.hasMechanicGate('置换'));
+const exchangeTarget = ref('');
+const exchangeMsg = ref('');
+const exchangeErr = ref('');
+/** 可置换的：素材 + 卡牌（装备/道具不在描述范围内） */
+const exchangeables = computed<InventoryItem[]>(() =>
+  (player.value?.inventory ?? []).filter((i) => i.type === '材料' || i.type === '卡牌'),
+);
+async function doExchange() {
+  if (!exchangeTarget.value) return;
+  exchangeErr.value = '';
+  exchangeMsg.value = '';
+  const r = await game.exchangeItem(exchangeTarget.value);
+  if (!r.ok) {
+    exchangeErr.value = r.reason ?? '置换失败';
+    return;
+  }
+  exchangeMsg.value = r.summary ?? '置换完成';
+  exchangeTarget.value = '';
+}
+
+// ═══ 败犬烙印区（`烙印` 条目：SS「败犬烙印」；累计计数）═══
+//
+// 制卡由叙事驱动（AI 在正文里出制卡意图），玩家无法在那一刻点按钮——
+// 所以这里是**预付开关**：勾上之后，下一次制卡自动扣一枚烙印并把评级上浮两档。
+const canScar = computed(() => game.hasMechanicGate('烙印'));
+const scarLeft = computed(() => (canScar.value ? game.scarCount() : 0));
+const scarPending = computed(() => (canScar.value ? game.pendingScar() : false));
+const scarBusy = ref(false);
+const scarMsg = ref('');
+const scarErr = ref('');
+
+async function toggleScar(use: boolean) {
+  scarBusy.value = true;
+  scarErr.value = '';
+  scarMsg.value = '';
+  const r = await game.setPendingScar(use);
+  scarBusy.value = false;
+  if (!r.ok) {
+    scarErr.value = r.reason ?? '操作失败';
+    return;
+  }
+  scarMsg.value = use ? '下一次制卡将烧掉一枚烙印（评级上浮两档）' : '已取消预付';
+}
+
 // ═══ 素材点金区（`点金` 条目：S「素材点金」；每日账本的首个消费者）═══
 
 const canPointGold = computed(() => game.hasMechanicGate('点金'));
@@ -1113,6 +1159,59 @@ const RATING_HINT: Record<string, string> = {
         <p v-if="abyssErr" class="clash-warn" role="alert">{{ abyssErr }}</p>
         <AppButton size="sm" variant="primary" :disabled="!abyssPreview?.ok" @click="doAbyss">
           缔结深渊契约
+        </AppButton>
+      </div>
+    </section>
+
+    <!-- 不等价交换区（门槛：`置换` 条目——S「不等价交换」） -->
+    <section v-if="canExchange" class="repair-section" aria-label="不等价交换">
+      <h4 class="d-label">不等价交换（天赋：不等价交换）</h4>
+      <div v-if="exchangeables.length === 0" class="empty-tab small">没有可放弃的素材或卡牌…</div>
+      <div v-else class="slot-card">
+        <div class="slot-price">
+          放弃一件素材或卡牌，换回 1~2 个<b>同类型、品质不高于原来</b>的回报。
+          份数与抽到哪张都由天意决定——<b>换亏是认了的</b>。
+        </div>
+        <div class="slot-head">
+          <select v-model="exchangeTarget" class="slot-select" aria-label="选择要放弃的物品">
+            <option value="" disabled>选择要放弃的物品…</option>
+            <option v-for="i in exchangeables" :key="i.name" :value="i.name">
+              {{ i.name }}（{{
+                i.type === '卡牌' ? (i as CardItem).cardTier : (i.rarity ?? '普通')
+              }}）
+            </option>
+          </select>
+        </div>
+        <p v-if="exchangeMsg" class="bench-note">{{ exchangeMsg }}</p>
+        <p v-if="exchangeErr" class="clash-warn" role="alert">{{ exchangeErr }}</p>
+        <AppButton size="sm" variant="primary" :disabled="!exchangeTarget" @click="doExchange">
+          放弃并置换
+        </AppButton>
+      </div>
+    </section>
+
+    <!-- 败犬烙印区（门槛：`烙印` 条目——SS「败犬烙印」；战败累计，制卡时烧一枚） -->
+    <section v-if="canScar" class="repair-section" aria-label="败犬烙印">
+      <h4 class="d-label">败犬烙印（天赋：败犬烙印）</h4>
+      <div class="slot-card">
+        <div class="slot-price">
+          每一败都在灵魂上留一枚烙印，攒着不散。<b>当前 {{ scarLeft }} 枚</b>。<br />
+          预付一枚：下一次制卡评级<b>上浮两档</b>——「强行扭转一次词条冲突，化腐朽为神奇」。
+        </div>
+        <p v-if="scarPending" class="bench-note">已预付：下一次制卡将烧掉一枚烙印。</p>
+        <p v-if="scarMsg" class="bench-note">{{ scarMsg }}</p>
+        <p v-if="scarErr" class="clash-warn" role="alert">{{ scarErr }}</p>
+        <AppButton
+          v-if="!scarPending"
+          size="sm"
+          variant="primary"
+          :disabled="scarLeft <= 0 || scarBusy"
+          @click="toggleScar(true)"
+        >
+          {{ scarLeft > 0 ? '预付一枚烙印' : '没有可用的烙印' }}
+        </AppButton>
+        <AppButton v-else size="sm" :disabled="scarBusy" @click="toggleScar(false)">
+          取消预付
         </AppButton>
       </div>
     </section>

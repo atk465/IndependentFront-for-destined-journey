@@ -68,7 +68,9 @@ export type TalentEntryKind =
   | '克上' // 攻原生等级高于你的敌人时额外伤害（SS「下克上」）
   | '环境加成' // 特定环境（水下…）由领域/场景卡建立时，防御/闪避应对获得加成（SS「黑潮之子」）
   | '点金' // 每日可指定素材提升品质档数（S「素材点金」）
-  | '日掷'; // 每日可投一次骰（SS「好运之骰」；S「命运之骰」将来共用此种类）
+  | '日掷' // 每日可投一次骰（SS「好运之骰」十面 / S「命运之骰」六面，靠 faces 分派）
+  | '烙印' // 战败累积烙印，制卡时消耗一枚扭转词条冲突（SS「败犬烙印」）
+  | '置换'; // 放弃素材/卡牌，换回 1~2 个同类同品质的回报（S「不等价交换」）
 
 /** 骨架条目：kind + 预设参数 + 独占渠道标记 */
 export interface TalentEntry {
@@ -127,6 +129,12 @@ export interface TalentEntry {
     env?: string;
     /** 点金：每日可用次数 */
     perDay?: number;
+    /** 日掷：骰面数（6 = 命运之骰 / 10 = 好运之骰；决定用哪张面表） */
+    faces?: number;
+    /** 烙印：可持有的烙印上限（败犬烙印；超出不再累积） */
+    maxHold?: number;
+    /** 置换：最多换回几份（不等价交换；上限 2） */
+    maxReturn?: number;
   };
 }
 
@@ -321,7 +329,10 @@ export const TALENT_ENTRY_POOL: readonly TalentEntry[] = [
   e({ kind: '克上', channel: 'universal', params: { vsHigherLevel: 30 } }),
   e({ kind: '环境加成', channel: 'universal', params: { env: '水下', percent: 30 } }),
   e({ kind: '点金', channel: 'universal', params: { tierGain: 1, perDay: 1 } }),
-  e({ kind: '日掷', channel: 'universal', params: { perDay: 1 } }),
+  e({ kind: '日掷', channel: 'universal', params: { perDay: 1, faces: 10 } }),
+  e({ kind: '日掷', channel: 'universal', params: { perDay: 1, faces: 6 } }),
+  e({ kind: '烙印', channel: 'universal', params: { maxHold: 9 } }),
+  e({ kind: '置换', channel: 'universal', params: { maxReturn: 2 } }),
   e({ kind: '改造', channel: 'story', params: {} }),
   // ── v10 扩容（伙伴卡生成通道，2026-09-17）──
   e({ kind: '捕获', channel: 'story', params: {} }),
@@ -416,7 +427,9 @@ const ENTRY_NUMERIC_TIERS: Partial<
   克上: { vsHigherLevel: [20, 30, 50] },
   环境加成: { percent: [20, 30, 40, 50] },
   点金: { tierGain: [1, 2], perDay: [1, 2] },
-  日掷: { perDay: [1, 2] },
+  日掷: { perDay: [1, 2], faces: [6, 10] },
+  烙印: { maxHold: [3, 5, 9] },
+  置换: { maxReturn: [1, 2] },
 };
 
 /**
@@ -439,7 +452,9 @@ export const ENTRY_STRENGTH_BASELINE = {
   吞噬: { levelBonus: 1 },
   拆解: { levelBonus: 1 },
   点金: { tierGain: 1, perDay: 1 },
-  日掷: { perDay: 1 },
+  日掷: { perDay: 1, faces: 10 },
+  烙印: { maxHold: 9 },
+  置换: { maxReturn: 2 },
 } as const;
 
 /** 各种类的必填内容参数（非空字符串；keywords 为字符串数组） */
@@ -497,6 +512,8 @@ const ENTRY_KIND_LIST: readonly TalentEntryKind[] = [
   '环境加成',
   '点金',
   '日掷',
+  '烙印',
+  '置换',
 ];
 
 /**
@@ -515,6 +532,9 @@ const ENTRY_OPTIONAL_NUMERIC: Partial<Record<TalentEntryKind, readonly string[]>
   位份: ['percent'],
   融合: ['tierGain', 'levelBonus'],
   越阶: ['tierGain', 'halveCost'],
+  日掷: ['faces'],
+  烙印: ['maxHold'],
+  置换: ['maxReturn'],
   吞噬: ['levelBonus'],
   拆解: ['levelBonus'],
 };
@@ -1563,7 +1583,9 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '每一次战败，都会在你的灵魂上留下一枚【败犬烙印】。在制卡时，你可以消耗一枚烙印，强行扭转一次词条冲突，极大增加成功率，甚至能化腐朽为神奇。',
-    entries: [],
+    // 2026-09-17：战败累计 +1（worldFlags.counters），制卡时消耗一枚把评级上浮两档
+    // ——「强行扭转一次词条冲突，极大增加成功率、化腐朽为神奇」的机械兑现。
+    entries: [{ kind: '烙印', channel: 'universal', params: { maxHold: 9 } }],
   },
   {
     name: '因果炼金术',
@@ -1899,7 +1921,7 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     description:
       '每天一次机会，投出一个十面骰子，随机从里面的奖项中获取一项：谢谢惠顾/福缘天降/再来一次/红鸾天喜/提升一级/刀刀暴击/制卡顺利/材料秘境/屠龙宝刀/杂鱼杂鱼。',
     // 2026-09-17：十面全部 Code 兑现（fortune-dice.ts），AI 只负责把它写成一段话。
-    entries: [{ kind: '日掷', channel: 'universal', params: { perDay: 1 } }],
+    entries: [{ kind: '日掷', channel: 'universal', params: { perDay: 1, faces: 10 } }],
   },
   {
     name: '现代武装',
@@ -2459,7 +2481,9 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你可以将自己的素材和卡牌放弃，天赋会给你带来1-2个类型相同，品质不高于原来的回报。',
-    entries: [],
+    // 2026-09-17：置换通道（unequal-exchange.ts）——放弃一件素材/卡牌，
+    // 换回 1~2 个同类型、品质不高于原来的回报。换亏是设计的一部分。
+    entries: [{ kind: '置换', channel: 'universal', params: { maxReturn: 2 } }],
   },
   {
     name: '禁忌知识',
@@ -2571,7 +2595,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你的身体纯净无暇，能自动净化素材中的负面与杂质词条，并免疫一切诅咒与侵蚀。你是欲望主导流派天生的克星。',
-    entries: [],
+    // 2026-09-17：复用「词条之王」的剥离通道——「净化词条」在引擎里就是剥离/剥夺词条。
+    entries: [{ kind: '剥离', channel: 'universal', params: {} }],
   },
   {
     name: '功德金身（东方）',
@@ -2724,7 +2749,9 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '该伙伴卡获得一个独特的痛苦能量槽，通过对敌人造成伤害和折磨来填充。能量槽每填满一阶，她的体型和力量都会发生一次可见的永久性增长，同时性格会变得更加残暴嗜虐。',
-    entries: [],
+    // 2026-09-17：复用「最终兵器：她」的自我进化通道——战后按战况永久成长，
+    // 正是「能量槽填满则永久增长」的机械兑现（能量槽本身由描述交给 AI 演绎）。
+    entries: [{ kind: '自我进化', channel: 'universal', params: {} }],
   },
   {
     name: '恐虐印记',
@@ -2767,7 +2794,9 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '每天可以投一次命运之骰，六个面分别是天灾、倒霉透顶、略有不顺、略有好运、诸事顺利、福缘天降。投出结果由世界的随机数决定，无法引导。',
-    entries: [],
+    // 2026-09-17：六面纯吉凶梯度（fortune-dice.ts 的 SIX_FACES）——与 SS「好运之骰」
+    // 共用 `日掷` 条目种类，靠 faces 档位分派到不同的面表。
+    entries: [{ kind: '日掷', channel: 'universal', params: { perDay: 1, faces: 6 } }],
   },
   {
     name: '卡面来打',
@@ -6971,6 +7000,8 @@ export const IMPLEMENTED_ENTRY_KINDS: ReadonlySet<TalentEntryKind> = new Set<Tal
   '环境加成',
   '点金',
   '日掷',
+  '烙印',
+  '置换',
   '战技附加',
 ]);
 
