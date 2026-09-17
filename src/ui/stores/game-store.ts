@@ -987,6 +987,7 @@ export const useGameStore = defineStore('game', () => {
       d20: 1 + Math.floor(Math.random() * 20),
       fallbackName: `${input.mainName}·卡`,
       talents: playerChar.talents?.list ?? [],
+      expMult: strengthOf('经验倍率', 'expMult'),
       lift: {
         baseLift: luckToday ? 1 : 0, // 「制卡顺利」+1（烙印是预付流程，不在这里）
         misfortune: {

@@ -3282,6 +3282,8 @@ export class GamePipeline {
       playerC.level,
       expMultiplierOf(hooks) *
         nemesisMult.mult *
+        // 通用经验倍率（C「快速成长」等）：条目 `经验倍率{expMult}` 驱动
+        (entryStrength(playerC.talents?.list, '经验倍率', 'expMult') || 1) *
         // 败北强化（A「败北强化」）：败北时的经验加成（名字钩子）
         (session.finished === '败北' ? defeatExpMultiplierOf(hooks) : 1),
     );

@@ -130,6 +130,7 @@ describe('TALENT_ENTRY_POOL（单一真源）', () => {
     '狂化',
     '本名武器',
     '同契',
+    '经验倍率',
   ];
   const ALL_CHANNELS: readonly TalentChannel[] = [
     'creation',

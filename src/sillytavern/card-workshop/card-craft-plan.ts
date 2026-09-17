@@ -145,6 +145,8 @@ export interface CardCraftInput {
    * 技能蓝本（S「支配者倒影」）：从败仗里抄来的敌方招式。
    * 用了它 → 产物**定格为技能卡** + 评级上浮一档（照成名招式做，比凭空摸索稳）。
    */
+  /** 通用经验倍率（C「快速成长」等；缺省 1） */
+  expMult?: number;
   blueprint?: { name: string };
 }
 
@@ -280,7 +282,7 @@ export function planCardCraft(input: CardCraftInput): {
 
   // ⑦ 消耗与经验（Code 定）
   const consumed = consumedByRating(rating, mainName, unique.slice(1));
-  const exp = craftExpFor(card.cardTier, rating);
+  const exp = Math.round(craftExpFor(card.cardTier, rating) * Math.max(1, input.expMult ?? 1));
   audit.push(`消耗：${consumed.join('、') || '（无）'}`);
   audit.push(`经验：${exp}（${CARD_TIERS.indexOf(card.cardTier)} 档 × 评级「${rating}」）`);
 

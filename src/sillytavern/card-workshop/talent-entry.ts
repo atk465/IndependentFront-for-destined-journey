@@ -99,7 +99,8 @@ export type TalentEntryKind =
   | '体型压制' // 攻击远小于自己的敌人时额外伤害（B「体格差压制」）
   | '狂化' // 玩家处于负面状态时攻击提升（B「宿醉狂暴」）
   | '本名武器' // 开局绑定一把随等级成长的武器卡（SS「天生剑骨」「战意破苍穹」）
-  | '同契'; // 与首张伙伴卡同步成长——战斗经验按比例同步（SS「爱」）
+  | '同契' // 与首张伙伴卡同步成长——战斗经验按比例同步（SS「爱」）
+  | '经验倍率'; // 通用经验获取倍率（C「快速成长」等）
 
 /** 骨架条目：kind + 预设参数 + 独占渠道标记 */
 export interface TalentEntry {
@@ -190,7 +191,7 @@ export interface TalentEntry {
     maxLevel?: number;
     /** 回溯：每次回溯的精神力消耗 */
     mpCost?: number;
-    /** 宿敌：与宿敌战斗的经验倍率 */
+    /** 经验倍率：宿敌战斗倍率 / 通用经验倍率（经验倍率条目） */
     expMult?: number;
     /** 打脸：打赢时的额外经验 / 每次胜利获得的点数 / 兑换一件装备所需点数 */
     expBonus?: number;
@@ -471,6 +472,7 @@ export const TALENT_ENTRY_POOL: readonly TalentEntry[] = [
   e({ kind: '本名武器', channel: 'universal', params: { weapon: '剑' } }),
   e({ kind: '本名武器', channel: 'universal', params: { weapon: '弓' } }),
   e({ kind: '同契', channel: 'universal', params: { syncPct: 50 } }),
+  e({ kind: '经验倍率', channel: 'universal', params: { expMult: 2 } }),
   e({ kind: '改造', channel: 'story', params: {} }),
   // ── v10 扩容（伙伴卡生成通道，2026-09-17）──
   e({ kind: '捕获', channel: 'story', params: {} }),
@@ -596,6 +598,7 @@ const ENTRY_NUMERIC_TIERS: Partial<
   狂化: { rageMult: [1.5, 2] },
   本名武器: {},
   同契: { syncPct: [50] },
+  经验倍率: { expMult: [2] },
 };
 
 /**
@@ -650,6 +653,7 @@ export const ENTRY_STRENGTH_BASELINE = {
   狂化: { rageMult: 2 },
   本名武器: {},
   同契: { syncPct: 50 },
+  经验倍率: { expMult: 2 },
 } as const;
 
 /** 各种类的必填内容参数（非空字符串；keywords 为字符串数组） */
@@ -740,6 +744,7 @@ const ENTRY_KIND_LIST: readonly TalentEntryKind[] = [
   '狂化',
   '本名武器',
   '同契',
+  '经验倍率',
 ];
 
 /**
@@ -791,6 +796,7 @@ const ENTRY_OPTIONAL_NUMERIC: Partial<Record<TalentEntryKind, readonly string[]>
   狂化: ['rageMult'],
   本名武器: ['weapon'],
   同契: ['syncPct'],
+  经验倍率: ['expMult'],
 };
 
 export function validateTalentEntries(entries: readonly TalentEntry[]): {
@@ -3551,7 +3557,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '品尝不同的食物可以获得美食点数，累积点数可永久提升基础属性。品尝到传说级或蕴含特殊能量的料理时，可直接领悟新的技能或词条。',
-    entries: [],
+    // 2026-09-18 缺量批次：美食点数（counters 可用）但「累积→永久属性」缺兑换通道，先叙事。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '万物图鉴系统',
@@ -3585,7 +3592,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '当你收下弟子并传授其知识或技能时，你能获得其成长经验的20%作为反馈。弟子越强，你获得的好处越多。',
-    entries: [],
+    // 2026-09-18 缺量批次：师徒系统（缺量），先给叙事入口。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: 'BOSS首杀系统',
@@ -3707,7 +3715,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你每天可以使一个等级不高于你一级的素材直接变成一张相关卡牌，卡牌等级低于原素材等级一级。',
-    entries: [],
+    // 2026-09-18 缺量批次：「素材直接变卡」是反向制卡（每日限次可走账本），方向缺量。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '百毒之体（东方）',
@@ -3734,7 +3743,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'A' as TalentGrade,
     source: 'universal',
     description: '分解素材时，有较高概率获得额外的稀有材料。',
-    entries: [],
+    // 2026-09-18 经验/成长批次：「额外稀有材料」= 产出数量（拆解侧额外产出）
+    entries: [{ kind: '产出数量', channel: 'universal', params: { copies: 1 } }],
   },
   {
     name: '痛苦链接',
@@ -3742,7 +3752,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '制卡失败或卡牌爆炸时，你受到的伤害和损失的mp会转化为等量的MP，并且下一次制卡成功率小幅提升。',
-    entries: [],
+    // 2026-09-18 缺量批次：「伤害转 MP」需拍内核 hook；「下次成功率提升」可用赌运近似。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '魔物亲和',
@@ -3956,7 +3967,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'A' as TalentGrade,
     source: 'universal',
     description: '你可以将自己的血肉作为素材融入卡牌，大幅提升卡牌的生命链接，但会永久消耗HP上限。',
-    entries: [],
+    // 2026-09-18 缺量批次：「永久消耗 HP 上限」需 HP 上限消耗通道（缺量），先给叙事入口。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '卡牌附身',
@@ -4269,7 +4281,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'A' as TalentGrade,
     source: 'universal',
     description: '你做的食物很好看且拥有随机永久增益效果，但非常难吃。',
-    entries: [],
+    // 2026-09-18 缺量批次：食物类别（缺量），先给叙事入口；「非常难吃」是代价叙事。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '替身之力',
@@ -6484,7 +6497,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description: '你和你的伙伴卡获取经验值的速度提升15%。',
     // 2026-09-18 D 级批次②：「经验获取 +15%」需通用经验倍率钩子（缺量），先给叙事入口
-    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
+    // 2026-09-18 经验/成长系统：通用经验倍率 2（原来降档叙事，现在有了机械通道）
+    entries: [{ kind: '经验倍率', channel: 'universal', params: { expMult: 2 } }],
   },
   {
     name: '讨价还价',
@@ -7862,6 +7876,7 @@ export const IMPLEMENTED_ENTRY_KINDS: ReadonlySet<TalentEntryKind> = new Set<Tal
   '狂化',
   '本名武器',
   '同契',
+  '经验倍率',
   '战技附加',
 ]);
 
