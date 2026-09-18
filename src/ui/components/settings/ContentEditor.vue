@@ -6,7 +6,7 @@
  * 数据走 game-store 的 customTalents / customCards 通道（worldFlags 持久化）。
  * 天赋提交前走 validateTalentEntries 校验（AI 零编数门禁照旧）。
  */
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useGameStore } from '../../stores/game-store';
 import {
   TALENT_ENTRY_POOL,
@@ -20,10 +20,31 @@ import {
 } from '@engine/card-workshop/talent-entry';
 import type { CardCatalogItem } from '@engine/start-catalog-mechanics';
 import { CARD_TIERS } from '@engine/field-enums';
+import { coerceCustomCards, coerceCustomTalents } from '@engine/card-workshop/custom-content';
+import {
+  TALENT_TEMPLATE,
+  CARD_TEMPLATE,
+  buildTemplateBundle,
+} from '@engine/card-workshop/content-templates';
 import AppButton from '../shared/AppButton.vue';
 
 const game = useGameStore();
 const tab = ref<'talent' | 'card'>('talent');
+
+/**
+ * 列表刷新闸（2026-09-18）。
+ *
+ * 🔴 自定义天赋/卡的注册表是**模块级普通 Map**（引擎层不引 Vue），`computed` 读它
+ *    建立不了依赖 —— 保存/删除后列表不会重画（天赋那侧此前就带着这个毛病）。
+ *    写操作之后手动自增一次，等于"重新读一遍注册表"。
+ */
+const listsVersion = ref(0);
+function refreshLists() {
+  listsVersion.value += 1;
+}
+
+// 切档/读档会把注册表按存档重建（game-store 的 loadCustomContent）—— 编辑器开着切档时也要重画
+watch(() => game.activeSaveId, refreshLists);
 
 // ════════════════════════════════════════════════════════════════════
 // 天赋编辑器
@@ -41,7 +62,10 @@ const tMsg = ref('');
 const tErr = ref('');
 
 const allKinds = [...new Set(TALENT_ENTRY_POOL.map((e) => e.kind))];
-const customTalents = computed(() => getCustomTalents());
+const customTalents = computed(() => {
+  void listsVersion.value; // 依赖：刷新闸（见其声明处）
+  return getCustomTalents();
+});
 
 function addEntry() {
   const first = TALENT_ENTRY_POOL[0];
@@ -79,6 +103,7 @@ async function saveTalent() {
   };
   registerCustomTalent(tpl);
   game.saveCustomTalents(getCustomTalents());
+  refreshLists();
   tMsg.value = `天赋【${tpl.name}】已保存`;
   tName.value = '';
   tDesc.value = '';
@@ -87,6 +112,7 @@ async function saveTalent() {
 function removeTalent(name: string) {
   unregisterCustomTalent(name);
   game.saveCustomTalents(getCustomTalents());
+  refreshLists();
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -102,8 +128,15 @@ const cForm = ref('');
 const cElement = ref('');
 const cDesc = ref('');
 const cCost = ref(20);
+// 物资/素材卡的产出定义 —— 没有它的物资卡是废卡（useSupplyCard 直接拒绝）
+const cYieldName = ref('');
+const cYieldQty = ref(1);
+const cYieldIsMaterial = ref(false);
 const cMsg = ref('');
 const cErr = ref('');
+
+/** 这张卡的形态是否需要产出定义（物资/素材） */
+const needsYield = computed(() => cForm.value === '物资' || cForm.value === '素材');
 
 async function saveCard() {
   if (!cName.value.trim()) {
@@ -128,17 +161,37 @@ async function saveCard() {
     cost: cCost.value,
   };
   if (cElement.value) item.element = cElement.value;
+  if (needsYield.value && cYieldName.value.trim()) {
+    item.yield = {
+      name: cYieldName.value.trim(),
+      quantity: Math.max(1, Math.round(cYieldQty.value)),
+      itemType: cYieldIsMaterial.value ? '材料' : '消耗品',
+    };
+  }
   game.addCustomCard(item);
-  cMsg.value = `卡牌【${item.name}】已添加到购卡池`;
+  refreshLists();
+  cMsg.value = `卡牌【${item.name}】已添加到购卡池${
+    needsYield.value && !item.yield ? '（⚠️ 未填产出，这张卡在背包里用不了）' : ''
+  }`;
   cName.value = '';
   cDesc.value = '';
   cTier.value = '';
   cForm.value = '';
   cElement.value = '';
+  cYieldName.value = '';
+  cYieldQty.value = 1;
+  cYieldIsMaterial.value = false;
 }
 function removeCard(id: string) {
   game.removeCustomCard(id);
+  refreshLists();
 }
+
+/** 自定义卡列表（刷新闸驱动；与天赋的 customTalents 同口径） */
+const customCards = computed(() => {
+  void listsVersion.value;
+  return game.customCards();
+});
 
 // ════════════════════════════════════════════════════════════════════
 // 导入 / 导出
@@ -146,20 +199,45 @@ function removeCard(id: string) {
 
 const fileInput = ref<HTMLInputElement | null>(null);
 
-function exportContent() {
-  const data = {
-    version: 1,
-    exportedAt: new Date().toISOString(),
-    talents: getCustomTalents(),
-    cards: game.customCards(),
-  };
+/** 统一的 JSON 文件下载（导出/模板共用） */
+function downloadJson(filename: string, data: unknown) {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'custom-content.json';
+  a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+function exportContent() {
+  downloadJson('custom-content.json', {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    talents: getCustomTalents(),
+    cards: game.customCards(),
+  });
+  cMsg.value = `已导出：${getCustomTalents().length} 条天赋、${customCards.value.length} 张卡`;
+}
+
+/**
+ * 下载模板。
+ *
+ * 模板按 tab 给单条示例（照着填一条最省事）；也提供整包模板（多条 + 导入说明）。
+ */
+function downloadTemplate(scope: 'talent' | 'card' | 'bundle') {
+  if (scope === 'talent') {
+    downloadJson('talent-template.json', { version: 1, talents: [TALENT_TEMPLATE], cards: [] });
+    tMsg.value = '天赋模板已下载（改完直接导入即可）';
+    return;
+  }
+  if (scope === 'card') {
+    downloadJson('card-template.json', { version: 1, talents: [], cards: [CARD_TEMPLATE] });
+    cMsg.value = '卡牌模板已下载（改完直接导入即可）';
+    return;
+  }
+  downloadJson('custom-content-template.json', buildTemplateBundle());
+  cMsg.value = '整包模板已下载（含导入说明）';
 }
 
 async function importContent(e: Event) {
@@ -168,14 +246,20 @@ async function importContent(e: Event) {
   if (!file) return;
   try {
     const raw = JSON.parse(await file.text());
-    if (Array.isArray(raw.talents)) {
-      for (const t of raw.talents) registerCustomTalent(t);
-      game.saveCustomTalents(getCustomTalents());
-    }
-    if (Array.isArray(raw.cards)) {
-      for (const c of raw.cards) game.addCustomCard(c);
-    }
-    cMsg.value = `导入完成：${raw.talents?.length ?? 0} 条天赋、${raw.cards?.length ?? 0} 张卡`;
+    // 🔴 走与读档同一套宽读函数：形状不对的条目**丢弃**而不是注册垃圾进注册表
+    //    （此前直接 registerCustomTalent(raw)，模板里的示例/半成品会污染池子）
+    const talents = coerceCustomTalents(raw.talents);
+    const cards = coerceCustomCards(raw.cards);
+    for (const t of talents) registerCustomTalent(t);
+    if (talents.length) game.saveCustomTalents(getCustomTalents());
+    for (const c of cards) game.addCustomCard(c);
+    refreshLists();
+
+    const skippedT = (Array.isArray(raw.talents) ? raw.talents.length : 0) - talents.length;
+    const skippedC = (Array.isArray(raw.cards) ? raw.cards.length : 0) - cards.length;
+    const skipNote =
+      skippedT + skippedC > 0 ? `（跳过 ${skippedT} 条天赋、${skippedC} 张卡：形状不合法）` : '';
+    cMsg.value = `导入完成：${talents.length} 条天赋、${cards.length} 张卡${skipNote}`;
   } catch (err) {
     cErr.value = `导入失败：${err}`;
   }
@@ -206,6 +290,14 @@ async function importContent(e: Event) {
         <button type="button" class="tab-btn" title="导出 JSON" @click="exportContent">导出</button>
         <button type="button" class="tab-btn" title="从 JSON 导入" @click="fileInput?.click()">
           导入
+        </button>
+        <button
+          type="button"
+          class="tab-btn"
+          :title="tab === 'talent' ? '下载天赋 JSON 模板' : '下载卡牌 JSON 模板'"
+          @click="downloadTemplate(tab)"
+        >
+          模板
         </button>
         <input
           ref="fileInput"
@@ -311,16 +403,27 @@ async function importContent(e: Event) {
       </div>
       <label class="full">描述<textarea v-model="cDesc" rows="2" placeholder="卡牌描述" /></label>
 
+      <!-- 物资/素材卡必须有产出定义，否则进背包也用不了（useSupplyCard 直接拒绝） -->
+      <div v-if="needsYield" class="field-row yield-row">
+        <label
+          >产出物品<input v-model="cYieldName" placeholder="产出的物品名（留空 = 用不了）"
+        /></label>
+        <label>数量<input v-model.number="cYieldQty" type="number" min="1" step="1" /></label>
+        <label class="check-label"
+          ><input v-model="cYieldIsMaterial" type="checkbox" />产出为制卡素材</label
+        >
+      </div>
+
       <p v-if="cMsg" class="ok-msg">{{ cMsg }}</p>
       <p v-if="cErr" class="err-msg">{{ cErr }}</p>
       <AppButton variant="primary" :disabled="!cName.trim() || !cTier || !cForm" @click="saveCard"
         >添加到购卡池</AppButton
       >
 
-      <div v-if="game.customCardCount() > 0" class="custom-list">
-        <span>自定义卡（{{ game.customCardCount() }}）：</span>
+      <div v-if="customCards.length > 0" class="custom-list">
+        <span>自定义卡（{{ customCards.length }}）：</span>
         <span
-          v-for="c in game.customCards()"
+          v-for="c in customCards"
           :key="c.id"
           class="chip"
           title="点击删除"
@@ -379,6 +482,22 @@ async function importContent(e: Event) {
   flex-direction: column;
   gap: 0.15rem;
   font-size: 0.75rem;
+}
+/* 产出定义行：勾选项与输入框同排，不撑成整列 */
+.yield-row {
+  border-left: 2px solid var(--bg-dark);
+  padding-left: 0.5rem;
+}
+.field-row label.check-label {
+  flex: 0 0 auto;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.3rem;
+  align-self: flex-end;
+  padding-bottom: 0.3rem;
+}
+.field-row label.check-label input {
+  width: auto;
 }
 input,
 select,

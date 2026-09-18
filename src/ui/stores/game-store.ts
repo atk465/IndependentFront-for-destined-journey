@@ -25,7 +25,7 @@ import {
   rollFortuneTier,
   type FortuneMode,
 } from '@engine/card-workshop/fortune-draw';
-import { cardCatalogToItem, parseCatalogData } from '@engine/start-catalog';
+import { cardCatalogToItem } from '@engine/start-catalog';
 import { d100, rollDie } from '@engine/dice';
 import { buildDemoCardsPatches, buildDemoDeckPatches } from '@engine/card-workshop/demo';
 import { toPlainCardAlbum } from '@engine/card-workshop/album';
@@ -37,6 +37,8 @@ import {
   planOffspring,
 } from '@engine/card-workshop/companion-capture';
 import { buildSummonCompanion } from '@engine/card-workshop/companion';
+// 卡池唯一口径：内容仓 cardPool + 运行时自定义卡（2026-09-18）
+import { findCardDefinition, getPurchasableCardPool } from '@engine/card-workshop/card-pool';
 import { planStripEntry } from '@engine/card-workshop/card-strip';
 import {
   planAffectionTribute,
@@ -87,8 +89,19 @@ import { planFootAlchemy } from '@engine/card-workshop/partner-alchemy';
 import { planCardCraft } from '@engine/card-workshop/card-craft-plan';
 import { coerceBlueprints, consumeBlueprint } from '@engine/card-workshop/opponent-blueprints';
 import { fallbackCraftNarration } from '@engine/card-craft-narrate';
-import { coerceCustomTalents, coerceCustomCards } from '@engine/card-workshop/custom-content';
-import { registerCustomTalent, clearCustomTalents } from '@engine/card-workshop/talent-entry';
+import {
+  coerceCustomTalents,
+  coerceCustomCards,
+  getCustomCards,
+  registerCustomCard,
+  unregisterCustomCard,
+  replaceCustomCards,
+} from '@engine/card-workshop/custom-content';
+import {
+  registerCustomTalent,
+  clearCustomTalents,
+  getCustomTalents,
+} from '@engine/card-workshop/talent-entry';
 import type { TalentTemplate } from '@engine/card-workshop/talent-entry';
 import type { CardCatalogItem } from '@engine/start-catalog-mechanics';
 import {
@@ -124,7 +137,6 @@ import {
   getNarrativeIntents,
   clearNarrativeIntent as clearNarrativeIntentInDb,
 } from '@engine/save-profile';
-import { getContentRegistry } from './content-store';
 import type { CardTier } from '@engine/field-enums';
 import type { SkirmishSession } from '@engine/card-workshop/skirmish-session';
 import type { SkirmishChoice } from '@engine/card-workshop/skirmish';
@@ -537,9 +549,8 @@ export const useGameStore = defineStore('game', () => {
       return { ok: false, reason: '只有物资卡可以通过这个通道使用' };
     }
 
-    // 产出定义来自内容仓 cardPool（按名字查）
-    const pool = parseCatalogData(getContentRegistry().catalog).cardPool;
-    const def = pool.find((c) => c.name === cardName);
+    // 产出定义来自卡池（内容仓 + 自定义卡，按名字查）
+    const def = findCardDefinition(cardName);
     const y = def?.yield;
     if (!y || (!y.name && !y.gc)) {
       return { ok: false, reason: '这张卡没有产出定义，无法使用' };
@@ -653,10 +664,8 @@ export const useGameStore = defineStore('game', () => {
     const playerChar = player.value;
     if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
 
-    // 卡池：内容注册表 catalog.cardPool（装内容包后为铭刻卡池，未装则占位小样）
-    const pool = parseCatalogData(getContentRegistry().catalog).cardPool.filter(
-      (c) => !c.imitation,
-    );
+    // 卡池：内容注册表 catalog.cardPool + 自定义卡（装内容包后为铭刻卡池，未装则占位小样）
+    const pool = getPurchasableCardPool();
     if (pool.length === 0) return { ok: false, reason: '命运卡堆是空的（需安装内容包）' };
 
     // 费用预检
@@ -949,16 +958,37 @@ export const useGameStore = defineStore('game', () => {
   /**
    * 拆解（SSS「素材之王」非战斗侧）：物品 → 素材（材料）。
    */
+  /**
+   * 本次会话在编辑器里**新写**的自定义内容（2026-09-18）。
+   *
+   * 🔴 为什么要有这一层：注册表按"存档级内容"重建（读档 = 清空 + 灌入该档的列表），
+   *    而编辑器的用法多半是**先写内容再开档** —— 设置页里加完卡、转身点「开始新游戏」，
+   *    `loadCustomCards()` 会把刚加的东西一键抹掉，玩家看到的是"我写的卡又不见了"。
+   *    会话层只记「这次会话里首次出现、且当前仍在编辑器的列表里」的条目，
+   *    读档后盖回去 —— 既不会丢自己的稿子，也不会把上一个存档的内容串进新存档。
+   */
+  const sessionCustomTalents = new Map<string, TalentTemplate>();
+  const sessionCustomCards = new Map<string, CardCatalogItem>();
+
   /** 保存自定义天赋列表到 worldFlags（开发者模式） */
   function saveCustomTalents(list: TalentTemplate[]): void {
+    // 会话层：这一批里"编辑器新写的"记下来（读档后要盖回去）
+    const before = new Set(getCustomTalents().map((t) => t.name));
+    const names = new Set(list.map((t) => t.name));
+    for (const t of list) if (!before.has(t.name)) sessionCustomTalents.set(t.name, t);
+    for (const name of [...sessionCustomTalents.keys()]) {
+      if (!names.has(name)) sessionCustomTalents.delete(name);
+    }
+
+    // 注册表是"本次会话的编辑器状态"——即使没有活跃存档也要生效（否则没存档时改完没反应）
+    clearCustomTalents();
+    for (const t of list) registerCustomTalent(t);
+
     if (!activeSaveId.value) return;
     const sm = createStateManager(activeSaveId.value);
     void sm.commitChatState([
       { op: 'set_variable', target: 'worldFlags.customTalents', value: list } as StatePatch,
     ]);
-    // 同时注册到运行时注册表
-    clearCustomTalents();
-    for (const t of list) registerCustomTalent(t);
   }
 
   /** 读取自定义天赋列表（从 worldFlags 恢复到运行时注册表） */
@@ -968,36 +998,94 @@ export const useGameStore = defineStore('game', () => {
     for (const t of list) registerCustomTalent(t);
   }
 
-  /** 保存自定义卡到 worldFlags（追加） */
+  /**
+   * 新增/覆盖一张自定义卡（2026-09-18 真机修）。
+   *
+   * 🔴 先写**运行时注册表**：编辑器在设置页、多半没有活跃存档 —— 此前无存档就
+   *    静默 return，卡没存住却在界面上提示「已添加」，导出自然只有天赋、购卡池
+   *    也看不到它。有活跃存档时再顺带持久化，进游戏由 loadCustomCards 灌回。
+   */
   function addCustomCard(card: CardCatalogItem): void {
-    if (!activeSaveId.value) return;
-    const existing = coerceCustomCards(saveProfile.value?.worldFlags?.customCards);
-    const next = [...existing.filter((c) => c.id !== card.id), card];
-    const sm = createStateManager(activeSaveId.value);
-    void sm.commitChatState([
-      { op: 'set_variable', target: 'worldFlags.customCards', value: next } as StatePatch,
-    ]);
+    registerCustomCard(card);
+    sessionCustomCards.set(card.id, card);
+    persistCustomCards();
   }
 
-  /** 从 worldFlags 删除自定义卡 */
+  /** 删除一张自定义卡（运行时 + 存档同步） */
   function removeCustomCard(id: string): void {
+    unregisterCustomCard(id);
+    sessionCustomCards.delete(id);
+    persistCustomCards();
+  }
+
+  /** 把运行时注册表整体写进当前存档（无活跃存档时跳过 —— 运行时仍生效） */
+  function persistCustomCards(): void {
     if (!activeSaveId.value) return;
-    const existing = coerceCustomCards(saveProfile.value?.worldFlags?.customCards);
-    const next = existing.filter((c) => c.id !== id);
     const sm = createStateManager(activeSaveId.value);
     void sm.commitChatState([
-      { op: 'set_variable', target: 'worldFlags.customCards', value: next } as StatePatch,
+      {
+        op: 'set_variable',
+        target: 'worldFlags.customCards',
+        value: getCustomCards(),
+      } as StatePatch,
     ]);
   }
 
-  /** 读取自定义卡列表 */
+  /** 从存档灌回运行时注册表（进游戏 / 切换存档时调用） */
+  function loadCustomCards(): void {
+    replaceCustomCards(coerceCustomCards(saveProfile.value?.worldFlags?.customCards));
+  }
+
+  /** 读档后把两类自定义内容一起灌回运行时池（天赋 + 购卡） */
+  function loadCustomContent(): void {
+    loadCustomTalents();
+    loadCustomCards();
+    // 会话稿盖回（见 sessionCustomTalents 的说明）：读档按存档重建注册表后，
+    // 把"这次会话在编辑器里写的"重新注册上去，否则先写内容再开档会白写。
+    for (const t of sessionCustomTalents.values()) registerCustomTalent(t);
+    for (const c of sessionCustomCards.values()) registerCustomCard(c);
+    seedSessionContent();
+  }
+
+  /**
+   * 把会话稿播种进"还没有任何自定义内容"的存档（2026-09-18）。
+   *
+   * 🔴 新存档的 `worldFlags` 就是 `{}`（database.ts 建档只给空对象），而玩家的实际用法是
+   *    「先在设置页写好内容 → 再开始新游戏」：不播种的话这一局能玩，**刷新页面就没了**
+   *    （会话注册表随页面消失，存档里又从来没写过）。
+   * 只播种"完全空"的存档，且只播会话稿 —— 已有内容的存档一律以存档为准，不会被覆盖。
+   */
+  function seedSessionContent(): void {
+    if (!activeSaveId.value) return;
+    const flags = saveProfile.value?.worldFlags as Record<string, unknown> | undefined;
+    const nonEmpty = (v: unknown) => Array.isArray(v) && v.length > 0;
+    const patches: StatePatch[] = [];
+    if (!nonEmpty(flags?.customTalents) && sessionCustomTalents.size > 0) {
+      patches.push({
+        op: 'set_variable',
+        target: 'worldFlags.customTalents',
+        value: [...sessionCustomTalents.values()],
+      } as StatePatch);
+    }
+    if (!nonEmpty(flags?.customCards) && sessionCustomCards.size > 0) {
+      patches.push({
+        op: 'set_variable',
+        target: 'worldFlags.customCards',
+        value: [...sessionCustomCards.values()],
+      } as StatePatch);
+    }
+    if (patches.length === 0) return;
+    void createStateManager(activeSaveId.value).commitChatState(patches);
+  }
+
+  /** 读取自定义卡列表（运行时真源；与天赋的 getCustomTalents 同口径） */
   function customCards(): CardCatalogItem[] {
-    return coerceCustomCards(saveProfile.value?.worldFlags?.customCards);
+    return getCustomCards();
   }
 
   /** 自定义卡数量 */
   function customCardCount(): number {
-    return coerceCustomCards(saveProfile.value?.worldFlags?.customCards).length;
+    return getCustomCards().length;
   }
 
   /**
@@ -1650,9 +1738,7 @@ export const useGameStore = defineStore('game', () => {
     const item = playerChar.inventory.find((i) => i.name === itemName);
     if (!item) return { ok: false, reason: '找不到该物品' };
 
-    const pool = parseCatalogData(getContentRegistry().catalog).cardPool.filter(
-      (c) => !c.imitation,
-    );
+    const pool = getPurchasableCardPool();
     const { ok, reason, plan } = planUnequalExchange(
       item as unknown as Parameters<typeof planUnequalExchange>[0],
       pool,
@@ -1747,9 +1833,7 @@ export const useGameStore = defineStore('game', () => {
         break;
       }
       case 'card': {
-        const pool = parseCatalogData(getContentRegistry().catalog).cardPool.filter(
-          (c) => !c.imitation,
-        );
+        const pool = getPurchasableCardPool();
         const picked = drawFortuneCard(pool, face.reward.cardTier);
         if (!picked) {
           // 卡池为空（未装内容包）——不吞掉这次机会，按「谢谢惠顾」结算
@@ -3010,6 +3094,7 @@ export const useGameStore = defineStore('game', () => {
     messages.value = projection.messages;
     agentLogHistory.value = debugTurns;
     turnCounter = projection.turn;
+    loadCustomContent();
     wireEffectSystem(saveId, projection.characters);
     return true;
   }
@@ -3666,10 +3751,12 @@ export const useGameStore = defineStore('game', () => {
     ensureSoulWeapon,
     saveCustomTalents,
     loadCustomTalents,
+    loadCustomContent,
     addCustomCard,
     removeCustomCard,
     customCards,
     customCardCount,
+    loadCustomCards,
     upgradeMaterial,
     exchangeItem,
     drawMaterialTen,

@@ -48,6 +48,8 @@ import {
   talentExchangePrice,
   type TalentTemplate,
 } from '@engine/card-workshop/talent-entry';
+// 购卡池唯一口径：内容仓 cardPool + 运行时自定义卡（2026-09-18 开发者模式接线）
+import { getCustomCards, mergeCards } from '@engine/card-workshop/custom-content';
 import { useSettingsStore } from './settings-store';
 import {
   type CatalogData,
@@ -180,6 +182,15 @@ export const useCreateStore = defineStore('create', () => {
   let contentPromise: Promise<void> | null = null;
 
   /**
+   * 自定义内容版本号（2026-09-18）。
+   *
+   * 🔴 自定义天赋/卡的注册表是**模块级普通 Map**（引擎层不引 Vue），它的变化不会
+   *    触发 computed —— 而 store 是常驻的，`cardPool` 会一直缓存第一次算出的结果。
+   *    进页面（`initContent`）时自增一次，等于"重新读一遍注册表"。
+   */
+  const customContentVersion = ref(0);
+
+  /**
    * 捏人页的内容加载门（幂等、**永不抛**）。
    *
    * 组件在 `onMounted` 里 `await store.initContent()`；重复调用零 I/O。
@@ -203,6 +214,7 @@ export const useCreateStore = defineStore('create', () => {
       catalog.value = parseCatalogData(reg.catalog);
       bloodlineSet.value = getBloodlineSet();
       era.value = getBranding().era;
+      customContentVersion.value += 1;
       contentStatus.value = isCatalogPopulated(catalog.value) ? 'ready' : 'empty';
     })();
     return contentPromise;
@@ -419,7 +431,10 @@ export const useCreateStore = defineStore('create', () => {
   const CARD_CATEGORIES = ['装备', '技能', '领域', '物资'] as const;
   const activeCardCategory = ref<CardFormEntry>('装备');
 
-  const cardPool = computed(() => catalog.value.cardPool.filter((c) => !c.imitation));
+  const cardPool = computed(() => {
+    void customContentVersion.value; // 依赖：进页面时重读自定义注册表（见其声明处）
+    return mergeCards(catalog.value.cardPool, getCustomCards()).filter((c) => !c.imitation);
+  });
   const filteredCards = computed(() =>
     cardPool.value.filter((c) => c.formEntry === activeCardCategory.value),
   );

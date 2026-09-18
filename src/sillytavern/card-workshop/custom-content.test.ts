@@ -1,16 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import {
-  coerceCustomTalents,
-  coerceCustomCards,
-  mergeTalents,
-  mergeCards,
-} from './custom-content';
+import { coerceCustomTalents, coerceCustomCards, mergeTalents, mergeCards } from './custom-content';
 import type { TalentTemplate } from './talent-entry';
 import type { CardCatalogItem } from '../start-catalog-mechanics';
 
-const 合法条目 = [
-  { kind: '成功率加成', channel: 'universal', params: { bonus: 20 } },
-];
+const 合法条目 = [{ kind: '成功率加成', channel: 'universal', params: { bonus: 20 } }];
 const 自定义天赋 = {
   name: '测试天赋',
   source: 'universal',
@@ -31,10 +24,14 @@ describe('coerceCustomTalents', () => {
     expect(coerceCustomTalents([自定义天赋])).toHaveLength(1);
   });
   it('脏值丢弃', () => {
-    expect(coerceCustomTalents([null, 1, {}, { name: '' }, { name: 'x', grade: 'A', entries: 'bad' }])).toHaveLength(0);
+    expect(
+      coerceCustomTalents([null, 1, {}, { name: '' }, { name: 'x', grade: 'A', entries: 'bad' }]),
+    ).toHaveLength(0);
   });
   it('非法条目拒绝', () => {
-    expect(coerceCustomTalents([{ ...自定义天赋, entries: [{ kind: '不存在', params: {} }] }])).toHaveLength(0);
+    expect(
+      coerceCustomTalents([{ ...自定义天赋, entries: [{ kind: '不存在', params: {} }] }]),
+    ).toHaveLength(0);
   });
 });
 

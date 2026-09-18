@@ -161,8 +161,8 @@ import { runSkirmishAssessment, runSkirmishChronicle } from '@engine/card-worksh
 import { AgentClient } from '@engine/agent-client';
 import type { StreamCallbacks } from '@engine/agent-client';
 import { createStateManager } from '@engine/state-manager';
-import { parseCatalogData } from '@engine/start-catalog';
-import { getContentRegistry } from '../stores/content-store';
+// 卡池唯一口径：内容仓 cardPool + 运行时自定义卡（2026-09-18）
+import { getCardPool } from '@engine/card-workshop/card-pool';
 import { deckGuardBonus, deckPower } from '@engine/card-workshop/deck-power';
 import { matchFreeCardPlay } from '@engine/card-workshop/free-card-play';
 import { battleReadyCards } from '@engine/card-workshop/deck-power';
@@ -3338,7 +3338,7 @@ export class GamePipeline {
     if (this.ownsActiveSave) {
       const sm = createStateManager(this.saveId);
       // 首召入库（2026-09-17 巨兽召唤池）：种子查内容仓 cardPool，已有角色名查存档
-      const fortunePool = parseCatalogData(getContentRegistry().catalog).cardPool;
+      const fortunePool = getCardPool();
       const settlementPatches = buildSkirmishSettlementPatches({
         playerName: playerC.name,
         playerTotalExp: playerC.totalExp,
@@ -3752,9 +3752,7 @@ export class GamePipeline {
           rewindLift: 1,
         } as any;
         // 禁忌仿卡配方（2026-09-17）：内容仓 cardPool 带 imitation 字段的条目
-        const imitationRecipes = parseCatalogData(getContentRegistry().catalog).cardPool.filter(
-          (c) => c.imitation,
-        );
+        const imitationRecipes = getCardPool().filter((c) => c.imitation);
         const result = await runCraftGenChain(request, {
           clientFactory,
           stateManager,

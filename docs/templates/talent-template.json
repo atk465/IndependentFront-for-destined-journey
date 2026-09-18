@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "talents": [
+    {
+      "_说明": [
+        "天赋模板：删掉 _ 开头的注释行，保留 name/grade/source/description/entries。",
+        "grade：SSS/SS/S/A/B/C/D/E/F（定价按档走，见 docs/design 的档位表）。",
+        "source：universal（通用池，捏人抽卡 + 声望兑换）/ creation（出身独占）/",
+        "        story（剧情独占）/ fusion（融合产物——捏人抽不到）/ exchange（兑换独占）。",
+        "entries：条目是天赋的**机制**部分，必须来自 TALENT_ENTRY_POOL 的 kind 与 params 组合，",
+        "        否则 validateTalentEntries 会拒收（AI 零编数门禁）。",
+        "description：风味文字，随便写，不参与计算。"
+      ],
+      "name": "示例天赋 · 请改名",
+      "grade": "A",
+      "source": "universal",
+      "description": "风味描述：一句话讲清这个天赋在世界里长什么样。",
+      "entries": [{ "kind": "行动值加成", "channel": "universal", "params": { "amount": 2 } }]
+    }
+  ],
+  "cards": []
+}
