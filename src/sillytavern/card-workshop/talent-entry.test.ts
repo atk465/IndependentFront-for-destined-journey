@@ -131,6 +131,7 @@ describe('TALENT_ENTRY_POOL（单一真源）', () => {
     '本名武器',
     '同契',
     '经验倍率',
+    '交易折扣',
   ];
   const ALL_CHANNELS: readonly TalentChannel[] = [
     'creation',

@@ -100,7 +100,8 @@ export type TalentEntryKind =
   | '狂化' // 玩家处于负面状态时攻击提升（B「宿醉狂暴」）
   | '本名武器' // 开局绑定一把随等级成长的武器卡（SS「天生剑骨」「战意破苍穹」）
   | '同契' // 与首张伙伴卡同步成长——战斗经验按比例同步（SS「爱」）
-  | '经验倍率'; // 通用经验获取倍率（C「快速成长」等）
+  | '经验倍率' // 通用经验获取倍率（C「快速成长」等）
+  | '交易折扣'; // 商店购买折扣 %（C「讨价还价」/B「黑市贵宾」）
 
 // ── 自定义天赋注册表（开发者模式；运行时注入，不 mutation TALENT_CATALOG）──
 
@@ -250,6 +251,8 @@ export interface TalentEntry {
     weapon?: string;
     /** 同契：同步给首张伙伴卡的经验比例（%） */
     syncPct?: number;
+    /** 交易折扣：商店购买折扣 %（clamp 到 0..50） */
+    discountPct?: number;
   };
 }
 
@@ -497,6 +500,7 @@ export const TALENT_ENTRY_POOL: readonly TalentEntry[] = [
   e({ kind: '本名武器', channel: 'universal', params: { weapon: '弓' } }),
   e({ kind: '同契', channel: 'universal', params: { syncPct: 50 } }),
   e({ kind: '经验倍率', channel: 'universal', params: { expMult: 2 } }),
+  e({ kind: '交易折扣', channel: 'universal', params: { discountPct: 5 } }),
   e({ kind: '改造', channel: 'story', params: {} }),
   // ── v10 扩容（伙伴卡生成通道，2026-09-17）──
   e({ kind: '捕获', channel: 'story', params: {} }),
@@ -623,6 +627,7 @@ const ENTRY_NUMERIC_TIERS: Partial<
   本名武器: {},
   同契: { syncPct: [50] },
   经验倍率: { expMult: [2] },
+  交易折扣: { discountPct: [5, 10, 15] },
 };
 
 /**
@@ -678,6 +683,7 @@ export const ENTRY_STRENGTH_BASELINE = {
   本名武器: {},
   同契: { syncPct: 50 },
   经验倍率: { expMult: 2 },
+  交易折扣: { discountPct: 5 },
 } as const;
 
 /** 各种类的必填内容参数（非空字符串；keywords 为字符串数组） */
@@ -769,6 +775,7 @@ const ENTRY_KIND_LIST: readonly TalentEntryKind[] = [
   '本名武器',
   '同契',
   '经验倍率',
+  '交易折扣',
 ];
 
 /**
@@ -821,6 +828,7 @@ const ENTRY_OPTIONAL_NUMERIC: Partial<Record<TalentEntryKind, readonly string[]>
   本名武器: ['weapon'],
   同契: ['syncPct'],
   经验倍率: ['expMult'],
+  交易折扣: ['discountPct'],
 };
 
 export function validateTalentEntries(entries: readonly TalentEntry[]): {
@@ -3799,7 +3807,11 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description: '你在黑市中声名远扬，所有交易都能享受折扣，并能接到一些不对外开放的特殊委托。',
     // 2026-09-17 A 级批次①：「黑市折扣与不对外开放的委托」是渠道叙事。
-    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
+    // 2026-09-18 交易系统：追加交易折扣 10%
+    entries: [
+      { kind: '交易折扣', channel: 'universal', params: { discountPct: 10 } },
+      { kind: '叙事意图', channel: 'universal', params: {} },
+    ],
   },
   {
     name: '活体巢穴',
@@ -6546,7 +6558,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description: '在商店购买物品时，可以获得5%的折扣。',
     // 2026-09-18 C 级批次②：「商店 95 折」——金钱加减的折扣通道还没有，先给叙事入口（backlog：交易折扣）
-    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
+    // 2026-09-18 交易系统：折扣通道落地（shop-system.ts）
+    entries: [{ kind: '交易折扣', channel: 'universal', params: { discountPct: 5 } }],
   },
   {
     name: '坚韧之躯',
@@ -7842,7 +7855,10 @@ export function getCreationCatalog(): TalentTemplate[] {
   const customNames = new Set(custom.map((t) => t.name));
   return [
     ...TALENT_CATALOG.filter(
-      (t) => !t.fusionOnly && (t.source === 'universal' || t.source === 'creation') && !customNames.has(t.name),
+      (t) =>
+        !t.fusionOnly &&
+        (t.source === 'universal' || t.source === 'creation') &&
+        !customNames.has(t.name),
     ),
     ...custom,
   ];
@@ -7936,6 +7952,7 @@ export const IMPLEMENTED_ENTRY_KINDS: ReadonlySet<TalentEntryKind> = new Set<Tal
   '本名武器',
   '同契',
   '经验倍率',
+  '交易折扣',
   '战技附加',
 ]);
 
@@ -7969,7 +7986,10 @@ export function getExchangeCatalog(): TalentTemplate[] {
   const customNames = new Set(custom.map((t) => t.name));
   return [
     ...TALENT_CATALOG.filter(
-      (t) => !t.fusionOnly && (t.source === 'universal' || t.source === 'exchange') && !customNames.has(t.name),
+      (t) =>
+        !t.fusionOnly &&
+        (t.source === 'universal' || t.source === 'exchange') &&
+        !customNames.has(t.name),
     ),
     ...custom,
   ];
