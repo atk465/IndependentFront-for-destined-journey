@@ -3280,7 +3280,15 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你在制作或对抗带有【野性】、【傲慢】标签的魔物娘/伙伴卡时，拥有绝对压制力。每次攻击都有概率削减其忠诚底线，最终将其变为你的专属坐骑。',
-    entries: [],
+    // 2026-09-18 收尾批次：野性/傲慢词条必附；忠诚削减由叙事拿捏
+    entries: [
+      {
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['野性', '傲慢'], weight: 3 },
+      },
+      { kind: '叙事意图', channel: 'universal', params: {} },
+    ],
   },
   {
     name: '女王的衣橱',
@@ -3511,7 +3519,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你制作的卡牌，其效果会在成功和失败两种状态中叠加，直到使用时才最终确定。例如，一张火球卡在使用前，你不知道它会是大火球还是小火苗。',
-    entries: [],
+    // 2026-09-18 收尾批次：「叠加态到使用才确定」与薛定谔的成功同源（未定态缺量）
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '模仿者',
@@ -3732,7 +3741,9 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你每天必须向你的女性伙伴卡上缴一定数额的金钱作为贡金。上缴越多，她当天反馈给你的随机buff就越强。若无法上缴，你将受到奴隶的惩戒debuff。',
-    entries: [],
+    // 2026-09-18 收尾批次：每日上缴→buff 是反向流（玩家→伙伴），账本已有但
+    // 「金钱→临时buff」的方向缺量，先给叙事入口。
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '虐待狂化',
@@ -4201,7 +4212,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'A' as TalentGrade,
     source: 'universal',
     description: '你可以把任何东西当作装备来使用。',
-    entries: [],
+    // 2026-09-18 收尾批次：「任何东西当装备」与无限军火库同源（装备槽规则缺量）
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '军团之主',
@@ -4927,7 +4939,12 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '制作出的卡牌在用范围技能同时击杀多个敌人时，会获得一个短暂的、可叠加的愉悦Buff，提升自身攻击速度。',
-    entries: [],
+    // 2026-09-18 收尾批次：多敌击杀事件→叠层 buff 需 playBeat 报告击杀事件（缺量），
+    // 先给战技附加 + 叙事入口。
+    entries: [
+      { kind: '战技附加', channel: 'universal', params: { status: '减速', power: 3, beats: 2 } },
+      { kind: '叙事意图', channel: 'universal', params: {} },
+    ],
   },
   {
     name: '高塔的公主',
@@ -4935,7 +4952,15 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '制作出的巨大化女性伙伴卡，当她静立不动时，会获得堡垒状态，防御力大幅提升，并允许友方远程单位以她为掩体。',
-    entries: [],
+    // 2026-09-18 收尾批次：「静立→堡垒」需新的 CardInPlayEffect type（战斗维度扩展）
+    entries: [
+      {
+        kind: '词条加权',
+        channel: 'universal',
+        params: { keywords: ['巨大化', '堡垒'], weight: 3 },
+      },
+      { kind: '叙事意图', channel: 'universal', params: {} },
+    ],
   },
   {
     name: '迷你暴君',
@@ -5680,7 +5705,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你和你的伙伴卡在使用完主动技能后可以追加一支舞蹈动作，在此舞蹈期间所有友方单位每回合可行动次数加一。',
-    entries: [],
+    // 2026-09-18 收尾批次：「行动次数+1」需行动次数系统（拍制每拍一次行动，无多次行动机制）
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '固执己见',
@@ -5746,7 +5772,11 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你拥有一根不可摧毁的幽灵钓竿（不占装备栏）。在任何有水体的地方，你可以进行垂钓，随机获得从垃圾到稀有素材的各种收获。水体越深、越危险，钓到好东西的概率越高。但你也有可能钓到不想钓到的东西。',
-    entries: [],
+    // 2026-09-18 收尾批次：幽灵钓竿 + 垂钓动作（缺量），配方先给 + 叙事
+    entries: [
+      { kind: '配方解锁', channel: 'universal', params: { recipe: '幽灵钓竿' } },
+      { kind: '叙事意图', channel: 'universal', params: {} },
+    ],
   },
   {
     name: '盐风铸甲',
@@ -6199,7 +6229,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你的生物卡牌会自动反驳敌人的强化效果。每当一个敌方单位获得增益时，你的卡牌会尝试反驳掉该增益，有一定成功率。',
-    entries: [],
+    // 2026-09-18 收尾批次：「自动反驳敌方增益」需敌方增益事件（反制系统扩展，缺量）
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '活体工具',
@@ -6725,7 +6756,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你可以通过让伙伴卡或魔物产卵的方式来获取特殊的生命之卵素材，甚至可以在伙伴卡体内孕育，孕期通常为一周，诞生下来的大概率是素材，小概率是可成长的伙伴卡。',
-    entries: [],
+    // 2026-09-18 收尾批次：孕育周期时间系统（缺量）
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
   },
   {
     name: '石化凝视',

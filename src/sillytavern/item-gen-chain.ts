@@ -38,6 +38,7 @@ import type {
 import { buildAgentMessagesAsync } from './agent-templates';
 import { getToolsForAgent, executeToolCall } from './agent-tools';
 import { normalizeSlot } from './field-enums';
+import { buildCardFromEquipment, buildCardFromSkill } from './card-workshop/item-card-bridge';
 import type { ToolExecutionContext } from './types';
 
 // ========== Types ==========
@@ -352,36 +353,19 @@ async function callItemGenRaw(
 export function buildItemGenPatches(itemOutput: ItemGenOutput, characterId: string): StatePatch[] {
   const patches: StatePatch[] = [];
 
-  // 1. 装备 → add_item（M3: 带 equippedSlot 单 patch 落库，不再 add+equip 两步）
+  // 1. 装备 → **装备卡**（2026-09-18 第二批裁决：item_gen 装备产卡）
+  //
+  //    双身份：卡牌字段（cardTier/词条/recipe/sealed）供编组与交锋出卡；
+  //    穿戴字段（equippedSlot/stats/modifiers/automata…）原样保留，被动加成链
+  //    （走 equippedSlot 判定，不按 type 过滤）不受影响 —— 自由共存。
+  //    数值全 Code 推导（品质→tier 映射、形态+元素词条），AI 只给名字与描述。
   for (const equip of itemOutput.equipment) {
+    const card = buildCardFromEquipment(equip, normalizeSlot(equip.slot));
     patches.push({
       op: 'add_item',
       target: `characters.${characterId}`,
-      value: {
-        name: equip.name,
-        description: equip.description,
-        quantity: 1,
-        type: '装备',
-        rarity: equip.quality,
-        equippedSlot: normalizeSlot(equip.slot), // M3: slot 归一化，null=留背包
-        stats: equip.stats,
-        durability: equip.durability,
-        maxDurability: equip.durability,
-        // 🔴 2026-08-02 修: 透传 item_gen 的战斗声明 —— 此前只落 stats/durability，
-        //   解析出来的 modifiers/automata/effects/scripts 全被丢弃，前端「战斗修正」恒空。
-        //   S4 (2026-08-01) 语义: 装备的 modifier/automaton 编译进 v3 战斗 activeEffects。
-        ...(equip.effects && Object.keys(equip.effects).length > 0
-          ? { effects: equip.effects }
-          : {}),
-        ...(equip.scripts && Object.keys(equip.scripts).length > 0
-          ? { scripts: equip.scripts }
-          : {}),
-        ...(equip.modifiers?.length ? { modifiers: equip.modifiers } : {}),
-        ...(equip.buffs?.length ? { buffs: equip.buffs } : {}),
-        ...(equip.divinity !== undefined ? { divinity: equip.divinity } : {}),
-        ...(equip.automata?.length ? { automata: equip.automata } : {}),
-      },
-      metadata: { source: 'item_gen', kind: 'equipment' },
+      value: card as unknown as Record<string, unknown>,
+      metadata: { source: 'item_gen', kind: 'equipment_card' },
     });
   }
 
@@ -408,41 +392,22 @@ export function buildItemGenPatches(itemOutput: ItemGenOutput, characterId: stri
     });
   }
 
-  // 3. 技能 → add_skill
+  // 3. 技能 → **技能卡**（2026-09-18 第二批裁决）
+  //
+  //    《为什么不是 add_skill》：`CharacterState.skills` 自 combat-v3 删除后已无任何战斗
+  //    消费点（characterToCombatParticipant/createCombatState 均已下线，交锋层只读卡），
+  //    技能数据只有背包页在展示 —— 转成技能卡把它接回战斗体系。
+  //    技能卡的强度由卡牌品质与词条决定（与原技能的 skillPower 无关，那套数值属于
+  //    已删除的 v3 技能链，透传只会留下一批读不到的字段）。
   for (const skill of itemOutput.skills) {
+    const card = buildCardFromSkill(skill);
     patches.push({
-      op: 'add_skill',
+      op: 'add_item',
       target: `characters.${characterId}`,
-      value: {
-        name: skill.name,
-        description: skill.description,
-        type: skill.type,
-        cost: skill.cost,
-        cooldown: skill.cooldown,
-        // 🆕 2026-09-11: 技能品质透传（`<skill quality="...">` → rarity）。与 char_gen 链路的
-        //    assembleCharacterState 同口径；归一化在落库口 applyAddSkill 做（同 applyAddItem 的 rarity）。
-        ...(skill.quality ? { rarity: skill.quality } : {}),
-        effects: skill.effects,
-        scripts: skill.scripts,
-        // 🔴 同上: 透传战斗声明（S4 生产检定 modifier 在此落库，craft_check/settle 消费）
-        ...(skill.modifiers?.length ? { modifiers: skill.modifiers } : {}),
-        ...(skill.buffs?.length ? { buffs: skill.buffs } : {}),
-        ...(skill.divinity !== undefined ? { divinity: skill.divinity } : {}),
-        ...(skill.automata?.length ? { automata: skill.automata } : {}),
-        // 🆕 skillPower 链路修复 (2026-08-04 漏网 2026-08-12): 主体威力三字段透传。
-        //    0694453 只修了 char_gen 链路的 assembleCharacterState，本链（request_dispatcher →
-        //    item_gen → add_skill）的 patch 漏了这三字段 → 开局初始技能（火球术等）落库后
-        //    skillPower/relevantAttribute/damageType 全丢 → characterToCombatParticipant 按
-        //    typeof skillPower === 'number' 过滤踢出 activeSkills → 战斗兜底 0 伤害。
-        //    与 assembleCharacterState（char-gen-agent.ts）的透传口径逐字段一致。
-        ...(skill.skillPower !== undefined ? { skillPower: skill.skillPower } : {}),
-        ...(skill.relevantAttribute ? { relevantAttribute: skill.relevantAttribute } : {}),
-        ...(skill.damageType ? { damageType: skill.damageType } : {}),
-      },
-      metadata: { source: 'item_gen', kind: 'skill' },
+      value: card as unknown as Record<string, unknown>,
+      metadata: { source: 'item_gen', kind: 'skill_card' },
     });
   }
-
   return patches;
 }
 

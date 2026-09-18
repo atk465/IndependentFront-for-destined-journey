@@ -4,7 +4,11 @@ import { getTalentTemplate, hasWorkingMechanic } from './talent-entry';
 
 describe('shopDiscountOf', () => {
   const 持 = (pct: number) => [
-    { entries: [{ kind: '交易折扣', channel: 'universal' as const, params: { discountPct: pct } }] },
+    {
+      entries: [
+        { kind: '交易折扣' as const, channel: 'universal' as const, params: { discountPct: pct } },
+      ],
+    },
   ];
 
   it('单条折扣', () => {
