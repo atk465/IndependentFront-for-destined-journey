@@ -700,3 +700,62 @@ export async function clearNarrativeIntent(saveId: string, talent: string): Prom
     return fresh;
   }) as Promise<SaveProfile>;
 }
+
+// ═══════════════════════════════════════════════════════════
+// 自定义内容（开发者模式：自定义天赋 / 自定义购卡）
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * `worldFlags.customTalents` / `worldFlags.customCards` 在 profile 里的键
+ * —— 只在本节出现，读写两侧共用一处。
+ */
+const CUSTOM_TALENTS_KEY = 'customTalents';
+const CUSTOM_CARDS_KEY = 'customCards';
+
+/**
+ * 读自定义内容（开发者模式编辑器写的那两份列表）。
+ *
+ * 🔴 返回**原样**的未知值：形状校验在 `custom-content.ts` 的宽读函数里（那里才认得
+ *    `TalentTemplate` / `CardCatalogItem`），本文件不引内容层类型 —— 免得引擎基础
+ *    数据层反向依赖卡牌工坊。
+ *
+ * 🔴 为什么需要这一节（2026-09-18 真机修）：此前这两个袋子是通过
+ *    `commitChatState([{op:'set_variable', target:'worldFlags.customCards'}])` 写的 ——
+ *    那条路会把内容落到 **`variables.sys.worldFlags`**，而读档读的是
+ *    `profile.worldFlags`（本节与地图/随机事件那几节同一处）。写入与读取压根不是
+ *    同一个袋子：同一局里看不出问题（运行时注册表还在内存里），一刷新就全没了。
+ */
+export function getCustomTalentFlags(profile: SaveProfile): unknown {
+  return profile.worldFlags?.[CUSTOM_TALENTS_KEY];
+}
+
+/** 读自定义购卡列表（原样，见 `getCustomTalentFlags` 的说明） */
+export function getCustomCardFlags(profile: SaveProfile): unknown {
+  return profile.worldFlags?.[CUSTOM_CARDS_KEY];
+}
+
+/**
+ * 整份覆盖自定义内容（**命名写入口**，先例 `updateMapFlags` / `setMapFlagsInPlace`）。
+ *
+ * 只写传入的键：传 `cards` 不传 `talents` 时天赋那袋原样不动（编辑器是两个页签，
+ * 各存各的）。整份覆盖而不是合并 —— 编辑器每次提交的都是完整列表，删除要能生效。
+ */
+export async function updateCustomContentFlags(
+  profile: SaveProfile,
+  content: { talents?: readonly unknown[]; cards?: readonly unknown[] },
+): Promise<SaveProfile> {
+  setCustomContentFlagsInPlace(profile, content);
+  await updateProfile(profile);
+  return profile;
+}
+
+/** 整份覆盖自定义内容 —— **只改内存不落库**（`updateCustomContentFlags` 的纯变更那一半） */
+export function setCustomContentFlagsInPlace(
+  profile: SaveProfile,
+  content: { talents?: readonly unknown[]; cards?: readonly unknown[] },
+): void {
+  // 存量记录（与手搓的测试 profile）可能整个缺 worldFlags；缺了就补一个空袋子
+  if (profile.worldFlags === undefined || profile.worldFlags === null) profile.worldFlags = {};
+  if (content.talents !== undefined) profile.worldFlags[CUSTOM_TALENTS_KEY] = [...content.talents];
+  if (content.cards !== undefined) profile.worldFlags[CUSTOM_CARDS_KEY] = [...content.cards];
+}

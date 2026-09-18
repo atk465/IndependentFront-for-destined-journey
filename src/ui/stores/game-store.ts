@@ -131,6 +131,10 @@ import {
 } from '@engine/card-workshop/talent-entry';
 import {
   getReputation as getTalentReputation,
+  getCustomTalentFlags,
+  getCustomCardFlags,
+  updateCustomContentFlags,
+  setCustomContentFlagsInPlace,
   getProfile,
   spendFP,
   setNarrativeIntent,
@@ -984,16 +988,17 @@ export const useGameStore = defineStore('game', () => {
     clearCustomTalents();
     for (const t of list) registerCustomTalent(t);
 
-    if (!activeSaveId.value) return;
-    const sm = createStateManager(activeSaveId.value);
-    void sm.commitChatState([
-      { op: 'set_variable', target: 'worldFlags.customTalents', value: list } as StatePatch,
-    ]);
+    // 🔴 落库走 profile.worldFlags（`updateCustomContentFlags`）而不是 set_variable：
+    //    后者会把内容写进 variables.sys.worldFlags，与读档读的 profile.worldFlags 不是
+    //    同一个袋子 —— 同一局看不出问题，刷新就全没了（2026-09-18 真机修）。
+    void persistCustomContent({ talents: list });
   }
 
   /** 读取自定义天赋列表（从 worldFlags 恢复到运行时注册表） */
   function loadCustomTalents(): void {
-    const list = coerceCustomTalents(saveProfile.value?.worldFlags?.customTalents);
+    const list = coerceCustomTalents(
+      getCustomTalentFlags(saveProfile.value ?? ({} as SaveProfile)),
+    );
     clearCustomTalents();
     for (const t of list) registerCustomTalent(t);
   }
@@ -1018,22 +1023,33 @@ export const useGameStore = defineStore('game', () => {
     persistCustomCards();
   }
 
-  /** 把运行时注册表整体写进当前存档（无活跃存档时跳过 —— 运行时仍生效） */
+  /**
+   * 把自定义内容写进当前存档的 `worldFlags`（无活跃存档时跳过 —— 运行时仍生效）。
+   *
+   * 🔴 唯一落库通道：读档读 `profile.worldFlags`（`getCustomCardFlags` /
+   *    `getCustomTalentFlags`），写也必须落在同一处，见 `updateCustomContentFlags` 的说明。
+   */
+  async function persistCustomContent(content: {
+    talents?: readonly TalentTemplate[];
+    cards?: readonly CardCatalogItem[];
+  }): Promise<void> {
+    const profile = saveProfile.value;
+    if (!activeSaveId.value || !profile) return;
+    // 内存里就地改（编辑器读的是这份响应式 profile），落库用去代理副本 ——
+    // Dexie 的 structuredClone 克隆不了 Vue 的 reactive Proxy（DataCloneError）。
+    setCustomContentFlagsInPlace(profile, content);
+    await updateCustomContentFlags(detach(profile), content);
+  }
+
+  /** 把卡注册表整体写进当前存档（无活跃存档时跳过 —— 运行时仍生效） */
   function persistCustomCards(): void {
-    if (!activeSaveId.value) return;
-    const sm = createStateManager(activeSaveId.value);
-    void sm.commitChatState([
-      {
-        op: 'set_variable',
-        target: 'worldFlags.customCards',
-        value: getCustomCards(),
-      } as StatePatch,
-    ]);
+    void persistCustomContent({ cards: getCustomCards() });
   }
 
   /** 从存档灌回运行时注册表（进游戏 / 切换存档时调用） */
   function loadCustomCards(): void {
-    replaceCustomCards(coerceCustomCards(saveProfile.value?.worldFlags?.customCards));
+    const profile = saveProfile.value ?? ({} as SaveProfile);
+    replaceCustomCards(coerceCustomCards(getCustomCardFlags(profile)));
   }
 
   /** 读档后把两类自定义内容一起灌回运行时池（天赋 + 购卡） */
@@ -1059,23 +1075,15 @@ export const useGameStore = defineStore('game', () => {
     if (!activeSaveId.value) return;
     const flags = saveProfile.value?.worldFlags as Record<string, unknown> | undefined;
     const nonEmpty = (v: unknown) => Array.isArray(v) && v.length > 0;
-    const patches: StatePatch[] = [];
+    const content: { talents?: TalentTemplate[]; cards?: CardCatalogItem[] } = {};
     if (!nonEmpty(flags?.customTalents) && sessionCustomTalents.size > 0) {
-      patches.push({
-        op: 'set_variable',
-        target: 'worldFlags.customTalents',
-        value: [...sessionCustomTalents.values()],
-      } as StatePatch);
+      content.talents = [...sessionCustomTalents.values()];
     }
     if (!nonEmpty(flags?.customCards) && sessionCustomCards.size > 0) {
-      patches.push({
-        op: 'set_variable',
-        target: 'worldFlags.customCards',
-        value: [...sessionCustomCards.values()],
-      } as StatePatch);
+      content.cards = [...sessionCustomCards.values()];
     }
-    if (patches.length === 0) return;
-    void createStateManager(activeSaveId.value).commitChatState(patches);
+    if (content.talents === undefined && content.cards === undefined) return;
+    void persistCustomContent(content);
   }
 
   /** 读取自定义卡列表（运行时真源；与天赋的 getCustomTalents 同口径） */
