@@ -1927,3 +1927,50 @@ describe('localStorage 草稿 save/restore/clear', () => {
     expect(localStorage.getItem(DRAFT_KEY)).toBeNull();
   });
 });
+
+// ===== 性别声明进开场白（2026-09-18 裁决）=====
+
+describe('开场白：性别声明', () => {
+  let store: ReturnType<typeof useCreateStore>;
+  beforeEach(() => {
+    store = makeStore();
+    store.name = '艾琳';
+    store.selectDifficulty('normal');
+  });
+
+  it('男 → 以「他」称呼', () => {
+    store.gender = '男';
+    const prompt = store.buildOpeningPrompt();
+    expect(prompt).toContain('艾琳是男性，叙事中以「他」称呼艾琳');
+  });
+
+  it('自定义 → 用填写的性别文本', () => {
+    store.gender = '自定义';
+    store.customGender = '女';
+    const prompt = store.buildOpeningPrompt();
+    expect(prompt).toContain('艾琳是女性，叙事中以「她」称呼艾琳');
+  });
+
+  it('自定义但留空 → 不输出性别段（不编造）', () => {
+    store.gender = '自定义';
+    store.customGender = '';
+    const prompt = store.buildOpeningPrompt();
+    expect(prompt).not.toContain('性别是');
+    expect(prompt).not.toContain('称呼');
+  });
+
+  it('旧预设/手写值「女」→ 识别出代词「她」（映射表覆盖男女与雌雄四值）', () => {
+    store.gender = '女';
+    const prompt = store.buildOpeningPrompt();
+    expect(prompt).toContain('艾琳是女性，叙事中以「她」称呼艾琳');
+  });
+
+  it('既非男女也非雌雄的自定义值 → 中性表述，不猜代词', () => {
+    store.gender = '自定义';
+    store.customGender = '无性';
+    const prompt = store.buildOpeningPrompt();
+    expect(prompt).toContain('艾琳的性别是「无性」');
+    expect(prompt).not.toContain('「他」');
+    expect(prompt).not.toContain('「她」');
+  });
+});

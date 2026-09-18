@@ -519,6 +519,70 @@ export const useGameStore = defineStore('game', () => {
    * 与 repairCard 同形状的原子提交：update_item（词条/cardTier）+ remove_item（素材）
    * + 跃迁时 update_character（tier delta + 属性包）。
    */
+  /**
+   * 使用物资卡（2026-09-18 裁决）：物资卡是纯道具卡，脱离战斗体系 —— 本动作是它
+   * 唯一的出路。消耗卡自身（-1）+ 按卡面 yield **确定性产出**（Code 定值，铁律3）；
+   * 无 yield 定义的卡拒绝使用（避免白消耗玩家的卡）。
+   */
+  async function useSupplyCard(
+    cardName: string,
+  ): Promise<{ ok: boolean; reason?: string; summary?: string }> {
+    const playerChar = player.value;
+    if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
+    const card = playerChar.inventory.find(
+      (i): i is CardItem => i.name === cardName && i.type === '卡牌',
+    );
+    if (!card) return { ok: false, reason: '找不到该卡' };
+    if (cardKindOf(card.词条) !== '物资') {
+      return { ok: false, reason: '只有物资卡可以通过这个通道使用' };
+    }
+
+    // 产出定义来自内容仓 cardPool（按名字查）
+    const pool = parseCatalogData(getContentRegistry().catalog).cardPool;
+    const def = pool.find((c) => c.name === cardName);
+    const y = def?.yield;
+    if (!y || (!y.name && !y.gc)) {
+      return { ok: false, reason: '这张卡没有产出定义，无法使用' };
+    }
+
+    const target = `characters.${playerChar.name}`;
+    const patches: StatePatch[] = [
+      { op: 'remove_item', target, value: { name: cardName, quantity: 1 } },
+    ];
+    if (y.name) {
+      patches.push({
+        op: 'add_item',
+        target,
+        value: {
+          name: y.name,
+          quantity: Math.max(1, Math.round(y.quantity ?? 1)),
+          type: y.itemType ?? '消耗品',
+        },
+      });
+    }
+    if (y.gc && y.gc > 0) {
+      patches.push({
+        op: 'update_character',
+        target,
+        value: { money: Math.round(y.gc) },
+        metadata: { delta: true, source: 'supply_card' },
+      } as StatePatch);
+    }
+
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState(patches);
+    if (!result.success) return { ok: false, reason: result.errors.join('; ') };
+    await refreshFromDb();
+
+    const parts: string[] = [];
+    if (y.name) parts.push(`${y.name} ×${Math.max(1, Math.round(y.quantity ?? 1))}`);
+    if (y.gc) parts.push(`${Math.round(y.gc)} GC`);
+    return {
+      ok: true,
+      summary: `使用「${cardName}」——获得 ${parts.join('、')}（卡已消耗）`,
+    };
+  }
+
   async function quenchCard(
     cardName: string,
     materialNames: string[],
@@ -3592,6 +3656,7 @@ export const useGameStore = defineStore('game', () => {
     plotOutline,
     repairCard,
     quenchCard,
+    useSupplyCard,
     drawFortune,
     devourCard,
     smeltCards,

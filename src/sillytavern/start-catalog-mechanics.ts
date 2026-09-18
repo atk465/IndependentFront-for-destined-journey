@@ -77,6 +77,21 @@ export type CardFormEntry = '装备' | '技能' | '领域' | '物资';
  */
 export type CardPoolFormEntry = CardFormEntry | '召唤' | '军团';
 
+/**
+ * 物资卡使用产出（2026-09-18 裁决）：物资卡是纯道具卡，使用时消耗卡自身并按此
+ * 定义**确定性产出**（Code 定值，铁律3；零 AI 依赖）。两条产出可并存。
+ */
+export interface CardYield {
+  /** 产出物品名（进背包） */
+  name?: string;
+  /** 产出数量（缺省 1） */
+  quantity?: number;
+  /** 产出物品类型（缺省「消耗品」；制卡素材类填「材料」） */
+  itemType?: '消耗品' | '材料';
+  /** 金钱直接入账（GC） */
+  gc?: number;
+}
+
 /** 召唤卡伙伴种子（首召实体化用，2026-09-17 巨兽召唤池） */
 export interface CompanionSeed {
   /** 伙伴种族（全雌世界：铭灵/诸族/兽裔皆可） */
@@ -98,6 +113,8 @@ export interface CardCatalogItem {
   cost: number;
   /** 召唤卡专属：首召实体化的伙伴种子（军团卡不需要——群像不个体化） */
   companion?: CompanionSeed;
+  /** 物资卡专属：使用产出定义（无此字段的物资卡不可使用——避免白消耗玩家的卡） */
+  yield?: CardYield;
   /** 禁忌仿卡专属：配方（素材名组合）与所仿的传说卡名。有此字段的卡不进抽卡池/开局购卡 */
   imitation?: {
     ofName: string;

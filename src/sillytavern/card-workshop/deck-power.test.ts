@@ -106,3 +106,31 @@ describe('deckGuardBonus（开战防护）', () => {
     expect(deckGuardBonus(-5)).toBe(0);
   });
 });
+
+// ===== 形态过滤（2026-09-18 裁决）：物资/素材不可出战 =====
+
+describe('不可出战的形态不计战力、不进候选', () => {
+  const 物资 = { ...卡('星辉', []), name: '物资卡', 词条: ['物资'] };
+  const 素材 = { ...卡('星辉', []), name: '素材卡', 词条: ['素材'] };
+  const 战卡 = { ...卡('青铜', ['火', '技能']), name: '可战卡' };
+
+  it('deckPower：物资/素材卡不计战力（此前占卡组位还给开战防护加成）', () => {
+    const map = new Map([物资, 素材, 战卡].map((c) => [c.name, c]));
+    const of = (n: string) => map.get(n as never);
+    const withDead = deckPower(['物资卡', '素材卡', '可战卡'], of);
+    const onlyPlayable = deckPower(['可战卡'], of);
+    expect(withDead).toBe(onlyPlayable);
+    expect(withDead).toBe(2); // 青铜权重 2，复合词条 0
+  });
+
+  it('battleReadyCards：物资/素材不进候选，即使卡组为空回退全背包', () => {
+    // 空组回退分支此前不过滤形态 —— 物资/素材照样能打出去
+    const ready = battleReadyCards([物资, 素材, 战卡], []);
+    expect(ready.map((c) => c.name)).toEqual(['可战卡']);
+  });
+
+  it('battleReadyCards：编入卡组时同样过滤（老存档里已编的物资卡不出现在候选）', () => {
+    const ready = battleReadyCards([物资, 素材, 战卡], ['物资卡', '可战卡']);
+    expect(ready.map((c) => c.name)).toEqual(['可战卡']);
+  });
+});

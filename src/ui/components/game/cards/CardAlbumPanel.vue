@@ -15,11 +15,13 @@ import {
   DEFAULT_DECK_SIZE,
   addCardToAlbum,
   addToDeck,
+  deadDeckSlots,
   countInDeck,
   ensureCardAlbum,
   removeFromDeck,
 } from '@engine/card-workshop/album';
 import { deckPower } from '@engine/card-workshop/deck-power';
+import { isPlayableCard } from '@engine/card-workshop/card-kind';
 import { UNSEAL_SLOT_COST, unsealDC, willModifierOf } from '@engine/card-workshop/unsealing';
 import AppButton from '../../shared/AppButton.vue';
 
@@ -59,14 +61,42 @@ async function commit(next: CardAlbumState) {
   opMessage.value = r.ok ? '' : (r.error ?? '卡册保存失败');
 }
 
-/** 编入一张：先幂等收录种类（含容量校验），再过同名≤2 / 卡组上限判定 */
+/**
+ * 编组资格判据（2026-09-18 裁决）：名字 → 能否出战。
+ * 查不到实物（数据漂移）按不可出战处理——宁可漏编也不放行僵尸位。
+ */
+function playableByName(name: string): boolean {
+  const card = cardItems.value.find((c) => c.name === name);
+  return !!card && isPlayableCard(card);
+}
+
+/** 编入按钮能否点：只看**形态可出战 + 卡组未满**。
+ *  🔴 刻意**不含「尚未收录」**——编入流程是「先收录进卡册、再编入卡组」
+ *  （engrave 的两步），把「尚未收录」当禁用条件会让新卡永远点不动
+ *  （2026-09-18 回归，被 CardAlbumPanel.test 当场抓住）。 */
+function canEngrave(card: CardItem): boolean {
+  if (!isPlayableCard(card)) return false;
+  return album.value.deck.length < DEFAULT_DECK_SIZE;
+}
+
+/** 编入按钮的禁用原因（仅在禁用时展示，供 title 用） */
+function engraveHint(card: CardItem): string | undefined {
+  if (!isPlayableCard(card)) return '不可出战：物资卡是道具、素材卡是制卡原料';
+  if (album.value.deck.length >= DEFAULT_DECK_SIZE) return `卡组已满（${DEFAULT_DECK_SIZE} 张）`;
+  return undefined;
+}
+
+/** 卡组里的无效位（物资/素材卡，或查不到实物的漂移位）—— 标灰提示，不自动清理 */
+const deadSlots = computed(() => deadDeckSlots(album.value.deck, playableByName));
+
+/** 编入一张：先幂等收录种类（含容量校验），再过形态+同名≤2+卡组上限判定 */
 async function engrave(card: CardItem) {
   const withSpecies = addCardToAlbum(album.value, card.name);
   if (!withSpecies.ok) {
     opMessage.value = withSpecies.reason ?? '无法收录';
     return;
   }
-  const r = addToDeck(withSpecies.album, card.name);
+  const r = addToDeck(withSpecies.album, card.name, playableByName);
   if (!r.ok) {
     opMessage.value = r.reason ?? '无法编入';
     return;
@@ -102,6 +132,9 @@ const power = computed(() =>
       <span class="dot">·</span>
       <span>战力 {{ power }}</span>
       <span v-if="opMessage" class="op-message" role="status">{{ opMessage }}</span>
+      <span v-if="deadSlots.length" class="dead-hint" role="status">
+        卡组有 {{ deadSlots.length }} 张不可出战的卡（{{ deadSlots.join('、') }}）——建议撤出
+      </span>
     </div>
 
     <div class="album-columns">
@@ -110,11 +143,20 @@ const power = computed(() =>
         <h4 class="d-label">卡组（{{ album.deck.length }}/{{ DEFAULT_DECK_SIZE }}）</h4>
         <div v-if="deckRows.length === 0" class="empty-tab">卡组还空着…</div>
         <ul v-else class="card-list">
-          <li v-for="row in deckRows" :key="row.name" class="deck-row">
+          <li
+            v-for="row in deckRows"
+            :key="row.name"
+            class="deck-row"
+            :class="{ 'not-playable': !playableByName(row.name) }"
+            :title="
+              playableByName(row.name) ? undefined : '不可出战（物资/素材卡）——它在卡组里不计战力'
+            "
+          >
             <span class="count-badge">×{{ row.count }}</span>
             <span class="card-name" :style="{ color: cardTierVar(tierOf(row.name)) }">{{
               row.name
             }}</span>
+            <span v-if="!playableByName(row.name)" class="noplay-badge">不可出战</span>
             <AppButton size="sm" variant="ghost" @click="withdraw(row.name)">撤出</AppButton>
           </li>
         </ul>
@@ -129,7 +171,11 @@ const power = computed(() =>
             v-for="card in cardItems"
             :key="card.name"
             class="pack-row"
-            :class="{ selected: selectedCard?.name === card.name }"
+            :class="{
+              selected: selectedCard?.name === card.name,
+              'not-playable': !isPlayableCard(card),
+            }"
+            :title="isPlayableCard(card) ? undefined : '不可出战：物资卡是道具、素材卡是制卡原料'"
             @click="selectCard(card.name)"
           >
             <span class="tier-dot" :style="{ background: cardTierVar(card.cardTier) }" />
@@ -137,11 +183,13 @@ const power = computed(() =>
               card.name
             }}</span>
             <span v-if="card.sealed" class="sealed-badge">未启封</span>
+            <span v-if="!isPlayableCard(card)" class="noplay-badge">不可出战</span>
             <span v-if="card.quantity > 1" class="count-badge">×{{ card.quantity }}</span>
             <AppButton
               size="sm"
               variant="secondary"
-              :disabled="album.deck.length >= DEFAULT_DECK_SIZE"
+              :disabled="!canEngrave(card)"
+              :title="engraveHint(card)"
               @click.stop="engrave(card)"
             >
               编入
@@ -459,3 +507,8 @@ const power = computed(() =>
   display: none;
 }
 </style>
+/* 不可出战的卡（物资/素材）：标灰，不自动清理（2026-09-18 裁决） */ .pack-row.not-playable,
+.deck-row.not-playable { opacity: 0.45; filter: grayscale(50%); } .noplay-badge { font-size:
+0.625rem; font-weight: 700; padding: 0 5px; border-radius: 999px; color: var(--theme-error); border:
+1px solid color-mix(in srgb, var(--theme-error) 35%, transparent); background: color-mix(in srgb,
+var(--theme-error) 8%, transparent); } .dead-hint { color: var(--theme-error); font-size: 0.75rem; }

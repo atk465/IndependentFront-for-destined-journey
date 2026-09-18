@@ -14,6 +14,7 @@ import {
   removeCardFromAlbum,
   canAddToDeck,
   addToDeck,
+  deadDeckSlots,
   removeFromDeck,
   toPlainCardAlbum,
 } from './album';
@@ -146,5 +147,50 @@ describe('toPlainCardAlbum —— 响应式 Proxy 净化（真机 DataCloneError
     expect(plain.owned).toEqual([]);
     expect(plain.deck).toEqual([]);
     expect(plain.capacity).toBe(60);
+  });
+});
+
+// ===== 编组资格的形态拦截（2026-09-18 裁决）=====
+
+describe('编组资格：按「能否打出」统一判', () => {
+  const albumWith = (deck: string[] = []): CardAlbumState => ({
+    owned: ['可战卡', '物资卡', '素材卡'],
+    deck,
+    capacity: 60,
+  });
+  /** 注入的形态判据：物资/素材不可出战（对应 card-kind.isPlayable） */
+  const playable = (name: string) => name === '可战卡';
+
+  it('可出战的卡：正常编入', () => {
+    const r = addToDeck(albumWith(), '可战卡', playable);
+    expect(r.ok).toBe(true);
+    expect(r.album.deck).toEqual(['可战卡']);
+  });
+
+  it('物资卡被拦：原因可见，卡册原样', () => {
+    const before = albumWith();
+    const r = addToDeck(before, '物资卡', playable);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toContain('不能在战斗中打出');
+    expect(r.album).toBe(before); // 失败不改入参
+  });
+
+  it('素材卡被拦（同类 bug 一并修：此前禁打却可编组且给战力加成）', () => {
+    const r = addToDeck(albumWith(), '素材卡', playable);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toContain('不能在战斗中打出');
+  });
+
+  it('canAddToDeck 与 addToDeck 同判据（形态先于收录判定）', () => {
+    expect(canAddToDeck(albumWith(), '物资卡', playable).ok).toBe(false);
+    expect(canAddToDeck(albumWith(), '可战卡', playable).ok).toBe(true);
+    // 不传判据 = 跳过形态校验（旧行为，生产调用方必须传）
+    expect(canAddToDeck(albumWith(), '物资卡').ok).toBe(true);
+  });
+
+  it('deadDeckSlots：挑出卡组里的无效位（老存档不自动清理，只标灰）', () => {
+    const dead = deadDeckSlots(['可战卡', '物资卡', '可战卡', '素材卡'], playable);
+    expect(dead).toEqual(['物资卡', '素材卡']);
+    expect(deadDeckSlots(['可战卡'], playable)).toEqual([]);
   });
 });

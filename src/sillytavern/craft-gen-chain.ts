@@ -44,6 +44,7 @@ import {
 import type { ToolExecutionContext } from './types';
 // Q-05：XML / JSON 解析的唯一工具面（参数顺序一律 (source, tag)）
 import { tagInner, tagBlock, parseAttrsStr } from './agent-xml';
+import { consumedByRating } from './card-workshop/card-craft-plan';
 import { matchImitation } from './start-catalog-mechanics';
 import { entryStrength } from './card-workshop/talent-rule-modifiers';
 import {
@@ -484,6 +485,32 @@ export function buildCraftPatches(
   const patches: StatePatch[] = [];
 
   const productName = craftOutput.productName;
+
+  // 0. 制卡素材消耗（2026-09-18 裁决：**Code 确定性扣减**，不依赖 AI 调 craft_settle）
+  //
+  //    此前叙事制卡的素材扣减被外包给 AI 工具调用：漏调 craft_settle 就一分不扣
+  //    （代码里那行「本次未经结算——不发放奖励，素材也未扣」是自认）。UI 制卡台
+  //    早已用 planCardCraft.consumed 修好了这条，这里补齐叙事路径，两条路径同口径。
+  //    消耗规则走 consumedByRating（成功/大失败全耗、失败只耗副素材）。
+  if (cardProduct && craftOutput.craftParams?.industry === '制卡') {
+    const mats = parseMaterialNames(craftOutput.craftParams.materials);
+    const main = mats[0];
+    const subs = mats.slice(1);
+    if (main) {
+      for (const name of consumedByRating(craftOutput.rating, main, subs)) {
+        patches.push({
+          op: 'remove_item',
+          target: `characters.${characterId}`,
+          value: { name, quantity: 1 },
+          metadata: { source: 'craft_card_materials' },
+        } as StatePatch);
+      }
+      // 素材被扣掉之后，那条「未经结算不扣素材」的兜底文案就不再成立
+      if (craftOutput.narrative?.includes('素材也未扣')) {
+        craftOutput.narrative = craftOutput.narrative.replace(/（[^）]*素材也未扣[^）]*）/g, '');
+      }
+    }
+  }
 
   // 1. 主产物写入背包 (add_item) — 仅成功产出完整制品
   // 阶段3b 制卡桥：industry=制卡 的主产物由调用方（runCraftGenChain）用融合内核

@@ -11,6 +11,7 @@
 import type { CardTier } from '../field-enums';
 import type { CardItem } from '../types';
 import { SYNERGY_PRODUCTS } from './card-fusion';
+import { isPlayableCard } from './card-kind';
 
 /** 品质 → 战力权重（单一真源） */
 export const TIER_POWER: Record<CardTier, number> = {
@@ -36,12 +37,14 @@ export function cardPower(card: Pick<CardItem, 'cardTier' | '词条' | 'cardPowe
   return tier + 2 * synergy + bonus;
 }
 
-/** 卡组战力：按编入顺序逐张累加；查不到实物的名字跳过 */
+/** 卡组战力：按编入顺序逐张累加；查不到实物的名字跳过。
+ * 🔴 2026-09-18 裁决：**不可打出的形态（物资/素材）不计战力** —— 此前它们
+ * 占着卡组位还能抬高开战防护与委托难度档，属于「禁打却算数」的漏洞。 */
 export function deckPower(deck: string[], cardOf: (name: string) => CardItem | undefined): number {
   let total = 0;
   for (const name of deck) {
     const card = cardOf(name);
-    if (card) total += cardPower(card);
+    if (card && isPlayableCard(card)) total += cardPower(card);
   }
   return total;
 }
@@ -50,16 +53,20 @@ export function deckPower(deck: string[], cardOf: (name: string) => CardItem | u
  *  ① 出卡资格收敛卡组——交锋只能打出编入卡组的卡（背包=收藏，卡组=出战配置）；
  *     卡组为空（未整备）时回退全背包，不惩罚老档。过滤口径与 SkirmishPanel 一致：
  *     排除损坏与未启封。
- *  ② 开战防护加成——guard += ⌊deckPower/3⌋（卡组是你的盾，C' 制互补）。 */
+ *  ② 开战防护加成——guard += ⌊deckPower/3⌋（卡组是你的盾，C' 制互补）。
+ *
+ * 🔴 2026-09-18 补：两条路径都叠加**形态过滤**（isPlayableCard）——物资卡已定位为
+ * 纯道具卡、素材卡是制卡原料，两者都不可出战；尤其「空组回退全背包」这条分支
+ * 不过滤的话，物资/素材卡照样能打出去。 */
 
 export function battleReadyCards(
   inventory: readonly CardItem[],
   deck: readonly string[],
 ): CardItem[] {
   const playable = inventory.filter(
-    (c) => c.type === '卡牌' && !isSealedCard(c) && !isDamagedCard(c),
+    (c) => c.type === '卡牌' && isPlayableCard(c) && !isSealedCard(c) && !isDamagedCard(c),
   );
-  if (deck.length === 0) return playable; // 未整备 → 回退全背包
+  if (deck.length === 0) return playable; // 未整备 → 回退全背包（已过形态过滤）
   const inDeck = new Set(deck);
   return playable.filter((c) => inDeck.has(c.name));
 }

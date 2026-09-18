@@ -18,7 +18,7 @@ import type { CardItem } from '../types';
 import type { CounterTag, SkirmishAction } from './skirmish';
 import { COUNTER_TAGS } from './skirmish';
 import { cardPower } from './deck-power';
-import { cardKindOf } from './card-kind';
+import { cardKindOf, isPlayable } from './card-kind';
 import { cardStatusEffect } from './entry-status';
 
 /** 词条 → 反制标签（单一真源；key 必须与 card-fusion/material 的词条字面一致） */
@@ -177,8 +177,17 @@ export function cardPlayPlan(
   stats: { atk: number },
 ): CardPlayPlan {
   const kind = cardKindOf(card.词条);
-  if (kind === '素材') {
-    return { mode: '禁打', reason: '素材卡是材料载体，不能在战斗中打出' };
+  // 🔴 2026-09-18 裁决：禁打判据统一走 isPlayable（素材 = 材料载体；物资 = 纯道具卡）。
+  //    物资卡此前是「直击」（与技能同类的一次性攻击卡），现按道具定位退出战斗——
+  //    它的使用在卡册/背包页的道具通道，不在交锋里。
+  if (!isPlayable(kind)) {
+    return {
+      mode: '禁打',
+      reason:
+        kind === '素材'
+          ? '素材卡是材料载体，不能在战斗中打出'
+          : '物资卡是道具，请在卡册/背包的道具栏使用',
+    };
   }
   // 战技附加（2026-09-17）：制卡时授予的战斗状态，打出此卡即生效（第二条在场效果）
   const extra = cardStatusEffect(card.战技, card.name);

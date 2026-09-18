@@ -360,3 +360,58 @@ describe('buildCraftPatches × cardProduct（industry=制卡）', () => {
     expect((addItems[0].value as any).type).toBe('卡牌');
   });
 });
+
+// ===== 制卡素材消耗：Code 确定性扣减（2026-09-18 裁决）=====
+
+describe('buildCraftPatches — 制卡素材扣减', () => {
+  const cardOutput = (rating: string, materials: string) => ({
+    success: true,
+    productName: '测试卡',
+    description: 'd',
+    quantity: 1,
+    quality: '普通',
+    rating,
+    narrative: '叙事',
+    craftParams: { industry: '制卡', materials },
+    settlementPatches: undefined,
+  });
+  const 卡产物 = {
+    name: '测试卡',
+    type: '卡牌',
+    quantity: 1,
+    cardTier: '青铜',
+    词条: ['火'],
+    sealed: false,
+  } as never;
+
+  it('成功：主素材与副素材全扣（不再依赖 AI 调 craft_settle）', () => {
+    const patches = buildCraftPatches(
+      cardOutput('成功', '火晶、炎心草') as never,
+      null,
+      '主角',
+      卡产物,
+    );
+    const removed = patches.filter((p) => p.op === 'remove_item').map((p) => (p.value as any).name);
+    expect(removed).toEqual(['火晶', '炎心草']);
+  });
+
+  it('失败：只扣副素材，主材保住', () => {
+    const patches = buildCraftPatches(
+      cardOutput('失败', '火晶、炎心草') as never,
+      null,
+      '主角',
+      卡产物,
+    );
+    const removed = patches.filter((p) => p.op === 'remove_item').map((p) => (p.value as any).name);
+    expect(removed).toEqual(['炎心草']);
+  });
+
+  it('非制卡行业：不产素材扣减', () => {
+    const out = {
+      ...cardOutput('成功', '铁锭'),
+      craftParams: { industry: '锻造', materials: '铁锭' },
+    };
+    const patches = buildCraftPatches(out as never, null, '主角', undefined);
+    expect(patches.filter((p) => p.op === 'remove_item')).toHaveLength(0);
+  });
+});

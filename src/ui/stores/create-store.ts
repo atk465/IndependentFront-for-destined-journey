@@ -1461,6 +1461,31 @@ export const useCreateStore = defineStore('create', () => {
       if (tf) lines.push(tf);
     }
 
+    // 性别声明（2026-09-18 裁决）：**开场白明确写出玩家性别** ——
+    // 此前性别完全不进开场白，而本作世界观是「除玩家外万物全雌」，于是 AI 会
+    // 顺理成章地把玩家也默认成「她」（真机反馈的首条信息问题）。玩家是「读铭者」、
+    // 不在铭中，性别是角色的显性身份、第一轮就该让 AI 知道。
+    const genderText =
+      gender.value === '自定义'
+        ? customGender.value.trim()
+        : gender.value === '雄性'
+          ? '雄性'
+          : gender.value;
+    if (genderText) {
+      const pronoun =
+        genderText === '男' || genderText === '雄性'
+          ? '他'
+          : genderText === '女' || genderText === '雌性'
+            ? '她'
+            : null;
+      lines.push('');
+      lines.push(
+        pronoun
+          ? `${charName}是${genderText}性，叙事中以「${pronoun}」称呼${charName}。`
+          : `${charName}的性别是「${genderText}」，叙事中据此称呼${charName}。`,
+      );
+    }
+
     // 收尾：约束首轮叙事流程 —— 先以开局背景为舞台重新演绎（既定事实不变），再自然续写。
     // 🔴 这一句同时是 `{{SKILL_STATE}}` 从开场消息里截取初始技能声明的结束边界
     //    （placeholder-registry 的 isNaturalOpeningSkillEnd），改措辞要同步改那里。

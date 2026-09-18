@@ -7,8 +7,15 @@
  * 多形态词条视为内容错误，按固定优先级取首个命中（防御性裁定，不炸）。
  * 「禁忌」是稀有类横切标记，不是类型（阶段 4 裁定）。
  *
- * 消耗分界（1.3）：技能/领域/场景/物资 = 消耗（settlement 结算，哑火不耗）；
+ * 消耗分界（1.3）：技能/领域/场景 = 消耗（settlement 结算，哑火不耗）；
  * 装备/召唤/军团 = 永久；素材不可战斗打出（材料载体，炼制/修复/交易用）。
+ *
+ * 🔴 2026-09-18 主人裁决：**物资卡定位为纯道具卡**，脱离战斗体系 —— 不可编组、
+ * 不计卡组战力、不可在交锋中打出；它的消耗发生在「道具使用」通道（卡册/背包页
+ * 的使用按钮：消耗卡自身 + 按卡面 yield 产出物品），不参与 settlement 结算。
+ * 由此 `isPlayable` 成为「能否编组 + 能否在战斗中打出」的**唯一判据**，
+ * 编组面板 / deckPower / battleReadyCards 三处共用（此前它们零形态校验，
+ * 素材卡禁打却可编组、还给开战防护加成）。
  */
 
 import { LANDSCAPE_ENTRY } from './landscape';
@@ -49,8 +56,10 @@ export function cardKindOf(词条: readonly string[] | null | undefined): CardKi
   return DEFAULT_CARD_KIND;
 }
 
-/** 消耗性（1.3）：技能/领域/场景/物资消耗；装备/召唤/军团永久 */
-const CONSUMABLE_KINDS: ReadonlySet<CardKind> = new Set<CardKind>(['技能', '领域', '场景', '物资']);
+/** 消耗性（1.3）：技能/领域/场景消耗；装备/召唤/军团永久。
+ * 🔴 物资已退出战斗（2026-09-18 裁决）——它的消耗由道具使用通道处理，
+ * 不再经 settlement，故此表不含物资。 */
+const CONSUMABLE_KINDS: ReadonlySet<CardKind> = new Set<CardKind>(['技能', '领域', '场景']);
 
 export function isConsumable(kind: CardKind): boolean {
   return CONSUMABLE_KINDS.has(kind);
@@ -61,8 +70,12 @@ export function isConsumableKind(kind: string): boolean {
   return (CONSUMABLE_KINDS as ReadonlySet<string>).has(kind);
 }
 
-/** 不可战斗打出的类型（素材 = 材料载体，炼制/修复/交易用） */
-const UNPLAYABLE_KINDS: ReadonlySet<CardKind> = new Set<CardKind>(['素材']);
+/**
+ * 不可战斗打出的类型 —— **同时也是不可编入卡组的类型**：
+ * - 素材：材料载体，炼制/修复/交易用
+ * - 物资：纯道具卡（2026-09-18 裁决），走道具使用通道
+ */
+const UNPLAYABLE_KINDS: ReadonlySet<CardKind> = new Set<CardKind>(['素材', '物资']);
 
 export function isPlayable(kind: CardKind): boolean {
   return !UNPLAYABLE_KINDS.has(kind);
@@ -73,7 +86,8 @@ export function cardKind(card: Pick<CardItem, '词条'>): CardKind {
   return cardKindOf(card.词条);
 }
 
-/** 这张卡能不能在战斗中打出（类型维度；编组/实物维度由会话层解析器把守） */
+/** 这张卡能不能在战斗中打出（类型维度；实物维度（封印/损坏）由 battleReadyCards 把守）。
+ * 编组资格 / 卡组战力 / 出卡候选三处共用这一条判据。 */
 export function isPlayableCard(card: Pick<CardItem, '词条'>): boolean {
   return isPlayable(cardKindOf(card.词条));
 }

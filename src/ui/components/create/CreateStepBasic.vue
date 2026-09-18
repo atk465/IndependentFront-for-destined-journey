@@ -46,6 +46,13 @@ function applyBackground(bg: BackgroundTemplate | null) {
           label="性别"
           :options="store.GENDER_OPTIONS.map((g) => ({ label: g, value: g }))"
         />
+        <FormInput
+          v-if="store.gender === '自定义'"
+          v-model="store.customGender"
+          label="自定义性别"
+          placeholder="输入性别（会写进开场白，让叙事知道你该被怎么称呼）"
+          class="custom-field"
+        />
         <FormStepper v-model="store.age" label="年龄" :min="1" :max="999" />
         <FormSelect v-model="store.race" label="种族" :options="store.raceOptions" />
         <FormInput

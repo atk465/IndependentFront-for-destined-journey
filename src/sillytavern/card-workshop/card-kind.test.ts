@@ -52,11 +52,12 @@ describe('八类类型与形态词条', () => {
 });
 
 describe('消耗性（1.3 裁定）', () => {
-  it('技能/领域/场景/物资 = 消耗', () => {
+  it('技能/领域/场景 = 消耗（物资已退出战斗，2026-09-18 裁决）', () => {
     expect(isConsumable('技能')).toBe(true);
     expect(isConsumable('领域')).toBe(true);
     expect(isConsumable('场景')).toBe(true);
-    expect(isConsumable('物资')).toBe(true);
+    // 物资卡定位为纯道具卡：消耗发生在道具使用通道，不经战斗 settlement
+    expect(isConsumable('物资')).toBe(false);
   });
   it('装备/召唤/军团 = 永久', () => {
     expect(isConsumable('装备')).toBe(false);
@@ -67,10 +68,12 @@ describe('消耗性（1.3 裁定）', () => {
 });
 
 describe('可打出性', () => {
-  it('素材卡不可战斗打出（材料载体）', () => {
+  it('素材卡与物资卡不可战斗打出（= 不可编组）', () => {
     expect(isPlayable('素材')).toBe(false);
+    expect(isPlayable('物资')).toBe(false);
+    // 其余六类可出战
     for (const kind of CARD_KINDS) {
-      if (kind !== '素材') expect(isPlayable(kind), kind).toBe(true);
+      if (kind !== '素材' && kind !== '物资') expect(isPlayable(kind), kind).toBe(true);
     }
   });
 });

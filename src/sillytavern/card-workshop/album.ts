@@ -87,13 +87,25 @@ export function removeCardFromAlbum(album: CardAlbumState, cardName: string): Ca
 }
 
 /**
- * 能否把一张卡编入卡组：未收录 / 同名超限 / 卡组满 三判，
+ * 编组资格的**形态判据**（2026-09-18 裁决）：注入式设计——album.ts 是纯名字集合
+ * 模型、不认识卡的词条，所以由调用方注入一个「名字 → 能否打出」的查询器。
+ * 不传 = 跳过形态校验（旧行为；**生产调用方必须传**，否则物资/素材卡会漏过）。
+ */
+export type PlayableQuery = (cardName: string) => boolean;
+
+/** 不可编组的形态原因文案（UI 直接展示） */
+const UNPLAYABLE_REASON = '这张卡不能在战斗中打出（物资卡是道具、素材卡是制卡原料）';
+
+/**
+ * 能否把一张卡编入卡组：形态（能否打出） / 未收录 / 同名超限 / 卡组满，
  * 逐条给出中文原因（UI 直接展示，不做二次拼接）。
  */
 export function canAddToDeck(
   album: CardAlbumState,
   cardName: string,
+  isPlayable?: PlayableQuery,
 ): { ok: boolean; reason?: string } {
+  if (isPlayable && !isPlayable(cardName)) return { ok: false, reason: UNPLAYABLE_REASON };
   if (!album.owned.includes(cardName)) return { ok: false, reason: '尚未收录这张卡' };
   if (countInDeck(album.deck, cardName) >= MAX_COPIES_PER_CARD) {
     return { ok: false, reason: `同名卡最多编入 ${MAX_COPIES_PER_CARD} 张` };
@@ -105,10 +117,24 @@ export function canAddToDeck(
 }
 
 /** 编入一张（失败时 ok:false 且卡册原样） */
-export function addToDeck(album: CardAlbumState, cardName: string): AlbumOpResult {
-  const check = canAddToDeck(album, cardName);
+export function addToDeck(
+  album: CardAlbumState,
+  cardName: string,
+  isPlayable?: PlayableQuery,
+): AlbumOpResult {
+  const check = canAddToDeck(album, cardName, isPlayable);
   if (!check.ok) return fail(album, check.reason ?? '无法编入');
   return { ok: true, album: { ...album, deck: [...album.deck, cardName] } };
+}
+
+/**
+ * 挑出卡组里**不可出战**的卡（物资/素材卡，或名字查不到实物的漂移位）。
+ *
+ * 🔴 2026-09-18 裁决：老存档里已编入的这类卡**不被自动清理**（不改玩家数据），
+ * 由 UI 标灰提示「卡组有 N 张不可出战的卡」，玩家自己决定清不清。
+ */
+export function deadDeckSlots(deck: readonly string[], isPlayable: PlayableQuery): string[] {
+  return deck.filter((name) => !isPlayable(name));
 }
 
 /** 撤出一张同名卡（撤最后编入的那张；卡组里没有时原样返回） */
