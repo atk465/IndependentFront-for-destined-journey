@@ -102,7 +102,9 @@ export type TalentEntryKind =
   | '同契' // 与首张伙伴卡同步成长——战斗经验按比例同步（SS「爱」）
   | '经验倍率' // 通用经验获取倍率（C「快速成长」等）
   | '交易折扣' // 商店购买折扣 %（C「讨价还价」/B「黑市贵宾」）
-  | '无槽限'; // 装备槽不限件数——同槽可穿多件（S「无限军火库」/A「成龙」）
+  | '无槽限' // 装备槽不限件数——同槽可穿多件（S「无限军火库」/A「成龙」）
+  | '采集强化' // 采集品质/额外产出提升（S「海底捞月」/C「野外生存」）
+  | '垂钓强化'; // 垂钓深水/稀有捕获提升（B「深海垂钓者」/C「冰渊垂钓者」）
 
 // ── 自定义天赋注册表（开发者模式；运行时注入，不 mutation TALENT_CATALOG）──
 
@@ -254,6 +256,12 @@ export interface TalentEntry {
     syncPct?: number;
     /** 交易折扣：商店购买折扣 %（clamp 到 0..50） */
     discountPct?: number;
+    /** 采集强化：品质提升档数 / 额外产出概率（%） */
+    qualityBoost?: number;
+    extraChance?: number;
+    /** 垂钓强化：深水加成档 / 稀有捕获概率提升（%） */
+    depthBonus?: number;
+    rareChance?: number;
   };
 }
 
@@ -503,6 +511,8 @@ export const TALENT_ENTRY_POOL: readonly TalentEntry[] = [
   e({ kind: '经验倍率', channel: 'universal', params: { expMult: 2 } }),
   e({ kind: '交易折扣', channel: 'universal', params: { discountPct: 5 } }),
   e({ kind: '无槽限', channel: 'universal', params: {} }),
+  e({ kind: '采集强化', channel: 'universal', params: { qualityBoost: 1, extraChance: 15 } }),
+  e({ kind: '垂钓强化', channel: 'universal', params: { depthBonus: 1, rareChance: 15 } }),
   e({ kind: '改造', channel: 'story', params: {} }),
   // ── v10 扩容（伙伴卡生成通道，2026-09-17）──
   e({ kind: '捕获', channel: 'story', params: {} }),
@@ -631,6 +641,8 @@ const ENTRY_NUMERIC_TIERS: Partial<
   经验倍率: { expMult: [2] },
   交易折扣: { discountPct: [5, 10, 15] },
   无槽限: {},
+  采集强化: { qualityBoost: [1, 2], extraChance: [0, 15, 30] },
+  垂钓强化: { depthBonus: [1, 2], rareChance: [15, 30] },
 };
 
 /**
@@ -688,6 +700,8 @@ export const ENTRY_STRENGTH_BASELINE = {
   经验倍率: { expMult: 2 },
   交易折扣: { discountPct: 5 },
   无槽限: {},
+  采集强化: { qualityBoost: 1, extraChance: 15 },
+  垂钓强化: { depthBonus: 1, rareChance: 15 },
 } as const;
 
 /** 各种类的必填内容参数（非空字符串；keywords 为字符串数组） */
@@ -781,6 +795,8 @@ const ENTRY_KIND_LIST: readonly TalentEntryKind[] = [
   '经验倍率',
   '交易折扣',
   '无槽限',
+  '采集强化',
+  '垂钓强化',
 ];
 
 /**
@@ -834,6 +850,8 @@ const ENTRY_OPTIONAL_NUMERIC: Partial<Record<TalentEntryKind, readonly string[]>
   同契: ['syncPct'],
   经验倍率: ['expMult'],
   交易折扣: ['discountPct'],
+  采集强化: ['qualityBoost', 'extraChance'],
+  垂钓强化: ['depthBonus', 'rareChance'],
 };
 
 export function validateTalentEntries(entries: readonly TalentEntry[]): {
@@ -3216,7 +3234,11 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你在进行任何打捞、采集、搜索行为时，有额外15%的概率获得超出预期一个等级的物品或素材。该概率在月圆之夜翻倍至30%。',
-    entries: [],
+    // 2026-09-18 采集系统：采集强化（品质 +1、额外产出 +15%）+ 叙事（月圆翻倍由叙事拿捏）
+    entries: [
+      { kind: '采集强化', channel: 'universal', params: { qualityBoost: 1, extraChance: 15 } },
+      { kind: '叙事意图', channel: 'universal', params: {} },
+    ],
   },
 
   // ── v8 第四批 A 级全量（主人 2026-09-15；制作专精/系统/规则/形态转化，条目映射或纯叙事）──
@@ -5781,10 +5803,10 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你拥有一根不可摧毁的幽灵钓竿（不占装备栏）。在任何有水体的地方，你可以进行垂钓，随机获得从垃圾到稀有素材的各种收获。水体越深、越危险，钓到好东西的概率越高。但你也有可能钓到不想钓到的东西。',
-    // 2026-09-18 收尾批次：幽灵钓竿 + 垂钓动作（缺量），配方先给 + 叙事
+    // 2026-09-18 采集系统：垂钓强化（深水 +1、稀有捕获 +15%）+ 幽灵钓竿配方
     entries: [
+      { kind: '垂钓强化', channel: 'universal', params: { depthBonus: 1, rareChance: 15 } },
       { kind: '配方解锁', channel: 'universal', params: { recipe: '幽灵钓竿' } },
-      { kind: '叙事意图', channel: 'universal', params: {} },
     ],
   },
   {
@@ -5905,8 +5927,10 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '在冰层上打洞垂钓时，你总能钓上来一些奇奇怪怪的高级素材，包括但不限于深海巨兽的触手、古代冻尸的器官，或是某种滑溜溜的催情海藻。',
-    // 2026-09-18 C 级批次①：「冰钓出奇怪素材」是世界给你的馈赠，归叙事。
-    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
+    // 2026-09-18 C 级批次①→垂钓升级：冰钓出高级素材 = 垂钓强化
+    entries: [
+      { kind: '垂钓强化', channel: 'universal', params: { depthBonus: 1, rareChance: 15 } },
+    ],
   },
   {
     name: '冻骨巫医',
@@ -6614,8 +6638,10 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'C' as TalentGrade,
     source: 'universal',
     description: '你在野外获得草药、矿石等基础素材时，质量小幅提升。',
-    // 2026-09-18 D 小批：野外素材质量提升
-    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
+    // 2026-09-18 D 小批 → 采集系统升级：素材质量提升 = 采集强化
+    entries: [
+      { kind: '采集强化', channel: 'universal', params: { qualityBoost: 1, extraChance: 0 } },
+    ],
   },
   {
     name: '妹妹的祈愿',
@@ -7995,6 +8021,8 @@ export const IMPLEMENTED_ENTRY_KINDS: ReadonlySet<TalentEntryKind> = new Set<Tal
   '经验倍率',
   '交易折扣',
   '无槽限',
+  '采集强化',
+  '垂钓强化',
   '战技附加',
 ]);
 
