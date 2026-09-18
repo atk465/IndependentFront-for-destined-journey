@@ -24,6 +24,8 @@ import {
 } from './content-store';
 import { getDatabase } from '@engine/database';
 import { hashWorldBook } from '@engine/content-source';
+import { getContentRegistry } from '@engine/content-registry-runtime';
+import { getBloodlineSet } from '@engine/bloodlines';
 import type { WorldBook, WorldBookEntry } from '@engine/types';
 import type { ContentPack } from '@engine/types-content';
 
@@ -83,6 +85,14 @@ function makePack(version = '1.0.0'): ContentPack {
     packId: 'fated-poem-official',
     packVersion: version,
     name: '测试内容包',
+    // 🔴 bloodlines 是带壳分节（PackBloodlinesSection）—— 装包后必须剥壳供注册表，
+    //    否则 getBloodlineSet() 遍历到外壳那层就全跳过 → 捏人页种族下拉只剩「自定义」
+    bloodlines: {
+      bloodlines: {
+        human: { name: '人类', description: '真实人类', statModifiers: { con: 1 } },
+        elf: { name: '精灵', description: '真实精灵' },
+      },
+    },
     worldBooks: [
       book('system_core', 'system_core', [entry(1, '核心A', '真实A'), entry(2, '核心B', '真实B')]),
       book('world_setting', 'world_setting', [entry(3, '背景常识', '真实背景')]),
@@ -575,5 +585,37 @@ describe('content-store 执行器 —— 6. D42 重播种', () => {
     expect(ws?.entries[0].content).toBe('用户自己改过的内容');
     // 戳已更新
     expect(cfg.settings.placeholderVersion).toBe('2');
+  });
+});
+
+// ===== bloodlines 分节剥壳（2026-09-18 真机回归：种族下拉只剩「自定义」）=====
+
+describe('content-store 执行器 —— bloodlines 供注册表前必须剥壳', () => {
+  beforeEach(async () => {
+    setActivePinia(createPinia());
+    await cleanDb();
+    await seedPlaceholderLibrary();
+    installContentFetchMock();
+  });
+  afterEach(() => {
+    setActivePackRecord(null);
+    resetPlaceholderHashesCache();
+    vi.restoreAllMocks();
+  });
+
+  it('装包后 getBloodlineSet() 拿到真实血脉（不是空表）', async () => {
+    const c = useContentStore();
+    await c.installPack(makePack());
+
+    // 注册表这一面必须是**裸的** raceKey → 血脉 映射
+    const face = getContentRegistry().bloodlines as Record<string, unknown>;
+    expect(face).not.toHaveProperty('bloodlines');
+    expect(face).toHaveProperty('human');
+
+    // 消费方视角：血脉集非空且含 name/description（getBloodlineSet 的准入条件）
+    const set = getBloodlineSet();
+    expect(Object.keys(set).length).toBeGreaterThanOrEqual(2);
+    expect(set['human']?.name).toBe('人类');
+    expect(set['elf']?.description).toBe('真实精灵');
   });
 });

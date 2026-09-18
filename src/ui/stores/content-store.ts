@@ -506,9 +506,10 @@ async function fetchRegistryFace(
  * 已装 pack 各面的取值（D20 三态的 pack 半边）。
  *
  * 取法与装包执行器一致：`catalog` / `namePools` 取 `.data` 子字段，
- * `locations` / `mapMarkers` / `branding` / `bloodlines` / `mapPack` 是整节
- * （方言分节按整节走，因为它落盘就是 `{ dialects: [...] }` —— 与 `bloodlines` 同形；
- * 地图包同理，它落盘就是 `MapPack` 本身，再包一层 `data` 只是多一层壳）。
+ * `locations` / `mapMarkers` / `branding` / `mapPack` 是整节（裸形状）。
+ * 🔴 **`bloodlines` 是例外：它带壳**（`PackBloodlinesSection = { bloodlines: {...} }`），
+ *    必须在供注册表前剥到内层 —— 注册表消费方要的是裸的 raceKey→血脉 映射。
+ *    地图包落盘就是 `MapPack` 本身，再包一层 `data` 只是多一层壳。
  * 键**只在该面有值时才出现**——于是下游一律 `resolveSection(packFace, placeholder)`，
  * 不必在两处各写一遍三元。
  *
@@ -522,7 +523,17 @@ function packRegistryFaces(
   const out: Partial<Record<keyof ContentRegistry, unknown>> = {};
   if (pack.catalog?.data !== undefined) out.catalog = pack.catalog.data;
   if (pack.locations !== undefined) out.locations = pack.locations;
-  if (pack.bloodlines !== undefined) out.bloodlines = pack.bloodlines;
+  if (pack.bloodlines !== undefined) {
+    // 🔴 2026-09-18 真机修：`PackBloodlinesSection` 是**带壳的**（`{ bloodlines: {...} }`），
+    //    而注册表这一面的消费方 `getBloodlineSet()` 直接遍历顶层键、要求每行含
+    //    `name` + `description`。此前直接整节赋值 → 遍历遇到外壳那一层就全跳过 →
+    //    血脉集恒空 → 捏人页种族下拉只剩「自定义」。
+    //    （占位侧走 HTTP 直取 bloodlines.json 是裸对象，所以不装包时看不出来；
+    //     旧内容包没有 bloodlines 分节，所以这个问题最近才暴露。）
+    //    剥壳；兼容构建器将来若改成裸对象（内层不存在时原样用）。
+    const inner = (pack.bloodlines as { bloodlines?: unknown }).bloodlines;
+    out.bloodlines = inner !== undefined ? inner : pack.bloodlines;
+  }
   if (pack.namePools?.data !== undefined) out.namePools = pack.namePools.data;
   if (pack.mapMarkers !== undefined) out.markers = pack.mapMarkers;
   if (pack.branding !== undefined) out.branding = pack.branding;
