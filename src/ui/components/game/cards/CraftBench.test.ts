@@ -44,9 +44,13 @@ beforeEach(() => {
   mockGame.player = { name: '主角', inventory: [火晶, 风羽, 寒水珠] };
 });
 
-async function selectSub(wrapper: ReturnType<typeof mount>, label: string, name: string) {
-  const select = wrapper.findAll('select').find((s) => s.attributes('aria-label') === label)!;
-  await select.setValue(name);
+/**
+ * 点素材区的一件材料（2026-09-18 UI 改造：三个下拉 → 点选填槽）。
+ * 语义与旧 selectSub 对齐：第一次点击填主槽，第二次填副一，第三次填副二。
+ */
+async function clickMaterial(wrapper: ReturnType<typeof mount>, name: string) {
+  const btn = wrapper.findAll('.pool-item').find((b) => b.text().includes(name))!;
+  await btn.trigger('click');
 }
 
 describe('确定性预览', () => {
@@ -58,7 +62,7 @@ describe('确定性预览', () => {
   });
   it('火 + 风 → 相生复合：燎原词条 + 升档青铜 + 造价按系数', async () => {
     const w = mount(CraftBench);
-    await selectSub(w, '选择副素材一', '风羽');
+    await clickMaterial(w, '风羽');
     expect(w.text()).toContain('相生复合');
     expect(w.text()).toContain('燎原');
     expect(w.text()).toContain('青铜'); // 白铁 +1
@@ -67,13 +71,13 @@ describe('确定性预览', () => {
   });
   it('相克组合亮警示行', async () => {
     const w = mount(CraftBench);
-    await selectSub(w, '选择副素材一', '寒水珠');
+    await clickMaterial(w, '寒水珠');
     expect(w.text()).toContain('相克不稳');
     expect(w.find('[role="alert"]').text()).toContain('相克');
   });
   it('关掉副素材的元素标签 → 退回叠加（手动纠偏生效）', async () => {
     const w = mount(CraftBench);
-    await selectSub(w, '选择副素材一', '寒水珠');
+    await clickMaterial(w, '寒水珠');
     // 副素材一的标签行里点掉「水」
     const chips = w.findAll('.slot-card').slice(1);
     const waterChip = chips[0].findAll('button.chip').find((b) => b.text() === '水')!;

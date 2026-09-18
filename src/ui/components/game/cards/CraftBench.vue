@@ -153,6 +153,36 @@ const subSpecs = computed(() =>
 
 const result = computed(() => (mainSpec.value ? fuse(mainSpec.value, subSpecs.value) : null));
 
+/**
+ * 点素材区的一件材料 → 填入**第一个空槽**（主素材优先）。
+ * 三槽全满时替换主素材（最常见的意图：换掉主料重做）。
+ */
+function fillSlot(name: string) {
+  if (!selection.main) {
+    selection.main = name;
+    return;
+  }
+  if (!selection.sub1) {
+    selection.sub1 = name;
+    return;
+  }
+  if (!selection.sub2) {
+    selection.sub2 = name;
+    return;
+  }
+  selection.main = name; // 三槽全满 → 换主料
+}
+
+/** 清空某一槽 */
+function clearSlot(slot: SlotKey) {
+  selection[slot] = '';
+}
+
+/** 某件材料当前被几个槽位占用（同名可占多槽 —— 消耗按份数扣） */
+function slotUsage(name: string): number {
+  return (['main', 'sub1', 'sub2'] as SlotKey[]).filter((k) => selection[k] === name).length;
+}
+
 // 换素材 → 该槽元素标签重置为推导缺省
 for (const slot of Object.keys(selection) as SlotKey[]) {
   watch(
@@ -919,15 +949,23 @@ const RATING_HINT: Record<string, string> = {
       <section class="bench-col slots-col" aria-label="素材">
         <h4 class="d-label">素材（1 主 + 0~2 副）</h4>
 
-        <div class="slot-card">
+        <div class="slot-card" :class="{ 'slot-filled': !!selection.main }">
           <div class="slot-head">
             <span class="slot-role">主素材</span>
             <span v-if="mainSpec" class="slot-price">估价 {{ mainSpec.price }} GC</span>
+            <button
+              v-if="selection.main"
+              type="button"
+              class="slot-clear"
+              title="清空这一槽"
+              @click="clearSlot('main')"
+            >
+              ×
+            </button>
           </div>
-          <select v-model="selection.main" class="slot-select" aria-label="选择主素材">
-            <option v-for="m in materials" :key="m.name" :value="m.name">{{ m.name }}</option>
-          </select>
-          <div class="chip-row">
+          <div v-if="selection.main" class="slot-value">{{ selection.main }}</div>
+          <div v-else class="slot-empty">点下方素材填入</div>
+          <div v-if="selection.main" class="chip-row">
             <button
               v-for="e in ELEMENT_KEYWORDS"
               :key="e"
@@ -941,19 +979,27 @@ const RATING_HINT: Record<string, string> = {
           </div>
         </div>
 
-        <div v-for="slot in ['sub1', 'sub2'] as const" :key="slot" class="slot-card">
+        <div
+          v-for="slot in ['sub1', 'sub2'] as const"
+          :key="slot"
+          class="slot-card"
+          :class="{ 'slot-filled': !!selection[slot] }"
+        >
           <div class="slot-head">
             <span class="slot-role">副素材 {{ slot === 'sub1' ? '一' : '二' }}</span>
             <span v-if="specOf(slot)" class="slot-price">估价 {{ specOf(slot)!.price }} GC</span>
+            <button
+              v-if="selection[slot]"
+              type="button"
+              class="slot-clear"
+              title="清空这一槽"
+              @click="clearSlot(slot)"
+            >
+              ×
+            </button>
           </div>
-          <select
-            v-model="selection[slot]"
-            class="slot-select"
-            :aria-label="`选择副素材${slot === 'sub1' ? '一' : '二'}`"
-          >
-            <option value="">（不用）</option>
-            <option v-for="m in materials" :key="m.name" :value="m.name">{{ m.name }}</option>
-          </select>
+          <div v-if="selection[slot]" class="slot-value">{{ selection[slot] }}</div>
+          <div v-else class="slot-empty">（不用）</div>
           <div v-if="selection[slot]" class="chip-row">
             <button
               v-for="e in ELEMENT_KEYWORDS"
@@ -964,6 +1010,28 @@ const RATING_HINT: Record<string, string> = {
               @click="toggleElement(slot, e)"
             >
               {{ e }}
+            </button>
+          </div>
+        </div>
+
+        <!-- 背包素材区：点一下填入空槽（2026-09-18 UI 改造） -->
+        <div class="material-pool">
+          <h5 class="pool-title">背包素材 <span class="pool-hint">点一下填入空槽</span></h5>
+          <div class="pool-list">
+            <button
+              v-for="m in materials"
+              :key="m.name"
+              type="button"
+              class="pool-item"
+              :class="{ used: slotUsage(m.name) > 0 }"
+              @click="fillSlot(m.name)"
+            >
+              <i class="fa-solid fa-cube pool-icon" />
+              <span class="pool-name">{{ m.name }}</span>
+              <span class="pool-qty">×{{ m.quantity ?? 1 }}</span>
+              <span v-if="slotUsage(m.name) > 0" class="pool-used"
+                >已选{{ slotUsage(m.name) }}</span
+              >
             </button>
           </div>
         </div>
@@ -2099,4 +2167,29 @@ const RATING_HINT: Record<string, string> = {
 </style>
 .peek-block { display: flex; flex-wrap: wrap; align-items: center; gap: var(--theme-spacing-xs);
 margin-top: var(--theme-spacing-xs); padding-top: var(--theme-spacing-xs); border-top: 1px solid
-var(--theme-card-border); }
+var(--theme-card-border); } /* ===== 背包素材区（2026-09-18 UI 改造：下拉 → 点选卡片）===== */
+.slot-filled .slot-value { font-size: 0.875rem; font-weight: 600; color: var(--theme-text-primary);
+padding: 6px 10px; border-radius: var(--theme-radius-sm); background: var(--theme-surface-muted);
+border: 1px solid var(--theme-card-border); } .slot-empty { font-size: 0.8125rem; color:
+var(--theme-text-muted); font-style: italic; padding: 6px 10px; } .slot-clear { margin-left: auto;
+width: 1.5em; height: 1.5em; display: flex; align-items: center; justify-content: center; border:
+1px solid var(--theme-card-border); border-radius: var(--theme-radius-sm); background: transparent;
+color: var(--theme-text-muted); font-size: 0.875rem; line-height: 1; cursor: pointer; transition:
+all var(--theme-transition-fast); } .slot-clear:hover { border-color: var(--theme-error); color:
+var(--theme-error); } .material-pool { margin-top: var(--theme-spacing-sm); padding:
+var(--theme-spacing-sm); border: 1px dashed var(--theme-card-border); border-radius:
+var(--theme-radius-md); } .pool-title { margin: 0 0 6px; font-size: 0.75rem; font-weight: 700;
+color: var(--theme-text-secondary); display: flex; align-items: baseline; gap: 6px; } .pool-hint {
+font-weight: 400; font-size: 0.6875rem; color: var(--theme-text-muted); } .pool-list { display:
+flex; flex-wrap: wrap; gap: var(--theme-spacing-xs); max-height: 8.5rem; overflow-y: auto; }
+.pool-item { display: flex; align-items: center; gap: 5px; padding: 4px 9px; border: 1px solid
+var(--theme-card-border); border-radius: var(--theme-radius-sm); background: var(--theme-card-bg);
+color: var(--theme-text-primary); font-family: inherit; font-size: 0.8125rem; cursor: pointer;
+transition: all var(--theme-transition-fast); } .pool-item:hover { border-color:
+var(--theme-primary); background: color-mix(in srgb, var(--theme-primary) 8%, transparent); }
+.pool-item.used { border-color: color-mix(in srgb, var(--theme-primary) 45%,
+var(--theme-card-border)); background: color-mix(in srgb, var(--theme-primary) 9%, transparent); }
+.pool-icon { font-size: 0.7rem; color: var(--theme-text-muted); } .pool-qty { color:
+var(--theme-text-muted); font-size: 0.7rem; } .pool-used { font-size: 0.625rem; font-weight: 700;
+color: var(--theme-primary); padding: 0 4px; border-radius: 999px; background: color-mix(in srgb,
+var(--theme-primary) 15%, transparent); }
