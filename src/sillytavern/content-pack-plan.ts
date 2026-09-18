@@ -203,6 +203,11 @@ export function planPackInstall(
     // 「坏定义逐条丢」的容错在 coerceCommissions（content-store 装缝之前过一遍）。
     sections.commissions = planOpaqueSection(pack.commissions);
   }
+  if (pack.talents !== undefined) {
+    // talents（第 16 面）照 commissions 同档：整块替换——planner 不解释 TalentTemplate 结构，
+    // validateTalentEntries 在读取时已做过一次了。
+    sections.talents = planOpaqueSection(pack.talents.data);
+  }
 
   // ── agentDefaults / branding 名册/键集（透传，无四态）──
   const agentDefaults: PackInstallPlan['agentDefaults'] | undefined = pack.agentDefaults

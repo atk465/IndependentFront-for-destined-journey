@@ -316,6 +316,8 @@ export interface ContentPack {
   branding?: PackBrandingSection;
   /** 地图内容包（地图系统 v1 / §3.3）—— 注册表第 8 面，整节替换 */
   mapPack?: PackMapPackSection;
+  /** 天赋模板集（2026-09-18）—— 整节替换（追加到内置目录尾部，同名覆盖） */
+  talents?: { data: import('./card-workshop/talent-entry').TalentTemplate[] };
   /**
    * 随机事件（随机事件系统 v1 / §3.3）—— 注册表**第 13 面**。
    *
@@ -519,6 +521,8 @@ export interface PackInstallPlan {
     randomEvents?: PackSectionPlan<PackRandomEventsSection>;
     /** 委托板（第 15 面）—— 整节替换，走 randomEvents 那一档（planOpaqueSection） */
     commissions?: PackSectionPlan<PackCommissionsSection>;
+    /** 天赋模板集（第 16 面）—— 整节替换，走 commissions 同档 */
+    talents?: PackSectionPlan<import('./card-workshop/talent-entry').TalentTemplate[]>;
   };
   agentDefaults?: {
     /** 默认层键集合（D44：解析名册 = 默认层键 ∪ 覆写层键） */
