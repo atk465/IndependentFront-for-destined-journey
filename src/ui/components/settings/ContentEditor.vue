@@ -139,6 +139,48 @@ async function saveCard() {
 function removeCard(id: string) {
   game.removeCustomCard(id);
 }
+
+// ════════════════════════════════════════════════════════════════════
+// 导入 / 导出
+// ════════════════════════════════════════════════════════════════════
+
+const fileInput = ref<HTMLInputElement | null>(null);
+
+function exportContent() {
+  const data = {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    talents: getCustomTalents(),
+    cards: game.customCards(),
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'custom-content.json';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function importContent(e: Event) {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file) return;
+  try {
+    const raw = JSON.parse(await file.text());
+    if (Array.isArray(raw.talents)) {
+      for (const t of raw.talents) registerCustomTalent(t);
+      game.saveCustomTalents(getCustomTalents());
+    }
+    if (Array.isArray(raw.cards)) {
+      for (const c of raw.cards) game.addCustomCard(c);
+    }
+    cMsg.value = `导入完成：${raw.talents?.length ?? 0} 条天赋、${raw.cards?.length ?? 0} 张卡`;
+  } catch (err) {
+    cErr.value = `导入失败：${err}`;
+  }
+  input.value = '';
+}
 </script>
 
 <template>
@@ -160,6 +202,19 @@ function removeCard(id: string) {
       >
         购卡编辑
       </button>
+      <span class="io-btns">
+        <button type="button" class="tab-btn" title="导出 JSON" @click="exportContent">导出</button>
+        <button type="button" class="tab-btn" title="从 JSON 导入" @click="fileInput?.click()">
+          导入
+        </button>
+        <input
+          ref="fileInput"
+          type="file"
+          accept=".json"
+          style="display: none"
+          @change="importContent"
+        />
+      </span>
     </div>
 
     <div v-if="tab === 'talent'" class="editor-panel">
