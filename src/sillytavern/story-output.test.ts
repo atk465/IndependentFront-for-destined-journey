@@ -7,12 +7,16 @@ describe('projectStoryOutput', () => {
       `<maintext>第一段。\n\n第二段。</maintext>\n<options>\n1. 前进\n2、等待\n</options>`,
     );
 
-    expect(result).toEqual({ content: '第一段。\n\n第二段。', options: ['前进', '等待'] });
+    expect(result).toEqual({
+      content: '第一段。\n\n第二段。',
+      options: ['前进', '等待'],
+      truncated: false,
+    });
   });
 
   it('supports the legacy singular option envelope', () => {
     const result = projectStoryOutput('<maintext>正文。</maintext><option>观察\n离开</option>');
-    expect(result).toEqual({ content: '正文。', options: ['观察', '离开'] });
+    expect(result).toEqual({ content: '正文。', options: ['观察', '离开'], truncated: false });
   });
 
   it('does not duplicate options when the closing tag contains whitespace', () => {
@@ -31,7 +35,12 @@ describe('projectStoryOutput', () => {
 
   it('handles an unclosed options envelope without leaking it into prose', () => {
     const result = projectStoryOutput('<maintext>正文。\n<options>\n1. 观察\n2. 离开');
-    expect(result).toEqual({ content: '正文。', options: ['观察', '离开'] });
+    // 有 <maintext> 开标签、无闭合 → 同时标记 truncated（2026-09-18 防护）
+    expect(result).toEqual({
+      content: '正文。',
+      options: ['观察', '离开'],
+      truncated: true,
+    });
   });
 
   it('keeps narrative formatting tags but removes non-rendering audio markers', () => {
@@ -78,5 +87,26 @@ describe('projectStreamingStory', () => {
   it('keeps completed and streamed prose in parity', () => {
     const raw = '<maintext>夜色渐深。\n\n门被推开。</maintext><options>\n1. 查看\n</options>';
     expect(projectStreamingStory(raw)).toBe(projectStoryOutput(raw).content);
+  });
+});
+
+describe('截断检测（2026-09-18 真机防护）', () => {
+  it('正常闭合 → truncated=false', () => {
+    const r = projectStoryOutput(
+      '<maintext>正文。</maintext><option>走\n留</option><sum>一句话</sum>',
+    );
+    expect(r.truncated).toBe(false);
+  });
+
+  it('有 maintext 开标签但缺闭合 → truncated=true（真机案例：输出停在「然后——没有」）', () => {
+    const r = projectStoryOutput('<maintext>他把卡拿起来，贴在自己胸口，然后——没有');
+    expect(r.truncated).toBe(true);
+    // 内容仍照常返回（半截正文可见），但调用方已拿到标志可提示
+    expect(r.content).toContain('然后——没有');
+  });
+
+  it('裸文本（无 maintext 信封）不算截断 —— 本来就没有闭合契约', () => {
+    const r = projectStoryOutput('就是一段没有标签的正文。');
+    expect(r.truncated).toBe(false);
   });
 });

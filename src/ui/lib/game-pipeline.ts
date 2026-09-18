@@ -324,9 +324,18 @@ function buildDebugEntry(input: DebugEntryInput): DebugAgentEntry {
 }
 
 /** 兼容旧调用名；正文、控制区块与 `<option(s)>` 统一由 story-output 投影。 */
-export function extractStoryOptions(raw: string): { content: string; options: string[] } {
+export function extractStoryOptions(raw: string): {
+  content: string;
+  options: string[];
+  truncated: boolean;
+} {
   return projectStoryOutput(raw);
 }
+
+/** 输出未闭合时给玩家的可见提示（2026-09-18 防护：把静默半截变成明确告知） */
+export const TRUNCATION_NOTICE =
+  '\n\n---\n⚠️ 本轮输出未正常结束（缺 `</maintext>` 闭合标记）——可能被模型截断或流式中断。' +
+  '若反复出现，请检查该 Agent 的**模型与预设是否匹配**（例如把 DeepSeek 专用预设用在非 DeepSeek 模型上）。';
 
 /** 各 Agent 的中文标签（供调试日志 / DebugPanel 显示） */
 const AGENT_LABELS: Record<string, string> = {
@@ -1729,11 +1738,23 @@ export class GamePipeline {
     switch (result.agentId) {
       case 'story': {
         // rawResponse 直接就是 AI 返回的字符串正文（流式模式下也是完整文本）
-        const { content, options } = extractStoryOptions(result.rawResponse || '');
+        const { content, options, truncated } = extractStoryOptions(result.rawResponse || '');
         if (!content) throw new Error('story produced no player-visible narrative');
+        // 🔴 2026-09-18 真机防护：输出未闭合（缺 </maintext>）时给可见提示 —— 此前
+        //    解析器会静默把「开标签到末尾」当完整正文展示，玩家只看到一句断掉的话，
+        //    排查时无从判断是模型问题还是显示问题。
+        if (truncated) {
+          console.warn(
+            '[GamePipeline] story 输出未闭合（缺 </maintext>）——可能被截断。原始响应长度:',
+            (result.rawResponse || '').length,
+          );
+        }
         // 🖼 记下这条消息 —— 情景插画按 (saveId, messageId, occurrence) 反查挂回正文（D2）。
         // 从 messages 末尾去捞是个会被别的写入者破坏的假设，所以让 addMessage 交回来。
-        const message = this.emitMessage(content, 'assistant');
+        const message = this.emitMessage(
+          truncated ? content + TRUNCATION_NOTICE : content,
+          'assistant',
+        );
         // null = 存档已切走，这条正文没写进去（COR-02）。此时**不能**记
         // lastStoryMessage —— 它是情景插画反查锚点，指向一条不存在的消息只会
         // 让后续开火挂到空处。

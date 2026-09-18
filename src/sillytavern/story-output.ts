@@ -11,6 +11,21 @@ import { scanEventTriggers } from './marker-protocol';
 export interface StoryProjection {
   content: string;
   options: string[];
+  /**
+   * 输出是否**未正常闭合**（2026-09-18 真机防护）。
+   *
+   * 判据：有 `<maintext>` 开标签但缺 `</maintext>` 闭合标签 —— 说明模型输出在正文
+   * 中途断了（模型/预设不兼容、服务端截断、流式中断等）。
+   *
+   * 🔴 为什么要这个标志：`extractMainText` 在缺闭合时**静默返回「开标签到末尾」的全部
+   *    内容** —— 于是被截断的半截正文会被当成完整正文展示，玩家看到一句莫名其妙断掉
+   *    的话，排查时无从判断是模型问题还是显示问题。真机案例：story 预设混入了
+   *    DeepSeek 的 `<｜User｜>`/`<｜begin▁of▁thinking｜>` 标记而模型是 MiniMax，
+   *    输出停在「然后——没有」。
+   *
+   * 裸文本兼容路径（无 maintext 信封）不算截断 —— 那种情况本来就没有闭合契约。
+   */
+  truncated: boolean;
 }
 
 const LEADING_FENCE = /^\s*```[^\n]*\n?/;
@@ -138,7 +153,16 @@ function stripTrailingPartialControlTag(text: string): string {
   return isControlFragment || fragment === '<' || fragment === '</' ? text.slice(0, start) : text;
 }
 
+/** 输出是否未闭合：有 <maintext> 开标签却缺闭合标签 */
+function detectTruncated(raw: string): boolean {
+  const text = stripCodeFences(raw);
+  const open = lastMatch(text, MAIN_TEXT_OPEN);
+  if (!open) return false; // 裸文本兼容路径，无信封即无闭合契约
+  return !MAIN_TEXT_CLOSE.test(text);
+}
+
 function project(raw: string, partial: boolean): StoryProjection {
+  const truncated = !partial && detectTruncated(raw);
   const options = extractOptions(raw);
   let content = extractMainText(stripCodeFences(raw));
 
@@ -152,7 +176,7 @@ function project(raw: string, partial: boolean): StoryProjection {
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 
-  return { content, options };
+  return { content, options, truncated };
 }
 
 /** Normalize a completed story response for persistence and rendering. */
