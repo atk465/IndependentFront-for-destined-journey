@@ -4,6 +4,7 @@ import { ref } from 'vue';
 import AppCard from '../shared/AppCard.vue';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useGameStore } from '../../stores/game-store';
+import ContentEditor from './ContentEditor.vue';
 
 const s = useSettingsStore().settings;
 const game = useGameStore();
@@ -137,6 +138,13 @@ async function onSkirmishTrial() {
           {{ game.skirmishBusy ? '交锋进行中…' : '发起遭遇战' }}
         </button>
       </div>
+    </AppCard>
+
+    <!-- 自定义内容编辑器（天赋 + 购卡池） -->
+    <AppCard v-if="devMode" padding="md">
+      <h4>自定义内容编辑器</h4>
+      <p class="card-desc">可视化创建自定义天赋和购卡池卡牌（存档级持久化）。</p>
+      <ContentEditor />
     </AppCard>
   </section>
 </template>

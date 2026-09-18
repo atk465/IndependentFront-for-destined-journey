@@ -87,6 +87,10 @@ import { planFootAlchemy } from '@engine/card-workshop/partner-alchemy';
 import { planCardCraft } from '@engine/card-workshop/card-craft-plan';
 import { coerceBlueprints, consumeBlueprint } from '@engine/card-workshop/opponent-blueprints';
 import { fallbackCraftNarration } from '@engine/card-craft-narrate';
+import { coerceCustomTalents, coerceCustomCards } from '@engine/card-workshop/custom-content';
+import { registerCustomTalent, clearCustomTalents } from '@engine/card-workshop/talent-entry';
+import type { TalentTemplate } from '@engine/card-workshop/talent-entry';
+import type { CardCatalogItem } from '@engine/start-catalog-mechanics';
 import {
   findSoulWeapon,
   planSoulWeapon,
@@ -881,6 +885,57 @@ export const useGameStore = defineStore('game', () => {
   /**
    * 拆解（SSS「素材之王」非战斗侧）：物品 → 素材（材料）。
    */
+  /** 保存自定义天赋列表到 worldFlags（开发者模式） */
+  function saveCustomTalents(list: TalentTemplate[]): void {
+    if (!activeSaveId.value) return;
+    const sm = createStateManager(activeSaveId.value);
+    void sm.commitChatState([
+      { op: 'set_variable', target: 'worldFlags.customTalents', value: list } as StatePatch,
+    ]);
+    // 同时注册到运行时注册表
+    clearCustomTalents();
+    for (const t of list) registerCustomTalent(t);
+  }
+
+  /** 读取自定义天赋列表（从 worldFlags 恢复到运行时注册表） */
+  function loadCustomTalents(): void {
+    const list = coerceCustomTalents(saveProfile.value?.worldFlags?.customTalents);
+    clearCustomTalents();
+    for (const t of list) registerCustomTalent(t);
+  }
+
+  /** 保存自定义卡到 worldFlags（追加） */
+  function addCustomCard(card: CardCatalogItem): void {
+    if (!activeSaveId.value) return;
+    const existing = coerceCustomCards(saveProfile.value?.worldFlags?.customCards);
+    const next = [...existing.filter((c) => c.id !== card.id), card];
+    const sm = createStateManager(activeSaveId.value);
+    void sm.commitChatState([
+      { op: 'set_variable', target: 'worldFlags.customCards', value: next } as StatePatch,
+    ]);
+  }
+
+  /** 从 worldFlags 删除自定义卡 */
+  function removeCustomCard(id: string): void {
+    if (!activeSaveId.value) return;
+    const existing = coerceCustomCards(saveProfile.value?.worldFlags?.customCards);
+    const next = existing.filter((c) => c.id !== id);
+    const sm = createStateManager(activeSaveId.value);
+    void sm.commitChatState([
+      { op: 'set_variable', target: 'worldFlags.customCards', value: next } as StatePatch,
+    ]);
+  }
+
+  /** 读取自定义卡列表 */
+  function customCards(): CardCatalogItem[] {
+    return coerceCustomCards(saveProfile.value?.worldFlags?.customCards);
+  }
+
+  /** 自定义卡数量 */
+  function customCardCount(): number {
+    return coerceCustomCards(saveProfile.value?.worldFlags?.customCards).length;
+  }
+
   /**
    * 唤醒/升档本名武器（SS「天生剑骨」「战意破苍穹」）：
    *  - 首次调用 → 按等级生成绑定装备卡（词条含「本名」+ 武器类型）
@@ -3544,6 +3599,12 @@ export const useGameStore = defineStore('game', () => {
     dismantleItem,
     craftCard,
     ensureSoulWeapon,
+    saveCustomTalents,
+    loadCustomTalents,
+    addCustomCard,
+    removeCustomCard,
+    customCards,
+    customCardCount,
     upgradeMaterial,
     exchangeItem,
     drawMaterialTen,

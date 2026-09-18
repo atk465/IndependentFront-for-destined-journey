@@ -102,6 +102,30 @@ export type TalentEntryKind =
   | '同契' // 与首张伙伴卡同步成长——战斗经验按比例同步（SS「爱」）
   | '经验倍率'; // 通用经验获取倍率（C「快速成长」等）
 
+// ── 自定义天赋注册表（开发者模式；运行时注入，不 mutation TALENT_CATALOG）──
+
+const customTalentMap = new Map<string, TalentTemplate>();
+
+/** 注册自定义天赋（同名覆盖内置目录） */
+export function registerCustomTalent(tpl: TalentTemplate): void {
+  customTalentMap.set(tpl.name, tpl);
+}
+
+/** 注销自定义天赋 */
+export function unregisterCustomTalent(name: string): void {
+  customTalentMap.delete(name);
+}
+
+/** 获取全部自定义天赋 */
+export function getCustomTalents(): TalentTemplate[] {
+  return [...customTalentMap.values()];
+}
+
+/** 清空全部自定义天赋 */
+export function clearCustomTalents(): void {
+  customTalentMap.clear();
+}
+
 /** 骨架条目：kind + 预设参数 + 独占渠道标记 */
 export interface TalentEntry {
   kind: TalentEntryKind;
@@ -7805,14 +7829,23 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
 
 /** 按名字查目录模板 */
 export function getTalentTemplate(name: string): TalentTemplate | undefined {
+  const custom = customTalentMap.get(name);
+  if (custom) return custom;
   return TALENT_CATALOG.find((t) => t.name === name);
 }
 
 /** 捏人出身可选清单：通用池 + 出身独占（融合产物除外） */
 export function getCreationCatalog(): TalentTemplate[] {
-  return TALENT_CATALOG.filter(
+  const custom = getCustomTalents().filter(
     (t) => !t.fusionOnly && (t.source === 'universal' || t.source === 'creation'),
   );
+  const customNames = new Set(custom.map((t) => t.name));
+  return [
+    ...TALENT_CATALOG.filter(
+      (t) => !t.fusionOnly && (t.source === 'universal' || t.source === 'creation') && !customNames.has(t.name),
+    ),
+    ...custom,
+  ];
 }
 
 /**
@@ -7930,9 +7963,16 @@ export function getDrawableCatalog(): TalentTemplate[] {
 
 /** 声望兑换清单：通用池 + 兑换独占（融合产物/出身/剧情独占除外） */
 export function getExchangeCatalog(): TalentTemplate[] {
-  return TALENT_CATALOG.filter(
+  const custom = getCustomTalents().filter(
     (t) => !t.fusionOnly && (t.source === 'universal' || t.source === 'exchange'),
   );
+  const customNames = new Set(custom.map((t) => t.name));
+  return [
+    ...TALENT_CATALOG.filter(
+      (t) => !t.fusionOnly && (t.source === 'universal' || t.source === 'exchange') && !customNames.has(t.name),
+    ),
+    ...custom,
+  ];
 }
 
 /** 兑换定价（初稿）：基础 10+5×(条目数−1)，再乘品级乘数；数值总表终审对象 */
