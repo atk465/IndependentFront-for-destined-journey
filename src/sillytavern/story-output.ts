@@ -153,13 +153,41 @@ function stripTrailingPartialControlTag(text: string): string {
   return isControlFragment || fragment === '<' || fragment === '</' ? text.slice(0, start) : text;
 }
 
-/** 输出是否未闭合：有 <maintext> 开标签却缺闭合标签 */
+/**
+ * 输出是否未闭合（2026-09-18 真机防护）。
+ *
+ * 判据分两层，**不能只看 `</maintext>`**：
+ * 1. 有 `<maintext>` 开标签且缺闭合 → 疑似截断；
+ * 2. 但**写出了 `<option>`/`<sum>` 区块的，一律算完整** —— 那些是契约里排在正文
+ *    之后的必填块，能写到它们说明模型走完了整个输出契约。
+ *
+ * 🔴 第 2 层是 2026-09-18 真机补的：用户导入的第三方预设教模型用 `</正文>` 收尾
+ *    （而不是 `</maintext>`），于是内容完整（正文 + option + sum，6150 tokens）
+ *    却被判成截断 —— 假警报比没有警报更糟，它会让玩家以为模型坏了。
+ *
+ * 裸文本兼容路径（无 maintext 信封）不算截断 —— 那种情况本来就没有闭合契约。
+ */
 function detectTruncated(raw: string): boolean {
   const text = stripCodeFences(raw);
   const open = lastMatch(text, MAIN_TEXT_OPEN);
-  if (!open) return false; // 裸文本兼容路径，无信封即无闭合契约
-  return !MAIN_TEXT_CLOSE.test(text);
+  if (!open) return false;
+  if (MAIN_TEXT_CLOSE.test(text)) return false;
+  // 写出了正文之后的**完整**必填块 → 完整（无论正文用什么标记收尾）。
+  // 🔴 必须要求成对闭合：只有开标签的 `<options>` 自身也可能是被截断的残片
+  //    （既有用例 'unclosed options envelope' 钉住这条边界）。
+  if (/<option(s)?\b[^>]*>[\s\S]*?<\/\1\s*>/i.test(text)) return false;
+  if (/<sum\b[^>]*>[\s\S]*?<\/sum\s*>/i.test(text)) return false;
+  return true;
 }
+
+/**
+ * 剥掉第三方预设惯用的「正文」收尾标记（2026-09-18 真机）。
+ *
+ * 我们的输出契约用 `<maintext>`/`</maintext>`，但外部预设可能教模型输出 `</正文>`
+ * ——它是模型给自己画的句号，不该漏进玩家看到的正文。非契约标签，故只在清洗链里
+ * 顺带剥除，不进 CONTROL_TAGS（那张表是「控制区块」，语义不同）。
+ */
+const ALTERNATE_PROSE_CLOSE = /<\/?正文\s*>/g;
 
 function project(raw: string, partial: boolean): StoryProjection {
   const truncated = !partial && detectTruncated(raw);
@@ -172,6 +200,7 @@ function project(raw: string, partial: boolean): StoryProjection {
 
   content = stripEventTriggerMarkers(content)
     .replace(LEGACY_MARKER_RE, '')
+    .replace(ALTERNATE_PROSE_CLOSE, '')
     .replace(/<\/?maintext\b[^>]*>/gi, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim();

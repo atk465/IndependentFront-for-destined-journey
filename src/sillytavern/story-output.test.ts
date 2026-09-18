@@ -110,3 +110,32 @@ describe('截断检测（2026-09-18 真机防护）', () => {
     expect(r.truncated).toBe(false);
   });
 });
+
+describe('第三方预设的输出变体（2026-09-18 真机）', () => {
+  // 用户导入的预设教模型用 </正文> 收尾（而非 </maintext>）——
+  // 内容完整却被误判截断，且标签泄漏进正文。两条都在这组钉住。
+  const externalPresetOutput = [
+    '<maintext>',
+    '正文第一段，够长够像样，不是占位符。',
+    '</正文>',
+    '<option>去看看委托板\n绕着钟楼走一圈\n往城外走</option>',
+    '<sum>一句话总结。</sum>',
+  ].join('\n');
+
+  it('写出 option/sum 的 → 不算截断（假警报比没有警报更糟）', () => {
+    const r = projectStoryOutput(externalPresetOutput);
+    expect(r.truncated).toBe(false);
+    expect(r.options).toEqual(['去看看委托板', '绕着钟楼走一圈', '往城外走']);
+  });
+
+  it('</正文> 收尾标记被剥掉，不漏进玩家正文', () => {
+    const r = projectStoryOutput(externalPresetOutput);
+    expect(r.content).toContain('正文第一段，够长够像样');
+    expect(r.content).not.toContain('正文>');
+    expect(r.content).not.toContain('</');
+  });
+
+  it('真截断（无闭合、也无 option/sum）仍判 true', () => {
+    expect(projectStoryOutput('<maintext>他伸手去拿那张卡，然后——').truncated).toBe(true);
+  });
+});
