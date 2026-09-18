@@ -101,7 +101,8 @@ export type TalentEntryKind =
   | '本名武器' // 开局绑定一把随等级成长的武器卡（SS「天生剑骨」「战意破苍穹」）
   | '同契' // 与首张伙伴卡同步成长——战斗经验按比例同步（SS「爱」）
   | '经验倍率' // 通用经验获取倍率（C「快速成长」等）
-  | '交易折扣'; // 商店购买折扣 %（C「讨价还价」/B「黑市贵宾」）
+  | '交易折扣' // 商店购买折扣 %（C「讨价还价」/B「黑市贵宾」）
+  | '无槽限'; // 装备槽不限件数——同槽可穿多件（S「无限军火库」/A「成龙」）
 
 // ── 自定义天赋注册表（开发者模式；运行时注入，不 mutation TALENT_CATALOG）──
 
@@ -501,6 +502,7 @@ export const TALENT_ENTRY_POOL: readonly TalentEntry[] = [
   e({ kind: '同契', channel: 'universal', params: { syncPct: 50 } }),
   e({ kind: '经验倍率', channel: 'universal', params: { expMult: 2 } }),
   e({ kind: '交易折扣', channel: 'universal', params: { discountPct: 5 } }),
+  e({ kind: '无槽限', channel: 'universal', params: {} }),
   e({ kind: '改造', channel: 'story', params: {} }),
   // ── v10 扩容（伙伴卡生成通道，2026-09-17）──
   e({ kind: '捕获', channel: 'story', params: {} }),
@@ -628,6 +630,7 @@ const ENTRY_NUMERIC_TIERS: Partial<
   同契: { syncPct: [50] },
   经验倍率: { expMult: [2] },
   交易折扣: { discountPct: [5, 10, 15] },
+  无槽限: {},
 };
 
 /**
@@ -684,6 +687,7 @@ export const ENTRY_STRENGTH_BASELINE = {
   同契: { syncPct: 50 },
   经验倍率: { expMult: 2 },
   交易折扣: { discountPct: 5 },
+  无槽限: {},
 } as const;
 
 /** 各种类的必填内容参数（非空字符串；keywords 为字符串数组） */
@@ -776,6 +780,7 @@ const ENTRY_KIND_LIST: readonly TalentEntryKind[] = [
   '同契',
   '经验倍率',
   '交易折扣',
+  '无槽限',
 ];
 
 /**
@@ -3010,7 +3015,8 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description:
       '你的所有伙伴卡，装备装备卡时不再有部位限制，一个伙伴可以同时装备多把武器或多件盔甲。',
-    entries: [],
+    // 2026-09-18 升级为机械：equip_item 同槽顶替跳过——同槽可穿多件
+    entries: [{ kind: '无槽限', channel: 'universal', params: {} }],
   },
   {
     name: '卡牌降临',
@@ -4213,7 +4219,10 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     source: 'universal',
     description: '你可以把任何东西当作装备来使用。',
     // 2026-09-18 收尾批次：「任何东西当装备」与无限军火库同源（装备槽规则缺量）
-    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
+    entries: [
+      { kind: '无槽限', channel: 'universal', params: {} },
+      { kind: '叙事意图', channel: 'universal', params: {} },
+    ],
   },
   {
     name: '军团之主',
@@ -7985,6 +7994,7 @@ export const IMPLEMENTED_ENTRY_KINDS: ReadonlySet<TalentEntryKind> = new Set<Tal
   '同契',
   '经验倍率',
   '交易折扣',
+  '无槽限',
   '战技附加',
 ]);
 

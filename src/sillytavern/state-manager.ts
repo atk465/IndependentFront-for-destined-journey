@@ -1526,9 +1526,14 @@ export class StateManager {
     }
 
     // 同槽顶替: 仅清旧穿戴者的 equippedSlot，物品留在背包字段无损（杀 #10 有损穿脱）
-    for (const other of char.inventory) {
-      if (other !== item && other.equippedSlot === slot) {
-        other.equippedSlot = null;
+    // 无槽限（S「无限军火库」/A「成龙」）：跳过同槽顶替——同槽可穿多件
+    const hasNoSlotLimit =
+      char.talents?.list?.some((t) => t.entries?.some((e) => e.kind === '无槽限')) ?? false;
+    if (!hasNoSlotLimit) {
+      for (const other of char.inventory) {
+        if (other !== item && other.equippedSlot === slot) {
+          other.equippedSlot = null;
+        }
       }
     }
 

@@ -132,6 +132,7 @@ describe('TALENT_ENTRY_POOL（单一真源）', () => {
     '同契',
     '经验倍率',
     '交易折扣',
+    '无槽限',
   ];
   const ALL_CHANNELS: readonly TalentChannel[] = [
     'creation',
