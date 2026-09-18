@@ -51,6 +51,7 @@ function removeEntry(i: number) {
   tEntries.value.splice(i, 1);
 }
 function onKindChange(entry: TalentEntry, kind: string) {
+  entry.kind = kind as TalentEntry['kind'];
   const preset = TALENT_ENTRY_POOL.find((e) => e.kind === kind);
   if (preset) {
     entry.params = { ...preset.params };
