@@ -5,6 +5,9 @@ import { useUIStore } from '../../stores/ui-store';
 import { useHoverPopup } from '../../composables/useHoverPopup';
 import { usePlayerPortrait } from '../../composables/usePlayerPortrait';
 import { normalizeItemType } from '@engine/field-enums';
+import type { CardItem, InventoryItem } from '@engine/types';
+import { cardKindOf, isPlayableCard } from '@engine/card-workshop/card-kind';
+import { cardTierVar } from '../../lib/quality-colors';
 import { getTierConfig } from '@engine/tier-constants';
 import { getRequiredXpForLevel } from '@engine/exp-table';
 import type { AllocatableAttr } from '@engine/attribute-allocation';
@@ -22,6 +25,7 @@ import PlayerPersonaEditorModal from './PlayerPersonaEditorModal.vue';
 // 它的 props/events，不复制一份 —— 复制一份就等于把 D16 不变式、撞位分配、
 // 部分成功口径再实现一遍。
 import AssetCropEditor from '../shared/AssetCropEditor.vue';
+import { rankForReputation } from '@engine/card-workshop/adventurer-rank';
 
 const game = useGameStore();
 const ui = useUIStore();
@@ -124,7 +128,11 @@ const identityFields = computed(() => {
     { label: '身份', value: p.identity?.[0] || '—', cls: '' },
     { label: '职业', value: p.occupation?.[0] || '—', cls: '' },
     { label: '生命层级', value: p.tierName || '—', cls: 'tier-text' },
-    { label: '冒险者等级', value: p.adventurerRank ? `${p.adventurerRank}级` : '—', cls: '' },
+    {
+      label: '冒险者等级',
+      value: rankForReputation(game.saveProfile?.reputation ?? 0),
+      cls: '',
+    },
   ];
 });
 /** 一行放不下时会被省略号截断，完整带标签的版本挂在 title 上，信息不丢 */
@@ -204,35 +212,132 @@ const EQUIP_ICONS: Record<string, string> = {
   腰带: 'fa-solid fa-ring',
   饰品: 'fa-regular fa-gem',
 };
-const equipmentList = computed(() =>
-  (player.value?.inventory ?? [])
-    .filter((i) => i.equippedSlot)
-    .map((e) => ({
-      ...e,
-      icon: EQUIP_ICONS[e.equippedSlot!] || 'fa-solid fa-circle',
-    })),
-);
 
-// ═══ 持有物页签：装备 / 背包 / 消耗品 / 技能 ═══
-type HoldTab = 'equipment' | 'bag' | 'consumable' | 'skills';
-const holdTab = ref<HoldTab>('equipment');
+// ═══ 持有物页签：战斗卡 / 道具卡 / 素材（2026-09-18 与背包页同口径）═══
+//
+// 旧四栏（装备/背包/消耗品/技能）是卡牌化之前的物品体系视图 —— 卡牌化后
+// inventory 只装卡，装备/技能栏结构性空转。现改为按**卡形态**分栏，与 ItemsPanel 一致：
+//   战斗卡 = 可出战的卡（装备/技能/领域/召唤/军团/场景）+ 传统装备物品 + 技能
+//   道具卡 = 物资卡（纯道具，不可出战）+ 传统消耗品
+//   素材   = 制卡原料（材料类物品）+ 素材卡
+type HoldTab = 'battle' | 'supply' | 'material';
+const holdTab = ref<HoldTab>('battle');
 const holdTabs: { key: HoldTab; label: string }[] = [
-  { key: 'equipment', label: '装备' },
-  { key: 'bag', label: '背包' },
-  { key: 'consumable', label: '消耗品' },
-  { key: 'skills', label: '技能' },
+  { key: 'battle', label: '战斗卡' },
+  { key: 'supply', label: '道具卡' },
+  { key: 'material', label: '素材' },
 ];
 
-/** 未穿戴的物品（穿戴中的归「装备」页签，规范 §3：装备是物品的状态而非独立实体） */
-const unequipped = computed(() => (player.value?.inventory ?? []).filter((i) => !i.equippedSlot));
-const consumableList = computed(() =>
-  unequipped.value.filter((i) => normalizeItemType(i.type ?? '') === '消耗品'),
-);
-/** 背包 = 未穿戴且非消耗品（材料/任务物品/特殊/未穿戴的装备都在这） */
-const bagList = computed(() =>
-  unequipped.value.filter((i) => normalizeItemType(i.type ?? '') !== '消耗品'),
-);
+const allInventory = computed(() => player.value?.inventory ?? []);
 const skillList = computed(() => player.value?.skills ?? []);
+
+/** 卡牌实物判定（inventory 里的 type='卡牌'） */
+function isCardRow(i: InventoryItem): i is CardItem {
+  return i.type === '卡牌';
+}
+
+/** 战斗卡栏：可出战的卡 + 传统装备物品 + 技能（顺序：卡 → 装备 → 技能） */
+const battleList = computed(() => {
+  const rows: HoldRowSource[] = [];
+  for (const i of allInventory.value) {
+    if (isCardRow(i)) {
+      if (isPlayableCard(i)) {
+        rows.push({
+          name: i.name,
+          icon: 'fa-solid fa-clone',
+          tag: i.equippedSlot ?? cardKindOf(i.词条),
+          description: i.description,
+          tier: i.cardTier,
+          meta: [
+            ...(i.equippedSlot ? [{ label: '已穿戴', value: i.equippedSlot }] : []),
+            ...statsMeta(i.stats),
+          ],
+          effects: i.effects,
+        });
+      }
+    } else if (i.type === '装备') {
+      rows.push({
+        name: i.name,
+        icon: EQUIP_ICONS[i.equippedSlot ?? ''] || 'fa-solid fa-shield',
+        tag: i.equippedSlot ?? undefined,
+        description: i.description,
+        meta: [...(i.rarity ? [{ label: '品质', value: i.rarity }] : []), ...statsMeta(i.stats)],
+        effects: i.effects,
+      });
+    }
+  }
+  for (const s of skillList.value) {
+    rows.push({
+      name: s.name,
+      icon: s.type === 'active' ? 'fa-solid fa-wand-sparkles' : 'fa-solid fa-shield-heart',
+      tag: s.type === 'active' ? '主动' : '被动',
+      description: s.description,
+      meta: [...(s.cost ? [{ label: '消耗', value: `${s.cost.amount} ${s.cost.type}` }] : [])],
+      effects: s.effects,
+    });
+  }
+  return rows;
+});
+
+/** 道具卡栏：物资卡 + 传统消耗品 */
+const supplyList = computed(() => {
+  const rows: HoldRowSource[] = [];
+  for (const i of allInventory.value) {
+    if (isCardRow(i)) {
+      if (cardKindOf(i.词条) === '物资') {
+        rows.push({
+          name: i.name,
+          icon: 'fa-solid fa-flask',
+          tag: '物资',
+          description: i.description,
+          tier: i.cardTier,
+          meta: [],
+          effects: i.effects,
+        });
+      }
+    } else if (normalizeItemType(i.type ?? '') === '消耗品') {
+      rows.push({
+        name: i.name,
+        icon: 'fa-solid fa-flask',
+        trail: `×${i.quantity}`,
+        description: i.description,
+        meta: [{ label: '数量', value: String(i.quantity) }],
+        effects: i.effects,
+      });
+    }
+  }
+  return rows;
+});
+
+/** 素材栏：材料类物品 + 素材卡 */
+const materialList = computed(() => {
+  const rows: HoldRowSource[] = [];
+  for (const i of allInventory.value) {
+    if (isCardRow(i)) {
+      if (cardKindOf(i.词条) === '素材') {
+        rows.push({
+          name: i.name,
+          icon: 'fa-solid fa-cube',
+          tag: '素材卡',
+          description: i.description,
+          tier: i.cardTier,
+          meta: [],
+          effects: i.effects,
+        });
+      }
+    } else if (normalizeItemType(i.type ?? '') === '材料') {
+      rows.push({
+        name: i.name,
+        icon: 'fa-solid fa-cube',
+        trail: `×${i.quantity}`,
+        description: i.description,
+        meta: [{ label: '数量', value: String(i.quantity) }],
+        effects: i.effects,
+      });
+    }
+  }
+  return rows;
+});
 
 /** 统一行模型 —— 四个页签共用一套渲染，避免四份几乎一样的模板 */
 interface HoldRow {
@@ -241,8 +346,18 @@ interface HoldRow {
   tag?: string;
   trail?: string;
   description?: string;
+  /** 卡牌品质（五级 tier；仅卡牌行有，供品质色用） */
+  tier?: string;
   meta: { label: string; value: string }[];
   effects?: Record<string, string>;
+}
+
+/** 三栏数据源的行模型（与 HoldRow 同形；tier 供卡牌品质色用） */
+type HoldRowSource = HoldRow;
+
+/** 卡牌行的品质色（五级 tier 调色板；非卡行返回空串 = 用默认色） */
+function rowTierColor(tier: string): string {
+  return cardTierVar(tier as never);
 }
 
 /** 装备加成 Record<词条, 数值> → meta 行，正数补 + 号 */
@@ -256,58 +371,14 @@ function statsMeta(stats?: Record<string, number>): { label: string; value: stri
 
 const holdRows = computed<HoldRow[]>(() => {
   switch (holdTab.value) {
-    case 'equipment':
-      return equipmentList.value.map((e) => ({
-        name: e.name,
-        icon: e.icon,
-        tag: e.equippedSlot ?? undefined,
-        description: e.description,
-        meta: [
-          ...(e.rarity ? [{ label: '品质', value: e.rarity }] : []),
-          ...statsMeta(e.stats),
-          ...(e.maxDurability
-            ? [{ label: '耐久', value: `${e.durability ?? e.maxDurability}/${e.maxDurability}` }]
-            : []),
-        ],
-        effects: e.effects,
-      }));
-    case 'bag':
-    case 'consumable': {
-      const list = holdTab.value === 'bag' ? bagList.value : consumableList.value;
-      const icon = holdTab.value === 'bag' ? 'fa-solid fa-cube' : 'fa-solid fa-flask';
-      return list.map((i) => ({
-        name: i.name,
-        icon,
-        tag: holdTab.value === 'bag' ? i.type : undefined,
-        trail: `×${i.quantity}`,
-        description: i.description,
-        meta: [
-          ...(i.rarity ? [{ label: '品质', value: i.rarity }] : []),
-          ...(i.type ? [{ label: '类型', value: i.type }] : []),
-          { label: '数量', value: String(i.quantity) },
-          ...statsMeta(i.stats),
-        ],
-        effects: i.effects,
-      }));
-    }
-    case 'skills':
-      return skillList.value.map((s) => ({
-        name: s.name,
-        icon: s.type === 'active' ? 'fa-solid fa-wand-sparkles' : 'fa-solid fa-shield-heart',
-        tag: s.type === 'active' ? '主动' : '被动',
-        trail: s.level ? `Lv.${s.level}` : undefined,
-        description: s.description,
-        meta: [
-          ...(s.cost ? [{ label: '消耗', value: `${s.cost.amount} ${s.cost.type}` }] : []),
-          ...(s.maxCooldown
-            ? [{ label: '冷却', value: `${s.cooldown ?? 0}/${s.maxCooldown}` }]
-            : []),
-        ],
-        effects: s.effects,
-      }));
-    default:
-      return [];
+    case 'battle':
+      return battleList.value;
+    case 'supply':
+      return supplyList.value;
+    case 'material':
+      return materialList.value;
   }
+  return [];
 });
 
 /** 每个页签最多预览 6 条，超出走「查看全部」进背包面板 */
@@ -506,6 +577,24 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
         </Transition>
       </div>
 
+      <!-- ═══════ 天赋（卡牌工坊：只有玩家主角有） ═══════ -->
+      <div v-if="player.talents?.list?.length" class="section">
+        <div class="section-header">
+          <span class="section-title">天赋</span>
+        </div>
+        <div class="talent-chips">
+          <span
+            v-for="t in player.talents.list"
+            :key="t.name"
+            class="talent-chip"
+            :title="t.description ?? t.name"
+          >
+            <i class="fa-solid fa-fingerprint" aria-hidden="true"></i>
+            {{ t.name }}
+          </span>
+        </div>
+      </div>
+
       <!-- ═══════ 状态效果 ═══════ -->
       <!-- 徽章与标题同处一行：flex-wrap 让前几个自然排在标题右侧，放不下的往下折 -->
       <div v-if="player.statusEffects?.length" class="section">
@@ -570,8 +659,16 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
                   :aria-expanded="isHoldOpen(row.name)"
                   @click="toggleHold(row.name)"
                 >
-                  <i :class="row.icon" class="item-icon" />
-                  <span class="item-name">{{ row.name }}</span>
+                  <i
+                    :class="row.icon"
+                    class="item-icon"
+                    :style="row.tier ? { color: rowTierColor(row.tier) } : undefined"
+                  />
+                  <span
+                    class="item-name"
+                    :style="row.tier ? { color: rowTierColor(row.tier) } : undefined"
+                    >{{ row.name }}</span
+                  >
                   <span v-if="row.tag" class="item-tag">{{ row.tag }}</span>
                   <span v-if="row.trail" class="item-count">{{ row.trail }}</span>
                   <i
@@ -1390,5 +1487,23 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
   .collapse-leave-active {
     transition: none;
   }
+}
+
+.talent-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 2px;
+}
+.talent-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--theme-card-border, #72502d);
+  background: var(--theme-surface-muted, #1a130d);
+  color: var(--theme-text-primary, #eadcc5);
+  font-size: 0.8125rem;
 }
 </style>

@@ -23,12 +23,17 @@ import type {
   ChatPreset,
   LocationNode,
   MapMarker,
-  WorkshopNote,
   WorldBook,
   WorldBookPartition,
 } from './types';
 // 第 13 分节 `randomEvents` 的形状真源在随机事件分册（type-only，边不成环）
 import type { PackRandomEventsSection } from './types-random-events';
+import type { CommissionDef } from './card-workshop/commission';
+
+/** 第 15 分节 `commissions` 的形状（委托板；整块替换分节，真源 = card-workshop/commission） */
+export interface PackCommissionsSection {
+  defs: CommissionDef[];
+}
 
 // ═══════════════════════════════════════════════════════════
 // agent 默认值（pack 承载的 per-Agent 配置）
@@ -309,9 +314,10 @@ export interface ContentPack {
   bloodlines?: PackBloodlinesSection;
   namePools?: PackNamePoolsSection;
   branding?: PackBrandingSection;
-  imageDialects?: PackImageDialectsSection;
   /** 地图内容包（地图系统 v1 / §3.3）—— 注册表第 8 面，整节替换 */
   mapPack?: PackMapPackSection;
+  /** 天赋模板集（2026-09-18）—— 整节替换（追加到内置目录尾部，同名覆盖） */
+  talents?: { data: import('./card-workshop/talent-entry').TalentTemplate[] };
   /**
    * 随机事件（随机事件系统 v1 / §3.3）—— 注册表**第 13 面**。
    *
@@ -336,6 +342,18 @@ export interface ContentPack {
   remoteAssets?: PackRemoteAssetsSection;
 
   /**
+   * 委托板（卡牌工坊 委托接线）—— 注册表**第 15 面**。
+   *
+   * 形状 `{ defs: CommissionDef[] }`：委托定义真源在 `card-workshop/commission.ts`
+   * （requireCard 组合过滤器 / 奖励包含 reputation delta）。
+   *
+   * 🔴 照 randomEvents（第 13 面）同一档：**整节替换，无 `.data` 壳**；校验器只判
+   * 「是不是 JSON 对象」，`defs` 里每一条能不能用由容错解析器 `coerceCommissions`
+   * 说了算（坏定义逐条丢）。**planner 不解释结构**。
+   */
+  commissions?: PackCommissionsSection;
+
+  /**
    * 构建器逐节盖章的 hash 清单。
    *
    * 🔴 用途仅限 D40 升级 diff 展示与快速比对；冲突判定/对账的逐书基线从 payload 现算。
@@ -348,7 +366,18 @@ export interface ContentPack {
 // 校验产出（§5.2：validate 先于任何写入）
 // ═══════════════════════════════════════════════════════════
 
-/** 校验产出的问题级别（参考 WorkshopNote 的三分类语气，但语义独立） */
+/**
+ * 带类别的处置记录 —— **「丢了」和「装上了但会这样」不是一回事**：
+ * - `dropped` —— 该条内容在当前显示路径**确实丢了**（宿主不支持的改写等）
+ * - `degraded` —— **装了**，但受隔离契约限制（宏原样输出、存储不开放等）
+ * - `sideEffect` —— **装了**，且有**规则自身之外**的副作用
+ */
+export interface WorkshopNote {
+  kind: 'dropped' | 'degraded' | 'sideEffect';
+  text: string;
+}
+
+/** 校验产出的问题级别（与 WorkshopNote 的三分类语气相近，但语义独立） */
 export type PackValidationLevel = 'error' | 'warning';
 
 /**
@@ -490,6 +519,10 @@ export interface PackInstallPlan {
      * 判定已经在 `coerceRandomEventPack` 里做过一次了 —— planner 再做一遍就是两处口径。
      */
     randomEvents?: PackSectionPlan<PackRandomEventsSection>;
+    /** 委托板（第 15 面）—— 整节替换，走 randomEvents 那一档（planOpaqueSection） */
+    commissions?: PackSectionPlan<PackCommissionsSection>;
+    /** 天赋模板集（第 16 面）—— 整节替换，走 commissions 同档 */
+    talents?: PackSectionPlan<import('./card-workshop/talent-entry').TalentTemplate[]>;
   };
   agentDefaults?: {
     /** 默认层键集合（D44：解析名册 = 默认层键 ∪ 覆写层键） */

@@ -64,19 +64,7 @@ import {
   getDebugTurns,
   saveDebugTurn,
   // Audio (v11)
-  getAudioTracks,
-  getAudioTrack,
-  saveAudioTrack,
-  deleteAudioTrack,
-  getAudioBlob,
-  getAudioPlaylists,
-  getAudioPlaylist,
-  saveAudioPlaylist,
-  deleteAudioPlaylist,
   // Audio 本地文件夹句柄 (v12)
-  getAudioHandle,
-  saveAudioHandle,
-  deleteAudioHandle,
   // Asset (v13)
   getAssets,
   getAsset,
@@ -84,10 +72,6 @@ import {
   deleteAsset,
   deleteAssets,
   getAssetBlob,
-  // 角色外貌会话副本 (v19 / D56)
-  characterAppearanceKey,
-  getCharacterAppearances,
-  saveCharacterAppearance,
   DB_VERSION,
 } from './database';
 import type { FullBackup } from './database';
@@ -101,11 +85,7 @@ import type {
   Snapshot,
   SaveSlot,
   ApiEndpoint,
-  AudioTrack,
-  AudioPlaylist,
-  AudioHandleRecord,
   AssetMetaRecord,
-  WorkshopProject,
   WorldBook,
   DebugTurnRecord,
 } from './types';
@@ -135,27 +115,6 @@ function makeMemory(overrides: Partial<MemoryRecord> = {}): MemoryRecord {
     keywords: ['测试', '记忆'],
     relatedCharacterIds: ['char_1'],
     importance: 5,
-    ...overrides,
-  };
-}
-
-function makeWorkshopProject(overrides: Partial<WorkshopProject> = {}): WorkshopProject {
-  return {
-    id: crypto.randomUUID(),
-    rootProjectId: 'root_1',
-    name: '测试工坊项目',
-    description: '测试用二创项目',
-    version: '1.0.0',
-    authorName: '测试作者',
-    tags: ['系统', '外挂'],
-    downloadUrl: 'https://example.invalid/pkg.json',
-    fileSize: 1024,
-    installState: 'installed',
-    installedVersion: '1.0.0',
-    installedAt: Date.now(),
-    fetchedAt: Date.now(),
-    uidRange: { start: 900000, end: 900999 },
-    updatedAt: Date.now(),
     ...overrides,
   };
 }
@@ -234,45 +193,10 @@ function makeApiEndpoint(overrides: Partial<ApiEndpoint> = {}): ApiEndpoint {
   };
 }
 
-function makeAudioTrack(overrides: Partial<AudioTrack> = {}): AudioTrack {
-  return {
-    id: crypto.randomUUID(),
-    name: '测试音轨',
-    kind: 'music',
-    source: 'blob',
-    mimeType: 'audio/mpeg',
-    size: 1234,
-    tags: ['战斗'],
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-    ...overrides,
-  };
-}
-
-function makeAudioPlaylist(overrides: Partial<AudioPlaylist> = {}): AudioPlaylist {
-  return {
-    id: crypto.randomUUID(),
-    name: '测试列表',
-    trackIds: [],
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-    ...overrides,
-  };
-}
-
 /**
  * 目录句柄夹具：fake-indexeddb 走结构化克隆，普通对象即可往返。
  * 不要尝试构造真实 FileSystemDirectoryHandle —— node 环境下不存在该 API。
  */
-function makeAudioHandle(overrides: Partial<AudioHandleRecord> = {}): AudioHandleRecord {
-  return {
-    id: 'library-root',
-    handle: { kind: 'directory', name: '我的音乐' } as unknown as FileSystemDirectoryHandle,
-    addedAt: Date.now(),
-    ...overrides,
-  };
-}
-
 function makeAsset(overrides: Partial<AssetMetaRecord> = {}): AssetMetaRecord {
   return {
     id: crypto.randomUUID(),
@@ -1132,7 +1056,7 @@ describe('exportAllData / importAllData', () => {
     // v21：地图字节本地缓存 mapBlobs（2026-08-07，D23 补强；字节同不进备份）。
     // v22：快照拆表（snapshots 只留元数据 + snapshotPayloads 存整档载荷，两者都进备份）。
     // v23：API 凭据级 RPM 策略表。
-    expect(backup.version).toBe(24);
+    expect(backup.version).toBe(26);
     expect(Array.isArray(backup.lorebooks)).toBe(true);
     expect(Array.isArray(backup.presets)).toBe(true);
     // SEC-01：settings 死表与 apiEndpoints 都可能含明文 Key，只留在本机，不进普通备份。
@@ -1151,14 +1075,7 @@ describe('exportAllData / importAllData', () => {
     expect(Array.isArray(backup.createPresets)).toBe(true);
     expect(Array.isArray(backup.messages)).toBe(true);
     expect(Array.isArray(backup.worldBooks)).toBe(true);
-    expect(Array.isArray(backup.workshopProjects)).toBe(true);
     expect(Array.isArray(backup.regexStorage)).toBe(true);
-    // v17 —— 元数据进备份，字节（sceneImageBlobs）刻意不进（设计 §7.3）
-    expect(Array.isArray(backup.sceneImages)).toBe(true);
-    expect(Array.isArray(backup.imagePresets)).toBe(true);
-    expect('sceneImageBlobs' in backup).toBe(false);
-    // v19 —— 角色外貌会话副本与 sceneImages 同为「每存档」数据，必须同进同出
-    expect(Array.isArray(backup.characterAppearances)).toBe(true);
     // v20 —— contentPacks 刻意不进 FullBackup（D18 / §5.7）：payload 进备份 = 每份日常备份
     // 都成了可自由转发的完整内容包 + 体积翻倍。备份/恢复一致性由 reconcilePackState() 解决。
     expect('contentPacks' in backup).toBe(false);
@@ -1172,55 +1089,6 @@ describe('exportAllData / importAllData', () => {
     ]) {
       expect(serialized).not.toContain(secret);
     }
-  });
-
-  /**
-   * 🔴 会话外貌漏出备份时**不会有任何报错** —— 存档的其余部分完好，只是每个角色的
-   * 本档变化静默退回基线，症状看起来像「AI 忘了她换过装」。所以这条走完整往返。
-   */
-  it('exportAllData/importAllData 应往返角色外貌会话副本（v19/D56）', async () => {
-    const db = getDatabase();
-    await saveCharacterAppearance({
-      key: characterAppearanceKey('save_test', '艾莉丝'),
-      saveId: 'save_test',
-      name: '艾莉丝',
-      patch: { outfit: 'dark travel cloak', condition: 'soaked' },
-      updatedAt: 1_700_000_000_000,
-    });
-
-    const backup = await exportAllData();
-    expect(backup.characterAppearances).toHaveLength(1);
-
-    // 清空这张表，模拟「换一台设备后导入」
-    await db.characterAppearances.clear();
-    expect(await getCharacterAppearances('save_test')).toHaveLength(0);
-
-    await importAllData(backup);
-
-    const restored = await getCharacterAppearances('save_test');
-    expect(restored).toHaveLength(1);
-    expect(restored[0].name).toBe('艾莉丝');
-    expect(restored[0].patch).toEqual({ outfit: 'dark travel cloak', condition: 'soaked' });
-  });
-
-  /** 三态语义：pre-v19 的旧备份对这张表**无话可说**，就不该有权删它 */
-  it('导入缺 characterAppearances 字段的旧备份应保留现有会话外貌', async () => {
-    await saveCharacterAppearance({
-      key: characterAppearanceKey('save_test', '苏婉'),
-      saveId: 'save_test',
-      name: '苏婉',
-      patch: { hairStyle: 'short hair' },
-      updatedAt: 1_700_000_000_000,
-    });
-
-    const backup = await exportAllData();
-    delete (backup as Partial<FullBackup>).characterAppearances;
-
-    await importAllData(backup as FullBackup);
-
-    const kept = await getCharacterAppearances('save_test');
-    expect(kept).toHaveLength(1);
-    expect(kept[0].patch).toEqual({ hairStyle: 'short hair' });
   });
 
   it('importAllData 应还原可迁移数据', async () => {
@@ -1426,6 +1294,7 @@ describe('exportAllData / importAllData', () => {
       saveId: 'save_legacy',
       fp: 0,
       fpHistory: [],
+      reputation: 0,
       contracts: [],
       achievements: [],
       news: [],
@@ -1509,21 +1378,12 @@ describe('exportAllData / importAllData', () => {
    * 「恢复一份旧备份」就会静默抹掉用户全部世界书。以下六条把三态逐一钉死。
    */
   describe('importAllData × v14 新表三态语义', () => {
-    /** 预置：worldBooks 两行 + workshopProjects 两行 */
+    /** 预置：worldBooks 两行 */
     async function seedV14Tables() {
       const db = getDatabase();
       await db.worldBooks.bulkPut([
         { id: 'wb_user', name: '用户自建书', partition: 'extra_setting', entries: [] },
-        {
-          id: 'workshop:proj_seed',
-          name: '工坊书',
-          partition: 'creative_workshop',
-          entries: [],
-        },
-      ]);
-      await db.workshopProjects.bulkPut([
-        makeWorkshopProject({ id: 'proj_seed', name: '种子项目' }),
-        makeWorkshopProject({ id: 'proj_seed2', name: '种子项目2' }),
+        { id: 'wb_dlc', name: '扩展书', partition: 'dlc', entries: [] },
       ]);
     }
 
@@ -1539,7 +1399,7 @@ describe('exportAllData / importAllData', () => {
       const db = getDatabase();
       expect(await db.worldBooks.count()).toBe(2);
       expect((await db.worldBooks.get('wb_user'))!.name).toBe('用户自建书');
-      expect((await db.worldBooks.get('workshop:proj_seed'))!.partition).toBe('creative_workshop');
+      expect((await db.worldBooks.get('wb_dlc'))!.name).toBe('扩展书');
     });
 
     it('worldBooks: [] （字段存在但为空）：表被清空', async () => {
@@ -1567,57 +1427,17 @@ describe('exportAllData / importAllData', () => {
       expect(await db.worldBooks.get('wb_user')).toBeUndefined();
     });
 
-    it('缺 workshopProjects 字段（pre-v14 备份）：整张表逐行原样保留', async () => {
-      await seedV14Tables();
-      const legacyBackup: any = await exportAllData();
-      delete legacyBackup.workshopProjects;
-      legacyBackup.version = 13;
-      expect('workshopProjects' in legacyBackup).toBe(false);
-
-      await expect(importAllData(legacyBackup)).resolves.toBeDefined();
-
-      const db = getDatabase();
-      expect(await db.workshopProjects.count()).toBe(2);
-      expect((await db.workshopProjects.get('proj_seed'))!.name).toBe('种子项目');
-      expect((await db.workshopProjects.get('proj_seed2'))!.name).toBe('种子项目2');
-    });
-
-    it('workshopProjects: [] （字段存在但为空）：表被清空', async () => {
-      await seedV14Tables();
-      const backup = await exportAllData();
-      backup.workshopProjects = [];
-
-      await importAllData(backup);
-
-      expect(await getDatabase().workshopProjects.count()).toBe(0);
-    });
-
-    it('workshopProjects 含数据：正常覆盖', async () => {
-      await seedV14Tables();
-      const backup = await exportAllData();
-      backup.workshopProjects = [makeWorkshopProject({ id: 'proj_from_backup', name: '备份项目' })];
-
-      await importAllData(backup);
-
-      const db = getDatabase();
-      expect(await db.workshopProjects.count()).toBe(1);
-      expect((await db.workshopProjects.get('proj_from_backup'))!.name).toBe('备份项目');
-      expect(await db.workshopProjects.get('proj_seed')).toBeUndefined();
-    });
-
-    it('两个字段同时缺席（真实 pre-v14 备份形状）：两张表都原样保留，其它表照常导入', async () => {
+    it('字段缺席（真实 pre-v14 备份形状）：整张表原样保留，其它表照常导入', async () => {
       await seedV14Tables();
       await saveApiEndpoint(makeApiEndpoint({ id: 'api_before' }));
       const legacyBackup: any = await exportAllData();
       delete legacyBackup.worldBooks;
-      delete legacyBackup.workshopProjects;
       legacyBackup.version = 13;
 
       await expect(importAllData(legacyBackup)).resolves.toBeDefined();
 
       const db = getDatabase();
       expect(await db.worldBooks.count()).toBe(2);
-      expect(await db.workshopProjects.count()).toBe(2);
       // 其它表仍按整库替换语义正常导入
       expect((await getApiEndpoints()).map((e) => e.id)).toContain('api_before');
       expect(await db.presets.count()).toBeGreaterThan(0);
@@ -1856,53 +1676,6 @@ describe('exportAllData / importAllData', () => {
         ['viewer-state', '{"tab":"inventory"}'],
       ]);
     });
-  });
-
-  it('exportAllData / importAllData 往返应保留 worldBooks 与 workshopProjects', async () => {
-    const db = getDatabase();
-    await db.worldBooks.put({
-      id: 'workshop:proj_1',
-      name: '工坊书',
-      partition: 'creative_workshop',
-      builtIn: false,
-      entries: [
-        {
-          uid: 900001,
-          name: '工坊条目',
-          content: '正文',
-          enabled: true,
-          key: [],
-          keysecondary: [],
-          selectiveLogic: 0,
-          order: 100,
-          position: 0,
-          extra: {
-            workshop: {
-              projectId: 'proj_1',
-              projectName: '测试项目',
-              sourceUid: 42,
-              sourceComment: '上游注释',
-              sourceHash: 'deadbeef',
-            },
-          },
-        },
-      ],
-    });
-    await db.workshopProjects.put(makeWorkshopProject({ id: 'proj_1' }));
-
-    const backup = await exportAllData();
-    await clearAllData();
-    await initializeDatabase();
-    await importAllData(backup);
-
-    const db2 = getDatabase();
-    const book = await db2.worldBooks.get('workshop:proj_1');
-    expect(book).toBeDefined();
-    expect(book!.partition).toBe('creative_workshop');
-    expect(book!.entries[0].extra?.workshop?.sourceHash).toBe('deadbeef');
-    const proj = await db2.workshopProjects.get('proj_1');
-    expect(proj).toBeDefined();
-    expect(proj!.uidRange).toEqual({ start: 900000, end: 900999 });
   });
 });
 
@@ -2493,184 +2266,6 @@ describe('restoreSnapshot 集成 — 真实 DB (M5 §11.2)', () => {
   });
 });
 
-// ========== Audio (v11) ==========
-
-describe('Audio CRUD (v11)', () => {
-  it('音轨保存/读取应往返一致', async () => {
-    const track = makeAudioTrack({ name: '序曲', tags: ['开场', '和平'] });
-    const id = await saveAudioTrack(track);
-    expect(id).toBe(track.id);
-
-    const loaded = await getAudioTrack(track.id);
-    expect(loaded).toBeDefined();
-    expect(loaded!.name).toBe('序曲');
-    expect(loaded!.kind).toBe('music');
-    expect(loaded!.tags).toEqual(['开场', '和平']);
-  });
-
-  it('saveAudioTrack 应自行打上 updatedAt', async () => {
-    const before = Date.now();
-    const track = makeAudioTrack({ updatedAt: 0 });
-    await saveAudioTrack(track);
-    const loaded = await getAudioTrack(track.id);
-    expect(loaded!.updatedAt).toBeGreaterThanOrEqual(before);
-  });
-
-  it('saveAudioPlaylist 应自行打上 updatedAt', async () => {
-    const before = Date.now();
-    const list = makeAudioPlaylist({ updatedAt: 0 });
-    await saveAudioPlaylist(list);
-    const loaded = await getAudioPlaylist(list.id);
-    expect(loaded!.updatedAt).toBeGreaterThanOrEqual(before);
-  });
-
-  it('blob 应与元数据分表存储，可单独读取', async () => {
-    const track = makeAudioTrack();
-    const blob = new Blob(['fake-audio-bytes']);
-    await saveAudioTrack(track, blob);
-
-    const loadedBlob = await getAudioBlob(track.id);
-    expect(loadedBlob).toBeDefined();
-    expect(await loadedBlob!.text()).toBe('fake-audio-bytes');
-  });
-
-  it('未传 blob 时不应写入 audioBlobs', async () => {
-    const track = makeAudioTrack();
-    await saveAudioTrack(track);
-    expect(await getAudioBlob(track.id)).toBeUndefined();
-  });
-
-  it('getAudioTracks() 返回的元数据行不应携带音频字节', async () => {
-    const track = makeAudioTrack();
-    await saveAudioTrack(track, new Blob(['bytes']));
-
-    const tracks = await getAudioTracks();
-    expect(tracks).toHaveLength(1);
-    expect((tracks[0] as any).blob).toBeUndefined();
-    expect(Object.keys(tracks[0])).not.toContain('blob');
-  });
-
-  it('删除音轨应同时清除元数据与字节', async () => {
-    const track = makeAudioTrack();
-    await saveAudioTrack(track, new Blob(['bytes']));
-
-    await deleteAudioTrack(track.id);
-    expect(await getAudioTrack(track.id)).toBeUndefined();
-    expect(await getAudioBlob(track.id)).toBeUndefined();
-  });
-
-  it('删除音轨应从所有播放列表中剔除该 id', async () => {
-    const t1 = makeAudioTrack({ name: 'A' });
-    const t2 = makeAudioTrack({ name: 'B' });
-    await saveAudioTrack(t1);
-    await saveAudioTrack(t2);
-
-    const l1 = makeAudioPlaylist({ trackIds: [t1.id, t2.id] });
-    const l2 = makeAudioPlaylist({ trackIds: [t2.id] });
-    await saveAudioPlaylist(l1);
-    await saveAudioPlaylist(l2);
-
-    await deleteAudioTrack(t2.id);
-
-    expect((await getAudioPlaylist(l1.id))!.trackIds).toEqual([t1.id]);
-    expect((await getAudioPlaylist(l2.id))!.trackIds).toEqual([]);
-  });
-
-  it('删除播放列表不应级联删除其中的音轨', async () => {
-    const track = makeAudioTrack();
-    await saveAudioTrack(track, new Blob(['bytes']));
-    const list = makeAudioPlaylist({ trackIds: [track.id] });
-    await saveAudioPlaylist(list);
-
-    await deleteAudioPlaylist(list.id);
-
-    expect(await getAudioPlaylist(list.id)).toBeUndefined();
-    expect(await getAudioTrack(track.id)).toBeDefined();
-    expect(await getAudioBlob(track.id)).toBeDefined();
-  });
-
-  it('播放列表 CRUD 应往返一致', async () => {
-    const list = makeAudioPlaylist({ name: '战斗歌单', trackIds: ['t1', 't2'] });
-    await saveAudioPlaylist(list);
-
-    let all = await getAudioPlaylists();
-    expect(all).toHaveLength(1);
-    expect(all[0].name).toBe('战斗歌单');
-    expect(all[0].trackIds).toEqual(['t1', 't2']);
-
-    list.name = '和平歌单';
-    list.trackIds = ['t3'];
-    await saveAudioPlaylist(list);
-    const updated = await getAudioPlaylist(list.id);
-    expect(updated!.name).toBe('和平歌单');
-    expect(updated!.trackIds).toEqual(['t3']);
-
-    await deleteAudioPlaylist(list.id);
-    all = await getAudioPlaylists();
-    expect(all).toHaveLength(0);
-  });
-
-  // ---------- 本地文件夹 (v12) ----------
-
-  it('source=file 的音轨应无 blob 往返（文件夹路径不存字节）', async () => {
-    const track = makeAudioTrack({
-      name: '外部曲目',
-      source: 'file',
-      relativePath: 'bgm/序曲.mp3',
-      missing: false,
-      mimeType: undefined,
-      size: undefined,
-    });
-    await saveAudioTrack(track);
-
-    const loaded = await getAudioTrack(track.id);
-    expect(loaded).toBeDefined();
-    expect(loaded!.source).toBe('file');
-    expect(loaded!.relativePath).toBe('bgm/序曲.mp3');
-    expect(loaded!.missing).toBe(false);
-    // 文件夹路径不存字节
-    expect(await getAudioBlob(track.id)).toBeUndefined();
-  });
-
-  it('missing=true 的音轨行应保留（曲目丢失不删行，保住 tags/歌单槽位）', async () => {
-    const track = makeAudioTrack({ source: 'file', relativePath: 'gone.mp3', missing: true });
-    await saveAudioTrack(track);
-    const loaded = await getAudioTrack(track.id);
-    expect(loaded!.missing).toBe(true);
-    expect(loaded!.tags).toEqual(['战斗']);
-  });
-
-  it('目录句柄保存/读取应往返一致', async () => {
-    const record = makeAudioHandle();
-    const id = await saveAudioHandle(record);
-    expect(id).toBe('library-root');
-
-    const loaded = await getAudioHandle('library-root');
-    expect(loaded).toBeDefined();
-    expect(loaded!.addedAt).toBe(record.addedAt);
-    expect((loaded!.handle as any).name).toBe('我的音乐');
-  });
-
-  it('saveAudioHandle 未带 addedAt 时应补时间戳', async () => {
-    const before = Date.now();
-    const record = makeAudioHandle({ addedAt: 0 });
-    await saveAudioHandle(record);
-    const loaded = await getAudioHandle('library-root');
-    expect(loaded!.addedAt).toBeGreaterThanOrEqual(before);
-  });
-
-  it('删除目录句柄后应读不到', async () => {
-    await saveAudioHandle(makeAudioHandle());
-    await deleteAudioHandle('library-root');
-    expect(await getAudioHandle('library-root')).toBeUndefined();
-  });
-
-  it('不存在的目录句柄应返回 undefined', async () => {
-    expect(await getAudioHandle('library-root')).toBeUndefined();
-    expect(await getAudioHandle('不存在的id')).toBeUndefined();
-  });
-});
-
 // ========== Asset (v13) ==========
 
 /**
@@ -2918,10 +2513,18 @@ describe('Asset CRUD (v13)', () => {
         content: '你好',
         timestamp: 1,
       },
-      audioTracks: makeAudioTrack({ id: 'tr1' }),
+      audioTracks: {
+        id: 'tr1',
+        name: 'tr1',
+        kind: 'music',
+        source: 'blob',
+        tags: [],
+        createdAt: 1,
+        updatedAt: 1,
+      },
       audioBlobs: { id: 'tr1', blob: new Blob(['legacy-audio']) },
-      audioPlaylists: makeAudioPlaylist({ id: 'pl1', trackIds: ['tr1'] }),
-      audioHandles: makeAudioHandle(),
+      audioPlaylists: { id: 'pl1', name: 'pl1', trackIds: ['tr1'], createdAt: 1, updatedAt: 1 },
+      audioHandles: { id: 'library-root', handle: { name: '我的音乐' }, addedAt: 1 },
     };
     for (const [table, row] of Object.entries(rows)) {
       await legacy.table(table).put(row as never);
@@ -2935,26 +2538,35 @@ describe('Asset CRUD (v13)', () => {
     // ---- 以当前版 (AppDatabase) 打开：触发升版 ----
     await initializeDatabase();
     const db = getDatabase();
-    // v20=D18 contentPacks; v21=地图字节; v22=快照拆表; v23=API RPM; v24=调试历史
-    expect(db.verno).toBe(24);
+    // v20=D18 contentPacks; v21=地图字节; v22=快照拆表; v23=API RPM; v24=调试历史;
+    // v25=创意工坊下线（删 workshopProjects 表）; v26=图像生成下线（删插画/外貌四表）
+    expect(db.verno).toBe(26);
 
-    // 表册齐全: v12 的 17 张 + 素材两张 + 工坊两张 + 美化规则一张 + 正则 KV 一张
+    // 表册齐全: v12 的 17 张 + 素材两张 + 美化规则一张 + 正则 KV 一张
     //           + 图像生成三张 + 角色外貌会话副本一张（v19/D56）
     //           + contentPacks 一张（v20/D18）+ mapBlobs 一张（v21）
     //           + snapshotPayloads 一张（v22）+ apiRateLimitPolicies 一张（v23），一个不少
     //（误写 `表名: null` 或漏声明会在这里炸 —— 尤其 lorebooks/settings 两张死表按 D3 必须保留）
-    const EXPECTED_TABLES = [
-      ...Object.keys(V12_STORES),
-      'assetMeta',
-      'assetBlobs',
-      'worldBooks',
+    // v25 起工坊下线（workshopProjects）+ 音频系统下线（audio* 四表），
+    // 这五张表已从库里删除，不在清单里。
+    const REMOVED_IN_V25 = [
       'workshopProjects',
-      'beautifierRules',
-      'regexStorage',
+      'audioTracks',
+      'audioBlobs',
+      'audioPlaylists',
+      'audioHandles',
       'sceneImages',
       'sceneImageBlobs',
       'imagePresets',
       'characterAppearances',
+    ];
+    const EXPECTED_TABLES = [
+      ...Object.keys(V12_STORES).filter((t) => !REMOVED_IN_V25.includes(t)),
+      'assetMeta',
+      'assetBlobs',
+      'worldBooks',
+      'beautifierRules',
+      'regexStorage',
       'contentPacks',
       'mapBlobs',
       'snapshotPayloads',
@@ -2963,25 +2575,19 @@ describe('Asset CRUD (v13)', () => {
     ].sort();
     expect(db.tables.map((t) => t.name).sort()).toEqual(EXPECTED_TABLES);
 
-    // 每一张旧表的数据都必须还在（漏写任一表会让这里归零）
+    // 每一张旧表的数据都必须还在（漏写任一表会让这里归零）；v25 删掉的五张除外
     for (const table of Object.keys(V12_STORES)) {
+      if (REMOVED_IN_V25.includes(table)) continue;
       expect(await db.table(table).count(), `升版后 ${table} 数据丢失`).toBe(1);
     }
     // 抽查内容而非仅行数
     expect((await db.lorebooks.get('lb1'))!.name).toBe('测试世界书');
-    expect(await getAudioBlob('tr1')).toBeDefined();
-    expect(await (await getAudioBlob('tr1'))!.text()).toBe('legacy-audio');
-    expect((await db.audioPlaylists.get('pl1'))!.trackIds).toEqual(['tr1']);
     // 新表就位且为空
     expect(await getAssets()).toHaveLength(0);
     expect(await db.assetBlobs.count()).toBe(0);
     expect(await db.worldBooks.count()).toBe(0);
-    expect(await db.workshopProjects.count()).toBe(0);
     expect(await db.beautifierRules.count()).toBe(0);
     expect(await db.regexStorage.count()).toBe(0);
-    expect(await db.sceneImages.count()).toBe(0);
-    expect(await db.sceneImageBlobs.count()).toBe(0);
-    expect(await db.imagePresets.count()).toBe(0);
     // v22 例外：snapshotPayloads 不是空的 —— 上面那行 v12 胖快照被升版拆了出来
     expect(await db.snapshotPayloads.count()).toBe(1);
     expect(await db.apiRateLimitPolicies.count()).toBe(0);

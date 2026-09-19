@@ -22,6 +22,7 @@
 import type {
   AgentContext,
   ApiEndpoint,
+  CardItem,
   CraftRequestMarker,
   CraftGenRequestMarker,
   ItemGenOutput,
@@ -33,10 +34,26 @@ import type {
 } from './types';
 import { buildAgentMessagesAsync } from './agent-templates';
 import { getToolsForAgent, executeToolCall } from './agent-tools';
-import { normalizeSlot, normalizeItemType } from './field-enums';
+import { normalizeSlot, normalizeItemType, normalizeCraftIndustry } from './field-enums';
+// 阶段3b 制卡桥：industry=制卡 的主产物由融合内核确定性组装（数值归 Code，ADR-11）
+import {
+  buildCardItem,
+  parseMaterialNames,
+  resolveMaterialSpecs,
+} from './card-workshop/craft-card';
 import type { ToolExecutionContext } from './types';
 // Q-05：XML / JSON 解析的唯一工具面（参数顺序一律 (source, tag)）
 import { tagInner, tagBlock, parseAttrsStr } from './agent-xml';
+import { consumedByRating } from './card-workshop/card-craft-plan';
+import { matchImitation } from './start-catalog-mechanics';
+import { entryStrength } from './card-workshop/talent-rule-modifiers';
+import {
+  applyCraftEntryTalents,
+  applyCraftTalentBonus,
+  isDesireDominant,
+} from './card-workshop/craft-talent-bonus';
+import { liftFromMisfortune } from './card-workshop/craft-flow-hooks';
+import { cardCatalogToItem } from './start-catalog-mechanics';
 import { extractJsonPayload } from './model-json';
 
 // ========== Types ==========
@@ -51,6 +68,21 @@ export interface CraftGenRequest {
   configs?: import('./types').AgentConfig[];
   worldBooks?: import('./types').WorldBook[];
   presets?: import('./types').AgentPreset[];
+  /** 天赋生成倾向段（卡牌工坊 T-S2 路线图实装；无天赋缺省，注入零成本） */
+  talentBias?: string;
+  /**
+   * 产物评级上浮档数（缺省 0 = 不生效）。两个来源共用这一个旋钮：
+   *  - 「制卡顺利」（好运之骰 5 点面 / 命运之骰 5 点面）：+1 档
+   *  - 「败犬烙印」消耗一枚：+2 档（「化腐朽为神奇」）
+   */
+  ratingLift?: number;
+  /** 赌徒谬论：当前厄运层数与单次上浮上限（缺省 = 无此天赋） */
+  misfortuneLayers?: number;
+  misfortuneMaxLift?: number;
+  /** 时间回溯：本次制卡失败时是否回溯重裁一次（预付开关；MP 由 pipeline 扣） */
+  rewindArmed?: boolean;
+  /** 回溯每次重裁上浮档数（缺省 1） */
+  rewindLift?: number;
 }
 
 /** Helper: extract attributes from old or new marker shape */
@@ -81,6 +113,9 @@ export interface CraftGenDeps {
   stateManager?: {
     commitDomainCommand: (patches: StatePatch[]) => Promise<void>;
   };
+  /** 禁忌仿卡配方（2026-09-17）：内容仓 cardPool 里带 imitation 字段的条目；
+   *  制卡素材组合命中 → 产出定格为仿卡。不传 = 黑市仿制线关闭。 */
+  imitationRecipes?: import('./start-catalog-mechanics').CardCatalogItem[];
 }
 
 /**
@@ -156,6 +191,10 @@ export interface CraftGenChainResult {
   patches: StatePatch[];
   craftOutput: CraftGenOutput;
   itemOutput: ItemGenOutput | null;
+  /** 赌徒谬论：本次用掉了几层厄运（pipeline 据此清零计数） */
+  misfortuneConsumed?: number;
+  /** 时间回溯：本次是否真的回溯过（pipeline 据此扣 MP） */
+  rewindUsed?: boolean;
 }
 
 // ========== Public API ==========
@@ -190,8 +229,15 @@ export async function callCraftGenAgent(
     agentOutputs: new Map([['story', markerContext]]),
   };
 
+  // 天赋生成倾向段（词条加权/形态转化/配方解锁）——置于请求体之前，AI 优先读
+  const talentBiasBlock = request.talentBias
+    ? `<制卡师天赋倾向>
+${request.talentBias}
+</制卡师天赋倾向>
+`
+    : '';
   const craftLocalParams: Record<string, string> = {
-    CRAFT_REQUEST: markerBody || request.storyOutput,
+    CRAFT_REQUEST: talentBiasBlock + (markerBody || request.storyOutput),
   };
 
   // 真机修(2026-07-17): configs/worldBooks/presets 透传
@@ -403,7 +449,7 @@ export function parseCraftResultXML(xml: string): CraftGenOutput {
         itemRequests: parseItemRequestsJSON(parsed),
         narrative: parsed.narrative ?? '',
         craftParams: {
-          industry: (parsed.industry ?? '锻造') as CraftIndustry,
+          industry: normalizeCraftIndustry(parsed.industry ?? '') ?? '锻造',
           targetQuality: (parsed.target_quality ?? parsed.targetQuality ?? '普通') as QualityLevel,
           stage: parsed.stage ?? '成品',
           quantity: parsed.quantity ?? 1,
@@ -434,30 +480,67 @@ export function buildCraftPatches(
   craftOutput: CraftGenOutput,
   itemOutput: ItemGenOutput | null,
   characterId: string,
+  cardProduct?: CardItem,
 ): StatePatch[] {
   const patches: StatePatch[] = [];
 
   const productName = craftOutput.productName;
 
+  // 0. 制卡素材消耗（2026-09-18 裁决：**Code 确定性扣减**，不依赖 AI 调 craft_settle）
+  //
+  //    此前叙事制卡的素材扣减被外包给 AI 工具调用：漏调 craft_settle 就一分不扣
+  //    （代码里那行「本次未经结算——不发放奖励，素材也未扣」是自认）。UI 制卡台
+  //    早已用 planCardCraft.consumed 修好了这条，这里补齐叙事路径，两条路径同口径。
+  //    消耗规则走 consumedByRating（成功/大失败全耗、失败只耗副素材）。
+  if (cardProduct && craftOutput.craftParams?.industry === '制卡') {
+    const mats = parseMaterialNames(craftOutput.craftParams.materials);
+    const main = mats[0];
+    const subs = mats.slice(1);
+    if (main) {
+      for (const name of consumedByRating(craftOutput.rating, main, subs)) {
+        patches.push({
+          op: 'remove_item',
+          target: `characters.${characterId}`,
+          value: { name, quantity: 1 },
+          metadata: { source: 'craft_card_materials' },
+        } as StatePatch);
+      }
+      // 素材被扣掉之后，那条「未经结算不扣素材」的兜底文案就不再成立
+      if (craftOutput.narrative?.includes('素材也未扣')) {
+        craftOutput.narrative = craftOutput.narrative.replace(/（[^）]*素材也未扣[^）]*）/g, '');
+      }
+    }
+  }
+
   // 1. 主产物写入背包 (add_item) — 仅成功产出完整制品
+  // 阶段3b 制卡桥：industry=制卡 的主产物由调用方（runCraftGenChain）用融合内核
+  // 组装好传入 —— tier/词条/造价/封印是 Code 算的，这里原样落库。
   // M3: item_gen equipment 已细化同名产物时跳过 — 以 item_gen 的完整数据为准
   // 不再两步落库；stats/durability/maxDurability 直写 value（#7）
   // S4d（2026-08-01 失败品链路）：失败时跳过主产物——失败品由 item_gen 以 <item_requests> 产出（下方第 2 步）
   if (craftOutput.success) {
-    const productElaboratedByItemGen =
-      itemOutput?.equipment.some((e) => e.name === productName) ?? false;
-    if (!productElaboratedByItemGen) {
+    if (cardProduct) {
       patches.push({
         op: 'add_item',
         target: `characters.${characterId}`,
-        value: {
-          name: productName,
-          description: craftOutput.checkSummary,
-          quantity: craftOutput.craftParams.quantity,
-          type: normalizeItemType('equipment') ?? '装备',
-          rarity: craftOutput.quality,
-        },
+        value: cardProduct,
       });
+    } else {
+      const productElaboratedByItemGen =
+        itemOutput?.equipment.some((e) => e.name === productName) ?? false;
+      if (!productElaboratedByItemGen) {
+        patches.push({
+          op: 'add_item',
+          target: `characters.${characterId}`,
+          value: {
+            name: productName,
+            description: craftOutput.checkSummary,
+            quantity: craftOutput.craftParams.quantity,
+            type: normalizeItemType('equipment') ?? '装备',
+            rarity: craftOutput.quality,
+          },
+        });
+      }
     }
   }
 
@@ -466,6 +549,8 @@ export function buildCraftPatches(
   //   ——失败品不 auto-equip（剥离 equippedSlot），也不进装备槽，仅背包可见
   if (itemOutput) {
     for (const equip of itemOutput.equipment) {
+      // 阶段3b：卡牌主产物已按名占位，item_gen 同名条目跳过防双份
+      if (cardProduct && equip.name === cardProduct.name) continue;
       patches.push({
         op: 'add_item',
         target: `characters.${characterId}`,
@@ -494,6 +579,8 @@ export function buildCraftPatches(
 
     // 库存品 → add_item
     for (const inv of itemOutput.inventory) {
+      // 阶段3b：卡牌主产物已按名占位，item_gen 同名条目跳过防双份
+      if (cardProduct && inv.name === cardProduct.name) continue;
       patches.push({
         op: 'add_item',
         target: `characters.${characterId}`,
@@ -514,31 +601,20 @@ export function buildCraftPatches(
     }
   }
 
-  // 3. 经验奖励 → update_character delta（M3: 不再走 delta_variable，#12 exp 侧）
-  // S4d：失败/大失败不结算 EXP/FP（craft_gen 失败时 expGained/fpGained 为 0，这里双重保险）
-  if (
-    !craftOutput.settlementPatches &&
-    craftOutput.success &&
-    craftOutput.craftParams.expGained > 0
-  ) {
-    patches.push({
-      op: 'update_character',
-      target: `characters.${characterId}`,
-      value: { totalExp: craftOutput.craftParams.expGained },
-      metadata: { source: 'craft_gen', delta: true },
-    });
-  }
-  // 4. FP 奖励 → delta_variable profile.fp（M5 改 FP op 前保持现状）
-  if (
-    !craftOutput.settlementPatches &&
-    craftOutput.success &&
-    craftOutput.craftParams.fpGained > 0
-  ) {
-    patches.push({
-      op: 'delta_variable',
-      target: 'profile.fp',
-      amount: craftOutput.craftParams.fpGained,
-    });
+  // 3./4. 经验与 FP 奖励
+  // S4d：失败/大失败不结算 EXP/FP（craft_gen 失败时 expGained/fpGained 为 0，双重保险）
+  //
+  // 🔒 2026-09-17（第三档门禁）：**奖励只认「真的结算过」**。
+  //   走了 `craft_settle` → 奖励在它自己的补丁里（所以这两支不该再发，否则双发）；
+  //   没走结算 → **一分不发**，只在叙事里标注。此前那一支
+  //   (`!settlementPatches && expGained > 0`) 会拿 AI 在 <craft_params> 里写的数发奖励——
+  //   Agentic 失败回退 `client.chat`（**无工具**）时，那个数只能由 AI 编。
+  //   卡牌制卡已改走制卡主路（card-craft-plan，Code 侧算完），不再依赖这条链的奖励。
+  const settled = !!(craftOutput.settlementPatches && craftOutput.settlementPatches.length > 0);
+  if (craftOutput.success && !settled && craftOutput.narrative) {
+    craftOutput.narrative = [craftOutput.narrative, '（本次未经结算——不发放奖励，素材也未扣）']
+      .filter(Boolean)
+      .join('\n');
   }
 
   return patches;
@@ -555,12 +631,61 @@ export function buildCraftPatches(
  *   - narrative: 注入回 story output 的制作叙事
  *   - patches: 提交给 StateManager 的状态变更
  */
+/**
+ * 制作评级上浮 n 档（纯函数）：大失败 → 失败 → 成功 → 精益求精（封顶不越界）。
+ * 与 `card-fusion.rollCraftRating` 同一套评级枚举，不引入第二套档位。
+ *
+ * @param steps 上浮档数（缺省 1）：制卡顺利 +1 / 败犬烙印 +2
+ */
+export function liftCraftRating(rating: CraftRating, steps = 1): CraftRating {
+  const order: readonly CraftRating[] = ['大失败', '失败', '成功', '精益求精'];
+  const idx = order.indexOf(rating);
+  if (idx < 0) return rating;
+  const n = Math.max(0, Math.round(steps));
+  return order[Math.min(idx + n, order.length - 1)];
+}
+
 export async function runCraftGenChain(
   request: CraftGenRequest,
   deps: CraftGenDeps,
 ): Promise<CraftGenChainResult> {
   // Step 1: callCraftGenAgent
   const craftOutput = await callCraftGenAgent(request, deps);
+
+  // 评级上浮（好运之骰「制卡顺利」+1 / 败犬烙印「扭转冲突」+2）：
+  // 在**评级产生之后、落库之前**改，且写进制作叙事让玩家看到天赋真的生效。
+  let misfortuneConsumed = 0;
+  let rewindUsed = false;
+  const lift = Math.max(0, Math.round(request.ratingLift ?? 0));
+  if (lift > 0) {
+    const lifted = liftCraftRating(craftOutput.rating, lift);
+    if (lifted !== craftOutput.rating) {
+      craftOutput.rating = lifted;
+      craftOutput.narrative = [
+        craftOutput.narrative,
+        lift >= 2
+          ? `【败犬烙印】你烧掉一枚烙印，强行扭转了这条命运线——评级上浮至「${lifted}」`
+          : `【制卡顺利】今日手气极佳——评级上浮一档至「${lifted}」`,
+      ]
+        .filter(Boolean)
+        .join('\n');
+    }
+  }
+
+  // 时间回溯：**失败才触发**（成功时不浪费玩家的预付与精神力）
+  if (request.rewindArmed && !craftOutput.success) {
+    const lifted = liftCraftRating(craftOutput.rating, Math.max(1, request.rewindLift ?? 1));
+    if (lifted !== craftOutput.rating) {
+      craftOutput.rating = lifted;
+      rewindUsed = true;
+      craftOutput.narrative = [
+        craftOutput.narrative,
+        `【时间回溯】你把这一刻倒回去重来了一次——评级改写为「${lifted}」`,
+      ]
+        .filter(Boolean)
+        .join('\n');
+    }
+  }
 
   // Step 2: callItemGenForCraft
   // S4d（2026-08-01 失败品链路）：成功/失败都发 item_gen——
@@ -580,9 +705,82 @@ export async function runCraftGenChain(
     console.warn('[craft-gen-chain] 无 owner 且无玩家角色，craft patches 将跳过角色目标');
     return { narrative: craftOutput.narrative, patches: [], craftOutput, itemOutput };
   }
+
+  // 阶段3b 制卡桥：industry=制卡 且成功时，主产物由融合内核确定性组装 ——
+  // AI 提名素材（craftParams.materials 名单，按背包解析成 MaterialSpec）并给卡起名；
+  // tier / 词条 / 造价 / 封印全部 Code 算。名单解析查不到的素材静默跳过（宁可
+  // 元素少一张卡，不让一次拼写失误炸掉制作链）。
+  let cardProduct: CardItem | undefined;
+  if (craftOutput.craftParams.industry === '制卡' && craftOutput.success) {
+    const owner = request.context.characters?.find((c) => c.name === characterId);
+    const materialNames = parseMaterialNames(craftOutput.craftParams.materials);
+    // 禁忌仿卡（2026-09-17）：素材组合命中黑市配方 → 产出定格为仿卡（弱化定值，
+    // 名字不由 AI 起；data.imitationOf 供使用惩罚结算识别）
+    const imitationHit = deps.imitationRecipes
+      ? matchImitation(materialNames, deps.imitationRecipes)
+      : undefined;
+    if (imitationHit) {
+      const item = cardCatalogToItem(imitationHit);
+      cardProduct = {
+        ...item,
+        data: { ...(item.data ?? {}), imitationOf: imitationHit.imitation!.ofName },
+      };
+    } else {
+      cardProduct = buildCardItem({
+        productName: craftOutput.productName,
+        description: craftOutput.checkSummary,
+        quantity: craftOutput.craftParams.quantity,
+        quality: craftOutput.quality,
+        rating: craftOutput.rating,
+        materialSpecs: resolveMaterialSpecs(materialNames, owner?.inventory ?? []),
+      });
+    }
+    // 制卡侧天赋加成（2026-09-17）：越阶（卡牌造物主）/ 欲望主导（欲望魔神）。
+    // 天赋门槛按**条目种类**判定（与 UI 同源），无天赋时两个开关皆关 → 零改动。
+    // 越阶档数走 `越阶{tierGain}` 强度档（缺省基准 1 档）。
+    if (cardProduct) {
+      const talentList = owner?.talents?.list ?? [];
+      const talentEntries = talentList.flatMap((t: any) => t.entries ?? []);
+      const has = (kind: string) => talentEntries.some((e: any) => e.kind === kind);
+      const desireDominant = has('欲望主导') && isDesireDominant(materialNames);
+      const { card: boosted, notes } = applyCraftTalentBonus(cardProduct, materialNames, {
+        tierGain: has('越阶') ? entryStrength(talentList, '越阶', 'tierGain') : 0,
+        halveCost: has('越阶') && entryStrength(talentList, '越阶', 'halveCost') > 0,
+        desireDominant,
+      });
+      cardProduct = boosted;
+      // 条目天赋的产物加成（模块化/惰性/产出数量/战技附加）——**与制卡主路
+      // （card-craft-plan）共用同一个函数**，两条路径的加成口径只有一份实现。
+      const entryBoost = applyCraftEntryTalents(cardProduct, talentList as never);
+      cardProduct = entryBoost.card;
+      notes.push(...entryBoost.notes);
+      // 天赋审计行并入制作叙事（让玩家看到天赋确实生效）
+      if (notes.length > 0) {
+        craftOutput.narrative = [craftOutput.narrative, ...notes].filter(Boolean).join('\n');
+      }
+    }
+  }
+
+  // 赌徒谬论：厄运只在**对冲融合（相克）**上兑现，用掉即清空。
+  // 放在这里是因为要读产物卡的 `recipe.fusionKind`（融合内核算好的），
+  // 而产物卡是在上面那个天赋块里才建出来的。
+  if (cardProduct && (request.misfortuneLayers ?? 0) > 0) {
+    const rolled = liftFromMisfortune({
+      layers: request.misfortuneLayers ?? 0,
+      isClashFusion: cardProduct.recipe?.fusionKind === '相克',
+      maxLift: request.misfortuneMaxLift ?? 3,
+    });
+    if (rolled.lift > 0) {
+      const lifted = liftCraftRating(craftOutput.rating, rolled.lift);
+      if (lifted !== craftOutput.rating) craftOutput.rating = lifted;
+      misfortuneConsumed = rolled.consumed;
+      craftOutput.narrative = [craftOutput.narrative, rolled.note].filter(Boolean).join('\n');
+    }
+  }
+
   const patches = [
     ...(craftOutput.settlementPatches ?? []),
-    ...buildCraftPatches(craftOutput, itemOutput, characterId),
+    ...buildCraftPatches(craftOutput, itemOutput, characterId, cardProduct),
   ];
 
   // Step 4: optional persistence
@@ -595,6 +793,8 @@ export async function runCraftGenChain(
     patches,
     craftOutput,
     itemOutput,
+    ...(misfortuneConsumed > 0 ? { misfortuneConsumed } : {}),
+    ...(rewindUsed ? { rewindUsed } : {}),
   };
 }
 
@@ -673,7 +873,7 @@ function parseItemRequestsJSON(parsed: any): ItemRequest[] {
  */
 function parseCraftParams(xml: string): CraftGenOutput['craftParams'] {
   return {
-    industry: (tagInner(xml, 'industry')?.trim() ?? '锻造') as CraftIndustry,
+    industry: normalizeCraftIndustry(tagInner(xml, 'industry') ?? '') ?? '锻造',
     targetQuality: (tagInner(xml, 'target_quality')?.trim() ?? '普通') as QualityLevel,
     stage: tagInner(xml, 'stage')?.trim() ?? '成品',
     quantity: parseInt(tagInner(xml, 'quantity')?.trim() ?? '1', 10) || 1,

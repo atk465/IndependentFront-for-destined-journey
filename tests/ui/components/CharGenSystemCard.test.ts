@@ -231,12 +231,6 @@ describe('CharGenSystemCard', () => {
     expect(w.text()).toContain('主手');
     expect(w.text()).toContain('霜语法杖');
   });
-  it('renders ascension when enabled', async () => {
-    const w = mount(CharGenSystemCard, { props: { event: mockFull } });
-    expect(w.text()).toContain('登神长阶');
-    expect(w.text()).toContain('冰霜之道');
-  });
-
   // ── 防御性渲染 ──
   it('hides background when empty', async () => {
     const w = mount(CharGenSystemCard, { props: { event: mockMinimal } });
@@ -247,11 +241,6 @@ describe('CharGenSystemCard', () => {
     const w = mount(CharGenSystemCard, { props: { event: mockMinimal } });
     expect(w.text()).not.toContain('技能');
   });
-  it('hides ascension when disabled', async () => {
-    const w = mount(CharGenSystemCard, { props: { event: mockMinimal } });
-    expect(w.text()).not.toContain('登神长阶');
-  });
-
   // ── Profile grid ──
   it('renders personality in profile grid', async () => {
     const w = mount(CharGenSystemCard, { props: { event: mockFull } });
@@ -305,43 +294,7 @@ describe('CharGenSystemCard', () => {
   });
 
   // ── Ascension full ──
-  it('renders ascension deity position', async () => {
-    const w = mount(CharGenSystemCard, { props: { event: mockFull } });
-    expect(w.text()).toContain('冰霜之神');
-  });
-  it('renders ascension divine kingdom', async () => {
-    const w = mount(CharGenSystemCard, { props: { event: mockFull } });
-    expect(w.text()).toContain('永冻圣域');
-    expect(w.text()).toContain('永远冰封');
-  });
-  it('renders ascension elements', async () => {
-    const w = mount(CharGenSystemCard, { props: { event: mockFull } });
-    expect(w.text()).toContain('要素');
-    expect(w.text()).toContain('极寒元素');
-    expect(w.text()).toContain('凛冬之风');
-  });
   // 回归：effects 是 string[]，逐条渲染原文；旧模板按 (v, k) 遍历，会把数组下标 0/1 当词条名画出来
-  it('renders element effects as plain lines, not indexed pairs', async () => {
-    const w = mount(CharGenSystemCard, { props: { event: mockFull } });
-    const pills = w.findAll('.ci-effect-pill').map((p) => p.text());
-    expect(pills).toContain('冰霜伤害+30%');
-    expect(pills.some((t) => /^\d+\s/.test(t))).toBe(false);
-  });
-  it('renders ascension authorities', async () => {
-    const w = mount(CharGenSystemCard, { props: { event: mockFull } });
-    expect(w.text()).toContain('权能');
-    expect(w.text()).toContain('冰封纪元');
-    expect(w.text()).toContain('消耗100 MP');
-    expect(w.findAll('.ci-effect-pill').map((p) => p.text())).toContain('范围冻结100m');
-  });
-  it('renders ascension laws with passive and active effects', async () => {
-    const w = mount(CharGenSystemCard, { props: { event: mockFull } });
-    expect(w.text()).toContain('法则');
-    expect(w.text()).toContain('绝对零度法则');
-    expect(w.text()).toContain('冰霜抗性+50%');
-    expect(w.text()).toContain('绝对零度爆发');
-  });
-
   // ── Skill effects ──
   it('renders skill effects', async () => {
     const w = mount(CharGenSystemCard, { props: { event: mockFull } });

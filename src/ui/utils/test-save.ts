@@ -4,7 +4,7 @@
  * 创建包含完整游戏数据的测试存档:
  * - 1 个玩家角色 (莱恩, T4, Lv.12)
  * - 3 个 NPC
- * - SaveProfile: FP 500 + 3 quests + 1 contract + 2 news
+ * - SaveProfile: FP 500 + 3 quests + 2 news
  * - 基础装备/技能/背包物品
  *
  * 🔴 **这里的叙事一律是通用奇幻占位内容**（内容-引擎分离 D27）：人名/地名/势力/纪元
@@ -141,7 +141,6 @@ export async function createTestSave(options: { reset?: boolean } = {}): Promise
     maxSp: 150,
     money: 1250,
     location: '中部大陆-边境行省-石桥镇',
-    adventurerRank: 'A',
     currentAction: '',
     bloodlineIds: ['human_imperial'],
     // M2: 装备并入 inventory（equippedSlot 非空 = 已穿戴，规范 §3）
@@ -424,17 +423,7 @@ export async function createTestSave(options: { reset?: boolean } = {}): Promise
         source: 'other',
       },
     ],
-    contracts: [
-      {
-        id: crypto.randomUUID(),
-        targetId: npcs[0].id,
-        targetName: '莉薇娅',
-        tier: 1,
-        fpSpent: 50,
-        affectionLevel: '友好',
-        createdAt: Date.now() - 43200000,
-      },
-    ],
+    reputation: 0,
     achievements: [
       {
         id: crypto.randomUUID(),

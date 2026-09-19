@@ -35,7 +35,6 @@ import type {
   CharacterState,
   CraftActionRequest,
   CraftDiceTape,
-  CraftIndustry,
   CraftMaterial,
   CraftStage,
   CraftToolArgs,
@@ -43,6 +42,7 @@ import type {
 } from './types';
 import type { Modifier, CheckModifier } from './effect-types';
 import { determineAdvantage } from './craft-dc';
+import { normalizeCraftIndustry } from './field-enums';
 
 /**
  * 这次检定要掷几颗 d20。
@@ -132,7 +132,7 @@ export function buildCraftRequest(
   return {
     // CraftActionRequest 沿用历史字段名，但 StatePatch 的逻辑键必须是角色名（铁律 ①）。
     characterId: character.name,
-    industry: (args.industry ?? '锻造') as CraftIndustry,
+    industry: normalizeCraftIndustry(args.industry ?? '') ?? '锻造',
     stage: (args.stage ?? '成品') as CraftStage,
     productName: args.productName ?? '未命名制品',
     targetQuality: (args.targetQuality ?? '普通') as QualityLevel,

@@ -459,6 +459,123 @@ function enforcePoolCap(pending: PendingRandomEvent[], maxPending: number): void
 }
 
 // ═══════════════════════════════════════════════════════════
+// 探索掷骰（委托×地图闭环 2026-09-19，决议 #10）
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 一轮探索动作（采集/垂钓）结算时的探索事件掷骰。无命中返回 `null`。
+ *
+ * 与 MTTH 的分界（决议 #10：按动作不按天）：
+ *   · 掷骰时机由调用方（采集/垂钓动作）驱动，一次动作至多入池一条
+ *   · 种子带 `rollSalt`（动作序号，来自存档计数器）—— 同一动作的重放稳定，不同动作独立
+ *   · 命中多条时按**权重加权抽一条**（MTTH 是逐条独立掷骰，这里是一条轮盘）
+ *   · `chancePct`（缺省 100）是每条事件的独立前置闸，权重链照常在其后生效
+ *
+ * 全局冷却 / `once` / `cooldownDays` / 已在池 / `available` 的口径与 MTTH 逐字相同。
+ */
+export function rollExplorationEvent(
+  defs: readonly RandomEventDef[],
+  config: RandomEventConfig,
+  flags: RandomEventSaveFlags,
+  ctx: RandomEventRollContext,
+  args: {
+    saveSeed: string;
+    currentDay: number;
+    /** 动作序号（探索掷骰计数器），同日多次探索各自独立 */
+    rollSalt: number;
+    /** 匹配面：中层 id、中层名、地块名、位置路径段（scope.anyOf 命中任一即可） */
+    surface: string[];
+    frequency?: number;
+  },
+): RandomEventSaveFlags | null {
+  const currentDay = toDay(args.currentDay);
+  if (currentDay === null) return null;
+
+  const before = normalizeFlags(flags);
+  const next = normalizeFlags(flags);
+  const frequency = args.frequency === undefined ? 1 : args.frequency;
+  const cooldown = Math.max(0, Math.floor(safeNumber(config.globalCooldownDays, 0)));
+  const ttl = Math.max(0, Math.floor(safeNumber(config.offerTtlDays, 0)));
+  const surface = args.surface.filter((s) => typeof s === 'string' && s.length > 0);
+
+  if (next.lastTriggerDay !== undefined && currentDay - next.lastTriggerDay < cooldown) {
+    return null;
+  }
+
+  // 候选收集 + 每条独立 chance 闸（种子含动作序号：重放稳定）
+  interface Candidate {
+    def: RandomEventDef;
+    weight: number;
+  }
+  const candidates: Candidate[] = [];
+  for (const def of defs) {
+    if (!def || !def.trigger || def.trigger.type !== 'exploration') continue;
+    const scope = def.trigger.scope;
+    if (scope && Array.isArray(scope.anyOf) && scope.anyOf.length > 0) {
+      if (!scope.anyOf.some((label) => surface.includes(label))) continue;
+    }
+
+    const record = next.fired[def.name];
+    if (def.once === true && record !== undefined) continue;
+    if (
+      record !== undefined &&
+      typeof def.cooldownDays === 'number' &&
+      def.cooldownDays > 0 &&
+      currentDay - record.lastDay < def.cooldownDays
+    ) {
+      continue;
+    }
+    if (next.pending.some((entry) => entry.name === def.name)) continue;
+    if (def.available !== undefined && !evaluateEventCondition(def.available, ctx)) continue;
+
+    const chanceRaw = def.trigger.chancePct;
+    const chancePct =
+      typeof chanceRaw === 'number' && Number.isFinite(chanceRaw)
+        ? Math.max(0, Math.min(100, chanceRaw))
+        : 100;
+    if (chancePct < 100) {
+      const gate = createEjsRng(
+        `${buildRandomEventSeed(args.saveSeed, def.name, currentDay)}#gate#${Math.floor(args.rollSalt)}`,
+      );
+      if (!gate.chance(chancePct / 100)) continue;
+    }
+
+    const weight = computeEventWeight(def, ctx, frequency);
+    if (weight <= 0) continue;
+    candidates.push({ def, weight });
+  }
+
+  if (candidates.length === 0) return null;
+
+  // 权重加权抽一条（一条轮盘，不是逐条独立掷骰）
+  const total = candidates.reduce((sum, c) => sum + c.weight, 0);
+  const wheel = createEjsRng(
+    buildRandomEventSeed(args.saveSeed, `#exploration#${Math.floor(args.rollSalt)}`, currentDay),
+  );
+  let pickAt = wheel.float() * total;
+  let picked = candidates[candidates.length - 1];
+  for (const candidate of candidates) {
+    pickAt -= candidate.weight;
+    if (pickAt < 0) {
+      picked = candidate;
+      break;
+    }
+  }
+
+  // 同一条 rng 继续采样 slots —— 两条序列意味着两处要各自保证可复现
+  next.pending.push(
+    armEntry(picked.def, ctx, wheel, {
+      armedDay: currentDay,
+      expiresDay: currentDay + ttl,
+      placeKey: ctx.placeKey,
+    }),
+  );
+  enforcePoolCap(next.pending, config.maxPending);
+  next.lastTriggerDay = currentDay;
+  return finalize(next, before);
+}
+
+// ═══════════════════════════════════════════════════════════
 // 首访强制（§4.2）
 // ═══════════════════════════════════════════════════════════
 

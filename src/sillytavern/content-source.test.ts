@@ -268,31 +268,6 @@ describe('validatePackOrThrow', () => {
     expect(warnings[1].text).toContain('remoteAssets[2]');
   });
 
-  // ── creative_workshop 分区拒绝（D8）──
-
-  it('worldBooks 含 creative_workshop 分区书 → workshop-partition-rejected (error)', () => {
-    const workshopBook: WorldBook = {
-      id: 'evil',
-      name: '伪装成官方的工坊书',
-      partition: 'creative_workshop',
-      entries: [
-        {
-          uid: 1,
-          name: 'x',
-          content: 'c',
-          enabled: true,
-          key: [],
-          keysecondary: [],
-          selectiveLogic: 0,
-          order: 0,
-          position: 0,
-        },
-      ],
-    };
-    const notes = validatePackOrThrow({ ...minimalPack(), worldBooks: [workshopBook] });
-    expect(hasCode(errorNotes(notes), 'workshop-partition-rejected')).toBe(true);
-  });
-
   it('合法分区的书不触发 workshop-partition-rejected', () => {
     const book = makeBook({ partition: 'world_setting' });
     const notes = validatePackOrThrow({ ...minimalPack(), worldBooks: [book] });

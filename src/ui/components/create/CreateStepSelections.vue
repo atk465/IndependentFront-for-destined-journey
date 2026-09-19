@@ -1,339 +1,220 @@
 <script setup lang="ts">
 /**
- * CreateStepSelections — Step 3: 装备/道具/技能选择
+ * CreateStepSelections — Step 5: 开局购卡（2026-09-16 卡牌化）
  *
- * 布局: 选择区(固定高度,内部滚动) + 伙伴区(下方独立)
+ * 旧 CDN 装备/道具/技能目录退役。卡来自内容仓 catalog.cardPool，
+ * 按可战斗四类（装备/技能/领域/物资）分栏选购，点数按 cardTier 计价。
+ * 提交时由 store 确定性构造 CardItem 直落卡组（含白铁保底两张）。
  */
-import { computed, ref } from 'vue';
+import { computed } from 'vue';
 import { useCreateStore } from '../../stores/create-store';
-import type { CatalogItem } from '@engine/start-catalog';
-import CategorySelectionLayout from './CategorySelectionLayout.vue';
+import { STARTER_CARDS } from '@engine/start-catalog';
 import CategoryTabs from './CategoryTabs.vue';
-import QualityFilter from './QualityFilter.vue';
-import SelectableCard from './SelectableCard.vue';
-import SelectedPanel from './SelectedPanel.vue';
-import CustomItemForm from './CustomItemForm.vue';
-import AppButton from '../shared/AppButton.vue';
 
 const store = useCreateStore();
-const showCustomForm = ref(false);
 
-const editingItem = ref<CatalogItem | null>(null);
-
-function handleCustomSave(item: CatalogItem) {
-  if (editingItem.value) {
-    if (item.category === 'equipment') store.updateEquipment(item);
-    else if (item.category === 'item') store.updateItem(item);
-    else store.updateSkill(item);
-    editingItem.value = null;
-  } else {
-    if (item.category === 'equipment') store.addEquipment(item);
-    else if (item.category === 'item') store.addItem(item);
-    else store.addSkill(item);
-  }
-}
-function handleEditItem(item: CatalogItem) {
-  editingItem.value = item;
-  showCustomForm.value = true;
-}
-function handleCustomClose() {
-  showCustomForm.value = false;
-  editingItem.value = null;
-}
-function handleSelect(item: CatalogItem) {
-  if (item.category === 'equipment') store.addEquipment(item);
-  else if (item.category === 'item') store.addItem(item);
-  else store.addSkill(item);
-}
-function handleRemove(item: CatalogItem) {
-  if (item.category === 'equipment') store.removeEquipment(item.id);
-  else if (item.category === 'item') store.removeItem(item.id);
-  else store.removeSkill(item.id);
-}
-
-const sidebarCategories = computed(() => [
-  { key: 'equipment', label: '装备', count: store.selectedEquipments.length },
-  { key: 'item', label: '道具', count: store.selectedItems.length },
-  { key: 'skill', label: '技能', count: store.selectedSkills.length },
-]);
-
-const subCategoryOptions = computed(() => [
-  { key: 'all', label: '全部' },
-  ...store.subCategories.map((tag) => ({ key: tag, label: tag })),
-]);
-
-const searchText = ref('');
-
-const visiblePool = computed(() => {
-  // filteredPool 已按 activeCategory(大分类) + rarityFilter(品质) + typeFilter(子分类) 三层过滤
-  let pool = store.filteredPool;
-  if (searchText.value.trim()) {
-    const q = searchText.value.trim().toLowerCase();
-    pool = pool.filter(
-      (item) =>
-        item.name.toLowerCase().includes(q) ||
-        item.tag.some((t) => t.toLowerCase().includes(q)) ||
-        item.description.toLowerCase().includes(q),
-    );
-  }
-  return pool;
-});
+const categories = computed(() =>
+  store.CARD_CATEGORIES.map((key) => ({
+    key,
+    label: `${key}卡`,
+    count: store.cardPool.filter((c) => c.formEntry === key).length,
+  })),
+);
 </script>
 
 <template>
-  <section class="step-selections">
-    <!-- ====== 上部: 选择区 (固定高度, 内部独立滚动) ====== -->
-    <div class="selection-main">
-      <CategorySelectionLayout sidebar-width="13em">
-        <!-- 左侧: 大分类 + 子分类 -->
-        <template #sidebar>
-          <div class="sidebar-nav">
-            <CategoryTabs
-              v-model="store.activeCategory"
-              :categories="sidebarCategories"
-              variant="vertical"
-            />
-            <div v-if="subCategoryOptions.length > 1" class="sub-nav">
-              <button
-                v-for="sc in subCategoryOptions"
-                :key="sc.key"
-                class="sub-btn"
-                :class="{ active: store.typeFilter === sc.key }"
-                @click="store.typeFilter = sc.key"
-              >
-                {{ sc.label }}
-              </button>
-            </div>
-          </div>
-        </template>
+  <section class="step-cards">
+    <h2 class="step-title">开局购卡</h2>
+    <p class="step-desc">
+      用转生点预先购入铭卡，开局即入卡组、交锋可打。召唤卡与军团卡不做开局售卖——伙伴要在故事里相遇。
+    </p>
 
-        <!-- 工具栏 -->
-        <template #toolbar>
-          <QualityFilter v-model="store.rarityFilter" />
-          <div class="search-box">
-            <input v-model="searchText" type="text" placeholder="搜索..." class="search-input" />
-            <span v-if="searchText" class="search-clear" @click="searchText = ''">✕</span>
-          </div>
-        </template>
-
-        <!-- 卡片列表 (内部 overflow-y 滚动) -->
-        <template #content>
-          <div v-if="visiblePool.length === 0" class="empty">
-            {{ searchText ? '无搜索结果' : '该分类暂无物品' }}
-          </div>
-          <SelectableCard
-            v-for="item in visiblePool"
-            :key="item.id"
-            :item="item"
-            :selected="store.isSelected(item)"
-            :disabled="!store.canSelect(item)"
-            @select="handleSelect"
-            @remove="handleRemove"
-          />
-        </template>
-
-        <!-- 自定义物品按钮 -->
-        <template #extra>
-          <AppButton size="sm" variant="ghost" @click="showCustomForm = true">
-            ✦ 自定义物品
-          </AppButton>
-        </template>
-      </CategorySelectionLayout>
-
-      <!-- 右侧已选面板 (固定宽度, sticky 顶部) -->
-      <div class="selected-sidebar">
-        <SelectedPanel
-          :equipments="store.selectedEquipments"
-          :items="store.selectedItems"
-          :skills="store.selectedSkills"
-          :equipment-cost="store.equipmentCost"
-          :item-cost="store.itemCost"
-          :skill-cost="store.skillCost"
-          @remove-equipment="(e) => store.removeEquipment(e.id)"
-          @remove-item="(i) => store.removeItem(i.id)"
-          @remove-skill="(s) => store.removeSkill(s.id)"
-          @edit-equipment="handleEditItem"
-          @edit-item="handleEditItem"
-          @edit-skill="handleEditItem"
-        />
-      </div>
+    <div class="starter-note">
+      <span class="starter-badge">自带保底</span>
+      <span v-for="c in STARTER_CARDS" :key="c.id" class="starter-card">
+        {{ c.name }}（{{ c.cardTier }}·{{ c.formEntry }}）
+      </span>
+      <span class="starter-hint">零点赠送，已入本命卡组</span>
     </div>
 
-    <!-- ====== 下部: 伙伴 (独立区域, 后面做自己的滚动) ====== -->
-
-    <!-- 自定义 Modal -->
-    <CustomItemForm
-      :visible="showCustomForm"
-      :edit-item="editingItem"
-      @save="handleCustomSave"
-      @close="handleCustomClose"
+    <CategoryTabs
+      :categories="categories"
+      :model-value="store.activeCardCategory"
+      @update:model-value="store.activeCardCategory = $event as never"
     />
+
+    <div class="card-list">
+      <button
+        v-for="card in store.filteredCards"
+        :key="card.id"
+        type="button"
+        class="card-row"
+        :class="{
+          selected: store.isCardSelected(card),
+          disabled: !store.canSelectCard(card),
+        }"
+        :aria-pressed="store.isCardSelected(card)"
+        @click="store.toggleCard(card)"
+      >
+        <span class="card-check">{{ store.isCardSelected(card) ? '✓' : '' }}</span>
+        <span class="card-name">{{ card.name }}</span>
+        <span class="card-tier">{{ card.cardTier }}</span>
+        <span v-if="card.element" class="card-element">{{ card.element }}</span>
+        <span class="card-desc">{{ card.description }}</span>
+        <span class="card-cost">{{ card.cost }} 点</span>
+      </button>
+      <p v-if="store.filteredCards.length === 0" class="empty">
+        该分类暂无可购铭卡（装内容包后到此选购）
+      </p>
+    </div>
+
+    <div class="buy-summary">
+      <span>已购 {{ store.selectedCards.length }} 张 · 计 {{ store.cardCost }} 点</span>
+      <span>剩余转生点 {{ store.remainingPoints }}</span>
+    </div>
   </section>
 </template>
 
 <style scoped>
-/* ===== 页面整体: 两个独立卡片纵向排列 ===== */
-.step-selections {
-  display: flex;
-  flex-direction: column;
-  gap: var(--theme-spacing-md);
+.step-cards {
   max-width: 100%;
 }
-
-/* ================================================
-   卡片框 ①: 装备选择区
-   ================================================ */
-.selection-main {
-  display: flex;
-  gap: var(--theme-spacing-md);
-  align-items: stretch;
+.step-title {
+  font-family: var(--theme-font-title, serif);
+  color: var(--theme-text-primary);
+  font-size: 1.3rem;
+  margin-bottom: var(--theme-spacing-xs);
 }
-
-/* ===== 侧栏导航 ===== */
-.sidebar-nav {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  max-height: 50vh;
-  overflow: hidden;
-  background: var(--theme-card-bg);
-  border: 1px solid var(--theme-card-border);
-  border-radius: var(--theme-radius-lg, 12px);
-  padding: var(--theme-spacing-sm);
-}
-
-/* 子分类 */
-.sub-nav {
-  margin-top: var(--theme-spacing-xs);
-  padding-top: var(--theme-spacing-xs);
-  border-top: 1px solid var(--theme-card-border);
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-}
-.sub-btn {
-  width: 100%;
-  min-height: 2em;
-  padding: 0.5em 0.8em;
-  border: 1px solid transparent;
-  background: transparent;
+.step-desc {
   color: var(--theme-text-secondary);
-  font-size: 0.85em;
-  line-height: 1.4;
-  text-align: left;
-  cursor: pointer;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  font-size: 0.85rem;
+  margin-bottom: var(--theme-spacing-md);
+  line-height: 1.6;
+}
+.starter-note {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--theme-spacing-sm);
+  padding: var(--theme-spacing-sm) var(--theme-spacing-md);
+  margin-bottom: var(--theme-spacing-md);
+  border: 1px dashed color-mix(in srgb, var(--theme-success) 40%, var(--theme-card-border));
+  border-radius: var(--theme-radius-md);
+  background: color-mix(in srgb, var(--theme-success) 6%, transparent);
+  font-size: 0.8rem;
+}
+.starter-badge {
+  padding: 1px 8px;
   border-radius: var(--theme-radius-sm);
-  transition:
-    background var(--theme-transition-fast),
-    color var(--theme-transition-fast),
-    border-color var(--theme-transition-fast);
-}
-.sub-btn:hover {
-  color: var(--theme-text-primary);
-  background: var(--theme-tab-hover-bg);
-}
-.sub-btn.active {
-  color: var(--theme-primary);
-  background: color-mix(in srgb, var(--theme-primary) 8%, var(--theme-card-bg));
-  border-color: color-mix(in srgb, var(--theme-primary) 35%, var(--theme-card-border));
+  background: color-mix(in srgb, var(--theme-success) 18%, transparent);
+  color: var(--theme-success);
   font-weight: 700;
+  font-size: 0.7rem;
 }
-
-/* ===== 搜索 ===== */
-.search-box {
-  position: relative;
-  margin-left: auto;
+.starter-card {
+  color: var(--theme-text-primary);
+  font-weight: 600;
 }
-.search-input {
-  width: 10em;
-  padding: 0.4em 1.8em 0.4em 0.8em;
+.starter-hint {
+  color: var(--theme-text-muted);
+  font-size: 0.7rem;
+}
+.card-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--theme-spacing-xs);
+}
+.card-row {
+  display: grid;
+  grid-template-columns: 1.6em minmax(8em, auto) 3.5em 2em minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--theme-spacing-sm);
+  padding: var(--theme-spacing-xs) var(--theme-spacing-md);
   border: 1px solid var(--theme-card-border);
-  border-radius: var(--theme-radius-md, 8px);
+  border-radius: var(--theme-radius-md);
   background: var(--theme-card-bg);
   color: var(--theme-text-primary);
-  font-size: 0.82em;
-  outline: none;
-  transition:
-    border-color var(--theme-transition-fast),
-    box-shadow var(--theme-transition-fast);
-  font-family: inherit;
-}
-.search-input::placeholder {
-  color: var(--theme-text-muted);
-}
-.search-input:focus {
-  border-color: var(--theme-primary);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--theme-primary) 12%, transparent);
-}
-.search-clear {
-  position: absolute;
-  right: 0.4em;
-  top: 50%;
-  transform: translateY(-50%);
+  text-align: left;
+  font-size: 0.85rem;
   cursor: pointer;
-  font-size: 0.75em;
-  color: var(--theme-text-muted);
-  width: 16px;
-  height: 16px;
+  transition: all var(--theme-transition-fast);
+}
+.card-row:hover:not(.disabled) {
+  border-color: var(--theme-color-primary);
+  background: color-mix(in srgb, var(--theme-color-primary) 6%, var(--theme-card-bg));
+}
+.card-row.selected {
+  border-color: var(--theme-color-primary);
+  box-shadow: 0 0 0 1px var(--theme-color-primary);
+  background: color-mix(in srgb, var(--theme-color-primary) 8%, var(--theme-card-bg));
+}
+.card-row.disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: grayscale(40%);
+}
+.card-check {
+  width: 1.4em;
+  height: 1.4em;
   display: flex;
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-}
-.search-clear:hover {
-  color: var(--theme-text-primary);
-  background: var(--theme-surface-muted);
-}
-
-/* ===== 右侧已选面板 ===== */
-.selected-sidebar {
-  width: 16em;
-  flex-shrink: 0;
-  overflow-y: auto;
-}
-.selected-sidebar :deep(.selected-panel) {
   border: 1px solid var(--theme-card-border);
-  border-radius: var(--theme-radius-lg, 12px);
+  font-size: 0.75em;
+  color: var(--theme-color-primary);
+  font-weight: 700;
 }
-
-/* ===== 空状态 ===== */
+.card-row.selected .card-check {
+  background: var(--theme-color-primary);
+  border-color: var(--theme-color-primary);
+  color: var(--theme-primary-text);
+}
+.card-name {
+  font-weight: 700;
+}
+.card-tier {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--theme-text-secondary);
+  text-align: center;
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-sm);
+  padding: 0 0.4em;
+}
+.card-element {
+  font-size: 0.75rem;
+  color: var(--theme-text-secondary);
+  text-align: center;
+}
+.card-desc {
+  font-size: 0.75rem;
+  color: var(--theme-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.card-cost {
+  font-weight: 700;
+  color: var(--theme-quality-rare, #3f7fd4);
+  font-variant-numeric: tabular-nums;
+}
 .empty {
   text-align: center;
   color: var(--theme-text-muted);
-  padding: var(--theme-spacing-xl) 0;
+  padding: var(--theme-spacing-lg) 0;
   font-size: 0.85em;
 }
-
-/* ===== 响应式 ===== */
-@media (max-width: 768px) {
-  .selection-main {
-    flex-direction: column;
-  }
-  .selected-sidebar {
-    width: 100%;
-    overflow: visible;
-  }
-  .sidebar-nav {
-    max-height: none;
-    overflow: visible;
-  }
-  .sub-nav {
-    flex-direction: row;
-    flex-wrap: wrap;
-    overflow-y: visible;
-    flex: none;
-  }
-  .sub-btn {
-    width: auto;
-    font-size: 0.82em;
-    padding: 0.4em 0.7em;
-    min-height: 1.8em;
-  }
+.buy-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--theme-spacing-md);
+  margin-top: var(--theme-spacing-md);
+  padding: var(--theme-spacing-sm) var(--theme-spacing-md);
+  background: var(--theme-surface-muted);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-md);
+  font-size: 0.8rem;
+  color: var(--theme-text-secondary);
 }
 </style>

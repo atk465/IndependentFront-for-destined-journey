@@ -15,7 +15,7 @@
  * `hashContentDeterministic`（照 `workshop-install-plan.ts` 的 `hashWorkshopContent` 先例）。
  *
  * 本波（T1）交付范围:
- * - `validatePackOrThrow` —— 完整实现（格式 / 引擎版本 / 分节形状 / `creative_workshop` 分区拒绝）
+ * - `validatePackOrThrow` —— 完整实现（格式 / 引擎版本 / 分节形状）
  * - `hashContentDeterministic` / `hashWorldBook` / `hashPackSectionSha256` —— 完整实现
  * - `resolveSection` —— 完整实现（三态语义，纯函数）
  * - `planPackInstall` —— **只立骨架 + 类型**（签名 + 返回 `// TODO(T6)` 空计划）；
@@ -45,7 +45,6 @@ import type { WorldBook, BeautifierRule } from './types';
 export const CURRENT_PACK_FORMAT_VERSION: PackFormatVersion = 1;
 
 /** 工坊分区名（D8: pack 校验器拒绝此分区的世界书） */
-const CREATIVE_WORKSHOP_PARTITION = 'creative_workshop';
 
 /**
  * 占位世界书 uid 保留段下界（D43）。
@@ -229,7 +228,6 @@ export async function hashPackSectionSha256(content: string): Promise<string | u
  * 3. `minEngineVersion` 与 `__ENGINE_VERSION__` semver 比对（D40）—— **本波缺省=跳过**：
  *    `typeof __ENGINE_VERSION__ === 'undefined'` 时不做版本门（见 {@link checkEngineVersion}）
  * 4. 各分节 if-present 形状校验（数组/对象类型；`agentDefaults.version` / `.agents` 等）
- * 5. 🔴 拒 `creative_workshop` 分区的世界书（D8：工坊分区是信任边界，不许 pack 染指）→ error
  *
  * 调用方据 `notes.some(n => n.level === 'error')` 判是否阻止安装。
  *
@@ -276,7 +274,7 @@ export function validatePackOrThrow(pack: unknown): PackValidationNote[] {
     );
   }
 
-  // worldBooks 分节形状 + creative_workshop 分区拒绝（D8）
+  // worldBooks 分节形状
   if (pack.worldBooks !== undefined) {
     const wbNotes = validateWorldBooksSection(pack.worldBooks);
     notes.push(...wbNotes);
@@ -319,9 +317,7 @@ export function validatePackOrThrow(pack: unknown): PackValidationNote[] {
     'bloodlines',
     'namePools',
     'branding',
-    'imageDialects',
     // 地图包（第 8 面）：裸数组/裸串在这里就被拒，`coerceMapPack` 那条「整份认不出 → 空包」
-    // 的兜底因此只服务运行时，不给装包路径当遮羞布（口径同 imageDialects）
     'mapPack',
     // 随机事件（第 13 面）：同上一条的口径 —— `coerceRandomEventPack` 那句「整份认不出 →
     // 空包」是**运行时**的兜底，不该顺带把「装了一个裸数组当事件包」也悄悄接下来
@@ -425,12 +421,7 @@ function parseSemver(
   return { major, minor, patch, prerelease: m[4] };
 }
 
-/**
- * 校验 worldBooks 分节（§4 / D8）。
- *
- * 🔴 **拒 `creative_workshop` 分区的书**: 工坊分区是信任边界，pack 染指它等于
- * 把未经审查的社区内容伪装成官方内容混进信任域（§0.3 / D8）。
- */
+/** 校验 worldBooks 分节（§4）。 */
 function validateWorldBooksSection(section: unknown): PackValidationNote[] {
   const notes: PackValidationNote[] = [];
   if (!Array.isArray(section)) {
@@ -448,14 +439,6 @@ function validateWorldBooksSection(section: unknown): PackValidationNote[] {
     }
     if (typeof book.name !== 'string' || book.name.length === 0) {
       notes.push(makeError('bad-worldbook-row', `worldBooks[${i}] 缺少非空 name`));
-    }
-    if (book.partition === CREATIVE_WORKSHOP_PARTITION) {
-      notes.push(
-        makeError(
-          'workshop-partition-rejected',
-          `worldBooks[${i}]（id=${String(book.id)}）声明了 creative_workshop 分区，pack 不允许染指工坊信任域（D8）`,
-        ),
-      );
     }
     // 条目结构：必须是数组，每条要有 uid/name/content
     if (!Array.isArray(book.entries)) {

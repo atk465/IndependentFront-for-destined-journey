@@ -38,11 +38,7 @@ async function checkReadiness() {
   try {
     const result = await settings.initApiSecrets();
     if (result.status === 'failed') throw new Error('API 配置未能加载，请到 API 设置重试。');
-    await Promise.all([
-      store.initContent(true),
-      settings.loadAgentProjectDefaults(),
-      store.loadWorldBookEntries(),
-    ]);
+    await Promise.all([store.initContent(true), settings.loadAgentProjectDefaults()]);
   } catch {
     checkError.value = '配置未能加载，请重新检查；若仍失败，请打开 API 设置。';
   } finally {
@@ -50,29 +46,28 @@ async function checkReadiness() {
   }
 }
 
-// 懒加载步骤组件
+// 懒加载步骤组件（2026-09-16 精简：9 步 → 6 步；2026-09-17：删除「启用角色」步 → 5 步。
+// 该步实际语义是「排除」而非「启用」（引擎已废弃关键词激活，enabled=true 即注入），
+// UI 文案与行为相反且收窄能力已由设置页世界书编辑器承担）
 const Step0 = defineAsyncComponent(() => import('./CreateStepDifficulty.vue'));
 const Step1 = defineAsyncComponent(() => import('./CreateStepBasic.vue'));
-const Step2 = defineAsyncComponent(() => import('./CreateStepDestinyCore.vue'));
-const Step3 = defineAsyncComponent(() => import('./CreateStepCharacters.vue'));
-const Step4 = defineAsyncComponent(() => import('./CreateStepSelections.vue'));
-const Step5 = defineAsyncComponent(() => import('./CreateStepBackground.vue'));
-const Step6 = defineAsyncComponent(() => import('./CreateStepPlot.vue'));
-const Step7 = defineAsyncComponent(() => import('./CreateStepConfirm.vue'));
+const Step2 = defineAsyncComponent(() => import('./CreateStepTalent.vue'));
+const Step3 = defineAsyncComponent(() => import('./CreateStepSelections.vue'));
+const Step4 = defineAsyncComponent(() => import('./CreateStepPlot.vue'));
 
-const stepComponents = [Step0, Step1, Step2, Step3, Step4, Step5, Step6, Step7] as const;
+const stepComponents = [Step0, Step1, Step2, Step3, Step4] as const;
 
 const currentComponent = computed(() => stepComponents[store.currentStep]);
 
 const nextLabel = computed(() =>
-  store.isCreating ? '正在创建…' : store.currentStep === 7 ? '✦ 开始命运之旅 ✦' : '下一步 →',
+  store.isCreating ? '正在创建…' : store.currentStep === 4 ? '✦ 开始命运之旅 ✦' : '下一步 →',
 );
 
-// Step 7 特殊处理: 点击"下一步" → 执行 startJourney
+// Step 4（剧情规划，最后一步）特殊处理: 点击"下一步" → 执行 startJourney
 async function handleNext() {
   if (store.isCreating || !ready.value) return;
   creationError.value = '';
-  if (store.currentStep === 7) {
+  if (store.currentStep === 4) {
     try {
       const saveId = await store.startJourney();
       ui.navigate('game', saveId);
@@ -101,7 +96,7 @@ onMounted(() => {
       ← 首页
     </button>
 
-    <CreateSteps v-if="ready" :current="store.currentStep" :total="8" />
+    <CreateSteps v-if="ready" :current="store.currentStep" :total="5" />
 
     <PointsBar
       v-if="ready"

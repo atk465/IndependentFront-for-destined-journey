@@ -6,17 +6,19 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { nextTick } from 'vue';
+import type { CardItem } from '@engine/types';
 import { setActivePinia, createPinia } from 'pinia';
 import { useCreateStore } from './create-store';
 import { useSettingsStore } from './settings-store';
 import { patchAgentSettings } from './agent-settings';
 import {
   DIFFICULTY_PRESETS,
-  type CatalogItem,
+  type CardCatalogItem,
+  type CardFormEntry,
   type BackgroundTemplate,
-  type DestinyCore,
   type CascaderOption,
 } from '@engine/start-catalog';
+import { getCreationCatalog } from '@engine/card-workshop/talent-entry';
 import { setContentRegistry } from './content-store';
 import { NEUTRAL_BRANDING } from '../branding-defaults';
 
@@ -32,48 +34,28 @@ import { NEUTRAL_BRANDING } from '../branding-defaults';
 
 const FIXTURE_ERA = '占位纪元';
 
-function mkEquip(id: string, type: string, cost: number): CatalogItem {
+function mkCard(id: string, formEntry: CardFormEntry, cost: number): CardCatalogItem {
   return {
     id,
-    name: `占位${id}`,
-    category: 'equipment',
-    type,
-    rarity: 'common',
-    tag: [],
-    effect: {},
+    name: `占位${id}卡`,
+    cardTier: '白铁',
+    formEntry,
+    element: '金',
     description: '',
     cost,
   };
 }
 
-const FIXTURE_EQUIPMENT_POOL: CatalogItem[] = [
-  mkEquip('剑', '武器', 30),
-  mkEquip('斧', '武器', 40),
-  mkEquip('甲', '防具', 20),
-  mkEquip('盔', '防具', 25),
-  mkEquip('神兵', '武器', 5000), // 地狱档（100 点）买不起 —— canSelect 闸门用
-];
-
-const FIXTURE_ITEM_POOL: CatalogItem[] = [
-  {
-    id: 'it_药水',
-    name: '占位药水',
-    category: 'item',
-    type: '消耗品',
-    rarity: 'common',
-    tag: [],
-    effect: {},
-    description: '',
-    cost: 10,
-    quantity: 1,
-  },
+const FIXTURE_CARD_POOL: CardCatalogItem[] = [
+  mkCard('刃', '装备', 30),
+  mkCard('甲', '装备', 20),
+  mkCard('击', '技能', 40),
+  mkCard('障', '领域', 25),
+  mkCard('粮', '物资', 10),
+  mkCard('神兵卡', '装备', 5000), // 地狱档（100 点）买不起 —— canSelectCard 闸门用
 ];
 
 const FIXTURE_START_LOCATION = '占位大陆-占位王国-占位城';
-
-const FIXTURE_DESTINY_CORES: DestinyCore[] = [
-  { id: 'dc_placeholder', name: '占位核心', author: 'fixture', theme: 'fixture' },
-];
 
 const FIXTURE_BACKGROUNDS: BackgroundTemplate[] = [
   { id: 'bg_通用', name: '占位通用', description: '', fullText: '占位通用开局正文' },
@@ -104,10 +86,10 @@ const FIXTURE_START_LOCATIONS: CascaderOption[] = [
 
 const FIXTURE_CATALOG = {
   version: 1,
-  destinyCores: FIXTURE_DESTINY_CORES,
-  equipmentPool: FIXTURE_EQUIPMENT_POOL,
-  itemPool: FIXTURE_ITEM_POOL,
+  equipmentPool: [],
+  itemPool: [],
   skillPool: [],
+  cardPool: FIXTURE_CARD_POOL,
   backgrounds: FIXTURE_BACKGROUNDS,
   raceCosts: { 人类: 0, 占位羽族: 30, 自定义: 80 },
   identityCosts: { 非贵族平民: 0, 占位学徒: 10, 自定义: 80 },
@@ -123,8 +105,8 @@ function seedFixtureRegistry() {
     namePools: undefined,
     markers: undefined,
     branding: { era: FIXTURE_ERA },
-    imageDialects: undefined,
     randomEvents: undefined,
+    commissions: undefined,
     remoteAssets: undefined,
     mapPack: undefined,
   });
@@ -200,6 +182,24 @@ function makeStore() {
   return useCreateStore();
 }
 
+/** 灌入指定（可坏）目录的 store 变体——空态/坏态测试用 */
+function makeStoreWithCatalog(catalog: unknown) {
+  setActivePinia(createPinia());
+  setContentRegistry({
+    catalog,
+    locations: undefined,
+    bloodlines: undefined,
+    namePools: undefined,
+    markers: undefined,
+    branding: { era: FIXTURE_ERA },
+    randomEvents: undefined,
+    commissions: undefined,
+    remoteAssets: undefined,
+    mapPack: undefined,
+  });
+  return useCreateStore();
+}
+
 const TEST_ATTRIBUTES = ['力量', '敏捷', '体质', '智力', '精神'];
 
 function allocateBasePoints(store: ReturnType<typeof useCreateStore>, count = 25) {
@@ -258,9 +258,9 @@ describe('内容加载门 —— 目录来自注册表而不是编译期常量',
       namePools: undefined,
       markers: undefined,
       branding,
-      imageDialects: undefined,
       mapPack: undefined,
       randomEvents: undefined,
+      commissions: undefined,
       remoteAssets: undefined,
     });
     return useCreateStore();
@@ -269,7 +269,6 @@ describe('内容加载门 —— 目录来自注册表而不是编译期常量',
   it('注册表有内容 → 构造即 ready，六个消费点全都读到它', () => {
     const store = storeWith(FIXTURE_CATALOG);
     expect(store.contentStatus).toBe('ready');
-    expect(store.destinyCorePool).toEqual(FIXTURE_DESTINY_CORES);
     expect(store.filteredBackgrounds.length).toBeGreaterThan(0);
     expect(store.identityOptions).toContain('占位学徒');
     expect(store.flatLocationOptions.map((o) => o.value)).toContain(FIXTURE_START_LOCATION);
@@ -281,10 +280,8 @@ describe('内容加载门 —— 目录来自注册表而不是编译期常量',
   it('🔴 换一份目录 → 消费点跟着变（证明它读的是注册表，不是某个常量）', () => {
     const store = storeWith({
       ...FIXTURE_CATALOG,
-      destinyCores: [{ id: 'dc_other', name: '另一枚', author: 'x', theme: 'y' }],
       raceCosts: { 占位羽族: 999 },
     });
-    expect(store.destinyCorePool.map((c) => c.id)).toEqual(['dc_other']);
     store.race = '占位羽族';
     expect(store.raceCost).toBe(999);
   });
@@ -297,7 +294,6 @@ describe('内容加载门 —— 目录来自注册表而不是编译期常量',
       expect(store.contentStatus).toBe('idle');
       await store.initContent();
       expect(store.contentStatus).toBe('empty');
-      expect(store.destinyCorePool).toEqual([]);
       expect(store.filteredBackgrounds).toEqual([]);
       expect(store.flatLocationOptions).toEqual([]);
       // 查不到的种族/身份落兜底 80，而不是 NaN/undefined
@@ -311,7 +307,6 @@ describe('内容加载门 —— 目录来自注册表而不是编译期常量',
     await expect(store.initContent()).resolves.toBeUndefined();
     await expect(store.initContent()).resolves.toBeUndefined();
     expect(store.contentStatus).toBe('ready');
-    expect(store.destinyCorePool).toEqual(FIXTURE_DESTINY_CORES);
   });
 
   it('难度档位不随内容走（机制留引擎，目录为空也照样能选）', () => {
@@ -613,162 +608,42 @@ describe('totalCost 消耗公式', () => {
   });
 });
 
-// ===== 装备选择 =====
+// ===== 开局购卡（2026-09-16 卡牌化）=====
 
-describe('装备选择', () => {
+describe('开局购卡', () => {
   let store: ReturnType<typeof useCreateStore>;
   beforeEach(() => {
     store = makeStore();
     store.selectDifficulty('creative'); // 1000000 点, 够用
   });
 
-  const sword = FIXTURE_EQUIPMENT_POOL.find((e) => e.type === '武器')!;
-
-  it('添加武器应成功', () => {
-    if (sword) {
-      store.addEquipment(sword);
-      expect(store.selectedEquipments).toHaveLength(1);
-      expect(store.isSelected(sword)).toBe(true);
-    }
+  it('toggleCard 选中/取消，分栏过滤生效', () => {
+    store.activeCardCategory = '装备';
+    const card = FIXTURE_CARD_POOL.find((c) => c.formEntry === '装备')!;
+    store.toggleCard(card);
+    expect(store.selectedCards).toHaveLength(1);
+    expect(store.isCardSelected(card)).toBe(true);
+    store.toggleCard(card);
+    expect(store.selectedCards).toHaveLength(0);
+    // 分栏过滤：领域卡不在装备栏里
+    store.activeCardCategory = '领域';
+    expect(store.filteredCards.every((c) => c.formEntry === '领域')).toBe(true);
   });
 
-  it('同类型防具应允许多选', () => {
-    const armors = FIXTURE_EQUIPMENT_POOL.filter((e) => e.type === '防具');
-    if (armors.length >= 2) {
-      store.addEquipment(armors[0]);
-      store.addEquipment(armors[1]);
-      expect(store.selectedEquipments).toHaveLength(2);
-    }
+  it('cardCost 累加计价并进 totalCost', () => {
+    const card = FIXTURE_CARD_POOL[0];
+    const before = store.totalCost;
+    store.toggleCard(card);
+    expect(store.cardCost).toBe(card.cost);
+    expect(store.totalCost).toBe(before + card.cost);
   });
 
-  it('武器不限制唯一', () => {
-    // 武器的 addEquipment 逻辑允许多个
-    // 检查现有代码: addEquipment 只对非武器做替换
-    // 所以多把武器是允许的
-    const weapons = FIXTURE_EQUIPMENT_POOL.filter((e) => e.type === '武器');
-    if (weapons.length >= 2) {
-      store.addEquipment(weapons[0]);
-      store.addEquipment(weapons[1]);
-      expect(store.selectedEquipments.length).toBeGreaterThanOrEqual(2);
-    }
-  });
-
-  it('removeEquipment 应移除指定装备', () => {
-    if (sword) {
-      store.addEquipment(sword);
-      store.removeEquipment(sword.id);
-      expect(store.selectedEquipments).toHaveLength(0);
-    }
-  });
-});
-
-// ===== 道具选择 =====
-
-describe('道具选择', () => {
-  let store: ReturnType<typeof useCreateStore>;
-  beforeEach(() => {
-    store = makeStore();
-    store.selectDifficulty('creative');
-  });
-
-  it('同 id 道具应叠加 quantity', () => {
-    const item = FIXTURE_ITEM_POOL[0];
-    if (item) {
-      store.addItem(item);
-      store.addItem(item);
-      expect(store.selectedItems).toHaveLength(1);
-      const q = store.selectedItems[0].quantity || 1;
-      const origQ = item.quantity || 1;
-      expect(q).toBe(origQ * 2);
-    }
-  });
-
-  it('removeItem 应移除指定道具', () => {
-    const item = FIXTURE_ITEM_POOL[0];
-    if (item) {
-      store.addItem(item);
-      store.removeItem(item.id);
-      expect(store.selectedItems).toHaveLength(0);
-    }
-  });
-});
-
-// ===== 技能选择 =====
-
-describe('技能选择', () => {
-  let store: ReturnType<typeof useCreateStore>;
-  beforeEach(() => {
-    store = makeStore();
-    store.selectDifficulty('creative');
-  });
-
-  it('addSkill / removeSkill 正常', () => {
-    // 使用 filteredPool 中的技能（CDN 可能未加载，此时池为空则跳过）
-    const skills = store.filteredPool;
-    if (skills.length === 0) return;
-    const skill = skills[0];
-    store.addSkill(skill);
-    expect(store.selectedSkills.length).toBeGreaterThanOrEqual(1);
-    store.removeSkill(skill.id);
-    expect(store.selectedSkills.length).toBe(0);
-  });
-
-  it('canSelect 点数不足时返回 false', () => {
+  it('canSelectCard 点数不足时返回 false', () => {
     store.selectDifficulty('hell'); // 100 点
-    const item = FIXTURE_EQUIPMENT_POOL.find((e) => e.cost > 100);
-    if (item) {
-      expect(store.canSelect(item)).toBe(false);
+    const pricey = FIXTURE_CARD_POOL.find((c) => c.cost > 100);
+    if (pricey) {
+      expect(store.canSelectCard(pricey)).toBe(false);
     }
-  });
-});
-
-// ===== 背景条件 =====
-
-describe('背景条件检查', () => {
-  let store: ReturnType<typeof useCreateStore>;
-  beforeEach(() => {
-    store = makeStore();
-    store.name = '测试';
-    store.race = '人类';
-    store.identity = '非贵族平民';
-    store.startLocation = FIXTURE_START_LOCATION;
-  });
-
-  // 🔴 这四条以前写成 `const bg = pool.find(...); if (bg) { … }` —— 池换成占位目录后
-  //    那个 `if` 会让「fixture 里没有这类背景」静默变成绿灯。fixture 是确定的，
-  //    所以一律 `!` 断言：找不到就当场红。
-  it('无限制背景应始终通过', () => {
-    const bg = FIXTURE_BACKGROUNDS.find(
-      (b) =>
-        !b.requiredRace && !b.requiredIdentity && !b.requiredLocation && !b.requiredDestinyCore,
-    )!;
-    const result = store.checkBackgroundConditions(bg);
-    expect(result.valid).toBe(true);
-    expect(result.missing).toHaveLength(0);
-  });
-
-  it('种族不匹配应返回 missing', () => {
-    const bg = FIXTURE_BACKGROUNDS.find((b) => b.requiredRace && b.requiredRace !== '人类')!;
-    const result = store.checkBackgroundConditions(bg);
-    expect(result.valid).toBe(false);
-    expect(result.missing.some((m) => m.includes('种族'))).toBe(true);
-  });
-
-  it('身份不匹配应返回 missing', () => {
-    const bg = FIXTURE_BACKGROUNDS.find(
-      (b) => b.requiredIdentity && b.requiredIdentity !== '非贵族平民',
-    )!;
-    const result = store.checkBackgroundConditions(bg);
-    expect(result.valid).toBe(false);
-  });
-
-  it('地点前缀匹配应通过', () => {
-    const bg = FIXTURE_BACKGROUNDS.find(
-      (b) => b.requiredLocation && !b.requiredRace && !b.requiredIdentity,
-    )!;
-    // 设置地点包含 requiredLocation
-    store.startLocation = (bg.requiredLocation || '') + '-某处';
-    expect(store.checkBackgroundConditions(bg).valid).toBe(true);
   });
 });
 
@@ -784,11 +659,7 @@ describe('背景四分类过滤', () => {
     store.activeBackgroundCategory = 'universal';
     expect(
       store.filteredBackgrounds.every(
-        (bg) =>
-          !bg.requiredRace &&
-          !bg.requiredIdentity &&
-          !bg.requiredLocation &&
-          !bg.requiredDestinyCore,
+        (bg) => !bg.requiredRace && !bg.requiredIdentity && !bg.requiredLocation,
       ),
     ).toBe(true);
   });
@@ -804,11 +675,9 @@ describe('背景四分类过滤', () => {
     expect(store.filteredBackgrounds.every((bg) => !!bg.requiredRace)).toBe(true);
   });
 
-  it('地区限定分类应有 requiredLocation 或 requiredDestinyCore', () => {
+  it('地区限定分类应有 requiredLocation', () => {
     store.activeBackgroundCategory = 'location';
-    expect(
-      store.filteredBackgrounds.every((bg) => !!bg.requiredLocation || !!bg.requiredDestinyCore),
-    ).toBe(true);
+    expect(store.filteredBackgrounds.every((bg) => !!bg.requiredLocation)).toBe(true);
   });
 });
 
@@ -906,26 +775,17 @@ describe('stepValid 步骤验证', () => {
     });
 
     expect(store.attributesFullyAllocated).toBe(false);
-    expect(store.stepValid[7]).toBe(false);
+    expect(store.stepValid[1]).toBe(false);
     expect(store.currentStep).toBe(1);
     await expect(store.startJourney()).rejects.toThrow('请先分配全部基础属性点和额外属性点');
   });
 
-  it('Step 2: 未选命定核心时无效', () => {
-    expect(store.stepValid[2]).toBe(false);
-    // 新的世界书驱动 API：selectedSystemCoreEntryUid 控制 step 2 验证
-    store.selectSystemCoreEntry(1001);
+  it('Step 2 出身天赋必选（提前到基础信息之后，供剧情规划参照）；Steps 3-4 均可跳', () => {
+    expect(store.stepValid[2]).toBe(false); // 出身天赋未选
+    store.selectedCreationTalent = '封印亲和';
     expect(store.stepValid[2]).toBe(true);
-  });
-
-  it('Steps 3-6 始终有效；Step 7 仍须满足属性分配不变量', () => {
     expect(store.stepValid[3]).toBe(true);
     expect(store.stepValid[4]).toBe(true);
-    expect(store.stepValid[5]).toBe(true);
-    expect(store.stepValid[6]).toBe(true);
-    expect(store.stepValid[7]).toBe(false);
-    allocateBasePoints(store);
-    expect(store.stepValid[7]).toBe(true);
   });
 });
 
@@ -985,50 +845,31 @@ describe('buildCharacterState', () => {
     expect(state.race).toBe('精灵混血');
   });
 
-  it('开局 inventory/skills 始终为空（装备/道具/技能交 item_gen 链经开场正文生成，不直接落库）', () => {
+  it('开局卡组直落：保底卡+选购卡构造 CardItem 进 inventory，cardAlbum 同步收录', () => {
     store.selectDifficulty('creative');
-    // 即使选了装备/道具，buildCharacterState 也不再直接落库
-    store.addEquipment(FIXTURE_EQUIPMENT_POOL.find((e) => e.type === '武器')!);
-    store.addItem(FIXTURE_ITEM_POOL[0]);
+    store.toggleCard(FIXTURE_CARD_POOL[0]);
     const state = store.buildCharacterState('test-save-id');
-    expect(state.inventory).toEqual([]);
-    expect(state.skills).toEqual([]);
+    const cards = state.inventory.filter((i): i is CardItem => i.type === '卡牌');
+    // 保底 2 张（行旅短刃/凝神一击）+ 购入 1 张
+    expect(cards).toHaveLength(3);
+    expect(cards.every((c) => c.cardTier && Array.isArray((c as any).词条))).toBe(true);
+    expect(state.cardAlbum?.owned).toHaveLength(3);
+    expect(state.cardAlbum?.deck).toEqual(state.cardAlbum?.owned);
   });
 
-  it('真机修(2026-07-23): 选中项写进开场正文而非直接落库（交 item_gen 生成 stats）', () => {
+  it('卡牌化(2026-09-16): 卡实物确定性落库 + 卡面叙事进开场白（不再发 item_gen 清单）', () => {
     store.selectDifficulty('creative');
-    const sword = FIXTURE_EQUIPMENT_POOL.find((e) => e.type === '武器')!;
-    const armor = FIXTURE_EQUIPMENT_POOL.find((e) => e.type === '防具')!;
-    const potion = FIXTURE_ITEM_POOL[0];
-    // 目录的 skillPool 为空数组（运行时从 baseInfo 加载），测试用手工条目
-    const skill = {
-      id: 'sk_test',
-      name: '灼热射线',
-      category: 'skill' as const,
-      type: '主动',
-      rarity: 'uncommon' as const,
-      tag: [],
-      effect: { 灼烧: '造成持续伤害' },
-      consume: '',
-      description: '一道炽热凝练的能量射线',
-      cost: 100,
-    };
-    store.addEquipment(sword);
-    store.addEquipment(armor);
-    store.addItem(potion);
-    store.addSkill(skill);
+    const card = FIXTURE_CARD_POOL.find((c) => c.formEntry === '技能')!;
+    store.toggleCard(card);
 
-    // 不直接落库 — inventory/skills 为空，交下游 item_gen 经开场正文生成
     const state = store.buildCharacterState('test-save-id');
-    expect(state.inventory).toEqual([]);
-    expect(state.skills).toEqual([]);
+    const played = state.inventory.filter((i) => i.type === '卡牌');
+    expect(played.some((c) => c.name === card.name)).toBe(true);
 
-    // 装备/道具/技能信息写进开场正文（供 request_dispatcher 识别 → item_gen_request）
     const prompt = store.buildOpeningPrompt();
-    expect(prompt).toContain(sword.name);
-    expect(prompt).toContain(armor.name);
-    expect(prompt).toContain(potion.name);
-    expect(prompt).toContain(skill.name);
+    expect(prompt).toContain('卡匣里贴身放着这些铭卡');
+    expect(prompt).toContain(`「${card.name}」`);
+    expect(prompt).toContain('本命卡组');
   });
 
   it('HP/MP/SP 应正确写入', () => {
@@ -1054,10 +895,10 @@ describe('buildOpeningPrompt', () => {
     expect(prompt).not.toContain('创角完成');
     expect(prompt).not.toContain('初始数据');
     expect(prompt).not.toContain('---');
-    // 没有选择任何装备/技能/物品 → 不应生成对应的自然语言引导句
-    expect(prompt).not.toContain('测试带着这些装备');
-    expect(prompt).not.toContain('测试已经掌握这些本领');
-    expect(prompt).not.toContain('测试的行囊里还有这些东西');
+    // 没有购卡 → 只断言不出卡段引导句（保底卡不算「购入」叙述，见下）
+    expect(prompt).not.toContain('带着这些装备');
+    expect(prompt).not.toContain('已经掌握这些本领');
+    expect(prompt).not.toContain('行囊里还有这些东西');
     // 初始金钱段总是存在（0 G 时写「身无分文」，>0 时写具体数）——开局经济是既成事实
     expect(prompt).toContain('身无分文');
     // 开局时间总是存在（纪元基准 488 年）；纪元名由内容侧 branding 面供给（D9）
@@ -1066,13 +907,12 @@ describe('buildOpeningPrompt', () => {
     expect(prompt).not.toContain('不要解释规则');
   });
 
-  it('用户示例路径以故事语言交接剧情与人物特征，不输出核心说明', () => {
+  it('用户示例路径以故事语言交接剧情与人物特征', () => {
     store.name = '阿黑';
-    store.customBackgroundText =
+    store.backstory =
       '帝国女皇命令圣女施展古魔法阵召唤异世勇者。四位勇者现身后，唯独阿黑身边没有任何异象。';
     store.personality = '天真';
-    store.physics = '男娘';
-    store.selectDestinyCore(FIXTURE_DESTINY_CORES[0].id);
+    store.physics = '瘦高';
 
     const prompt = store.buildOpeningPrompt();
 
@@ -1080,12 +920,10 @@ describe('buildOpeningPrompt', () => {
     expect(prompt).toContain('帝国女皇命令圣女施展古魔法阵召唤异世勇者');
     expect(prompt).toContain('阿黑身无分文，衣袋里连一枚帝冕币也没有。');
     expect(prompt).toContain('阿黑生性天真。');
-    expect(prompt).toContain('阿黑的身形与外貌给人的印象是：男娘。');
+    expect(prompt).toContain('阿黑的身形与外貌给人的印象是：瘦高。');
     expect(prompt).toContain('再自然续写后续发展');
     expect(prompt).not.toContain('---');
     expect(prompt).not.toContain('初始数据');
-    expect(prompt).not.toContain('起源印记');
-    expect(prompt).not.toContain(FIXTURE_DESTINY_CORES[0].name);
     expect(prompt).not.toMatch(/(^|\n)你(?:身|生|随|带|有|的)/);
   });
 
@@ -1097,9 +935,9 @@ describe('buildOpeningPrompt', () => {
       namePools: undefined,
       markers: undefined,
       branding: undefined,
-      imageDialects: undefined,
       mapPack: undefined,
       randomEvents: undefined,
+      commissions: undefined,
       remoteAssets: undefined,
     });
     setActivePinia(createPinia());
@@ -1111,21 +949,12 @@ describe('buildOpeningPrompt', () => {
     expect(prompt).not.toContain(FIXTURE_ERA);
   });
 
-  it('有装备应输出装备信息', () => {
-    const item = FIXTURE_EQUIPMENT_POOL[0];
-    store.addEquipment(item);
+  it('购卡后卡面叙事进开场白', () => {
+    const card = FIXTURE_CARD_POOL[0];
+    store.toggleCard(card);
     const prompt = store.buildOpeningPrompt();
-    expect(prompt).toContain('测试带着这些装备');
-    expect(prompt).toContain(item.name);
-  });
-
-  it('有起源印记时也不在开场消息中描述或指挥核心演出', () => {
-    const core = FIXTURE_DESTINY_CORES[0];
-    store.selectDestinyCore(core.id);
-    const prompt = store.buildOpeningPrompt();
-    expect(prompt).not.toContain(core.name);
-    expect(prompt).not.toContain('起源印记');
-    expect(prompt).not.toContain('苏醒');
+    expect(prompt).toContain('卡匣里贴身放着这些铭卡');
+    expect(prompt).toContain(card.name);
   });
 
   it('🆕 初始金钱段：money>0 时写明具体数额（开局经济既成事实）', () => {
@@ -1133,32 +962,6 @@ describe('buildOpeningPrompt', () => {
     const prompt = store.buildOpeningPrompt();
     expect(prompt).toContain('10012 枚帝冕币');
     expect(prompt).not.toContain('身无分文');
-  });
-
-  it('选中 system_core 世界书条目时开场消息保持沉默，交由世界书通道注入', () => {
-    // 新的 UI 起源印记选择走 selectedSystemCoreEntry（system_core 世界书条目）
-    store.systemCoreEntries = [
-      {
-        uid: 413,
-        name: '占位印记',
-        content: '寄宿于灵魂深处的占位设定，影响叙事风格。',
-        enabled: true,
-        constant: false,
-        key: [],
-        keysecondary: [],
-        selectiveLogic: 0,
-        order: 0,
-        position: 0,
-      } as any,
-    ];
-    store.selectSystemCoreEntry(413);
-    const prompt = store.buildOpeningPrompt();
-    // 条目名与全文都由世界书通道注入
-    // （buildEnabledWorldBookEntries → SaveSlot.metadata.enabledWorldBookEntries → worldbook-loader）。
-    // 开场 user 消息不再用通用话术覆盖不同核心的人格与出场方式。
-    expect(prompt).not.toContain('占位印记');
-    expect(prompt).not.toContain('寄宿于灵魂深处的占位设定');
-    expect(prompt).not.toContain('起源印记');
   });
 });
 
@@ -1249,92 +1052,28 @@ describe('预设系统', () => {
   });
 });
 
-// ===== 自定义物品编辑（updateXxx，捏人页内编辑入口） =====
+// ===== 开局购卡边界（卡牌化后自定义卡表单退役：局内制卡才是正道） =====
 
-describe('自定义物品编辑 updateXxx', () => {
+describe('开局购卡边界', () => {
   let store: ReturnType<typeof useCreateStore>;
   beforeEach(() => {
     store = makeStore();
   });
 
-  it('updateEquipment 按 id 原地替换装备（含 stats）', () => {
-    const eq = {
-      id: 'custom_equipment_abc',
-      name: '原剑',
-      category: 'equipment' as const,
-      type: '武器',
-      rarity: 'common' as const,
-      tag: [],
-      effect: {},
-      consume: '',
-      description: 'd',
-      cost: 30,
-      stats: { atk: 10 },
-    };
-    store.addEquipment(eq);
-    store.updateEquipment({ ...eq, name: '改名校', stats: { atk: 99 } });
-    expect(store.selectedEquipments).toHaveLength(1);
-    expect(store.selectedEquipments[0].name).toBe('改名校');
-    expect(store.selectedEquipments[0].stats).toEqual({ atk: 99 });
+  it('toggleCard 未选中且点数不足 → 不入选（幂等，不抛）', () => {
+    store.selectDifficulty('hell'); // 100 点
+    const pricey = FIXTURE_CARD_POOL.find((c) => c.cost > 100)!;
+    const before = store.selectedCards.length;
+    store.toggleCard(pricey);
+    expect(store.selectedCards.length).toBe(before);
+    store.toggleCard(pricey); // 再点一次也不变
+    expect(store.selectedCards.length).toBe(before);
   });
 
-  it('updateItem 按 id 原地替换道具', () => {
-    const it = {
-      id: 'custom_item_abc',
-      name: '原药',
-      category: 'item' as const,
-      type: '消耗品',
-      rarity: 'common' as const,
-      tag: [],
-      effect: {},
-      consume: '',
-      description: 'd',
-      cost: 30,
-      quantity: 3,
-    };
-    store.addItem(it);
-    store.updateItem({ ...it, name: '改名药', quantity: 5 });
-    expect(store.selectedItems).toHaveLength(1);
-    expect(store.selectedItems[0].name).toBe('改名药');
-    expect(store.selectedItems[0].quantity).toBe(5);
-  });
-
-  it('updateSkill 按 id 原地替换技能', () => {
-    const sk = {
-      id: 'custom_skill_abc',
-      name: '原技',
-      category: 'skill' as const,
-      type: '主动',
-      rarity: 'common' as const,
-      tag: [],
-      effect: {},
-      consume: '',
-      description: 'd',
-      cost: 30,
-    };
-    store.addSkill(sk);
-    store.updateSkill({ ...sk, name: '改名技' });
-    expect(store.selectedSkills).toHaveLength(1);
-    expect(store.selectedSkills[0].name).toBe('改名技');
-  });
-
-  it('update 未匹配 id 时不新增不删除（幂等）', () => {
-    const eq = {
-      id: 'custom_equipment_abc',
-      name: '剑',
-      category: 'equipment' as const,
-      type: '武器',
-      rarity: 'common' as const,
-      tag: [],
-      effect: {},
-      consume: '',
-      description: 'd',
-      cost: 30,
-    };
-    store.addEquipment(eq);
-    store.updateEquipment({ ...eq, id: 'custom_equipment_nope', name: '不存在的' });
-    expect(store.selectedEquipments).toHaveLength(1);
-    expect(store.selectedEquipments[0].name).toBe('剑');
+  it('cardPool 空目录（内容缺席）→ filteredCards 为空且不抛', () => {
+    const bad = makeStoreWithCatalog(undefined);
+    expect(bad.filteredCards).toEqual([]);
+    expect(() => bad.buildOpeningPrompt()).not.toThrow();
   });
 });
 
@@ -1365,7 +1104,7 @@ describe('resetAll', () => {
     expect(store.destinyPoints).toBe(0);
     expect(store.money).toBe(0);
     expect(store.currentStep).toBe(0);
-    expect(store.selectedEquipments).toHaveLength(0);
+    expect(store.selectedCards).toHaveLength(0);
   });
 
   it('resetAll 应重置剧情设置为默认（重读设置页新档默认值）', () => {
@@ -1375,6 +1114,34 @@ describe('resetAll', () => {
     expect(store.plotMode).toBe('off');
     // 设置页新档默认值 plotGenrePreference = ['combat', 'social']
     expect(store.plotGenrePreference).toEqual(['combat', 'social']);
+  });
+});
+
+// ===== 出身天赋抽卡池 + 分级定价（2026-09-16）=====
+
+describe('出身天赋抽卡池', () => {
+  let store: ReturnType<typeof useCreateStore>;
+  beforeEach(() => {
+    store = makeStore();
+  });
+
+  it('rollTalentOffers 恒抽 8 份且全部来自捏人池；重抽清掉不在新一批的已选', () => {
+    const poolNames = getCreationCatalog().map((t) => t.name);
+    expect(poolNames.length).toBeGreaterThanOrEqual(8);
+    store.rollTalentOffers();
+    expect(store.talentOffers).toHaveLength(8);
+    expect(new Set(store.talentOffers.map((t) => t.name)).size).toBe(8);
+    expect(store.talentOffers.every((t) => poolNames.includes(t.name))).toBe(true);
+    // 选中后重抽到不含它的批次 → 选择被清空
+    store.selectedCreationTalent = store.talentOffers[0].name;
+    for (let i = 0; i < 40 && store.selectedCreationTalent; i++) store.rollTalentOffers();
+    expect(store.selectedCreationTalent).toBeNull();
+  });
+
+  it('talentCost 按品级公式计价（天才卡师 C 级单条：(10×1.2)→5 取整 = 10 点），未选为 0', () => {
+    expect(store.talentCost).toBe(0);
+    store.selectedCreationTalent = '天才卡师';
+    expect(store.talentCost).toBe(10);
   });
 });
 
@@ -2161,157 +1928,49 @@ describe('localStorage 草稿 save/restore/clear', () => {
   });
 });
 
-// ===== 世界书启用轴（P1-5: 命定核心单选 / 角色多选 / 工坊项目多选，三轴互不干扰） =====
+// ===== 性别声明进开场白（2026-09-18 裁决）=====
 
-describe('buildEnabledWorldBookEntries 三条启用轴', () => {
+describe('开场白：性别声明', () => {
   let store: ReturnType<typeof useCreateStore>;
-
-  /** 直接铺 workshopOptions —— 不碰 Dexie，测的是展开语义本身 */
-  function seedWorkshop() {
-    store.workshopOptions = [
-      {
-        projectId: 'p1',
-        name: '维拉',
-        description: '一个角色包',
-        authorName: '作者A',
-        version: '1.2.0',
-        tags: ['角色'],
-        entryUids: [105, 106, 107],
-      },
-      {
-        projectId: 'p2',
-        name: '空项目',
-        description: '只带正则',
-        authorName: '作者B',
-        version: '0.1',
-        tags: [],
-        entryUids: [],
-      },
-    ];
-  }
-
   beforeEach(() => {
     store = makeStore();
-    seedWorkshop();
+    store.name = '艾琳';
+    store.selectDifficulty('normal');
   });
 
-  /** 一个标了「系统」的工坊项目 —— 它是命定核心候选，不是附加内容 */
-  function seedWorkshopSystem() {
-    store.workshopOptions = [
-      ...store.workshopOptions,
-      {
-        projectId: 'sys1',
-        name: '异界律令',
-        description: '一个工坊命定核心',
-        authorName: '作者C',
-        version: '2.0',
-        tags: ['系统'],
-        entryUids: [201, 202],
-      },
-    ];
-  }
-
-  it('★ 工坊「系统」项目进核心单选名单，不进附加多选名单', () => {
-    seedWorkshopSystem();
-    expect(store.workshopSystemOptions.map((o) => o.projectId)).toEqual(['sys1']);
-    // 否则它会在同一屏出现两次，且勾哪个都过不了必选闸门
-    expect(store.workshopExtraOptions.map((o) => o.projectId)).toEqual(['p1', 'p2']);
+  it('男 → 以「他」称呼', () => {
+    store.gender = '男';
+    const prompt = store.buildOpeningPrompt();
+    expect(prompt).toContain('艾琳是男性，叙事中以「他」称呼艾琳');
   });
 
-  it('★ 选工坊命定核心即可通过本步 —— 这正是此前卡死用户的地方', () => {
-    seedWorkshopSystem();
-    expect(store.stepValid[2]).toBe(false);
-    store.selectWorkshopCore('sys1');
-    expect(store.stepValid[2]).toBe(true);
+  it('自定义 → 用填写的性别文本', () => {
+    store.gender = '自定义';
+    store.customGender = '女';
+    const prompt = store.buildOpeningPrompt();
+    expect(prompt).toContain('艾琳是女性，叙事中以「她」称呼艾琳');
   });
 
-  it('★ 内置核心与工坊核心互斥 —— 命定核心只有一枚', () => {
-    seedWorkshopSystem();
-    store.selectSystemCoreEntry(413);
-    store.selectWorkshopCore('sys1');
-    expect(store.selectedSystemCoreEntryUid).toBeNull();
-
-    store.selectSystemCoreEntry(413);
-    expect(store.selectedWorkshopCoreProjectId).toBeNull();
-    expect(store.stepValid[2]).toBe(true);
+  it('自定义但留空 → 不输出性别段（不编造）', () => {
+    store.gender = '自定义';
+    store.customGender = '';
+    const prompt = store.buildOpeningPrompt();
+    expect(prompt).not.toContain('性别是');
+    expect(prompt).not.toContain('称呼');
   });
 
-  it('工坊核心照常展开成 creative_workshop:<uid>，与附加项目同一套存储', () => {
-    seedWorkshopSystem();
-    store.selectWorkshopCore('sys1');
-    const ids = store.buildEnabledWorldBookEntries();
-    expect(ids).toContain('creative_workshop:201');
-    expect(ids).toContain('creative_workshop:202');
-    // 没选内置核心时不该冒出 system_core: 串
-    expect(ids.some((i) => i.startsWith('system_core:'))).toBe(false);
+  it('旧预设/手写值「女」→ 识别出代词「她」（映射表覆盖男女与雌雄四值）', () => {
+    store.gender = '女';
+    const prompt = store.buildOpeningPrompt();
+    expect(prompt).toContain('艾琳是女性，叙事中以「她」称呼艾琳');
   });
 
-  it('工坊核心与附加项目可以并存，互不覆盖', () => {
-    seedWorkshopSystem();
-    store.selectWorkshopCore('sys1');
-    store.toggleWorkshopProject('p1');
-    const ids = store.buildEnabledWorldBookEntries();
-    for (const uid of [201, 202, 105, 106, 107]) {
-      expect(ids).toContain(`creative_workshop:${uid}`);
-    }
-  });
-
-  it('取消工坊核心后闸门重新关上', () => {
-    seedWorkshopSystem();
-    store.selectWorkshopCore('sys1');
-    store.selectWorkshopCore(null);
-    expect(store.stepValid[2]).toBe(false);
-    expect(store.buildEnabledWorldBookEntries()).toEqual([]);
-  });
-
-  it('勾一个项目 → 输出该项目全部条目的 creative_workshop:<uid>', () => {
-    store.toggleWorkshopProject('p1');
-    expect(store.buildEnabledWorldBookEntries()).toEqual([
-      'creative_workshop:105',
-      'creative_workshop:106',
-      'creative_workshop:107',
-    ]);
-  });
-
-  it('取消 → 该项目的串全部移除', () => {
-    store.toggleWorkshopProject('p1');
-    store.toggleWorkshopProject('p1');
-    expect(store.buildEnabledWorldBookEntries()).toEqual([]);
-  });
-
-  it('★ 与 system_core / character 两轴互不干扰', () => {
-    store.selectSystemCoreEntry(413);
-    store.toggleCharacterEntry(313);
-    store.toggleWorkshopProject('p1');
-    const ids = store.buildEnabledWorldBookEntries();
-    expect(ids).toContain('system_core:413');
-    expect(ids).toContain('character:313');
-    expect(ids.filter((i) => i.startsWith('creative_workshop:'))).toHaveLength(3);
-
-    // 取消工坊后另两轴原样还在
-    store.toggleWorkshopProject('p1');
-    expect(store.buildEnabledWorldBookEntries()).toEqual(['system_core:413', 'character:313']);
-  });
-
-  it('未安装的项目不在列表里，也就勾不上（勾不存在的 id 不产出任何串）', () => {
-    store.toggleWorkshopProject('不存在的项目');
-    expect(store.buildEnabledWorldBookEntries()).toEqual([]);
-  });
-
-  it('已装但无条目的项目：勾选不炸，只是产不出串', () => {
-    expect(() => store.toggleWorkshopProject('p2')).not.toThrow();
-    expect(store.buildEnabledWorldBookEntries()).toEqual([]);
-  });
-
-  it('工坊轴是独立的一条 —— 不占用命定核心那个单选槽', () => {
-    store.toggleWorkshopProject('p1');
-    expect(store.selectedSystemCoreEntryUid).toBeNull();
-  });
-
-  it('resetAll 清空工坊勾选与选项', () => {
-    store.toggleWorkshopProject('p1');
-    store.resetAll();
-    expect(store.enabledWorkshopProjectIds.size).toBe(0);
-    expect(store.workshopOptions).toEqual([]);
+  it('既非男女也非雌雄的自定义值 → 中性表述，不猜代词', () => {
+    store.gender = '自定义';
+    store.customGender = '无性';
+    const prompt = store.buildOpeningPrompt();
+    expect(prompt).toContain('艾琳的性别是「无性」');
+    expect(prompt).not.toContain('「他」');
+    expect(prompt).not.toContain('「她」');
   });
 });

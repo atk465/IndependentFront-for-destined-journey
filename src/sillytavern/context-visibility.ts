@@ -514,19 +514,6 @@ function formatCharacterNarrative(char: CharacterState): string {
     // 不显示 item.scripts (JS 代码)
   }
 
-  // 登神长阶 — 仅 enabled + 要素/权能/法则名称列表
-  if (char.ascension?.enabled) {
-    lines.push('');
-    lines.push('  登神长阶:');
-    const elementNames = (char.ascension.elements ?? []).map((e) => e.name);
-    const authorityNames = (char.ascension.authority ?? []).map((a) => a.name);
-    const lawNames = (char.ascension.law ?? []).map((l) => l.name);
-    if (elementNames.length) lines.push(`    要素: ${elementNames.join(', ')}`);
-    if (authorityNames.length) lines.push(`    权能: ${authorityNames.join(', ')}`);
-    if (lawNames.length) lines.push(`    法则: ${lawNames.join(', ')}`);
-    // 不展开 elements/authority/law 内部的 scripts
-  }
-
   // 关系 — 仅在场角色
   const relationships = cf.relationships as Record<string, any> | undefined;
   if (relationships && Object.keys(relationships).length > 0) {
@@ -610,7 +597,7 @@ function formatNpcSummary(content: Record<string, any>): string {
       `  状态效果: ${statusEffects}`,
     );
   }
-  // 排除: attributes, equipment详情, skills详情, inventory详情, ascension, money
+  // 排除: attributes, equipment详情, skills详情, inventory详情, money
   return lines.join('\n');
 }
 

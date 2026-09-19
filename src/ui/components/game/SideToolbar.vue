@@ -1,15 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useGameStore } from '../../stores/game-store';
-import { useAudioStore } from '../../stores/audio-store';
 import { useSettingsStore } from '../../stores/settings-store';
 
 const game = useGameStore();
-const audio = useAudioStore();
 const settings = useSettingsStore().settings;
-
-/** 播放中给音乐图标一点低幅呼吸（仅 opacity，不碰布局属性） */
-const musicPlaying = computed(() => audio.state.music.status === 'playing');
 
 const emit = defineEmits<{
   toolClick: [id: string];
@@ -17,15 +12,18 @@ const emit = defineEmits<{
 
 const allTools = [
   { id: 'items', label: '背包', icon: 'fa-solid fa-box' },
+  { id: 'cardAlbum', label: '卡册', icon: 'fa-solid fa-clone' },
+  { id: 'fortuneAltar', label: '祭坛', icon: 'fa-solid fa-monument' },
+  { id: 'commissionBoard', label: '委托', icon: 'fa-solid fa-bullhorn' },
+  { id: 'exploration', label: '探索', icon: 'fa-solid fa-compass' },
+  { id: 'talentPanel', label: '天赋', icon: 'fa-solid fa-fingerprint' },
+  { id: 'craftBench', label: '制台', icon: 'fa-solid fa-wand-magic-sparkles' },
   { id: 'characters', label: '角色', icon: 'fa-solid fa-users' },
   { id: 'quests', label: '任务', icon: 'fa-solid fa-scroll' },
   { id: 'map', label: '地图', icon: 'fa-solid fa-map' },
   { id: 'memory', label: '记忆', icon: 'fa-solid fa-brain' },
   { id: 'plot', label: '剧情', icon: 'fa-solid fa-book-open' },
   { id: 'snapshots', label: '快照', icon: 'fa-solid fa-clock-rotate-left' },
-  { id: 'gallery', label: '图鉴', icon: 'fa-solid fa-images' },
-  { id: 'extensions', label: '扩展', icon: 'fa-solid fa-puzzle-piece' },
-  { id: 'audio', label: '音乐', icon: 'fa-solid fa-music' },
   { id: 'debug', label: '调试', icon: 'fa-solid fa-bug' },
   { id: 'settings', label: '设置', icon: 'fa-solid fa-gear' },
 ];
@@ -50,7 +48,7 @@ function handleClick(id: string) {
       :aria-label="tool.label"
       @click="handleClick(tool.id)"
     >
-      <i :class="[tool.icon, { breathing: tool.id === 'audio' && musicPlaying }]" />
+      <i :class="tool.icon" />
       <span v-show="!game.sidebarCollapsed" class="tool-label">{{ tool.label }}</span>
     </button>
     <button

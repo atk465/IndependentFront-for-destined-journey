@@ -2,11 +2,11 @@
  * save-profile.ts — 存档档案管理测试 (Phase 4.6)
  *
  * 覆盖所有导出函数: getProfile / updateProfile / getFP / addFP / spendFP /
- * canAffordFP / addContract / getContracts / getContractByTarget /
+ * canAffordFP /
  * addAchievement / addNews / markNewsRead
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { SaveProfile, FateContract, Achievement, NewsItem, MapMarker, Quest } from './types';
+import type { SaveProfile, Achievement, NewsItem, Quest, MapMarker } from './types';
 
 // ---- Mocks ----
 const mockGetSaveProfile = vi.fn();
@@ -26,12 +26,11 @@ import {
   addFP,
   spendFP,
   canAffordFP,
-  addContract,
-  getContracts,
-  getContractByTarget,
   addAchievement,
   addNews,
   markNewsRead,
+  getReputation,
+  addReputation,
 } from './save-profile';
 
 // ---- Helpers ----
@@ -44,6 +43,7 @@ function makeProfile(overrides: Partial<SaveProfile> = {}): SaveProfile {
     experienceMode: 'normal',
     fp: 0,
     fpHistory: [],
+    reputation: 0,
     contracts: [],
     achievements: [],
     news: [],
@@ -64,6 +64,7 @@ function makeDefaultProfile(saveId: string): SaveProfile {
     experienceMode: 'normal',
     fp: 0,
     fpHistory: [],
+    reputation: 0,
     contracts: [],
     achievements: [],
     news: [],
@@ -186,6 +187,7 @@ describe('getFP', () => {
         { id: 'tx1', timestamp: 1, amount: 100, reason: '初始', balance: 100, source: 'other' },
         { id: 'tx2', timestamp: 2, amount: -25, reason: '消费', balance: 75, source: 'craft' },
       ],
+      reputation: 0,
     });
     expect(getFP(profile)).toBe(75);
   });
@@ -369,156 +371,6 @@ describe('canAffordFP', () => {
     expect(canAffordFP(profile, 1)).toBe(false);
   });
 });
-
-// ---- Contracts ----
-
-describe('addContract', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it('creates a contract with auto-generated id and createdAt timestamp', async () => {
-    const profile = makeProfile();
-    mockSaveSaveProfile.mockResolvedValue(undefined);
-
-    const result = await addContract(profile, {
-      targetId: 'char_1',
-      targetName: '艾莉丝',
-      tier: 3,
-      fpSpent: 100,
-      affectionLevel: '信任',
-    });
-
-    expect(result.contracts).toHaveLength(1);
-    const c = result.contracts[0];
-    expect(c.id).toBeTruthy();
-    expect(c.createdAt).toBeGreaterThan(0);
-    expect(c.targetId).toBe('char_1');
-    expect(c.targetName).toBe('艾莉丝');
-    expect(c.tier).toBe(3);
-    expect(c.fpSpent).toBe(100);
-    expect(c.affectionLevel).toBe('信任');
-  });
-
-  it('appends to existing contracts without overwriting', async () => {
-    const existingContract: FateContract = {
-      id: 'existing_contract',
-      targetId: 'char_0',
-      targetName: '旧角色',
-      tier: 1,
-      fpSpent: 50,
-      affectionLevel: '陌生',
-      createdAt: 1000,
-    };
-    const profile = makeProfile({ contracts: [existingContract] });
-    mockSaveSaveProfile.mockResolvedValue(undefined);
-
-    const result = await addContract(profile, {
-      targetId: 'char_2',
-      targetName: '新角色',
-      tier: 2,
-      fpSpent: 75,
-      affectionLevel: '友好',
-    });
-
-    expect(result.contracts).toHaveLength(2);
-    expect(result.contracts[0]).toBe(existingContract);
-    expect(result.contracts[1].targetId).toBe('char_2');
-  });
-
-  it('calls updateProfile after adding contract', async () => {
-    const profile = makeProfile();
-    mockSaveSaveProfile.mockResolvedValue(undefined);
-
-    await addContract(profile, {
-      targetId: 'char_3',
-      targetName: '测试',
-      tier: 1,
-      fpSpent: 10,
-      affectionLevel: '初次见面',
-    });
-
-    expect(mockSaveSaveProfile).toHaveBeenCalledWith(profile);
-    expect(mockSaveSaveProfile).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe('getContracts', () => {
-  it('returns all contracts from profile', () => {
-    const contracts: FateContract[] = [
-      {
-        id: 'c1',
-        targetId: 't1',
-        targetName: '角色A',
-        tier: 2,
-        fpSpent: 40,
-        affectionLevel: '友好',
-        createdAt: 1000,
-      },
-      {
-        id: 'c2',
-        targetId: 't2',
-        targetName: '角色B',
-        tier: 3,
-        fpSpent: 120,
-        affectionLevel: '信赖',
-        createdAt: 2000,
-      },
-    ];
-    const profile = makeProfile({ contracts });
-
-    expect(getContracts(profile)).toBe(contracts);
-    expect(getContracts(profile)).toHaveLength(2);
-  });
-
-  it('returns empty array when no contracts exist', () => {
-    const profile = makeProfile();
-    expect(getContracts(profile)).toEqual([]);
-  });
-});
-
-describe('getContractByTarget', () => {
-  const contracts: FateContract[] = [
-    {
-      id: 'c1',
-      targetId: 'char_alice',
-      targetName: '艾莉丝',
-      tier: 3,
-      fpSpent: 100,
-      affectionLevel: '信赖',
-      createdAt: 1000,
-    },
-    {
-      id: 'c2',
-      targetId: 'char_bob',
-      targetName: '鲍勃',
-      tier: 1,
-      fpSpent: 30,
-      affectionLevel: '陌生',
-      createdAt: 2000,
-    },
-  ];
-
-  it('returns the contract matching the targetId', () => {
-    const profile = makeProfile({ contracts });
-    const result = getContractByTarget(profile, 'char_alice');
-    expect(result).toBe(contracts[0]);
-  });
-
-  it('returns undefined when no contract matches targetId', () => {
-    const profile = makeProfile({ contracts });
-    const result = getContractByTarget(profile, 'char_nonexistent');
-    expect(result).toBeUndefined();
-  });
-
-  it('returns undefined when contracts array is empty', () => {
-    const profile = makeProfile();
-    const result = getContractByTarget(profile, 'char_any');
-    expect(result).toBeUndefined();
-  });
-});
-
-// ---- Achievements ----
 
 describe('addAchievement', () => {
   beforeEach(() => {
@@ -796,27 +648,6 @@ describe('chained operations', () => {
     expect(profile.fpHistory[1].balance).toBe(250);
     expect(profile.fpHistory[2].balance).toBe(150);
   });
-
-  it('addContract then getContractByTarget finds the newly added contract', async () => {
-    const profile = makeProfile();
-    mockSaveSaveProfile.mockResolvedValue(undefined);
-
-    const updated = await addContract(profile, {
-      targetId: 'char_test',
-      targetName: '测试角色',
-      tier: 2,
-      fpSpent: 50,
-      affectionLevel: '友好',
-    });
-
-    const found = getContractByTarget(updated, 'char_test');
-    expect(found).toBeDefined();
-    expect(found!.targetName).toBe('测试角色');
-    expect(found!.tier).toBe(2);
-
-    const notFound = getContractByTarget(updated, 'other');
-    expect(notFound).toBeUndefined();
-  });
 });
 
 // ═══════════════════════════════════════════════════════════
@@ -1063,5 +894,21 @@ describe('MapMarker', () => {
     expect(raw).toHaveLength(1);
     expect(raw[0].name).toBe('艾瑟嘉德');
     expect(raw[0].position.nx).toBe(0.42);
+  });
+});
+
+describe('委托声望（卡牌工坊 委托接线）', () => {
+  it('getReputation：旧档缺字段兜底 0', () => {
+    expect(getReputation({ ...makeProfile(), reputation: undefined } as never)).toBe(0);
+    expect(getReputation(makeProfile())).toBe(0);
+  });
+  it('addReputation：正负皆可、clamp ≥ 0', () => {
+    const p = makeProfile();
+    addReputation(p, 8);
+    expect(p.reputation).toBe(8);
+    addReputation(p, -3);
+    expect(p.reputation).toBe(5);
+    addReputation(p, -99);
+    expect(p.reputation).toBe(0);
   });
 });

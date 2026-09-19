@@ -76,41 +76,6 @@ describe('useBeautify rule resolution', () => {
     expect(beautify.getBeautifierRules()).toHaveLength(1);
   });
 
-  it('gates installed workshop regexes by the current save project selection', () => {
-    stores.beautifier.userRules = [
-      rule({
-        id: 'workshop-rule:p1:r1',
-        autoEnable: { worldBookIds: ['workshop:p1'] },
-      }),
-    ];
-    stores.workshop.projects = [
-      {
-        id: 'p1',
-        name: 'P1',
-        description: '',
-        authorName: '',
-        version: '1',
-        installedVersion: '1',
-        tags: [],
-      },
-    ];
-    stores.worldbooks.books = [
-      {
-        id: 'workshop:p1',
-        partition: 'creative_workshop',
-        entries: [{ uid: 900 }, { uid: 901 }],
-      },
-    ];
-    stores.game.activeSave = {
-      metadata: { enabledWorldBookEntries: ['creative_workshop:900'] },
-    };
-
-    expect(useBeautify().getBeautifierRules()[0].enabled).toBe(false);
-
-    stores.game.activeSave.metadata.enabledWorldBookEntries.push('creative_workshop:901');
-    expect(useBeautify().getBeautifierRules()[0].enabled).toBe(true);
-  });
-
   it('同 ID 用户规则在渲染路径上替换预设（F15 用户优先契约）', () => {
     stores.beautifier.presetRules = [rule({ id: 'dup', pattern: 'preset', isBuiltin: true })];
     stores.beautifier.userRules = [rule({ id: 'dup', pattern: 'user', isBuiltin: false })];

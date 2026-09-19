@@ -10,7 +10,6 @@ import {
   clearAllData,
   createDefaultSaveProfile,
   deleteSaveSlot,
-  characterAppearanceKey,
   exportAllData,
   saveSnapshot,
   DB_VERSION,
@@ -27,10 +26,8 @@ import type {
   PlotEvent,
   PlotOutline,
   WorldBook,
-  WorkshopProject,
   ChatPreset,
 } from './types';
-import type { SceneImageRecord, CharacterSessionAppearance, ImagePreset } from './types-image';
 import {
   isSessionBackup,
   isFullBackupFile,
@@ -65,12 +62,8 @@ function makeWorldBook(overrides: Partial<WorldBook> = {}): WorldBook {
   };
 }
 
-/** 世界书条目夹具；`workshop` 传了就写进 `extra.workshop`（跨机身份的来源） */
-function makeEntry(
-  uid: number,
-  name: string,
-  workshop?: { projectId: string; projectName: string; sourceUid: string | number },
-): WorldBook['entries'][number] {
+/** 世界书条目夹具 */
+function makeEntry(uid: number, name: string): WorldBook['entries'][number] {
   return {
     uid,
     name,
@@ -81,34 +74,6 @@ function makeEntry(
     selectiveLogic: 0,
     order: 0,
     position: 0,
-    ...(workshop
-      ? {
-          extra: {
-            workshop: { ...workshop, sourceComment: name, sourceHash: 'hash' },
-          },
-        }
-      : {}),
-  };
-}
-
-function makeWorkshopProject(overrides: Partial<WorkshopProject> = {}): WorkshopProject {
-  return {
-    id: 'proj_uuid_1',
-    rootProjectId: 'root_1',
-    name: '测试工坊项目',
-    description: '测试用二创项目',
-    version: '2.0.0',
-    authorName: '测试作者',
-    tags: ['系统'],
-    downloadUrl: 'https://example.invalid/pkg.json',
-    fileSize: 1024,
-    installState: 'installed',
-    installedVersion: '1.5.0',
-    installedAt: Date.now(),
-    fetchedAt: Date.now(),
-    uidRange: { start: 900000, end: 900999 },
-    updatedAt: Date.now(),
-    ...overrides,
   };
 }
 
@@ -139,42 +104,12 @@ function makePackRecord(overrides: Partial<ContentPackRecord> = {}): ContentPack
   };
 }
 
-function makeSceneImage(overrides: Partial<SceneImageRecord> = {}): SceneImageRecord {
-  return {
-    id: 'img_1',
-    saveId: SAVE_ID,
-    messageId: MSG_B,
-    anchorKind: 'marker',
-    occurrence: 0,
-    take: 0,
-    turn: 2,
-    status: 'done',
-    source: 'auto',
-    title: '雨中的桥',
-    description: '主角站在石桥上',
-    intent: '主角站在石桥上，雨水打湿了斗篷',
-    scenePrompt: '1boy, bridge, rain',
-    sceneNegative: '',
-    characters: ['莱恩'],
-    rating: 'general',
-    positive: '1boy, bridge, rain, masterpiece',
-    negative: 'lowres',
-    model: 'test-model',
-    seed: 12345,
-    params: {},
-    mime: 'image/png',
-    bytes: 2048,
-    createdAt: Date.now(),
-    ...overrides,
-  };
-}
-
 /**
  * 播一个「能玩」的最小存档：saves + saveProfile + characters + messages +
  * snapshots（内嵌副本齐全）+ memories + plotEvents + plotOutlines +
- * sceneImages（含字节行）+ characterAppearances。
+ * 各表数据齐备。
  *
- * 内部引用刻意都埋上：activeSnapshotId / sceneImages.messageId /
+ * 内部引用刻意都埋上：activeSnapshotId /
  * plotEvent.parentId+childrenIds / memory.relatedCharacterIds。
  */
 async function seedSave(): Promise<void> {
@@ -277,7 +212,7 @@ async function seedSave(): Promise<void> {
       userName: '玩家',
       gameStartTime: '001-01-01',
       totalTurns: 2,
-      enabledWorldBookEntries: ['system_core:100', 'creative_workshop:900001', 'dlc:777'],
+      enabledWorldBookEntries: ['system_core:100', 'dlc:777'],
     },
   };
 
@@ -309,14 +244,6 @@ async function seedSave(): Promise<void> {
     updatedAt: Date.now(),
   };
 
-  const appearance: CharacterSessionAppearance = {
-    key: characterAppearanceKey(SAVE_ID, '莉薇娅'),
-    saveId: SAVE_ID,
-    name: '莉薇娅',
-    patch: { outfit: '沾着麦粉的皮革围裙' } as CharacterSessionAppearance['patch'],
-    updatedAt: Date.now(),
-  };
-
   await db.saves.put(save);
   await db.saveProfiles.put(profile);
   await db.characters.bulkPut([player, npc]);
@@ -326,9 +253,6 @@ async function seedSave(): Promise<void> {
   await db.memories.put(memory);
   await db.plotEvents.bulkPut([plotRoot, plotChild]);
   await db.plotOutlines.put(outline);
-  await db.sceneImages.put(makeSceneImage());
-  await db.sceneImageBlobs.put({ id: 'img_1', blob: new Blob(['x']) });
-  await db.characterAppearances.put(appearance);
 }
 
 /** 播内容侧：世界书条目 / 工坊项目 / 内容包 / story 预设 */
@@ -342,25 +266,12 @@ async function seedContent(): Promise<void> {
       entries: [makeEntry(100, '命定核心')],
     }),
     makeWorldBook({
-      id: 'book_workshop',
-      name: '测试工坊项目',
-      partition: 'creative_workshop',
-      entries: [
-        makeEntry(900001, '二创条目', {
-          projectId: 'proj_uuid_1',
-          projectName: '测试工坊项目',
-          sourceUid: 1,
-        }),
-      ],
-    }),
-    makeWorldBook({
       id: 'book_dlc',
       name: '扩展内容',
       partition: 'dlc',
       entries: [makeEntry(777, '隐藏副本')],
     }),
   ]);
-  await db.workshopProjects.put(makeWorkshopProject());
   await db.contentPacks.put(makePackRecord());
   await db.presets.put({
     id: 'preset_story',
@@ -424,21 +335,6 @@ describe('exportSessionSave', () => {
     expect(backup.memories).toHaveLength(1);
     expect(backup.plotEvents).toHaveLength(2);
     expect(backup.plotOutlines).toHaveLength(1);
-    expect(backup.sceneImages).toHaveLength(1);
-    expect(backup.characterAppearances).toHaveLength(1);
-    // 字节表没有对应字段 —— 图片字节走独立路径，不进 JSON
-    expect(Object.keys(backup)).not.toContain('sceneImageBlobs');
-  });
-
-  it('导出的插画副本打上 blobDropped，库里的行一个字节不动', async () => {
-    await seedSave();
-
-    const backup = await exportSessionSave(SAVE_ID);
-    expect(backup.sceneImages[0].blobDropped).toBe(true);
-
-    const live = await getDatabase().sceneImages.get('img_1');
-    expect(live?.blobDropped).toBeUndefined();
-    expect(await getDatabase().sceneImageBlobs.get('img_1')).toBeDefined();
   });
 
   it('依赖清单：世界书条目带书名/条目名注释，解析不出的 token 照样进清单', async () => {
@@ -450,35 +346,13 @@ describe('exportSessionSave', () => {
     const backup = await exportSessionSave(SAVE_ID);
     const entries = backup.dependencies.worldBookEntries;
 
-    expect(entries).toHaveLength(3);
+    expect(entries).toHaveLength(2);
     expect(entries[0]).toEqual({
       token: 'system_core:100',
       bookName: '核心设定',
       entryTitle: '命定核心',
     });
-    expect(entries[2]).toEqual({ token: 'dlc:777' });
-  });
-
-  it('依赖清单：工坊项目走条目溯源，版本取 installedVersion', async () => {
-    await seedSave();
-    await seedContent();
-
-    const backup = await exportSessionSave(SAVE_ID);
-    expect(backup.dependencies.workshopProjects).toEqual([
-      { id: 'proj_uuid_1', name: '测试工坊项目', version: '1.5.0' },
-    ]);
-  });
-
-  it('依赖清单：条目无溯源时回退 uidRange 匹配', async () => {
-    await seedSave();
-    await seedContent();
-    const db = getDatabase();
-    const book = await db.worldBooks.get('book_workshop');
-    book!.entries[0].extra = undefined;
-    await db.worldBooks.put(book!);
-
-    const backup = await exportSessionSave(SAVE_ID);
-    expect(backup.dependencies.workshopProjects.map((p) => p.id)).toEqual(['proj_uuid_1']);
+    expect(entries[1]).toEqual({ token: 'dlc:777' });
   });
 
   it('依赖清单：内容包与 story 预设原样收录', async () => {
@@ -575,8 +449,6 @@ describe('importSessionSave — 往返', () => {
     expect((await db.memories.where('saveId').equals(newId).toArray()).length).toBe(1);
     expect((await db.plotEvents.where('saveId').equals(newId).toArray()).length).toBe(2);
     expect((await db.plotOutlines.where('saveId').equals(newId).toArray()).length).toBe(1);
-    expect((await db.sceneImages.where('saveId').equals(newId).toArray()).length).toBe(1);
-    expect((await db.characterAppearances.where('saveId').equals(newId).toArray()).length).toBe(1);
     expect((await db.saveProfiles.get(newId))?.saveId).toBe(newId);
   });
 
@@ -641,12 +513,6 @@ describe('importSessionSave — 往返', () => {
     expect(save?.activeSnapshotId).toBe(snaps[0].id);
     expect(save?.activeSnapshotId).not.toBe(SNAP_ID);
 
-    const msgs = await db.messages.where('saveId').equals(newId).toArray();
-    const imgs = await db.sceneImages.where('saveId').equals(newId).toArray();
-    const targetMsg = msgs.find((m) => m.role === 'assistant');
-    expect(imgs[0].messageId).toBe(targetMsg?.id);
-    expect(imgs[0].messageId).not.toBe(MSG_B);
-
     // 剧情父子链跟着一起搬
     const events = await db.plotEvents.where('saveId').equals(newId).toArray();
     const root = events.find((e) => e.title === '商队失踪')!;
@@ -654,10 +520,6 @@ describe('importSessionSave — 往返', () => {
     expect(child.parentId).toBe(root.id);
     expect(root.childrenIds).toEqual([child.id]);
     expect(root.id).not.toBe(PLOT_ROOT);
-
-    // 会话外貌主键重拼
-    const appearances = await db.characterAppearances.where('saveId').equals(newId).toArray();
-    expect(appearances[0].key).toBe(characterAppearanceKey(newId, '莉薇娅'));
   });
 
   it('快照内嵌副本用同一套映射改写（回退时才不会把旧 id 复活回库）', async () => {
@@ -803,7 +665,6 @@ describe('importSessionSave — 往返', () => {
 
     const chars = await db.characters.where('saveId').equals(newId).toArray();
     const player = chars.find((c) => c.type === 'player')!;
-    const npc = chars.find((c) => c.type === 'npc')!;
 
     const memory = (await db.memories.where('saveId').equals(newId).toArray())[0];
     expect(memory.relatedCharacterIds).toContain(player.id);
@@ -811,7 +672,6 @@ describe('importSessionSave — 往返', () => {
     expect(memory.relatedCharacterIds).toContain('莉薇娅');
 
     const profile = await db.saveProfiles.get(newId);
-    expect(profile?.contracts[0].targetId).toBe(npc.id);
     // affections 的键是名字（铁律 1），刻意不动
     expect(profile?.affections['莉薇娅']).toBe(45);
   });
@@ -877,7 +737,6 @@ describe('importSessionSave — 同一份文件导两次', () => {
       snaps: (await db.snapshots.where('saveId').equals(saveId).toArray()).map((r) => r.id),
       mems: (await db.memories.where('saveId').equals(saveId).toArray()).map((r) => r.id),
       plots: (await db.plotEvents.where('saveId').equals(saveId).toArray()).map((r) => r.id),
-      imgs: (await db.sceneImages.where('saveId').equals(saveId).toArray()).map((r) => r.id),
     });
 
     const a = await idsOf(first.saveId);
@@ -910,10 +769,6 @@ describe('importSessionSave — 同一份文件导两次', () => {
     // v22 拆表：删存档要连载荷行一起级联，另一份的载荷不受牵连
     expect(await db.snapshotPayloads.where('saveId').equals(first.saveId).count()).toBe(0);
     expect(await db.snapshotPayloads.where('saveId').equals(second.saveId).count()).toBe(1);
-    expect((await db.sceneImages.where('saveId').equals(second.saveId).toArray()).length).toBe(1);
-    expect(
-      (await db.characterAppearances.where('saveId').equals(second.saveId).toArray()).length,
-    ).toBe(1);
   });
 });
 
@@ -999,7 +854,7 @@ describe('checkSessionSaveDependencies', () => {
     const before = await db.saves.count();
     await checkSessionSaveDependencies(backup);
     expect(await db.saves.count()).toBe(before);
-    expect(await db.worldBooks.count()).toBe(2);
+    expect(await db.worldBooks.count()).toBe(1);
     expect(await db.presets.get('preset_story')).toBeDefined();
   });
 
@@ -1008,107 +863,6 @@ describe('checkSessionSaveDependencies', () => {
     const check = await checkSessionSaveDependencies(bare);
     expect(check.ok).toBe(true);
     expect(check.missingEntries).toEqual([]);
-  });
-});
-
-// ========== 工坊条目跨机身份（Finding 1/2）==========
-//
-// 工坊 uid 由**本机分区级单调游标**发号，同一个项目在另一台机器上按不同安装顺序
-// 拿到的 uid 完全不同。裸 token 比对的两种败法都不报错：假通过（uid 撞上别的项目）
-// 与假缺失（同项目不同号）。这一组把两种都钉住。
-
-describe('工坊条目按身份而非 uid 比对', () => {
-  /** 把收件人库里的工坊书换成「同一项目、不同本机 uid」 */
-  async function reinstallWorkshopAt(uid: number, projectId = 'proj_uuid_1'): Promise<void> {
-    await getDatabase().worldBooks.put(
-      makeWorldBook({
-        id: 'book_workshop',
-        name: '测试工坊项目',
-        partition: 'creative_workshop',
-        entries: [
-          makeEntry(uid, '二创条目', { projectId, projectName: '测试工坊项目', sourceUid: 1 }),
-        ],
-      }),
-    );
-  }
-
-  it('导出清单给工坊条目带上跨机身份（项目 id + 上游 uid）', async () => {
-    await seedSave();
-    await seedContent();
-
-    const backup = await exportSessionSave(SAVE_ID);
-    const workshopRef = backup.dependencies.worldBookEntries.find((e) =>
-      e.token.startsWith('creative_workshop:'),
-    )!;
-    expect(workshopRef.workshopProjectId).toBe('proj_uuid_1');
-    expect(workshopRef.workshopSourceUid).toBe(1);
-    // 非工坊条目不带身份（那些 uid 是内容仓固定编号，本来就跨机稳定）
-    const coreRef = backup.dependencies.worldBookEntries.find(
-      (e) => e.token === 'system_core:100',
-    )!;
-    expect(coreRef.workshopProjectId).toBeUndefined();
-  });
-
-  it('(a) 同项目、收件人本机 uid 不同 → 不报缺失，且导入时 token 被改写成本机 uid', async () => {
-    await seedSave();
-    await seedContent();
-    const backup = await exportSessionSave(SAVE_ID);
-
-    // 收件人那边这个项目装在 900500（安装顺序不同），而备份里写的是 900001
-    await reinstallWorkshopAt(900500);
-
-    const check = await checkSessionSaveDependencies(backup);
-    expect(check.missingEntries).toEqual([]);
-    expect(check.ok).toBe(true);
-
-    const { saveId } = await importSessionSave(backup);
-    const tokens = (await getDatabase().saves.get(saveId))!.metadata.enabledWorldBookEntries!;
-    expect(tokens).toContain('creative_workshop:900500');
-    expect(tokens).not.toContain('creative_workshop:900001');
-    // 非工坊 token 一个字节不动
-    expect(tokens).toContain('system_core:100');
-    expect(tokens).toContain('dlc:777');
-  });
-
-  it('(b) 同一个 uid 被**另一个项目**占着 → 照报缺失（裸 token 比对会在这里假通过）', async () => {
-    await seedSave();
-    await seedContent();
-    const backup = await exportSessionSave(SAVE_ID);
-
-    await reinstallWorkshopAt(900001, 'proj_uuid_OTHER');
-
-    const check = await checkSessionSaveDependencies(backup);
-    expect(check.ok).toBe(false);
-    expect(check.missingEntries.map((e) => e.token)).toEqual(['creative_workshop:900001']);
-
-    // 导入不去硬凑：认不出身份就原样留着，绝不指向别的项目的条目
-    const { saveId } = await importSessionSave(backup);
-    const tokens = (await getDatabase().saves.get(saveId))!.metadata.enabledWorldBookEntries!;
-    expect(tokens).toContain('creative_workshop:900001');
-  });
-
-  it('(c) 清单项没有身份（老备份 / 手工条目）→ 退回裸 token 比对', async () => {
-    await seedSave();
-    await seedContent();
-    // 导出**之前**抹掉溯源 → 清单里这一条不带身份
-    const db = getDatabase();
-    const book = (await db.worldBooks.get('book_workshop'))!;
-    book.entries[0].extra = undefined;
-    await db.worldBooks.put(book);
-
-    const backup = await exportSessionSave(SAVE_ID);
-    expect(backup.dependencies.worldBookEntries.every((e) => !e.workshopProjectId)).toBe(true);
-
-    // token 还在 → 齐全
-    expect((await checkSessionSaveDependencies(backup)).ok).toBe(true);
-
-    // token 换个号 → 报缺失（没有身份可依，只能按号比）
-    await reinstallWorkshopAt(900500);
-    const book2 = (await db.worldBooks.get('book_workshop'))!;
-    book2.entries[0].extra = undefined;
-    await db.worldBooks.put(book2);
-    const check = await checkSessionSaveDependencies(backup);
-    expect(check.missingEntries.map((e) => e.token)).toEqual(['creative_workshop:900001']);
   });
 });
 
@@ -1241,27 +995,16 @@ describe('importSessionSave — 校验', () => {
 // ========== 全局表不受影响 ==========
 
 describe('importSessionSave — 不碰全局表', () => {
-  it('worldBooks / presets / imagePresets / contentPacks 行数与内容不变', async () => {
+  it('worldBooks / presets / contentPacks 行数与内容不变', async () => {
     await seedSave();
     await seedContent();
     const db = getDatabase();
-    const imagePreset: ImagePreset = {
-      key: 'character:莉薇娅',
-      kind: 'character',
-      name: '莉薇娅',
-      dialects: { danbooru: { positive: 'elf', negative: '' } },
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-    await db.imagePresets.put(imagePreset);
 
     const backup = await exportSessionSave(SAVE_ID, { storyPreset: STORY_PRESET });
     const before = {
       worldBooks: await db.worldBooks.count(),
       presets: await db.presets.count(),
-      imagePresets: await db.imagePresets.count(),
       contentPacks: await db.contentPacks.count(),
-      workshopProjects: await db.workshopProjects.count(),
     };
 
     await importSessionSave(backup);
@@ -1269,27 +1012,7 @@ describe('importSessionSave — 不碰全局表', () => {
     expect({
       worldBooks: await db.worldBooks.count(),
       presets: await db.presets.count(),
-      imagePresets: await db.imagePresets.count(),
       contentPacks: await db.contentPacks.count(),
-      workshopProjects: await db.workshopProjects.count(),
     }).toEqual(before);
-    expect((await db.imagePresets.get('character:莉薇娅'))?.dialects.danbooru?.positive).toBe(
-      'elf',
-    );
-  });
-
-  it('插画字节表不随导入产生新行（备份里本就没有字节）', async () => {
-    await seedSave();
-    const backup = await exportSessionSave(SAVE_ID);
-    const before = await getDatabase().sceneImageBlobs.count();
-
-    const { saveId } = await importSessionSave(backup);
-
-    expect(await getDatabase().sceneImageBlobs.count()).toBe(before);
-    const imgs = await getDatabase().sceneImages.where('saveId').equals(saveId).toArray();
-    // 记录还在、配方齐全，只是字节已清理 —— 图鉴显示「重画」而不是坏图
-    expect(imgs[0].blobDropped).toBe(true);
-    expect(imgs[0].status).toBe('done');
-    expect(imgs[0].scenePrompt).toBe('1boy, bridge, rain');
   });
 });

@@ -43,10 +43,11 @@ const userRules = computed<BeautifierRule[]>(() => beautifier.userRules);
 
 // ===== 加载预设规则 =====
 
-/** 从当前存档的 enabledWorldBookEntries 提取激活信号（命定核心 + 启用角色）。
- *  命定核心选择走独立 uid（不改 worldBooks 条目 enabled），须以存档为准；
- *  worldBooks.enabled 是「是否注入 prompt」的开关，核心书里几乎全 enabled，不能作为 autoEnable 信号。
- *  autoEnable 绑定**启用的世界书条目 uid**，不按角色名。 */
+/** 从当前存档的 enabledWorldBookEntries 提取激活信号（存档级条目选择）。
+ *  该清单走独立 uid（不改 worldBooks 条目 enabled），须以存档为准；
+ *  worldBooks.enabled 是「是否注入 prompt」的开关，条目几乎全 enabled，不能作为 autoEnable 信号。
+ *  autoEnable 绑定**启用的世界书条目 uid**，不按角色名。
+ *  注：新档该清单恒为空（捏人页已不做存档级收窄），此处逻辑为兼容存量存档保留。 */
 function getActiveWorldBookState() {
   const entries: string[] = (game.activeSave?.metadata as any)?.enabledWorldBookEntries ?? [];
   return collectActiveSignalsFromEntries(entries);

@@ -314,7 +314,7 @@ export function resolveScriptRef(
 
   // 3. @type.id.xxx — 显式跨对象引用
   //    格式: @item.灼烧之剑.burnFormula / @skill.重击.damageCalc / @status.xxx.tick
-  const typeMatch = ref.match(/^@(item|skill|status|ascension)\.(.+?)\.(.+)$/);
+  const typeMatch = ref.match(/^@(item|skill|status)\.(.+?)\.(.+)$/);
   if (typeMatch) {
     // 显式跨对象引用需要外部 lookup 函数，沙盒内通过 $call 间接调用
     // resolveScriptRef 本身不访问 CharacterState，留给调用方处理

@@ -1,8 +1,10 @@
-# 命定之诗
+# 铭刻录
 
 > AI 驱动的文字角色扮演游戏 · 兼容 SillyTavern 生态
 >
 > 你创造角色，引擎保证规则，AI 编织故事，世界自行运转。
+>
+> **改编自《命定之诗》**——遵循其内容二创授权协议，标明来源；仅供作者本人与私下朋友非商用游玩。
 
 <!-- TODO: 放 1-2 张游戏内截图（捏人页 / 游戏页叙事+状态栏），能极大提升吸引力 -->
 
@@ -10,7 +12,7 @@
 
 ## 这是什么
 
-命定之诗是一个**文字 RPG 游戏引擎**。你创建一名角色，之后由多 Agent 编排引擎驱动一轮又一轮的叙事：
+《铭刻录》是一个**以制卡为力量核心的卡牌幻想世界**及其**文字 RPG 游戏引擎**。你创建一名角色，之后由多 Agent 编排引擎驱动一轮又一轮的叙事：
 
 - **确定性游戏系统**——战斗、制作、角色生成、数值、状态都由引擎严格计算，不靠 AI 瞎编。你看到的 HP、伤害、品质、好感度都是真实可供游玩的数据。
 - **AI 叙事创造性**——故事正文、角色对白、剧情演化由 AI 生成。引擎负责"规则对不对"，AI 负责"故事好不好"。
@@ -34,7 +36,7 @@
 
 ```bash
 # 1. 下载源码
-git clone https://github.com/The-poem-of-destiny/IndependentFront-for-destined-journey.git
+git clone https://github.com/atk465/IndependentFront-for-destined-journey.git
 cd IndependentFront-for-destined-journey
 
 # 2. 按锁文件安装依赖
@@ -143,12 +145,11 @@ npm run dev
 
 ---
 
-## 授权
+## 授权与来源声明
 
 - **代码部分**（`src/`）：MIT License
-- **世界观与叙事内容**：受 [《命定之诗》内容二创与素材使用授权协议](docs/《命定之诗》内容二创与素材使用授权协议.md) 约束
-
-> 两者不可混淆——引擎代码可自由修改分发；世界观、角色、设定的复用须遵守独立授权协议。
+- **改编声明**：本项目**改编自《命定之诗》**（[The-poem-of-destiny/IndependentFront-for-destined-journey](https://github.com/The-poem-of-destiny/IndependentFront-for-destined-journey)），遵循其 [《命定之诗》内容二创与素材使用授权协议](docs/《命定之诗》内容二创与素材使用授权协议.md) 并标明来源；仅供作者本人与私下朋友非商用游玩，不作商业用途
+- **去关联计划**：世界观名词替换与前端重写已立项，见 [长期待办](docs/planning/2026-09-17-roadmap-backlog.md)
 
 ---
 

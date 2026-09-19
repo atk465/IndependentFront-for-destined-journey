@@ -45,8 +45,15 @@ function ops(patches: ReturnType<typeof buildCraftPatches>, op: string) {
 
 // ========== buildCraftPatches (纯函数) ==========
 
+/** 门禁标注的取法：真的跑一次 buildCraftPatches，读它改过的 narrative */
+function makeOutputNarrativeWithGate(): string {
+  const out = makeCraftOutput();
+  buildCraftPatches(out, null, '理查德');
+  return out.narrative ?? '';
+}
+
 describe('buildCraftPatches', () => {
-  it('① 无 item_gen 输出 → 产物 1 条 add_item + 经验/FP 奖励', () => {
+  it('① 无 item_gen 输出 → 产物 1 条 add_item；**未经结算则不发经验/FP**（第三档门禁）', () => {
     const patches = buildCraftPatches(makeCraftOutput(), null, '理查德');
 
     const addItems = ops(patches, 'add_item');
@@ -59,17 +66,31 @@ describe('buildCraftPatches', () => {
     // 无装备细化 → 不发 equip_item
     expect(ops(patches, 'equip_item')).toHaveLength(0);
 
-    // 奖励: 经验走 update_character delta（M3），FP 走 delta_variable
-    const deltas = ops(patches, 'delta_variable');
-    expect(deltas).toHaveLength(1);
-    expect(deltas[0].target).toBe('profile.fp');
-    expect(deltas[0].amount).toBe(2);
+    // 🔒 2026-09-17 第三档门禁：没有 settlementPatches = 没走 craft_settle。
+    //    旧契约（`!settlementPatches && expGained > 0` 就发）是 fail-open——
+    //    AI 漏调结算工具时素材一分不扣、奖励却照发（还可能是 AI 编的数）。现在不发，
+    //    并在叙事里留下「未经结算」的标注，让玩家看得见这次没结算。
+    expect(ops(patches, 'delta_variable')).toHaveLength(0);
+    expect(ops(patches, 'update_character')).toHaveLength(0);
+    expect(makeOutputNarrativeWithGate()).toContain('未经结算');
+  });
 
-    const charUpdates = ops(patches, 'update_character');
-    expect(charUpdates).toHaveLength(1);
-    expect(charUpdates[0].target).toBe('characters.理查德');
-    expect(charUpdates[0].value).toEqual({ totalExp: 50 });
-    expect(charUpdates[0].metadata).toEqual({ source: 'craft_gen', delta: true });
+  it('①b 走了结算 → 本函数**不再发奖励**（奖励在结算补丁里，防双发）', () => {
+    const out = makeCraftOutput();
+    (out as any).settlementPatches = [
+      {
+        op: 'remove_item',
+        target: 'characters.理查德',
+        value: { name: '精钢锭', quantity: 1 },
+      },
+    ];
+    const patches = buildCraftPatches(out, null, '理查德');
+
+    // 奖励由 craft_settle 自己的补丁携带；这里若再发一次就是双发（曾经真这么错过）
+    expect(ops(patches, 'delta_variable')).toHaveLength(0);
+    expect(ops(patches, 'update_character')).toHaveLength(0);
+    // 结算过的，不该被打上「未经结算」的标注
+    expect(out.narrative).not.toContain('未经结算');
   });
 
   it('② item_gen equipment 与产物同名 → 不重复 add_item（同名恰好 1 条），单 add_item 带 equippedSlot（M3）', () => {
@@ -254,8 +275,9 @@ describe('buildCraftPatches', () => {
     expect((addItem[0].value as any).name).toBe('精钢长剑');
     expect((addItem[0].value as any).equippedSlot).toBe('武器');
     // 成功仍结算 EXP/FP
-    expect(ops(patches, 'update_character')).toHaveLength(1);
-    expect(ops(patches, 'delta_variable')).toHaveLength(1);
+    // 第三档门禁：exp/fp 与「真的结算过」绑定，这条没带 settlementPatches → 不发奖励
+    expect(ops(patches, 'update_character')).toHaveLength(0);
+    expect(ops(patches, 'delta_variable')).toHaveLength(0);
   });
 
   it('expGained/fpGained 为 0 时不发奖励 patch', () => {
@@ -264,5 +286,132 @@ describe('buildCraftPatches', () => {
     output.craftParams.fpGained = 0;
     const patches = buildCraftPatches(output, null, '理查德');
     expect(ops(patches, 'delta_variable')).toHaveLength(0);
+  });
+});
+
+// ========== 阶段3b 制卡桥：cardProduct 主产物（card-workshop/craft-card 组装） ==========
+
+describe('buildCraftPatches × cardProduct（industry=制卡）', () => {
+  /** 与 makeCraftOutput 同形，industry=制卡 */
+  function makeCardOutput(overrides: Partial<CraftGenOutput> = {}): CraftGenOutput {
+    return makeCraftOutput({
+      productName: '燎原符卡',
+      craftParams: {
+        industry: '制卡',
+        targetQuality: '稀有',
+        stage: '成品',
+        quantity: 1,
+        materials: '火晶、疾风羽',
+        expGained: 30,
+        fpGained: 1,
+      },
+      ...overrides,
+    });
+  }
+
+  const card = {
+    name: '燎原符卡',
+    description: '一团被驯服的野火',
+    quantity: 1,
+    type: '卡牌',
+    rarity: '稀有',
+    cardTier: '青铜',
+    词条: ['火', '风', '燎原'],
+    recipe: {
+      mainMaterial: '火晶',
+      subMaterials: ['疾风羽'],
+      tier: '青铜',
+      fusionKind: '相生',
+      cost: 48,
+      rating: '精益求精',
+    },
+    sealed: false,
+  } as any;
+
+  it('主产物 add_item 用的是 CardItem（type=卡牌，确定性字段随卡）', () => {
+    const patches = buildCraftPatches(makeCardOutput(), null, '艾拉', card);
+    const addItems = ops(patches, 'add_item');
+    expect(addItems).toHaveLength(1);
+    expect(addItems[0].value).toBe(card); // 原样落库，不重组
+  });
+
+  it('失败时不落卡牌主产物（失败品仍走 item_gen 残料链）', () => {
+    const patches = buildCraftPatches(makeCardOutput({ success: false }), null, '艾拉', card);
+    expect(ops(patches, 'add_item')).toHaveLength(0);
+  });
+
+  it('item_gen 与卡同名的 equipment/inventory 条目被跳过，防双份', () => {
+    const itemOutput: ItemGenOutput = {
+      skills: [],
+      equipment: [
+        {
+          slot: '武器',
+          name: '燎原符卡', // 与卡同名 — item_gen 想把它细化成装备，必须让位
+          description: '误入装备槽的卡',
+          stats: { 攻击: 5 },
+          quality: '稀有',
+        },
+      ],
+      inventory: [{ name: '燎原符卡', quantity: 1, description: '重复的卡', type: '材料' } as any],
+    };
+    const patches = buildCraftPatches(makeCardOutput(), itemOutput, '艾拉', card);
+    const addItems = ops(patches, 'add_item');
+    expect(addItems).toHaveLength(1); // 只剩卡牌本体
+    expect((addItems[0].value as any).type).toBe('卡牌');
+  });
+});
+
+// ===== 制卡素材消耗：Code 确定性扣减（2026-09-18 裁决）=====
+
+describe('buildCraftPatches — 制卡素材扣减', () => {
+  const cardOutput = (rating: string, materials: string) => ({
+    success: true,
+    productName: '测试卡',
+    description: 'd',
+    quantity: 1,
+    quality: '普通',
+    rating,
+    narrative: '叙事',
+    craftParams: { industry: '制卡', materials },
+    settlementPatches: undefined,
+  });
+  const 卡产物 = {
+    name: '测试卡',
+    type: '卡牌',
+    quantity: 1,
+    cardTier: '青铜',
+    词条: ['火'],
+    sealed: false,
+  } as never;
+
+  it('成功：主素材与副素材全扣（不再依赖 AI 调 craft_settle）', () => {
+    const patches = buildCraftPatches(
+      cardOutput('成功', '火晶、炎心草') as never,
+      null,
+      '主角',
+      卡产物,
+    );
+    const removed = patches.filter((p) => p.op === 'remove_item').map((p) => (p.value as any).name);
+    expect(removed).toEqual(['火晶', '炎心草']);
+  });
+
+  it('失败：只扣副素材，主材保住', () => {
+    const patches = buildCraftPatches(
+      cardOutput('失败', '火晶、炎心草') as never,
+      null,
+      '主角',
+      卡产物,
+    );
+    const removed = patches.filter((p) => p.op === 'remove_item').map((p) => (p.value as any).name);
+    expect(removed).toEqual(['炎心草']);
+  });
+
+  it('非制卡行业：不产素材扣减', () => {
+    const out = {
+      ...cardOutput('成功', '铁锭'),
+      craftParams: { industry: '锻造', materials: '铁锭' },
+    };
+    const patches = buildCraftPatches(out as never, null, '主角', undefined);
+    expect(patches.filter((p) => p.op === 'remove_item')).toHaveLength(0);
   });
 });

@@ -106,7 +106,7 @@ function makeRequest(marker: ItemGenRequestMarker) {
 // ========== buildItemGenPatches (纯函数) ==========
 
 describe('buildItemGenPatches', () => {
-  it('装备生成单 add_item 含 equippedSlot，M3 废除两步落库', () => {
+  it('装备生成 → 装备卡（双身份）：卡牌字段 + equippedSlot 穿戴字段并存', () => {
     const itemOutput: ItemGenOutput = {
       skills: [],
       equipment: [
@@ -132,8 +132,12 @@ describe('buildItemGenPatches', () => {
     const addItem = addPatches[0].value as any;
     // M3: 废除 id 生成，不再断言 id
     expect(addItem.name).toBe('法师长袍');
+    // 穿戴侧（双身份）：被动加成链按 equippedSlot 判定，不按 type 过滤
     expect(addItem.equippedSlot).toBe('身体');
-    expect(addItem.type).toBe('装备');
+    // 卡牌侧（2026-09-18 第二批）：type 变卡牌 + Code 推导 tier/词条
+    expect(addItem.type).toBe('卡牌');
+    expect(addItem.cardTier).toBe('白铁'); // 优良 → 白铁（品质映射表）
+    expect(addItem.词条).toContain('装备');
     expect(addItem.rarity).toBe('优良');
     expect(addItem.quantity).toBe(1);
     expect(addItem.stats).toEqual({ 防御: 60 });
@@ -158,27 +162,34 @@ describe('buildItemGenPatches', () => {
     expect((addPatches[0].value as any).rarity).toBe('普通');
   });
 
-  it('技能生成 add_skill，M3 不再补 id', () => {
+  it('技能生成 → 技能卡（add_item，不再是 add_skill）', () => {
     const itemOutput: ItemGenOutput = {
       skills: [
         {
-          name: '灼热射线',
+          name: '烈焰射线',
           description: '一道射线',
           type: 'active',
           cost: { type: 'MP', amount: 100 },
           effects: { 能量伤害: '100%' },
+          quality: '稀有',
         },
       ],
       equipment: [],
       inventory: [],
     };
     const patches = buildItemGenPatches(itemOutput, 'char-001');
-    const skillPatches = patches.filter((p) => p.op === 'add_skill');
-    expect(skillPatches).toHaveLength(1);
-    // M3: 废除 id 生成，不再断言 id
-    expect((skillPatches[0].value as any).name).toBe('灼热射线');
-    expect((skillPatches[0].value as any).type).toBe('active');
-    expect((skillPatches[0].value as any).cost).toEqual({ type: 'MP', amount: 100 });
+    // 2026-09-18 第二批：CharacterState.skills 已无战斗消费点 → 技能改产卡
+    expect(patches.filter((p) => p.op === 'add_skill')).toHaveLength(0);
+    const cardPatches = patches.filter((p) => p.op === 'add_item');
+    expect(cardPatches).toHaveLength(1);
+    const card = cardPatches[0].value as any;
+    expect(card.name).toBe('烈焰射线');
+    expect(card.type).toBe('卡牌');
+    expect(card.cardTier).toBe('青铜'); // 稀有 → 青铜
+    expect(card.词条).toContain('技能');
+    // 元素词条按关键词字面命中（deriveElements 的既有口径：「烈焰」含「火」？否——
+    // 用「火焰」一类的字面才命中；此处断言语义：词条至少含形态词，元素可缺）
+    expect(card.词条.length).toBeGreaterThanOrEqual(1);
   });
 
   it('空输出返回空 patches', () => {
@@ -257,7 +268,7 @@ describe('buildItemGenPatches', () => {
     expect(skill.modifiers[0].bonus).toBe(-4);
   });
 
-  it('🔴 回归 (2026-08-12): add_skill patch 透传 skillPower/relevantAttribute/damageType（0694453 只修了 char_gen 链，本链漏接 → 开局初始技能战斗兜底 0）', () => {
+  it('技能转卡（2026-09-18 第二批）：不再透传 skillPower 三字段（那套数值属已删除的 v3 技能链）', () => {
     const itemOutput: ItemGenOutput = {
       skills: [
         {
@@ -275,13 +286,14 @@ describe('buildItemGenPatches', () => {
       inventory: [],
     };
     const patches = buildItemGenPatches(itemOutput, 'char-001');
-    const skill = patches[0].value as any;
-    expect(skill.name).toBe('火球术');
-    // 断点: 此前只透传 modifiers/buffs/divinity/automata，三字段落库即丢 →
-    //   characterToCombatParticipant 按 typeof skillPower 过滤踢出 activeSkills
-    expect(skill.skillPower).toBe(400);
-    expect(skill.relevantAttribute).toBe('int');
-    expect(skill.damageType).toBe('能量');
+    const card = patches[0].value as any;
+    expect(card.name).toBe('火球术');
+    expect(card.type).toBe('卡牌');
+    // 技能卡的强度由卡牌品质与词条决定；skillPower/cost/cooldown 属于已删除的
+    // combat-v3 技能链（characterToCombatParticipant 已下线），透传只会留死字段
+    expect(card.skillPower).toBeUndefined();
+    expect(card.relevantAttribute).toBeUndefined();
+    expect(card.damageType).toBeUndefined();
   });
 
   it('🔴 回归 (2026-09-11): add_skill patch 透传 rarity（item_gen `<skill quality>` → 开局技能品质不丢）', () => {
@@ -298,7 +310,7 @@ describe('buildItemGenPatches', () => {
     expect(skill.rarity).toBe('优良');
   });
 
-  it('🔴 全链路 (2026-08-12): 开局技能声明 → buildItemRequestsXML → parseItemGenOutput → patch 含主体威力三字段', async () => {
+  it('🔴 全链路 (2026-09-18 改造): 开局技能声明 → buildItemRequestsXML → parseItemGenOutput → 落库为技能卡', async () => {
     // ① request_dispatcher 从 {{SKILL_STATE}} 的开局声明发 marker（bodyText 含「威力:400」原文）
     const marker: ItemGenRequestMarker = {
       type: 'item_gen_request',
@@ -329,14 +341,16 @@ describe('buildItemGenPatches', () => {
     expect(output.skills[0].skillPower).toBe(400);
     expect(output.skills[0].relevantAttribute).toBe('int');
     expect(output.skills[0].damageType).toBe('能量');
-    // ⑤ buildItemGenPatches 落库 patch 不丢三字段（断点 A 回归）
+    // ⑤ buildItemGenPatches 落库为**技能卡**（2026-09-18 第二批裁决）
+    //    解析层仍保留 power/attr/dtype（<skill> 属性照旧解析），但落库不再写 skills 字段
+    //    —— 那三字段的消费链（combat-v3）已删除，转卡后强度由品质+词条决定。
     const patches = buildItemGenPatches(output, 'char-001');
-    const skillPatch = patches.find((p) => p.op === 'add_skill');
-    expect(skillPatch).toBeDefined();
-    const value = skillPatch!.value as any;
-    expect(value.skillPower).toBe(400);
-    expect(value.relevantAttribute).toBe('int');
-    expect(value.damageType).toBe('能量');
+    expect(patches.find((p) => p.op === 'add_skill')).toBeUndefined();
+    const cardPatch = patches.find((p) => p.op === 'add_item');
+    expect(cardPatch).toBeDefined();
+    const value = cardPatch!.value as any;
+    expect(value.type).toBe('卡牌');
+    expect(value.词条).toContain('技能');
   });
 
   it('target 指向 owner 角色字符路径', () => {
@@ -355,16 +369,20 @@ describe('buildItemGenPatches', () => {
 // ========== runItemGenChain (集成) ==========
 
 describe('runItemGenChain', () => {
-  it('应从 item_gen XML 输出生成 patches（M3: 装备单 add_item 含 equippedSlot）', async () => {
+  it('应从 item_gen XML 输出生成 patches（2026-09-18: 装备/技能均落为卡）', async () => {
     const client = makeMockClient(makeItemGenXML());
     const deps: ItemGenChainDeps = { clientFactory: () => client };
     const result = await runItemGenChain(makeRequest(makeMarker()), deps);
 
-    // M3: 1 技能 + 1 装备(add_item with equippedSlot) + 1 物品 = 3 patches
+    // 2026-09-18 第二批：装备卡 + 技能卡 + 物品 = 3 个 add_item，不再有 add_skill
     expect(result.patches.length).toBe(3);
-    expect(result.patches.some((p) => p.op === 'add_skill')).toBe(true);
-    // 2 add_item: 1 equipment + 1 inventory
-    expect(result.patches.filter((p) => p.op === 'add_item')).toHaveLength(2);
+    expect(result.patches.some((p) => p.op === 'add_skill')).toBe(false);
+    expect(result.patches.filter((p) => p.op === 'add_item')).toHaveLength(3);
+    // 装备与技能都落成卡（type='卡牌'），物品保持原 type
+    const cards = result.patches
+      .filter((p) => p.op === 'add_item')
+      .map((p) => (p.value as any).type);
+    expect(cards.filter((t) => t === '卡牌')).toHaveLength(2);
     // M3: 废除 equip_item 两步模式
     expect(result.patches.filter((p) => p.op === 'equip_item')).toHaveLength(0);
   });

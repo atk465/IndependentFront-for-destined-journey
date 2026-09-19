@@ -1,12 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import {
-  collectSelectedSystemCoreWorkshopBookIds,
-  EndpointBindingError,
-  extractStoryOptions,
-  GamePipeline,
-  withImagePromptSystem,
-} from './game-pipeline';
-import type { AgentConfig, ApiEndpoint } from '@engine/types';
+import { EndpointBindingError, extractStoryOptions, GamePipeline } from './game-pipeline';
+import type { ApiEndpoint } from '@engine/types';
 import { patchAgentSettings } from '../stores/agent-settings';
 import type { AgentResult } from '@engine/types';
 
@@ -61,7 +55,6 @@ const {
   toastSpy,
   createSnapshotSpy,
   runCombatV3Mock,
-  callImagePromptAgentMock,
   summarizeAndSaveMock,
 } = vi.hoisted(() => ({
   commitSpy: vi.fn(async () => ({
@@ -76,7 +69,6 @@ const {
   ),
   toastSpy: vi.fn(),
   runCombatV3Mock: vi.fn(),
-  callImagePromptAgentMock: vi.fn(),
   summarizeAndSaveMock: vi.fn(),
 }));
 
@@ -94,28 +86,12 @@ vi.mock('@engine/combat-v3', () => ({
   runCombatV3: runCombatV3Mock,
 }));
 
-vi.mock('@engine/image-prompt-agent', () => ({
-  callImagePromptAgent: callImagePromptAgentMock,
-}));
-
 vi.mock('@engine/memory-summarizer', () => ({
   summarizeAndSave: summarizeAndSaveMock,
 }));
 
 vi.mock('../stores/ui-store', () => ({
   useUIStore: () => ({ toast: toastSpy }),
-}));
-
-// 🖼 情景插画：三档分流只关心「有没有把标记喂给 store.generate」，store 本身另有测试
-const { sceneImageStore } = vi.hoisted(() => ({
-  sceneImageStore: {
-    activeSaveId: 'save-test' as string | null,
-    generate: vi.fn(async (_input: unknown) => ({ ok: true, id: 'simg_1' }) as any),
-  },
-}));
-
-vi.mock('../stores/scene-image-store', () => ({
-  useSceneImageStore: () => sceneImageStore,
 }));
 
 // 🆕 T4：invalidatePromptSessions 的唯一职责 = 把本 pipeline 的 saveId 交给引擎清理。
@@ -183,10 +159,6 @@ function makeSettingsStore(settingsOverrides: Record<string, any> = {}) {
   return {
     settings: {
       apiPool: [],
-      // 图像生成三档开关。默认 `'manual'` 与 `getDefaults()` 一致 —— 桩里写 `'auto'`
-      // 会让每条测试用例都悄悄走上花钱那条路
-      imageGenMode: 'manual',
-      imageMaxRating: 'general',
       // Q-18: per-Agent 设置合并成一张 `agents` 表（此前是 10 张并行 map，
       // 而且这份桩少列了 agentDirty / agentHistoryLayers / agentHistorySlice ——
       // 那正是「加一张 map 要改七处」的代价）
@@ -348,54 +320,6 @@ describe('sendOpeningPrompt', () => {
   });
 });
 
-describe('buildAgentConfigs — selected system core visibility', () => {
-  it.each([408, 413, 999])(
-    'adds system_core to char_gen for any selected system-core entry (uid %s)',
-    (uid) => {
-      const pipeline = makePipeline({
-        activeSave: {
-          metadata: { enabledWorldBookEntries: [`system_core:${uid}`] },
-        },
-      });
-      const settings = (pipeline as any).settings.settings;
-      patchAgentSettings(settings, 'char_gen', {
-        worldBookEnabled: true,
-        worldBookIds: ['world_setting', 'race', 'character'],
-      });
-      patchAgentSettings(settings, 'story', {
-        worldBookEnabled: true,
-        worldBookIds: ['world_setting'],
-      });
-
-      const configs = (pipeline as any).buildAgentConfigs({ char_gen: {} });
-      const charGen = configs.find((config: any) => config.agentId === 'char_gen');
-      const story = configs.find((config: any) => config.agentId === 'story');
-
-      expect(charGen.worldBookIds).toContain('system_core');
-      expect(story.worldBookIds).toContain('system_core');
-    },
-  );
-
-  it('grants selected system/core workshop books to story and char_gen only', () => {
-    const pipeline = makePipeline();
-    const settings = (pipeline as any).settings.settings;
-    for (const agentId of ['story', 'char_gen', 'request_dispatcher']) {
-      patchAgentSettings(settings, agentId, {
-        worldBookEnabled: true,
-        worldBookIds: ['world_setting'],
-      });
-    }
-
-    const configs = (pipeline as any).buildAgentConfigs({}, undefined, ['workshop:core-project']);
-    const byId = (agentId: string) =>
-      configs.find((config: any) => config.agentId === agentId).worldBookIds;
-
-    expect(byId('story')).toContain('workshop:core-project');
-    expect(byId('char_gen')).toContain('workshop:core-project');
-    expect(byId('request_dispatcher')).not.toContain('workshop:core-project');
-  });
-});
-
 describe('buildAgentConfigs — combat_v3 侧链装配', () => {
   it('agentConfigs 包含 combat_v3，systemPrompt 来自设置覆写', () => {
     const pipeline = makePipeline();
@@ -491,49 +415,6 @@ describe('buildAgentConfigs / buildEndpoints —— Delta 会话两个配置面�
 
     expect(invalidatePromptSessionSpy).toHaveBeenCalledTimes(1);
     expect(invalidatePromptSessionSpy).toHaveBeenCalledWith('save-T4');
-  });
-});
-
-describe('collectSelectedSystemCoreWorkshopBookIds', () => {
-  it('returns only selected, enabled workshop books whose project has the system/core tag', () => {
-    const entry = (projectId: string, uid: number, enabled = true) => ({
-      uid,
-      name: projectId,
-      content: projectId,
-      enabled,
-      key: [],
-      keysecondary: [],
-      selectiveLogic: 0,
-      order: 0,
-      position: 0,
-      extra: { workshop: { projectId } },
-    });
-    const books = [
-      {
-        id: 'workshop:core-project',
-        partition: 'creative_workshop',
-        entries: [entry('core-project', 100)],
-      },
-      {
-        id: 'workshop:regular-project',
-        partition: 'creative_workshop',
-        entries: [entry('regular-project', 101)],
-      },
-      {
-        id: 'workshop:disabled-core',
-        partition: 'creative_workshop',
-        entries: [entry('disabled-core', 102, false)],
-      },
-    ] as any;
-    const projects = [
-      { id: 'core-project', tags: ['System/Core'] },
-      { id: 'regular-project', tags: ['character'] },
-      { id: 'disabled-core', tags: ['system/core'] },
-    ] as any;
-
-    expect(collectSelectedSystemCoreWorkshopBookIds(books, projects)).toEqual([
-      'workshop:core-project',
-    ]);
   });
 });
 
@@ -1115,139 +996,6 @@ vi.mock('../stores/audio-store', () => ({
   }),
 }));
 
-describe('GamePipeline — 场景配乐触发', () => {
-  function player(location: string) {
-    return { id: 'p', name: '主角', type: 'player', location, present: true };
-  }
-
-  function pipelineAt(location: string, chars: any[] = [], sceneAutoPlay = true) {
-    const p = makePipeline({
-      characters: [player(location), ...chars],
-      player: player(location),
-    });
-    (p as any).settings.settings.audioSceneAutoPlay = sceneAutoPlay;
-    return p;
-  }
-
-  beforeEach(() => {
-    audioCalls.length = 0;
-    audioStopCalls.n = 0;
-  });
-
-  it('地点变了 → 自动按地点选曲（这是场景配乐的主路径）', async () => {
-    const p = pipelineAt('大陆中东部-奥古斯提姆帝国-艾瑟嘉德');
-    (p as any).flushPendingAudio();
-    await Promise.resolve();
-    expect(audioCalls).toHaveLength(1);
-    expect(audioCalls[0].location).toBe('大陆中东部-奥古斯提姆帝国-艾瑟嘉德');
-  });
-
-  it('地点没变 → 不重选（同一地点里走动/翻面板不该反复触发）', async () => {
-    const p = pipelineAt('龙脊山脉-熔火裂谷');
-    (p as any).flushPendingAudio();
-    await Promise.resolve();
-    (p as any).flushPendingAudio();
-    await Promise.resolve();
-    expect(audioCalls).toHaveLength(1);
-  });
-
-  it('在场角色一并带上 —— 有专属主题的角色在场时打分器才可能让人物主题接管', async () => {
-    const p = pipelineAt('龙脊山脉', [
-      { id: 'n1', name: '傲雪', type: 'npc', present: true },
-      { id: 'n2', name: '不在场的人', type: 'npc', present: false },
-    ]);
-    (p as any).flushPendingAudio();
-    await Promise.resolve();
-    expect(audioCalls[0].characters).toEqual(['傲雪']);
-  });
-
-  it('AI 标记优先于地点变化 —— 它知道戏剧意图，比"地点变了"这个事实更准', async () => {
-    const p = pipelineAt('龙脊山脉');
-    (p as any).pendingAudioMarker = {
-      type: 'play_audio',
-      rawContent: '',
-      position: 0,
-      situation: '战斗',
-      mood: '紧张',
-    };
-    (p as any).flushPendingAudio();
-    await Promise.resolve();
-    expect(audioCalls).toHaveLength(1);
-    expect(audioCalls[0].situations).toContain('战斗');
-    expect(audioCalls[0].moods).toContain('紧张');
-  });
-
-  it('标记消费后清空，同一个标记不会在下一轮再播一次', async () => {
-    const p = pipelineAt('龙脊山脉');
-    (p as any).pendingAudioMarker = {
-      type: 'play_audio',
-      rawContent: '',
-      position: 0,
-      situation: '战斗',
-    };
-    (p as any).flushPendingAudio();
-    await Promise.resolve();
-    expect((p as any).pendingAudioMarker).toBeNull();
-    (p as any).flushPendingAudio(); // 地点也没变
-    await Promise.resolve();
-    expect(audioCalls).toHaveLength(1);
-  });
-
-  it('关掉开关 → 两条来源都不生效', async () => {
-    const p = pipelineAt('龙脊山脉', [], /* sceneAutoPlay */ false);
-    (p as any).pendingAudioMarker = {
-      type: 'play_audio',
-      rawContent: '',
-      position: 0,
-      situation: '战斗',
-    };
-    (p as any).flushPendingAudio();
-    await Promise.resolve();
-    expect(audioCalls).toHaveLength(0);
-  });
-
-  it('关掉开关期间照样记住地点 —— 重新打开时不会为"早就待着的地点"补播一次', async () => {
-    const p = pipelineAt('龙脊山脉', [], false);
-    (p as any).flushPendingAudio();
-    await Promise.resolve();
-    (p as any).settings.settings.audioSceneAutoPlay = true;
-    (p as any).flushPendingAudio();
-    await Promise.resolve();
-    expect(audioCalls).toHaveLength(0);
-  });
-
-  it('primeSceneAudio: 进场就起一次，并让紧接着的第一轮不再重选', async () => {
-    const p = pipelineAt('索伦蒂斯王国-潮汐王座');
-    await (p as any).primeSceneAudio();
-    expect(audioCalls).toHaveLength(1);
-    (p as any).flushPendingAudio();
-    await Promise.resolve();
-    expect(audioCalls).toHaveLength(1);
-  });
-
-  it('地点为空时什么都不做', async () => {
-    const p = pipelineAt('');
-    (p as any).flushPendingAudio();
-    await Promise.resolve();
-    await (p as any).primeSceneAudio();
-    expect(audioCalls).toHaveLength(0);
-  });
-
-  it('action="stop" 停止播放而不是选曲', async () => {
-    const p = pipelineAt('龙脊山脉');
-    (p as any).pendingAudioMarker = {
-      type: 'play_audio',
-      rawContent: '',
-      position: 0,
-      action: 'stop',
-    };
-    (p as any).flushPendingAudio();
-    await Promise.resolve();
-    expect(audioStopCalls.n).toBe(1);
-    expect(audioCalls).toHaveLength(0);
-  });
-});
-
 // ============================================================================
 // 工坊 P2 (ADR-30 D5) — EJS vars 差量提交 + 体积护栏
 // ============================================================================
@@ -1404,943 +1152,20 @@ describe('flushEjsVarsDiffs — EJS vars 差量提交 (工坊 P2 / D5)', () => {
 // 🖼 方言 systemPrompt 注入（图像 v2 / C3·C5）
 // ═══════════════════════════════════════════════════════════
 
-describe('withImagePromptSystem', () => {
-  function cfg(over: Partial<AgentConfig> = {}): AgentConfig {
-    return {
-      agentId: 'image_prompt',
-      enabled: true,
-      apiEndpointId: 'ep_1',
-      model: 'gpt-x',
-      temperature: 0.3,
-      maxTokens: 4096,
-      topP: 0.9,
-      frequencyPenalty: 0.1,
-      presencePenalty: 0.2,
-      retryOnFail: true,
-      timeout: 120000,
-      userId: 'fp|save|image_prompt',
-      promptTemplate: { fixedSystem: '', fixedExamples: '' },
-      worldBookIds: ['book_a'],
-      systemPrompt: '老的那份',
-      ...over,
-    };
-  }
-
-  it('🔴 只换 systemPrompt，模型与采样旋钮**一格不动**', () => {
-    const configs = [cfg({ agentId: 'story', systemPrompt: 'story 的' }), cfg()];
-    const out = withImagePromptSystem(configs, '方言写的');
-
-    const image = out.find((c) => c.agentId === 'image_prompt');
-    expect(image?.systemPrompt).toBe('方言写的');
-    // 新造一条顶掉原来的，用户在设置页调的模型与采样参数就全部静默回落成缺省
-    expect(image?.model).toBe('gpt-x');
-    expect(image?.temperature).toBe(0.3);
-    expect(image?.maxTokens).toBe(4096);
-    expect(image?.topP).toBe(0.9);
-    expect(image?.frequencyPenalty).toBe(0.1);
-    expect(image?.presencePenalty).toBe(0.2);
-    expect(image?.worldBookIds).toEqual(['book_a']);
-    // 别人的 config 一个字节不动
-    expect(out.find((c) => c.agentId === 'story')?.systemPrompt).toBe('story 的');
-    // 原数组不被就地改写（调用方还拿着 chainData 那一份）
-    expect(configs[1].systemPrompt).toBe('老的那份');
-  });
-
-  it('不传覆盖 = 原样返回（走 agent-config / 模板兜底，即图像 v1 行为）', () => {
-    const configs = [cfg()];
-    expect(withImagePromptSystem(configs, undefined)[0].systemPrompt).toBe('老的那份');
-    expect(withImagePromptSystem(configs, '')[0].systemPrompt).toBe('老的那份');
-  });
-
-  it('🔴 只剩空白的覆盖照样当没有 —— 否则整段提示词变成一个空格，且不报错', () => {
-    // 设置页今天不再写下这种值（判空前先 trim），但老档里可能躺着一份
-    const configs = [cfg()];
-    expect(withImagePromptSystem(configs, ' ')[0].systemPrompt).toBe('老的那份');
-    expect(withImagePromptSystem(configs, '\n\t ')[0].systemPrompt).toBe('老的那份');
-  });
-
-  it('configs 里没有 image_prompt 时补一条（宁可多一条，也不让方言静默失效）', () => {
-    const out = withImagePromptSystem([cfg({ agentId: 'story' })], '方言写的');
-    expect(out).toHaveLength(2);
-    expect(out[1]).toMatchObject({ agentId: 'image_prompt', systemPrompt: '方言写的' });
-  });
-});
-
-describe('runImagePromptAgent — activity ledger', () => {
-  beforeEach(() => {
-    callImagePromptAgentMock.mockReset();
-  });
-
-  it('registers and settles a standalone image_prompt step around the Agent call', async () => {
-    const gameStore = makeGameStore();
-    const pipeline = new GamePipeline({
-      gameStore,
-      settingsStore: makeSettingsStore({
-        apiPool: [{ id: 'ep-image', name: 'image', model: 'image-model' }],
-      }),
-      saveId: 'save-test',
-    });
-    (pipeline as any).ensureChainData = vi.fn(async () => ({
-      agentConfigs: [],
-      worldBooks: [],
-      presets: [],
-    }));
-    callImagePromptAgentMock.mockResolvedValue({
-      ok: true,
-      value: {
-        scenePrompt: 'moonlit tavern',
-        sceneNegative: '',
-        desc: '月下旅店',
-      },
-    });
-
-    await pipeline.runImagePromptAgent({
-      intent: '月下的旅店',
-      characters: [],
-      narrative: '旅店安静地立在月色里。',
-      rating: 'general',
-    });
-
-    expect(gameStore.startAgentActivityRun).toHaveBeenCalledWith(undefined, true);
-    expect(gameStore.updateAgentStatus).toHaveBeenCalledWith('image_prompt', 'activity-test');
-    expect(callImagePromptAgentMock).toHaveBeenCalledOnce();
-    expect(gameStore.clearAgentStatus).toHaveBeenCalledWith(
-      'image_prompt',
-      undefined,
-      'activity-test',
-    );
-  });
-
-  it("keeps an older turn's callbacks bound to their original activity run", () => {
-    const gameStore = makeGameStore();
-    const pipeline = new GamePipeline({
-      gameStore,
-      settingsStore: makeSettingsStore(),
-      saveId: 'save-test',
-    });
-    const events = (pipeline as any).buildEventHandlers('activity-old');
-
-    // abort() unlocks input immediately, so a newer turn can own the instance before
-    // the older callbacks finish. Those late callbacks must not land in the new ledger.
-    (pipeline as any).activeRunId = 'activity-new';
-    events.onAgentStart('story', { apiEndpointId: 'ep-story', model: 'story-model' });
-    events.onToolCall('story', 'lookup_lore', { name: '旧城' }, { found: true });
-    events.onAgentError('story', '已取消');
-
-    expect(gameStore.updateAgentStatus).toHaveBeenCalledWith('story', 'activity-old');
-    expect(gameStore.recordAgentToolActivity).toHaveBeenCalledWith(
-      'story',
-      'lookup_lore',
-      { name: '旧城' },
-      { found: true },
-      'activity-old',
-    );
-    expect(gameStore.clearAgentStatus).toHaveBeenCalledWith('story', '已取消', 'activity-old');
-  });
-
-  it('preserves the completed provider payload when completion handling later fails', () => {
-    const gameStore = makeGameStore();
-    const pipeline = new GamePipeline({
-      gameStore,
-      settingsStore: makeSettingsStore(),
-      saveId: 'save-test',
-    });
-    const events = (pipeline as any).buildEventHandlers('activity-failed');
-    const result = {
-      ...makeResult('story', 'billable response'),
-      requestMessages: [{ role: 'user', content: 'billable request' }],
-      tokensUsed: 73,
-      duration: 42,
-      error: 'completion handler failed',
-    };
-
-    events.onAgentStart('story', { apiEndpointId: 'ep-story', model: 'story-model' });
-    events.onAgentError('story', result.error, result);
-
-    expect(gameStore.addAgentLogEntry).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        messages: result.requestMessages,
-        rawResponse: 'billable response',
-        tokensUsed: 73,
-        duration: 42,
-        error: 'completion handler failed',
-      }),
-    );
-  });
-
-  it('records memory-summary embedding usage as its own billable invocation', async () => {
-    const gameStore = makeGameStore();
-    const settingsStore = makeSettingsStore({
-      embeddingEndpointId: 'ep-embedding',
-      embeddingModel: 'embed-model',
-      apiPool: [
-        {
-          id: 'ep-embedding',
-          name: 'Embedding API',
-          baseUrl: 'https://api.example.test/v1',
-          apiKey: 'secret',
-          defaultModel: 'fallback-model',
-        },
-      ],
-    });
-    summarizeAndSaveMock.mockImplementationOnce(async (options: any) => {
-      options.onEmbeddingRequest({
-        input: 'summary embedding input',
-        model: 'embed-model',
-        baseUrl: 'https://api.example.test/v1',
-        startedAt: 100,
-        completedAt: 125,
-        promptTokens: 11,
-        totalTokens: 11,
-        dimensions: 1536,
-      });
-      return null;
-    });
-    const pipeline = new GamePipeline({ gameStore, settingsStore, saveId: 'save-test' });
-
-    await (pipeline as any).persistMemorySummary(
-      makeResult('memory_summary', '{"content":"summary"}'),
-      'activity-embedding',
-    );
-
-    expect(gameStore.addAgentLogEntry).toHaveBeenCalledWith(
-      expect.objectContaining({
-        turnId: 'activity-embedding',
-        agentId: 'memory_embedding',
-        model: 'embed-model',
-        messages: [{ role: 'user', content: 'summary embedding input' }],
-        tokensUsed: 11,
-        promptTokens: 11,
-      }),
-    );
-  });
-});
-
 // ═══════════════════════════════════════════════════════════
 // 🖼 情景插画：三档分流（图像生成 §8 / D15 / D21 / D32 / D48）
 // ═══════════════════════════════════════════════════════════
-
-describe('handleSceneImages — 三档分流', () => {
-  /** 让管线以为「story 刚产出了这条消息」，即 D15 那个唯一的开火时机 */
-  async function primeStory(pipeline: any, narrative: string, mode = 'auto'): Promise<void> {
-    pipeline.settings.settings.imageGenMode = mode;
-    await pipeline.handleAgentResult(makeResult('story', `<maintext>${narrative}</maintext>`));
-  }
-
-  const oneMarker =
-    '夜色渐深。<scene_image title="炉火" characters="苏婉">她望着壁炉</scene_image>';
-
-  beforeEach(() => {
-    sceneImageStore.activeSaveId = 'save-test';
-    sceneImageStore.generate.mockClear();
-    sceneImageStore.generate.mockImplementation(async () => ({ ok: true, id: 'simg_1' }));
-  });
-
-  it('auto：逐个标记进 store.generate，带上 messageId/turn/occurrence 与剥净的正文', async () => {
-    const pipeline: any = makePipeline();
-    await primeStory(pipeline, oneMarker);
-
-    await pipeline.handleSceneImages([{ type: 'scene_image' }]);
-
-    expect(sceneImageStore.generate).toHaveBeenCalledTimes(1);
-    const input = sceneImageStore.generate.mock.calls[0][0] as any;
-    expect(input).toMatchObject({
-      saveId: 'save-test',
-      messageId: 'msg_stub',
-      turn: 1,
-      anchorKind: 'marker',
-      occurrence: 0,
-      source: 'auto',
-      title: '炉火',
-      characters: ['苏婉'],
-      intent: '她望着壁炉',
-    });
-    // 侧链拿到的是**剥掉全部标记**的正文
-    expect(input.narrative).toBe('夜色渐深。');
-  });
-
-  it('auto：occurrence 与渲染分段同源 —— 空正文的标记照剥但不占号', async () => {
-    const pipeline: any = makePipeline();
-    await primeStory(
-      pipeline,
-      `A<scene_image title="空"></scene_image>B<scene_image title="甲">画面甲</scene_image>` +
-        `C<scene_image title="乙">画面乙</scene_image>`,
-    );
-
-    await pipeline.handleSceneImages([{ type: 'scene_image' }]);
-
-    const calls = sceneImageStore.generate.mock.calls.map((c: any[]) => c[0]);
-    expect(calls.map((c) => c.occurrence)).toEqual([0, 1]);
-    expect(calls.map((c) => c.title)).toEqual(['甲', '乙']);
-  });
-
-  it('manual / off：一次都不建记录（点了才花钱 / 这个子系统不存在）', async () => {
-    for (const mode of ['manual', 'off']) {
-      sceneImageStore.generate.mockClear();
-      const pipeline: any = makePipeline();
-      await primeStory(pipeline, oneMarker, mode);
-      await pipeline.handleSceneImages([{ type: 'scene_image' }]);
-      expect(sceneImageStore.generate).not.toHaveBeenCalled();
-    }
-  });
-
-  it('🔴 D15：没有「刚产出的那条消息」就绝不开火（历史消息不会走到这里）', async () => {
-    const pipeline: any = makePipeline();
-    pipeline.settings.settings.imageGenMode = 'auto';
-
-    await pipeline.handleSceneImages([{ type: 'scene_image' }]);
-
-    expect(sceneImageStore.generate).not.toHaveBeenCalled();
-  });
-
-  it('🔴 D15：每轮 run() 开头清空上一轮的消息，标记不会挂到隔壁回合去', async () => {
-    const pipeline: any = makePipeline();
-    await primeStory(pipeline, oneMarker);
-    expect(pipeline.lastStoryMessage).not.toBeNull();
-
-    // run() 的重置在 try 内很靠前；这里直接验字段本身的语义
-    pipeline.lastStoryMessage = null;
-    await pipeline.handleSceneImages([{ type: 'scene_image' }]);
-    expect(sceneImageStore.generate).not.toHaveBeenCalled();
-  });
-
-  it('🔴 D21：限额拒绝时什么都不做，同一条消息里剩下的标记照样各自判定', async () => {
-    sceneImageStore.generate.mockImplementation(async () => ({
-      ok: false,
-      reason: 'rolling-window',
-      message: '已达本小时上限',
-    }));
-    const pipeline: any = makePipeline();
-    await primeStory(
-      pipeline,
-      `<scene_image title="甲">画面甲</scene_image><scene_image title="乙">画面乙</scene_image>`,
-    );
-
-    await expect(pipeline.handleSceneImages([{ type: 'scene_image' }])).resolves.toBeUndefined();
-    // 被拒不等于放弃后面那个：每个标记各自过闸门（拒了只是落到「无记录」那一格）
-    expect(sceneImageStore.generate).toHaveBeenCalledTimes(2);
-  });
-
-  it('一个标记入队抛错不牵连同一条消息里的其它标记', async () => {
-    sceneImageStore.generate
-      .mockImplementationOnce(async () => {
-        throw new Error('boom');
-      })
-      .mockImplementationOnce(async () => ({ ok: true, id: 'simg_2' }));
-    const pipeline: any = makePipeline();
-    await primeStory(
-      pipeline,
-      `<scene_image title="甲">画面甲</scene_image><scene_image title="乙">画面乙</scene_image>`,
-    );
-
-    await pipeline.handleSceneImages([{ type: 'scene_image' }]);
-    expect(sceneImageStore.generate).toHaveBeenCalledTimes(2);
-  });
-
-  it('插画库还没载入本存档时不开火（切存档途中不该在别处花钱）', async () => {
-    sceneImageStore.activeSaveId = 'another-save';
-    const pipeline: any = makePipeline();
-    await primeStory(pipeline, oneMarker);
-
-    await pipeline.handleSceneImages([{ type: 'scene_image' }]);
-    expect(sceneImageStore.generate).not.toHaveBeenCalled();
-  });
-
-  it('标记没写 rating 时取设置里的上限档（D38 的另一半）', async () => {
-    const pipeline: any = makePipeline({}, { imageMaxRating: 'sensitive' });
-    await primeStory(pipeline, oneMarker);
-
-    await pipeline.handleSceneImages([{ type: 'scene_image' }]);
-    expect((sceneImageStore.generate.mock.calls[0][0] as any).rating).toBe('sensitive');
-  });
-});
 
 // ===== T16：combat_v3 玩家输入桥时序 + pre-combat 快照 =====
 // 设计 2026-08-09 §3.5：handleCombatTriggerV3 必须在 `await runCombatV3(...)` **之前**
 // setCombatCoordinator —— 此前句柄在战斗结束后才挂，waitForCommand（玩家首决策）永远
 // 没人 resolve（T15 确认的「面板不弹」疑似根因）。顺带验证 pre-combat 快照在开战前打上。
-describe('T16 combat_v3 玩家输入桥时序 + pre-combat 快照', () => {
-  /** 最小 player 角色桩（characterToCombatParticipant 消费的字段） */
-  function playerCharStub() {
-    return {
-      id: 'hero',
-      name: '理查德',
-      type: 'player',
-      tier: 1,
-      level: 1,
-      attributes: { str: 5, dex: 5, con: 5, int: 5, spi: 5 },
-      hp: 100,
-      maxHp: 100,
-      mp: 50,
-      maxMp: 50,
-      sp: 50,
-      maxSp: 50,
-      inventory: [],
-      skills: [],
-      statusEffects: [],
-    };
-  }
-
-  beforeEach(() => {
-    runCombatV3Mock.mockReset();
-    createSnapshotSpy.mockClear();
-  });
-
-  it('F2：检出 → 只弹就绪面板（不 runCombatV3）→ 点开始 → startCombatV3 真开打（句柄先挂、pre-combat 快照已打）', async () => {
-    // 句柄形状照 game-store 的 combatCoordinator（submit/abandon/waitForCommand/preSnapshotId/restart/start）
-    // 🔴 用 holder 对象而不是裸 let：直接 `coordinatorHandle = h` 会让 TS 的 CFA 把变量收窄
-    //    成回调参数的类型（甚至 never），属性访问跟着报错。
-    const holder: {
-      handle: {
-        submit?: (c: never) => Promise<void>;
-        waitForCommand?: () => Promise<never>;
-        preSnapshotId?: string | null;
-        start?: () => Promise<void>;
-      } | null;
-    } = { handle: null };
-
-    const gameStore = makeGameStore({
-      characters: [playerCharStub()],
-      enterCombat: vi.fn(),
-      exitCombat: vi.fn(),
-      applyCombatEvent: vi.fn(),
-      updateAgentStatus: vi.fn(),
-      clearAgentStatus: vi.fn(),
-      setCombatCoordinator: vi.fn((h: unknown) => (holder.handle = h as never)),
-      addMessage: vi.fn(),
-      // totalTurns=3 → pre-combat 快照 turn 应为 3（照 advanceTurn 先例：已完成回合数 = 当前回合）
-      activeSave: { id: 's', metadata: { totalTurns: 3 } },
-    });
-    const pipeline = makePipeline(gameStore, {
-      apiPool: [{ id: 'ep1', name: 'ep', model: 'm' }],
-    });
-
-    // fake runCombatV3：断言时序（句柄已挂）+ 用句柄完成一次「等待 → 提交」往返
-    runCombatV3Mock.mockImplementation(async () => {
-      // 🔴 时序修复契约：战斗进行中 coordinator 句柄已在 store 上
-      expect(holder.handle).not.toBeNull();
-      // 模拟玩家回合：waitForCommand 挂起 → handle.submit 喂入 → resolve
-      const p = holder.handle!.waitForCommand!();
-      await holder.handle!.submit!({
-        commandId: 'ui-1',
-        expectedRevision: 0,
-        kind: 'PassAttack',
-        actorId: '甲',
-        cost: 'attack',
-        payload: {},
-      } as never);
-      await p;
-      return {
-        narrativeSummary: 'ok',
-        patches: [],
-        totalExp: 0,
-        totalFp: 0,
-        loot: [],
-        rounds: 1,
-        outcome: 'ally_win',
-      };
-    });
-
-    // ① combat_trigger 检出 → 只弹就绪面板：v3_combat_ready 投进 store、**不 runCombatV3**
-    const readyResult = await (pipeline as any).handleCombatTrigger(
-      { combatType: '标准', allies: '理查德', enemies: '骷髅' } as never,
-      '',
-    );
-    expect(readyResult).toBeNull();
-    expect(runCombatV3Mock).not.toHaveBeenCalled();
-    expect(gameStore.applyCombatEvent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: 'v3_combat_ready',
-        combatType: '标准',
-        allies: ['理查德'],
-        enemies: ['骷髅'],
-      }),
-    );
-    // 就绪期占位句柄：只有 start（store.startCombat 调它），submit/waitForCommand 还没挂
-    expect(typeof holder.handle?.start).toBe('function');
-    expect(holder.handle?.submit).toBeUndefined();
-
-    // ② 玩家点「开始战斗」→ store.startCombat → 占位句柄 start → startCombatV3 真开打
-    await holder.handle!.start!();
-
-    // 时序修复：完整句柄（submit/waitForCommand/...）在 runCombatV3 之前已挂（fake 内部断言成立）
-    expect(gameStore.setCombatCoordinator).toHaveBeenCalledTimes(2); // 占位 + 完整
-    // pre-combat 快照：createSnapshot('pre-combat', 当前回合数)
-    expect(createSnapshotSpy).toHaveBeenCalledWith('pre-combat', 3);
-    expect(holder.handle?.preSnapshotId).toBe('snap-pre-combat');
-    // 终局后的清理仍在 runCombatV3 完成之后执行（顺序未被提前破坏）
-    expect(gameStore.exitCombat).toHaveBeenCalled();
-  });
-
-  it('🔴 2026-08-13 真机 debug：战斗终局落库后回读 store（refreshFromDb）—— 满血假象修复', async () => {
-    // 战斗链路（store.startCombat → startCombatV3）不经过 run() 的 finally，
-    // 终局 commitChatState 只写 Dexie；不回读的话 HUD 一直显示开战前的血量/经验。
-    const holder: { handle: { start?: () => Promise<void> } | null } = { handle: null };
-    const gameStore = makeGameStore({
-      characters: [playerCharStub()],
-      enterCombat: vi.fn(),
-      exitCombat: vi.fn(),
-      applyCombatEvent: vi.fn(),
-      updateAgentStatus: vi.fn(),
-      clearAgentStatus: vi.fn(),
-      setCombatCoordinator: vi.fn((h: unknown) => (holder.handle = h as never)),
-      awaitCombatSummaryReview: vi.fn(async (p: { summaryText: string }) => p.summaryText),
-      activeSave: { id: 's', metadata: { totalTurns: 1 } },
-    });
-    runCombatV3Mock.mockResolvedValue({
-      narrativeSummary: 'ok',
-      patches: [],
-      totalExp: 2,
-      totalFp: 0,
-      loot: [],
-      rounds: 1,
-      outcome: 'ally_win',
-    });
-    const pipeline = new GamePipeline({
-      gameStore,
-      settingsStore: makeSettingsStore({ apiPool: [{ id: 'ep1', name: 'ep', model: 'm' }] }),
-      saveId: 'save-test',
-    });
-
-    await (pipeline as any).handleCombatTrigger(
-      { combatType: '标准', allies: '理查德', enemies: '骷髅' } as never,
-      '',
-    );
-    (gameStore.refreshFromDb as ReturnType<typeof vi.fn>).mockClear();
-    await holder.handle!.start!();
-
-    // 终局落库后回读了 store（HUD 血量/经验可见）
-    expect(gameStore.refreshFromDb).toHaveBeenCalledTimes(1);
-
-    // COR-02：存档已切走时不回读（给别人的存档跑刷新没有意义）
-    (gameStore.refreshFromDb as ReturnType<typeof vi.fn>).mockClear();
-    await (pipeline as any).handleCombatTrigger(
-      { combatType: '标准', allies: '理查德', enemies: '骷髅' } as never,
-      '',
-    );
-    gameStore.activeSaveId = 'another-save';
-    await holder.handle!.start!();
-    expect(gameStore.refreshFromDb).not.toHaveBeenCalled();
-  });
-
-  it('🔴 需求 D（2026-08-13）：终局先弹结算确认 → 玩家编辑后的文本注入正文；aborted 不弹确认', async () => {
-    const holder: { handle: { start?: () => Promise<void> } | null } = { handle: null };
-    const gameStore = makeGameStore({
-      characters: [playerCharStub()],
-      enterCombat: vi.fn(),
-      exitCombat: vi.fn(),
-      applyCombatEvent: vi.fn(),
-      updateAgentStatus: vi.fn(),
-      clearAgentStatus: vi.fn(),
-      setCombatCoordinator: vi.fn((h: unknown) => (holder.handle = h as never)),
-      addMessage: vi.fn((content: string, role: string) => ({
-        id: 'msg_stub',
-        role,
-        content,
-        timestamp: 0,
-        turn: 1,
-      })),
-      awaitCombatSummaryReview: vi.fn(async () => '玩家改过的战斗总结'),
-      activeSave: { id: 's', metadata: { totalTurns: 7 } },
-    });
-    const pipeline = new GamePipeline({
-      gameStore,
-      settingsStore: makeSettingsStore({ apiPool: [{ id: 'ep1', name: 'ep', model: 'm' }] }),
-      saveId: 'save-test',
-    });
-
-    // ① 正常终局：确认框收到结算数据，注入的是**编辑后**的文本
-    runCombatV3Mock.mockResolvedValue({
-      narrativeSummary: 'AI 原始摘要',
-      patches: [],
-      totalExp: 2,
-      totalFp: 5,
-      loot: [],
-      rounds: 2,
-      outcome: 'ally_win',
-    });
-    await (pipeline as any).handleCombatTrigger(
-      { combatType: '标准', allies: '理查德', enemies: '骷髅' } as never,
-      '',
-    );
-    await holder.handle!.start!();
-    expect(gameStore.awaitCombatSummaryReview).toHaveBeenCalledWith(
-      expect.objectContaining({ totalExp: 2, outcome: 'ally_win', summaryText: 'AI 原始摘要' }),
-    );
-    expect(gameStore.addMessage).toHaveBeenCalledWith(
-      '【战斗摘要】玩家改过的战斗总结',
-      'assistant',
-    );
-    // B：最近已结算战斗被记录（{{RECENT_COMBAT}} 数据源），含名单与回合数
-    expect((pipeline as any).buildContext('输入').recentCombat).toEqual({
-      allies: ['理查德'],
-      enemies: ['骷髅'],
-      outcome: 'ally_win',
-      endedAtTurn: 7,
-    });
-    // 确认之后才收面板
-    expect(gameStore.exitCombat).toHaveBeenCalled();
-
-    // ② 放弃的战斗（aborted）：不弹确认、不注入、不记录已结算
-    (gameStore.awaitCombatSummaryReview as ReturnType<typeof vi.fn>).mockClear();
-    (gameStore.addMessage as ReturnType<typeof vi.fn>).mockClear();
-    (gameStore.exitCombat as ReturnType<typeof vi.fn>).mockClear();
-    runCombatV3Mock.mockResolvedValue({
-      narrativeSummary: '战斗被放弃（M2 coordinator abandon）',
-      patches: [],
-      totalExp: 0,
-      totalFp: 0,
-      loot: [],
-      rounds: 1,
-      outcome: 'draw',
-      aborted: true,
-    });
-    await (pipeline as any).handleCombatTrigger(
-      { combatType: '标准', allies: '理查德', enemies: '骷髅' } as never,
-      '',
-    );
-    await holder.handle!.start!();
-    expect(gameStore.awaitCombatSummaryReview).not.toHaveBeenCalled();
-    expect(gameStore.addMessage).not.toHaveBeenCalled();
-    // aborted 未覆盖上一次的记录（仍然只有第一场的记录）
-    expect((pipeline as any)._recentCombat.outcome).toBe('ally_win');
-  });
-
-  it('无活跃存档回合数时 pre-combat 快照 turn 兜底 0（不阻塞开战）', async () => {
-    const holder: { handle: { start?: () => Promise<void> } | null } = { handle: null };
-    const gameStore = makeGameStore({
-      characters: [playerCharStub()],
-      enterCombat: vi.fn(),
-      exitCombat: vi.fn(),
-      applyCombatEvent: vi.fn(),
-      updateAgentStatus: vi.fn(),
-      clearAgentStatus: vi.fn(),
-      setCombatCoordinator: vi.fn((h: unknown) => (holder.handle = h as never)),
-      addMessage: vi.fn(),
-      activeSave: null, // activeSave 缺省 → 回合数兜底 0
-    });
-    const pipeline = makePipeline(gameStore, {
-      apiPool: [{ id: 'ep1', name: 'ep', model: 'm' }],
-    });
-    runCombatV3Mock.mockResolvedValue({
-      narrativeSummary: 'ok',
-      patches: [],
-      totalExp: 0,
-      totalFp: 0,
-      loot: [],
-      rounds: 1,
-      outcome: 'ally_win',
-    });
-
-    await (pipeline as any).handleCombatTrigger(
-      { combatType: '标准', allies: '理查德', enemies: '骷髅' } as never,
-      '',
-    );
-    await holder.handle!.start!();
-
-    expect(createSnapshotSpy).toHaveBeenCalledWith('pre-combat', 0);
-  });
-});
 
 // ══════════════════════════════════════════════════════════════════════════════
 // T2（2026-08-10）：handleCombatTriggerV3 向 runCombatV3 传模板系统上下文 ——
 // combatBrief（marker 组装）/ 过滤后的世界书（world_setting + race + system_core）/
 // userInput / storyOutput / history。全部可选，缺省不崩。
 // ══════════════════════════════════════════════════════════════════════════════
-describe('T2 combat_v3 模板系统上下文传参', () => {
-  /** 最小 player 角色桩（characterToCombatParticipant 消费的字段） */
-  function playerCharStub() {
-    return {
-      id: 'hero',
-      name: '理查德',
-      type: 'player',
-      tier: 1,
-      level: 1,
-      attributes: { str: 5, dex: 5, con: 5, int: 5, spi: 5 },
-      hp: 100,
-      maxHp: 100,
-      mp: 50,
-      maxMp: 50,
-      sp: 50,
-      maxSp: 50,
-      inventory: [],
-      skills: [],
-      statusEffects: [],
-    };
-  }
-
-  function combatGameStore(holder?: { handle: { start?: () => Promise<void> } | null }) {
-    return makeGameStore({
-      characters: [playerCharStub()],
-      enterCombat: vi.fn(),
-      exitCombat: vi.fn(),
-      applyCombatEvent: vi.fn(),
-      updateAgentStatus: vi.fn(),
-      clearAgentStatus: vi.fn(),
-      setCombatCoordinator: holder ? vi.fn((h: unknown) => (holder.handle = h as never)) : vi.fn(),
-      addMessage: vi.fn(),
-    });
-  }
-
-  beforeEach(() => {
-    runCombatV3Mock.mockReset();
-    createSnapshotSpy.mockClear();
-  });
-
-  it('组装 combatBrief + 过滤世界书（只留 world_setting/race/system_core）+ 透传 userInput/storyOutput/history', async () => {
-    const holder: { handle: { start?: () => Promise<void> } | null } = { handle: null };
-    const gameStore = combatGameStore(holder);
-    const pipeline = makePipeline(gameStore, {
-      apiPool: [{ id: 'ep1', name: 'ep', model: 'm' }],
-    });
-    // chainData：pipeline 侧取世界书的来源（含一个工坊书、一个 extra_setting 书，应被过滤掉）
-    (pipeline as any).chainData = {
-      agentConfigs: [],
-      presets: [],
-      worldBooks: [
-        { id: 'wb_setting', name: '世界观', partition: 'world_setting', entries: [] },
-        { id: 'wb_race', name: '种族', partition: 'race', entries: [] },
-        { id: 'wb_core', name: '核心', partition: 'system_core', entries: [] },
-        { id: 'wb_extra', name: '额外设定', partition: 'extra_setting', entries: [] },
-        { id: 'wb_ws', name: '工坊', partition: 'creative_workshop', entries: [] },
-      ],
-    };
-    // currentContext：本轮玩家输入 + 最近对话（startCombatV3 优先用它）
-    (pipeline as any).currentContext = {
-      userInput: '我走进竞技场，向冠军发起挑战',
-      history: [
-        { role: 'user', content: '我走进竞技场，向冠军发起挑战' },
-        { role: 'assistant', content: '大门缓缓打开' },
-      ],
-      worldBooks: [],
-      characters: [],
-      variables: {},
-      plotEvents: [],
-      memories: [],
-      agentOutputs: new Map(),
-    };
-
-    let captured: Record<string, any> | null = null;
-    runCombatV3Mock.mockImplementation(async (opts: Record<string, any>) => {
-      captured = opts;
-      return {
-        narrativeSummary: 'ok',
-        patches: [],
-        totalExp: 0,
-        totalFp: 0,
-        loot: [],
-        rounds: 1,
-        outcome: 'ally_win',
-      };
-    });
-
-    // F2：检出只弹就绪 → 点开始（holder.handle.start）才真开打（storyOutput 经就绪闭包传入）
-    await (pipeline as any).handleCombatTrigger(
-      {
-        combatType: '死斗',
-        environment: '竞技场',
-        bodyText: '决一死战',
-        allies: '理查德',
-        enemies: '冠军',
-      } as never,
-      '理查德推开了竞技场的大门，冠军早已等候。',
-    );
-    expect(runCombatV3Mock).not.toHaveBeenCalled();
-    await holder.handle!.start!();
-
-    expect(captured).not.toBeNull();
-    // combatBrief：从 marker 组装（战斗类型｜环境｜正文）
-    expect(captured!.deps.combatBrief).toBe('战斗类型: 死斗｜环境: 竞技场｜决一死战');
-    // combatRoster：从 marker 的 allies/enemies 组装（我方｜敌方）
-    expect(captured!.deps.combatRoster).toBe('我方: 理查德；敌方: 冠军');
-    // worldBooks：只保留 world_setting / race / system_core 三区
-    expect(captured!.deps.worldBooks.map((b: { id: string }) => b.id)).toEqual([
-      'wb_setting',
-      'wb_race',
-      'wb_core',
-    ]);
-    // userInput / storyOutput / history 透传
-    expect(captured!.deps.userInput).toBe('我走进竞技场，向冠军发起挑战');
-    expect(captured!.deps.storyOutput).toBe('理查德推开了竞技场的大门，冠军早已等候。');
-    expect(captured!.deps.history).toHaveLength(2);
-  });
-
-  it('marker 缺 environment/bodyText → combatBrief 走缺省（战斗类型: 标准），chainData 缺省 → worldBooks 空数组不崩', async () => {
-    const holder: { handle: { start?: () => Promise<void> } | null } = { handle: null };
-    const gameStore = combatGameStore(holder);
-    const pipeline = makePipeline(gameStore, {
-      apiPool: [{ id: 'ep1', name: 'ep', model: 'm' }],
-    });
-    // 不设 chainData / currentContext —— 缺省兜底路径
-
-    let captured: Record<string, any> | null = null;
-    runCombatV3Mock.mockImplementation(async (opts: Record<string, any>) => {
-      captured = opts;
-      return {
-        narrativeSummary: 'ok',
-        patches: [],
-        totalExp: 0,
-        totalFp: 0,
-        loot: [],
-        rounds: 1,
-        outcome: 'ally_win',
-      };
-    });
-
-    await (pipeline as any).handleCombatTrigger(
-      { combatType: '标准', allies: '理查德', enemies: '骷髅' } as never,
-      '',
-    );
-    await holder.handle!.start!();
-
-    expect(captured).not.toBeNull();
-    // 缺省字段照任务格式拼装（环境/正文为空段仍占位）
-    expect(captured!.deps.combatBrief).toBe('战斗类型: 标准｜环境: ｜');
-    // 有名单声明 → combatRoster 照拼
-    expect(captured!.deps.combatRoster).toBe('我方: 理查德；敌方: 骷髅');
-    // chainData 缺省 → 空数组（不 undefined、不崩）
-    expect(Array.isArray(captured!.deps.worldBooks)).toBe(true);
-    expect(captured!.deps.worldBooks).toHaveLength(0);
-  });
-
-  it('无 allies/enemies 名单声明 → combatRoster 空串（coordinator 落「（无参战方名单）」占位，不臆造名单）', async () => {
-    const holder: { handle: { start?: () => Promise<void> } | null } = { handle: null };
-    const gameStore = combatGameStore(holder);
-    const pipeline = makePipeline(gameStore, {
-      apiPool: [{ id: 'ep1', name: 'ep', model: 'm' }],
-    });
-
-    let captured: Record<string, any> | null = null;
-    runCombatV3Mock.mockImplementation(async (opts: Record<string, any>) => {
-      captured = opts;
-      return {
-        narrativeSummary: 'ok',
-        patches: [],
-        totalExp: 0,
-        totalFp: 0,
-        loot: [],
-        rounds: 1,
-        outcome: 'ally_win',
-      };
-    });
-
-    await (pipeline as any).handleCombatTrigger({ combatType: '标准' } as never, '');
-    await holder.handle!.start!();
-
-    expect(captured).not.toBeNull();
-    expect(captured!.deps.combatRoster).toBe('');
-  });
-
-  // 🔴 2026-08-10 真机 debug：combat_trigger 声明 allies/enemies 名单后，
-  // 名单外的角色（我方旁观 NPC 客栈掌柜奥斯瓦尔德·狼牙）曾被当敌方拉进战斗面板。
-  it('F3：名单声明时只拉名单内角色 + player 本体：名单外旁观 NPC 不进 participants', async () => {
-    const holder: { handle: { start?: () => Promise<void> } | null } = { handle: null };
-    const gameStore = combatGameStore(holder);
-    gameStore.characters = [
-      playerCharStub(), // 玩家 理查德
-      {
-        ...playerCharStub(),
-        id: 'npc_dalian',
-        name: '妲丽安',
-        type: 'npc',
-        hp: 30,
-        maxHp: 30,
-      },
-      {
-        ...playerCharStub(),
-        id: 'monster_sludge',
-        name: '沼泥潜兽',
-        type: 'monster',
-        hp: 20,
-        maxHp: 20,
-      },
-      {
-        ...playerCharStub(),
-        id: 'npc_oswald',
-        name: '奥斯瓦尔德·狼牙',
-        type: 'npc',
-        hp: 5,
-        maxHp: 5,
-      },
-    ];
-    const pipeline = makePipeline(gameStore, {
-      apiPool: [{ id: 'ep1', name: 'ep', model: 'm' }],
-    });
-
-    let captured: Record<string, any> | null = null;
-    runCombatV3Mock.mockImplementation(async (opts: Record<string, any>) => {
-      captured = opts;
-      return {
-        narrativeSummary: 'ok',
-        patches: [],
-        totalExp: 0,
-        totalFp: 0,
-        loot: [],
-        rounds: 1,
-        outcome: 'ally_win',
-      };
-    });
-
-    // F2：检出 → 就绪面板（v3_combat_ready 带名单数组）→ 点开始 → 真开打
-    await (pipeline as any).handleCombatTrigger(
-      { combatType: '标准', allies: '妲丽安', enemies: '沼泥潜兽' } as never,
-      '',
-    );
-    expect(gameStore.applyCombatEvent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: 'v3_combat_ready',
-        allies: ['妲丽安'],
-        enemies: ['沼泥潜兽'],
-      }),
-    );
-    await holder.handle!.start!();
-
-    const names = captured!.bundle.participants.map((p: { name: string }) => p.name).sort();
-    // 只有名单内双方 + player；奥斯瓦尔德（名单外旁观者）绝不参战
-    expect(names).toEqual(['妲丽安', '沼泥潜兽', '理查德']);
-    expect(names).toHaveLength(3);
-  });
-
-  it('F3：名单缺省时保持旧行为：所有存活角色全拉（player=ally，其余=enemy）', async () => {
-    const holder: { handle: { start?: () => Promise<void> } | null } = { handle: null };
-    const gameStore = combatGameStore(holder);
-    gameStore.characters = [
-      playerCharStub(),
-      { ...playerCharStub(), id: 'npc_a', name: '路人甲', type: 'npc', hp: 10, maxHp: 10 },
-      { ...playerCharStub(), id: 'npc_b', name: '路人乙', type: 'npc', hp: 10, maxHp: 10 },
-      { ...playerCharStub(), id: 'npc_dead', name: '已倒下者', type: 'npc', hp: 0, maxHp: 10 },
-    ];
-    const pipeline = makePipeline(gameStore, {
-      apiPool: [{ id: 'ep1', name: 'ep', model: 'm' }],
-    });
-
-    let captured: Record<string, any> | null = null;
-    runCombatV3Mock.mockImplementation(async (opts: Record<string, any>) => {
-      captured = opts;
-      return {
-        narrativeSummary: 'ok',
-        patches: [],
-        totalExp: 0,
-        totalFp: 0,
-        loot: [],
-        rounds: 1,
-        outcome: 'ally_win',
-      };
-    });
-
-    await (pipeline as any).handleCombatTrigger({ combatType: '标准' } as never, '');
-    // 无名单 → v3_combat_ready 不带 allies/enemies（缺省缺席）
-    expect(gameStore.applyCombatEvent).toHaveBeenCalledWith(
-      expect.not.objectContaining({ allies: expect.anything() }) as never,
-    );
-    await holder.handle!.start!();
-
-    // 无名单 → 旧行为全拉（hp>0 的角色都在），倒下者（hp=0）仍不拉
-    const names = captured!.bundle.participants.map((p: { name: string }) => p.name).sort();
-    // 期望数组按 .sort() 的 UTF-16 码点序（乙 U+4E59 在 甲 U+7532 前），与 received 同口径
-    expect(names).toEqual(['理查德', '路人乙', '路人甲']);
-  });
-});
 
 // ══════════════════════════════════════════════════════════════════════════
 // F10（2026-09-04）：显式 API 绑定失效必须 fail-closed，绝不把请求换到别的 provider
@@ -2596,4 +1421,255 @@ it('Stop then same-save remount cannot start a run before old cleanup drains', a
   gate.resolve();
   await Promise.all([running, next]);
   expect(admittedBeforeCleanup).toBe(0);
+});
+
+// ══════ 战斗形态改版（设计共识 §8）：combat_trigger 路由交锋拍 ══════
+
+describe('combat_trigger 路由交锋拍（SKIRMISH_DEFAULT，2026-09-12 主人裁定）', () => {
+  it('默认不再弹 v3 就绪面板，改走交锋拍编排（无玩家角色时明示失败，不抛）', async () => {
+    const setSkirmishSession = vi.fn();
+    const pipeline = makePipeline({ setSkirmishSession });
+    const result = await (pipeline as any).handleCombatTrigger(
+      { combatType: '标准', enemies: '骷髅', environment: '墓穴' } as never,
+      '',
+    );
+    expect(result).toBeNull(); // 交锋拍内联结算，不经 CombatSummary
+    expect(setSkirmishSession).not.toHaveBeenCalled(); // mock store 无玩家 → 评估前即失败
+  });
+
+  it('combat_trigger 走交锋拍时 enemyHint 由 marker 敌方名单+环境装配', async () => {
+    // 间接验证：有玩家角色 + 无 endpoint → runSkirmishEncounter 返回明示原因
+    const pipeline = makePipeline({
+      player: {
+        name: '理查德',
+        level: 9,
+        attributes: { str: 14, con: 14, dex: 12 },
+        hp: 100,
+        maxHp: 100,
+      },
+    });
+    const result = await (pipeline as any).handleCombatTrigger(
+      { combatType: '死斗', enemies: '骷髅兵,食尸鬼', environment: '墓穴' } as never,
+      '',
+    );
+    expect(result).toBeNull(); // getEndpointForAgent 在测试环境下解析不到 → 明示失败路径，不抛
+  });
+});
+
+// ══════ 封印卡启封流（积压 2026-09-14）：pipeline 组合链验证 ══════
+
+describe('submitSkirmishCounter —— 封印卡启封流', () => {
+  const 封印会话 = () => ({
+    enemyName: '岩爪兽',
+    enemyLevel: 12,
+    intents: [{ move: '咬', threat: 10, counters: ['防御'] }],
+    beat: 0,
+    playerHp: 155,
+    playerMaxHp: 155,
+    enemyHp: 200,
+    enemyMaxHp: 200,
+    guard: 10,
+    log: [],
+    playedCards: [],
+    counteredBeats: 0,
+    activeEffects: [],
+    unsealedCards: [],
+    finished: null,
+  });
+  const 封印玩家 = (cardTier: string) => ({
+    name: '莱恩',
+    level: 9,
+    attributes: { str: 14, con: 14, dex: 12, int: 10, spi: 10 },
+    hp: 155,
+    maxHp: 155,
+    totalExp: 0,
+    inventory: [
+      {
+        name: '封印试卡',
+        type: '卡牌',
+        quantity: 1,
+        cardTier,
+        词条: ['技能', '火'],
+        sealed: true,
+        recipe: { fusionKind: '叠加' },
+      },
+    ],
+  });
+
+  it('nat20 → 必启封：效果发动 + 破封账 + 参战卡账', async () => {
+    const setSkirmishSession = vi.fn();
+    const pipeline = makePipeline({
+      player: 封印玩家('白铁'), // 白铁 DC8：20+0 必启封
+      skirmishSession: 封印会话(),
+      setSkirmishSession,
+    });
+    (pipeline as any).rollD20 = vi.fn(() => 20);
+    await (pipeline as any).submitSkirmishCounter({ kind: '卡', name: '封印试卡' });
+
+    const s = setSkirmishSession.mock.calls[setSkirmishSession.mock.calls.length - 1][0];
+    expect(s.log.join('\n')).toContain('启封判定：d20=20+意志0 vs DC8 → 启封');
+    expect(s.unsealedCards).toEqual(['封印试卡']);
+    expect(s.playedCards).toEqual(['封印试卡']);
+    expect(s.finished).toBeNull();
+  });
+
+  it('nat1 + 星辉 → 反噬：效果炸空 + 全额反冲，不记已用账', async () => {
+    const setSkirmishSession = vi.fn();
+    const pipeline = makePipeline({
+      player: 封印玩家('星辉'), // DC20：1+0-20 = -19 → 反噬，反冲 20
+      skirmishSession: 封印会话(),
+      setSkirmishSession,
+    });
+    (pipeline as any).rollD20 = vi.fn(() => 1);
+    await (pipeline as any).submitSkirmishCounter({ kind: '卡', name: '封印试卡' });
+
+    const s = setSkirmishSession.mock.calls[setSkirmishSession.mock.calls.length - 1][0];
+    expect(s.log.join('\n')).toContain('→ 反噬');
+    expect(s.log.join('\n')).toContain('失控反冲：玩家 −20');
+    expect(s.unsealedCards).toEqual(['封印试卡']); // 封印破了
+    expect(s.playedCards).toEqual([]); // 但效果炸空，不算参战
+    // 反制失败（行动值0）吃威胁 10 − 防御减免5 = 5，再吃反冲 20：155−5−20 = 130
+    expect(s.playerHp).toBe(130);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 好感共鸣（伙伴卡 × 好感度，2026-09-16 主人裁定）
+// ═══════════════════════════════════════════════════════════
+
+describe('submitSkirmishCounter —— 好感共鸣（伙伴卡 × 好感度）', () => {
+  const 共鸣会话 = () => ({
+    enemyName: '岩爪兽',
+    enemyLevel: 12,
+    intents: [{ move: '咬', threat: 10, counters: ['防御'] }],
+    beat: 0,
+    playerHp: 155,
+    playerMaxHp: 155,
+    enemyHp: 200,
+    enemyMaxHp: 200,
+    guard: 10,
+    log: [],
+    playedCards: [],
+    counteredBeats: 0,
+    activeEffects: [],
+    unsealedCards: [],
+    finished: null,
+  });
+  /** 召唤卡玩家；affection 作为同名 NPC 的好感记录注入 saveProfile.affections */
+  const 召唤玩家 = (_affection?: number) => ({
+    name: '莱恩',
+    level: 9,
+    attributes: { str: 14, con: 14, dex: 12, int: 10, spi: 10 },
+    hp: 155,
+    maxHp: 155,
+    totalExp: 0,
+    inventory: [
+      {
+        name: '莉薇娅',
+        type: '卡牌',
+        quantity: 1,
+        cardTier: '青铜',
+        词条: ['召唤', '风'],
+      },
+    ],
+  });
+  const makeSave = (affection?: number) => ({
+    name: '莱恩',
+    ...(affection !== undefined ? { affections: { 莉薇娅: affection } } : {}),
+  });
+
+  it('有同名 NPC 且好感 ≥90（誓死追随）→ 效果 ×1.5 + 审计行', async () => {
+    const setSkirmishSession = vi.fn();
+    const pipeline = makePipeline({
+      player: 召唤玩家(),
+      saveProfile: makeSave(95),
+      skirmishSession: 共鸣会话(),
+      setSkirmishSession,
+    });
+    (pipeline as any).rollD20 = vi.fn(() => 10);
+    await (pipeline as any).submitSkirmishCounter({ kind: '卡', name: '莉薇娅' });
+
+    const s = setSkirmishSession.mock.calls[setSkirmishSession.mock.calls.length - 1][0];
+    const log = s.log.join('\n');
+    expect(log).toContain('好感共鸣：与【莉薇娅】的羁绊（誓死追随 95）→ 效果 ×1.5');
+    // 在场效果金额已乘 1.5（buff 2×power 取整后翻 1.5 倍，能整除故精确）
+    expect(s.activeEffects[0].amount).toBe(Math.round((s.activeEffects[0].amount / 1.5) * 1.5));
+  });
+
+  it('反感（≤ -10）→ 消极怠工 ×0.8，效果缩水', async () => {
+    const setSkirmishSession = vi.fn();
+    const pipeline = makePipeline({
+      player: 召唤玩家(),
+      saveProfile: makeSave(-40),
+      skirmishSession: 共鸣会话(),
+      setSkirmishSession,
+    });
+    (pipeline as any).rollD20 = vi.fn(() => 10);
+    await (pipeline as any).submitSkirmishCounter({ kind: '卡', name: '莉薇娅' });
+
+    const s = setSkirmishSession.mock.calls[setSkirmishSession.mock.calls.length - 1][0];
+    expect(s.log.join('\n')).toContain('好感共鸣：与【莉薇娅】的羁绊');
+    expect(s.log.join('\n')).toContain('×0.8');
+  });
+
+  it('账本无同名记录 → 无共鸣（不加不减、无审计行）', async () => {
+    const setSkirmishSession = vi.fn();
+    const pipeline = makePipeline({
+      player: 召唤玩家(),
+      saveProfile: makeSave(undefined),
+      skirmishSession: 共鸣会话(),
+      setSkirmishSession,
+    });
+    (pipeline as any).rollD20 = vi.fn(() => 10);
+    await (pipeline as any).submitSkirmishCounter({ kind: '卡', name: '莉薇娅' });
+
+    const s = setSkirmishSession.mock.calls[setSkirmishSession.mock.calls.length - 1][0];
+    expect(s.log.join('\n')).not.toContain('好感共鸣');
+  });
+
+  it('中立（好感 0，有记录）→ 不出审计行也不改数值（×1 等价不触发）', async () => {
+    const setSkirmishSession = vi.fn();
+    const pipeline = makePipeline({
+      player: 召唤玩家(),
+      saveProfile: makeSave(0),
+      skirmishSession: 共鸣会话(),
+      setSkirmishSession,
+    });
+    (pipeline as any).rollD20 = vi.fn(() => 10);
+    await (pipeline as any).submitSkirmishCounter({ kind: '卡', name: '莉薇娅' });
+
+    const s = setSkirmishSession.mock.calls[setSkirmishSession.mock.calls.length - 1][0];
+    expect(s.log.join('\n')).not.toContain('好感共鸣');
+  });
+
+  it('非伙伴卡（技能/装备/直击）不吃共鸣 —— 名字撞了也不加', async () => {
+    const setSkirmishSession = vi.fn();
+    const pipeline = makePipeline({
+      player: {
+        name: '莱恩',
+        level: 9,
+        attributes: { str: 14, con: 14, dex: 12, int: 10, spi: 10 },
+        hp: 155,
+        maxHp: 155,
+        totalExp: 0,
+        inventory: [
+          {
+            name: '莉薇娅的祝福',
+            type: '卡牌',
+            quantity: 1,
+            cardTier: '青铜',
+            词条: ['技能', '火'],
+          },
+        ],
+      },
+      saveProfile: makeSave(95),
+      skirmishSession: 共鸣会话(),
+      setSkirmishSession,
+    });
+    (pipeline as any).rollD20 = vi.fn(() => 10);
+    await (pipeline as any).submitSkirmishCounter({ kind: '卡', name: '莉薇娅的祝福' });
+
+    const s = setSkirmishSession.mock.calls[setSkirmishSession.mock.calls.length - 1][0];
+    expect(s.log.join('\n')).not.toContain('好感共鸣');
+  });
 });

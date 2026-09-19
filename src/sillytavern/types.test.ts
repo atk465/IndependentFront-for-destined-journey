@@ -59,16 +59,6 @@ describe('createDefaultCharacterState', () => {
     expect(c.maxSp).toBe(50);
   });
 
-  it('登神长阶默认 disabled', () => {
-    const c = createDefaultCharacterState();
-    expect(c.ascension.enabled).toBe(false);
-    expect(c.ascension.elements).toEqual([]);
-    expect(c.ascension.authority).toEqual([]);
-    expect(c.ascension.law).toEqual([]);
-    expect(c.ascension.deityPosition).toBe('');
-    expect(c.ascension.divineKingdom).toEqual({ name: '', description: '' });
-  });
-
   it('装备/技能/背包/状态 默认空数组', () => {
     const c = createDefaultCharacterState();
     // M2: equipment[] 已删除 — 装备 = inventory 中 equippedSlot 非空的物品（规范 §3）
@@ -78,10 +68,9 @@ describe('createDefaultCharacterState', () => {
     expect(c.statusEffects).toEqual([]);
   });
 
-  it('金钱默认 0，冒险者等级默认未评级', () => {
+  it('金钱默认 0', () => {
     const c = createDefaultCharacterState();
     expect(c.money).toBe(0);
-    expect(c.adventurerRank).toBe('未评级');
   });
 
   it('位置默认空串，present 默认 true', () => {
@@ -402,6 +391,7 @@ describe('Snapshot 重定义 (M5 规范 §11.2)', () => {
         experienceMode: 'normal',
         fp: 0,
         fpHistory: [],
+        reputation: 0,
         contracts: [],
         achievements: [],
         news: [],

@@ -92,25 +92,6 @@ describe('CharacterViewerModal — 开合', () => {
     expect(document.querySelector('.viewer')).toBeNull();
   });
 
-  it('给了名字 → 渲染名字与副标题', async () => {
-    mockGame.characters = [
-      makeChar({
-        race: '人类',
-        identity: ['帝王'],
-        occupation: ['法则代行者'],
-        tierName: '神话',
-        level: 24,
-      }),
-    ];
-    viewer();
-    await flushPromises();
-    expect(document.querySelector('.head-name')?.textContent).toBe('维奥莱塔');
-    const meta = document.querySelector('.head-meta')?.textContent ?? '';
-    expect(meta).toContain('人类');
-    expect(meta).toContain('法则代行者');
-    expect(meta).toContain('Lv 24');
-  });
-
   it('★ 名字给了却查不到人（被删 / 改名）→ 说清楚，不是一片空白', async () => {
     mockGame.characters = [];
     viewer('无此人');
@@ -191,48 +172,6 @@ describe('CharacterViewerModal — 档案页', () => {
     expect(document.querySelector('.aff-fill')?.getAttribute('style')).toContain('scaleX(0.5)');
   });
 
-  it('登神三档全空 → 三个占位格 + 「尚未踏上长阶」', async () => {
-    viewer();
-    await flushPromises();
-    expect(document.querySelectorAll('.asc-track')).toHaveLength(3);
-    expect(document.querySelectorAll('.asc-track.filled')).toHaveLength(0);
-    expect(document.querySelector('.asc-divine')?.textContent).toContain('尚未踏上长阶');
-  });
-
-  it('拿到法则 → 那一档着重，条目点开才显示描述', async () => {
-    mockGame.characters = [
-      makeChar({
-        ascension: {
-          enabled: true,
-          elements: [],
-          authority: [],
-          law: [
-            {
-              name: '镇压与秩序',
-              description: '以法则镇压异端',
-              effects: ['定身'],
-              costDescription: '25% 最大MP',
-            },
-          ],
-          deityPosition: '',
-          divineKingdom: { name: '', description: '' },
-        },
-      }),
-    ];
-    viewer();
-    await flushPromises();
-    const filled = document.querySelectorAll('.asc-track.filled');
-    expect(filled).toHaveLength(1);
-    expect(document.querySelector('.asc-entry-name')?.textContent).toBe('镇压与秩序');
-    expect(document.querySelector('.asc-entry-body')).toBeNull();
-
-    (document.querySelector('.asc-entry-head') as HTMLElement).click();
-    await flushPromises();
-    const body = document.querySelector('.asc-entry-body');
-    expect(body?.textContent).toContain('以法则镇压异端');
-    expect(body?.textContent).toContain('25% 最大MP');
-  });
-
   it('心里话走 store.getThoughts（唯一真源），没有就整节不出现', async () => {
     viewer();
     await flushPromises();
@@ -271,31 +210,6 @@ describe('CharacterViewerModal — 页签', () => {
     expect(document.body.textContent).toContain('古代矿石');
     expect(document.body.textContent).not.toContain('双头狮鹫帝冕');
     expect(document.querySelector('.purse-value')?.textContent).toContain('320');
-  });
-
-  it('状态页：资源条 + 状态效果，点一条才展开详情', async () => {
-    await open('状态', {
-      statusEffects: [
-        {
-          name: '秩序庇护',
-          description: '受法则庇护',
-          category: '增益',
-          stacks: 2,
-          remainingTime: 3,
-          timeUnit: '小时',
-          source: '[法则]-维奥莱塔',
-          effects: {},
-        },
-      ],
-    });
-    expect(document.querySelectorAll('.res-stack .res-track, .res-stack').length).toBeGreaterThan(
-      0,
-    );
-    expect(document.querySelector('.fx-detail')).toBeNull();
-
-    (document.querySelector('.fx-chip-btn') as HTMLElement).click();
-    await flushPromises();
-    expect(document.querySelector('.fx-detail')?.textContent).toContain('受法则庇护');
   });
 
   /**
@@ -437,28 +351,6 @@ describe('CharacterViewerModal — 无障碍', () => {
     expect(scroll.getAttribute('tabindex')).toBe('0');
     expect(scroll.getAttribute('role')).toBe('region');
     expect(scroll.getAttribute('aria-label')).toContain('维奥莱塔');
-  });
-
-  it('展开控件报 aria-expanded（登神条目 / 状态效果）', async () => {
-    mockGame.characters = [
-      makeChar({
-        ascension: {
-          enabled: true,
-          elements: [],
-          authority: [],
-          law: [{ name: '秩序', description: 'x', effects: [], costDescription: '' }],
-          deityPosition: '',
-          divineKingdom: { name: '', description: '' },
-        },
-      }),
-    ];
-    viewer();
-    await flushPromises();
-    const head = document.querySelector('.asc-entry-head') as HTMLElement;
-    expect(head.getAttribute('aria-expanded')).toBe('false');
-    head.click();
-    await flushPromises();
-    expect(document.querySelector('.asc-entry-head')?.getAttribute('aria-expanded')).toBe('true');
   });
 
   /**
