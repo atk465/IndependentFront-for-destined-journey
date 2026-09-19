@@ -49,7 +49,7 @@ const loose = (s: unknown): Record<string, unknown> => s as Record<string, unkno
 
 // ===== 夹具 =====
 
-const STORAGE_KEY = 'fated-poem-settings';
+const STORAGE_KEY = 'narrative-engine-settings';
 const lsBacking = new Map<string, string>();
 vi.stubGlobal('localStorage', {
   getItem: (k: string) => lsBacking.get(k) ?? null,

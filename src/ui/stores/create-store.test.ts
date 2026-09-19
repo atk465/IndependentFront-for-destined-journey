@@ -597,9 +597,9 @@ describe('totalCost 消耗公式', () => {
     expect(store.moneyCost).toBe(3); // ceil(250/100)=3
   });
 
-  it('destinyCost = ceil(destinyPoints/2)', () => {
-    store.destinyPoints = 5;
-    expect(store.destinyCost).toBe(3); // ceil(5/2)=3
+  it('startingPointCost = ceil(startingPoints/2)', () => {
+    store.startingPoints = 5;
+    expect(store.startingPointCost).toBe(3); // ceil(5/2)=3
   });
 
   it('remainingPoints = reincarnationPoints - totalCost', () => {
@@ -1092,7 +1092,7 @@ describe('resetAll', () => {
     store.addBasePoint('力量');
     store.addBasePoint('力量');
     store.addBasePoint('力量');
-    store.destinyPoints = 100;
+    store.startingPoints = 100;
     store.money = 5000;
 
     store.resetAll();
@@ -1101,7 +1101,7 @@ describe('resetAll', () => {
     expect(store.level).toBe(1);
     expect(store.difficulty).toBeNull();
     expect(store.usedBP).toBe(0);
-    expect(store.destinyPoints).toBe(0);
+    expect(store.startingPoints).toBe(0);
     expect(store.money).toBe(0);
     expect(store.currentStep).toBe(0);
     expect(store.selectedCards).toHaveLength(0);
@@ -1681,7 +1681,7 @@ describe('startJourney 剧情落库', () => {
     const store = useCreateStore();
     store.name = '测试';
     store.experienceMode = 'easy';
-    store.destinyPoints = 100;
+    store.startingPoints = 100;
     allocateBasePoints(store);
     const saveId = await store.startJourney();
     const { getSaveProfile } = await import('@engine/database');
@@ -1699,7 +1699,7 @@ describe('startJourney 剧情落库', () => {
     const store = useCreateStore();
     store.name = '测试';
     store.experienceMode = 'easy';
-    // destinyPoints 默认 0
+    // startingPoints 默认 0
     allocateBasePoints(store);
     const saveId = await store.startJourney();
     const { getSaveProfile } = await import('@engine/database');

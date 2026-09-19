@@ -82,7 +82,7 @@ const PLACEHOLDER_CHARACTER: WorldBook = book('character', 'character', [
 function makePack(version = '1.0.0'): ContentPack {
   return {
     formatVersion: 1,
-    packId: 'fated-poem-official',
+    packId: 'test-pack-001',
     packVersion: version,
     name: '测试内容包',
     // 🔴 bloodlines 是带壳分节（PackBloodlinesSection）—— 装包后必须剥壳供注册表，
@@ -223,7 +223,7 @@ describe('content-store 执行器 —— 1. 安装（含冲突确认路径）', 
     expect(outcome.plan?.sections.worldBooks?.updated).toHaveLength(0);
     // 内容态
     expect(c.contentStatus).toBe('pack');
-    expect(c.activePackId).toBe('fated-poem-official');
+    expect(c.activePackId).toBe('test-pack-001');
     expect(c.activePackVersion).toBe('1.0.0');
     // 库里有 pack 书
     const books = await getDatabase().worldBooks.toArray();
@@ -231,7 +231,7 @@ describe('content-store 执行器 —— 1. 安装（含冲突确认路径）', 
     // pack 书 builtIn 必须 true（loadBuiltInWorldBooks 真值门）
     expect(books.every((b) => b.builtIn === true)).toBe(true);
     // 存档重写 + agent 写 contentPacks（不写 settings.agents 是另一测）
-    const rec = await getDatabase().contentPacks.get('fated-poem-official');
+    const rec = await getDatabase().contentPacks.get('test-pack-001');
     expect(rec?.payload.packVersion).toBe('1.0.0');
     // 预设已落库
     const presets = await getDatabase().presets.toArray();
@@ -335,7 +335,7 @@ describe('content-store 执行器 —— 2. 升级 diff', () => {
       const done = await c.installPack(v2, { confirmConflicts: true });
       expect(done.ok).toBe(true);
     }
-    const rec = await getDatabase().contentPacks.get('fated-poem-official');
+    const rec = await getDatabase().contentPacks.get('test-pack-001');
     expect(rec?.packVersion).toBe('2.0.0');
   });
 });
@@ -543,6 +543,55 @@ describe('content-store 执行器 —— 5. 装包后 boot 时序（D44 默认�
     fetchSpy.mockRestore();
     expect(defaults.agents.story.systemPrompt).toBe('PLACEHOLDER');
     expect(c.contentStatus).toBe('placeholder');
+  });
+});
+
+describe('content-store 执行器 —— 旧官方包 packId 迁移（2026-09-20 去 fated-poem 化）', () => {
+  beforeEach(async () => {
+    setActivePinia(createPinia());
+    await cleanDb();
+    // 🔴 等前面用例 settings-store 构造期埋的 setTimeout(0) 启动任务全部落地：
+    //    它会经 loadProjectDefaults → hydrate 把「空库 hydrate」缓存到本 pinia 的
+    //    实例上，导致后续 put 进来的记录错过本次 boot 的迁移窗口。
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  afterEach(() => {
+    setActivePackRecord(null);
+    resetPlaceholderHashesCache();
+    vi.restoreAllMocks();
+  });
+
+  it('hydrate 时把旧 id 记录改名为 narrative-official（键与载荷同步）', async () => {
+    const pack: ContentPack = { ...makePack(), packId: 'fated-poem-official' };
+    await getDatabase().contentPacks.put({
+      packId: 'fated-poem-official',
+      packVersion: '1.0.0',
+      installedAt: Date.now(),
+      payload: pack,
+    });
+
+    // flush 之后开 fresh pinia：本用例的 hydrate 一定走完整的装载路径（迁移 + 装载）
+    setActivePinia(createPinia());
+    const c = useContentStore();
+    await c.hydratePackState();
+
+    const legacy = await getDatabase().contentPacks.get('fated-poem-official');
+    const rec = await getDatabase().contentPacks.get('narrative-official');
+    expect(legacy).toBeUndefined();
+    expect(rec?.packId).toBe('narrative-official');
+    expect(rec?.payload?.packId).toBe('narrative-official');
+    expect(c.activePackId).toBe('narrative-official');
+    expect(c.contentStatus).toBe('pack');
+  });
+
+  it('新 id 记录不受迁移影响（幂等空转）', async () => {
+    const c = useContentStore();
+    await c.installPack(makePack());
+    await c.hydratePackState();
+    const rec = await getDatabase().contentPacks.get('test-pack-001');
+    expect(rec?.packId).toBe('test-pack-001');
+    expect(rec?.payload?.packId).toBe('test-pack-001');
+    expect(c.activePackId).toBe('test-pack-001');
   });
 });
 

@@ -288,10 +288,21 @@ type PackRemoteAssetsSection = readonly RemoteAssetPackEntry[];
  * 🔴 `sectionHashes` 用途仅限 D40 升级 diff 展示与快速比对；冲突判定/对账用的
  *    逐书基线一律从 `payload` 现算（per-item），两者不许混用（D18 hash 分工）。
  */
+/**
+ * 旧官方包 packId → 新 packId 的永久映射（2026-09-20 去 fated-poem 化改名）。
+ *
+ * 引擎**不硬编码任何现役 packId**（packId 对引擎是不透明字符串）；本表只服务
+ * 旧数据兼容：旧存档备份依赖清单的导入检查、已装包记录的读取迁移。新包启用
+ * 新 id 后，装着旧 id 官方包的用户经此映射平滑续用。
+ */
+export const LEGACY_PACK_ID_MAP: Readonly<Record<string, string>> = {
+  'fated-poem-official': 'narrative-official',
+};
+
 export interface ContentPack {
   /** 🔴 必读必校验（§4）。不满足 → 拒绝 + 报消息 */
   formatVersion: PackFormatVersion;
-  /** 包身份（如 `fated-poem-official`），跨版本稳定 */
+  /** 包身份（如 `narrative-official`），跨版本稳定 */
   packId: string;
   /** semver，驱动升级判定（D40） */
   packVersion: string;

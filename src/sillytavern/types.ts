@@ -1651,7 +1651,8 @@ export interface CreatePreset {
     basePoints: Record<string, number>;
     attributePoints: Record<string, number>;
     money: number;
-    destinyPoints: number;
+    /** 开局命运点数量（2026-09-20 由 destinyPoints 改名；旧预设数据经 database.ts 的 normalizeCreatePresetData 归一化） */
+    startingPoints: number;
   };
   /** 开局购卡（2026-09-16 卡牌化）：旧 equipments/items/skills 三字段退役，加载时容错忽略 */
   cards: CardCatalogItem[];

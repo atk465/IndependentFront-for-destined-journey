@@ -57,7 +57,6 @@ export const QUALITY_BASE_DC: Record<string, number> = {
   神话: 32,
   唯一: 40,
 };
-export const DESTINY_CORE_WORLDBOOK_MAP: Record<string, string[]> = {};
 
 // 🪦 Q-11：`RARITY_TO_QUALITY` 已删。它是英文码 → 中文品质名的**第二张**表
 //    （`field-enums.RARITY_ALIASES` 是第一张，且它还多认 `unique`），值类型是裸

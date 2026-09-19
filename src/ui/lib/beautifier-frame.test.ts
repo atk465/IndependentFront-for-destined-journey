@@ -122,20 +122,20 @@ describe('beautifier iframe document', () => {
   it('accepts only bridge messages for the current frame', () => {
     expect(
       isBeautifierFrameMessage(
-        { source: 'fated-poem-beautifier', bridgeId: 'a', type: 'height', height: 100 },
+        { source: 'narrative-beautifier', bridgeId: 'a', type: 'height', height: 100 },
         'a',
       ),
     ).toBe(true);
     expect(
       isBeautifierFrameMessage(
-        { source: 'fated-poem-beautifier', bridgeId: 'stale', type: 'height' },
+        { source: 'narrative-beautifier', bridgeId: 'stale', type: 'height' },
         'a',
       ),
     ).toBe(false);
     expect(
       isBeautifierFrameMessage(
         {
-          source: 'fated-poem-beautifier',
+          source: 'narrative-beautifier',
           bridgeId: 'a',
           type: 'storage-mutate',
           sequence: 1,
@@ -147,7 +147,7 @@ describe('beautifier iframe document', () => {
     expect(
       isBeautifierFrameMessage(
         {
-          source: 'fated-poem-beautifier',
+          source: 'narrative-beautifier',
           bridgeId: 'a',
           type: 'storage-mutate',
           sequence: 1,

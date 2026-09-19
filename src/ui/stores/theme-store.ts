@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 
+import { migrateLegacyKeys } from '../lib/storage-migration';
+
 export interface ThemeDefinition {
   id: string;
   name: string;
@@ -114,10 +116,20 @@ const FONT_STACKS: Record<FontFamilyChoice, string> = {
 const DEFAULT_FONT_BODY: FontFamilyChoice = 'sans';
 const DEFAULT_FONT_TITLE: FontFamilyChoice = 'serif';
 
-const LS_FONT_BODY = 'fated-poem-font-body';
-const LS_FONT_TITLE = 'fated-poem-font-title';
+const LS_FONT_BODY = 'narrative-engine-font-body';
+const LS_FONT_TITLE = 'narrative-engine-font-title';
+const LS_FONT_SIZE = 'narrative-engine-font-size';
+const LS_THEME = 'narrative-engine-theme';
 /** 旧的三档单选（'sans' | 'serif' | 'mixed'），只在迁移时读一次 */
 const LS_FONTS_LEGACY = 'fated-poem-fonts';
+/**
+ * 2026-09-20 去 fated-poem 化前的旧键（兼容层：init 路径经 migrateLegacyKeys
+ * 一次性搬到上面的新键，之后只读新键）。
+ */
+const LEGACY_FONT_BODY = 'fated-poem-font-body';
+const LEGACY_FONT_TITLE = 'fated-poem-font-title';
+const LEGACY_FONT_SIZE = 'fated-poem-font-size';
+const LEGACY_THEME = 'fated-poem-theme';
 
 export const useThemeStore = defineStore('theme', () => {
   const current = ref('obsidian');
@@ -129,7 +141,7 @@ export const useThemeStore = defineStore('theme', () => {
     fontSize.value = size;
     document.documentElement.style.fontSize = size + 'px';
     try {
-      localStorage.setItem('fated-poem-font-size', size);
+      localStorage.setItem(LS_FONT_SIZE, size);
     } catch {
       // 隐私模式 / 配额满：字号记不住而已，本次设置已经生效，不值得打断用户
     }
@@ -137,7 +149,8 @@ export const useThemeStore = defineStore('theme', () => {
 
   function initFontSize() {
     try {
-      const saved = localStorage.getItem('fated-poem-font-size');
+      migrateLegacyKeys(LS_FONT_SIZE, [LEGACY_FONT_SIZE]);
+      const saved = localStorage.getItem(LS_FONT_SIZE);
       if (saved) setFontSize(saved);
     } catch {
       // 读不到就用默认字号，没有可降级的余地也没有可报的错
@@ -150,7 +163,7 @@ export const useThemeStore = defineStore('theme', () => {
     document.documentElement.setAttribute('data-theme', themeId);
     current.value = themeId;
     try {
-      localStorage.setItem('fated-poem-theme', themeId);
+      localStorage.setItem(LS_THEME, themeId);
     } catch {
       /* localStorage not available */
     }
@@ -158,7 +171,8 @@ export const useThemeStore = defineStore('theme', () => {
 
   function init() {
     try {
-      const saved = localStorage.getItem('fated-poem-theme');
+      migrateLegacyKeys(LS_THEME, [LEGACY_THEME]);
+      const saved = localStorage.getItem(LS_THEME);
       if (saved && THEME_LIST.some((t) => t.id === saved)) {
         apply(saved);
       } else {
@@ -227,6 +241,8 @@ export const useThemeStore = defineStore('theme', () => {
    * 因为旧实现从来没碰过 `--theme-font-title`。**照用户实际看到的样子迁**，不是照字面。
    */
   function initFonts() {
+    migrateLegacyKeys(LS_FONT_BODY, [LEGACY_FONT_BODY]);
+    migrateLegacyKeys(LS_FONT_TITLE, [LEGACY_FONT_TITLE]);
     let body = readChoice(LS_FONT_BODY);
     const title = readChoice(LS_FONT_TITLE);
 

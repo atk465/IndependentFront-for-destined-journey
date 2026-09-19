@@ -1852,16 +1852,35 @@ export function createDefaultSaveProfile(saveId: string, era?: string): SaveProf
 // Phase 7d — 捏人预设 CRUD
 // ═══════════════════════════════════════════════════════════
 
+/**
+ * 捏人预设旧字段归一化：`character.destinyPoints` → `character.startingPoints`
+ * （2026-09-20 改名）。读写边界统一走这里，旧记录在下次保存时自愈。
+ */
+function normalizeCreatePresetData(data: CreatePreset): CreatePreset {
+  const ch = data?.character as
+    (CreatePreset['character'] & { destinyPoints?: number }) | undefined;
+  if (ch && typeof ch.destinyPoints === 'number') {
+    if (typeof ch.startingPoints !== 'number') ch.startingPoints = ch.destinyPoints;
+    delete ch.destinyPoints;
+  }
+  return data;
+}
+
 export async function getCreatePresets(): Promise<CreatePresetRecord[]> {
-  return getDatabase().createPresets.orderBy('updatedAt').reverse().toArray();
+  const rows = await getDatabase().createPresets.orderBy('updatedAt').reverse().toArray();
+  return rows.map((row) => ({ ...row, data: normalizeCreatePresetData(row.data) }));
 }
 
 export async function getCreatePreset(id: string): Promise<CreatePresetRecord | undefined> {
-  return getDatabase().createPresets.get(id);
+  const row = await getDatabase().createPresets.get(id);
+  return row ? { ...row, data: normalizeCreatePresetData(row.data) } : undefined;
 }
 
 export async function saveCreatePreset(preset: CreatePresetRecord): Promise<string> {
-  return getDatabase().createPresets.put(preset);
+  return getDatabase().createPresets.put({
+    ...preset,
+    data: normalizeCreatePresetData(preset.data),
+  });
 }
 
 export async function deleteCreatePreset(id: string): Promise<void> {

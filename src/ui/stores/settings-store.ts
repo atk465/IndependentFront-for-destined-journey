@@ -30,6 +30,7 @@ import {
 import { credentialIdFor, replaceApiRpmPolicies } from '@engine/api-rpm-limiter';
 import type { ApiRpmPolicy } from '@engine/types';
 import { detach } from './db-write';
+import { migrateLegacyKeys } from '../lib/storage-migration';
 import { migrateLegacyAgentOverrides } from './agent-settings';
 import { migrateLegacyAgentMaps } from './agent-settings-migration';
 import type { UiSettings } from './settings-types';
@@ -101,7 +102,9 @@ export interface AgentProjectDefaults {
 
 // ===== 默认值 =====
 
-const STORAGE_KEY = 'fated-poem-settings';
+const STORAGE_KEY = 'narrative-engine-settings';
+/** 2026-09-20 去 fated-poem 化前的旧键；store 初始化时迁移一次（见 storage-migration.ts） */
+const LEGACY_STORAGE_KEYS: readonly string[] = ['fated-poem-settings'];
 
 function containsApiPoolKey(settings: Record<string, unknown>): boolean {
   return (
@@ -313,7 +316,8 @@ function getDefaults(): UiSettings {
 // ===== Store =====
 
 export const useSettingsStore = defineStore('settings', () => {
-  // 从 localStorage 恢复
+  // 从 localStorage 恢复（先做键改名迁移：旧键值搬到新键，之后只读新键）
+  migrateLegacyKeys(STORAGE_KEY, LEGACY_STORAGE_KEYS);
   let saved: Record<string, any> = {};
   try {
     const raw = localStorage.getItem(STORAGE_KEY);

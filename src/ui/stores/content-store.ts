@@ -42,6 +42,7 @@ import { defineStore, getActivePinia } from 'pinia';
 import { ref } from 'vue';
 import { detach } from './db-write';
 import type { ContentStatus } from '@engine/types-content';
+import { LEGACY_PACK_ID_MAP } from '@engine/types-content';
 // 占位基线清单：随引擎打包的静态资源（设计 §6），**不是**内容树的一部分。
 import placeholderHashesRaw from '@engine/placeholder-hashes.json';
 import type { ChatPreset, SaveSlot, WorldBook } from '@engine/types';
@@ -665,6 +666,27 @@ function writePackSelectionMetadata(
   return out as SaveSlot['metadata'];
 }
 
+/**
+ * 旧官方包 packId 记录迁移（2026-09-20 去 fated-poem 化）：记录键与载荷同步改名，
+ * 保持 `packId === payload.packId` 不变式。幂等读路径自愈——迁过一次后是空转扫描；
+ * 官方包出新版（新 id 同版本线）时升级判定照常工作。
+ */
+async function migrateLegacyPackIdRecords(): Promise<void> {
+  const records = await getDatabase().contentPacks.toArray();
+  for (let i = 0; i < records.length; i++) {
+    const record = records[i];
+    const newId = record ? LEGACY_PACK_ID_MAP[record.packId] : undefined;
+    if (!record || !newId) continue;
+    const migrated = {
+      ...record,
+      packId: newId,
+      ...(record.payload ? { payload: { ...record.payload, packId: newId } } : {}),
+    };
+    await getDatabase().contentPacks.delete(record.packId);
+    await getDatabase().contentPacks.put(migrated);
+  }
+}
+
 export const useContentStore = defineStore('content', () => {
   /** 应用级内容态（D16）。占位态起步；七处 fetch 上报后可能切到 error。 */
   const contentStatus = ref<ContentStatus>('placeholder');
@@ -813,6 +835,14 @@ export const useContentStore = defineStore('content', () => {
     if (hydratePromise) return hydratePromise;
     hydratePromise = (async () => {
       try {
+        // 旧官方包 packId 迁移（2026-09-20 改名）：记录键与载荷同步改名，
+        // 保持 `packId === payload.packId` 不变式；幂等，迁过一次后是空转扫描。
+        // 🔴 **必须放在幂等闸之内的 IIFE 里**（每 boot 一次），不能每次调用都跑：
+        //    每条 `ensureContentRegistryLoaded` 链都经 `hydratePackStateIfPossible`，
+        //    闸前多出的一拍 DB 等待会让跨用例泄漏的 settings-store 启动任务
+        //    （setTimeout(0) → loadProjectDefaults）恰好在计数型测试装好 mock 的
+        //    窗口里插进一整轮注册表 fetch（content-store-registry 的 fetch 计数闸）。
+        await migrateLegacyPackIdRecords();
         const records = await getDatabase().contentPacks.toArray();
         const active = records.find((r) => r.packId === r.payload?.packId && r.packId) ?? null;
         // 💡 单 pack 场景：取最后一条（主 pack）。多 pack 共存留待后续波次扩展。
@@ -838,8 +868,10 @@ export const useContentStore = defineStore('content', () => {
           // beautifier-store 侧另有 watch contentStatus 收敛保险（2026-08-08）。
           console.warn('[content-store] hydratePackState 重算 presetRules 失败:', err);
         }
-      } catch {
-        // Dexie 不可用 → 缓存保持现状，不阻断（boot 兜底）
+      } catch (err) {
+        // Dexie 不可用 → 缓存保持现状，不阻断（boot 兜底）。但必须留痕：
+        // 静默吞掉会让 packId 迁移这类一次性写路径失败得无影无踪。
+        console.warn('[content-store] hydratePackState 载入失败:', err);
       }
     })();
     return hydratePromise;

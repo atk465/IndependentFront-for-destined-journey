@@ -33,7 +33,7 @@ describe('BFF origin boundary', () => {
     });
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ ok: true, service: 'fated-poem-bff' });
+    expect(await response.json()).toMatchObject({ ok: true, service: 'narrative-bff' });
   });
 });
 

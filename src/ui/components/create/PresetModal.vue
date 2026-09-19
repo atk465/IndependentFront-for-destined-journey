@@ -134,7 +134,7 @@ function handleExport(preset: CreatePresetRecord) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `destiny_${preset.name}.preset.json`;
+  a.download = `narrative_${preset.name}.preset.json`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -149,7 +149,7 @@ function handleExportAll() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `destiny_all_${new Date().toISOString().slice(0, 10)}.presets.json`;
+  a.download = `narrative_all_${new Date().toISOString().slice(0, 10)}.presets.json`;
   a.click();
   URL.revokeObjectURL(url);
 }

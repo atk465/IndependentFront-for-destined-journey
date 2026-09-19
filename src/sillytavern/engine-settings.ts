@@ -2,7 +2,7 @@
  * 引擎侧读设置的**唯一入口**（Q-06）。
  *
  * 起因：设置曾有两个真源。前端设置住在 localStorage（`settings-store` 的
- * `fated-poem-settings`），而引擎侧 `createSnapshot` 读的是 Dexie `settings` 表 ——
+ * `narrative-engine-settings`），而引擎侧 `createSnapshot` 读的是 Dexie `settings` 表 ——
  * 一份由 `initializeDatabase` 播种、之后再没人写全的**影子配置**。
  * 两侧靠 `game-pipeline.syncSnapshotSettings` 搭桥，那座桥只搬两个字段，
  * 且以 `catch { console.warn }` 静默失败。

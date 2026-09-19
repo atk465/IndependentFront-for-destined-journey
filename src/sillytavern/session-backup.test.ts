@@ -298,7 +298,9 @@ beforeEach(async () => {
 // ========== isSessionBackup ==========
 
 describe('isSessionBackup', () => {
-  it('按 kind 分流：只认单存档备份', () => {
+  it('按 kind 分流：认现役 kind 与旧版兼容 kind', () => {
+    expect(isSessionBackup({ kind: 'narrative-session-save' })).toBe(true);
+    // 2026-09-20 去 fated-poem 化前的旧 kind：旧备份文件是用户进度，永久兼容
     expect(isSessionBackup({ kind: 'fated-poem-session-save' })).toBe(true);
     expect(isSessionBackup({ version: 21, saves: [] })).toBe(false);
     expect(isSessionBackup(null)).toBe(false);
@@ -320,7 +322,7 @@ describe('exportSessionSave', () => {
 
     const backup = await exportSessionSave(SAVE_ID, { storyPreset: STORY_PRESET });
 
-    expect(backup.kind).toBe('fated-poem-session-save');
+    expect(backup.kind).toBe('narrative-session-save');
     expect(Number.isFinite(backup.version)).toBe(true);
     expect(backup.save.id).toBe(SAVE_ID);
     expect(backup.profile?.saveId).toBe(SAVE_ID);

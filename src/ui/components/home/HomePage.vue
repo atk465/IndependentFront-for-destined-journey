@@ -314,7 +314,7 @@ async function exportSave(saveId: string) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `fated-poem-save-${name}-${Date.now()}.json`;
+    a.download = `narrative-save-${name}-${Date.now()}.json`;
     a.click();
     URL.revokeObjectURL(url);
     ui.toast('存档已导出', 'success');
@@ -593,7 +593,7 @@ function formatTime(ts: number) {
     <footer class="home-footer">
       <span class="footer-version">v{{ VERSION }}</span>
       <span class="footer-dot" aria-hidden="true">·</span>
-      <span class="footer-era">复兴纪元</span>
+      <span class="footer-era">{{ branding.era }}</span>
     </footer>
 
     <!-- 存档管理 — 全屏界面 -->

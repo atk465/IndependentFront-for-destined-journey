@@ -82,7 +82,7 @@ describe('settings-store', () => {
     store.settings.developerMode = true;
     await nextTick();
 
-    const saved = JSON.parse(localStorage.getItem('fated-poem-settings')!);
+    const saved = JSON.parse(localStorage.getItem('narrative-engine-settings')!);
     expect(saved.developerMode).toBe(true);
 
     store.resetAll();
@@ -104,7 +104,7 @@ describe('settings-store', () => {
       },
     ];
     await nextTick();
-    const raw = localStorage.getItem('fated-poem-settings');
+    const raw = localStorage.getItem('narrative-engine-settings');
     expect(raw).toBeTruthy();
     const parsed = JSON.parse(raw!);
     expect(parsed.apiPool).toHaveLength(1);
@@ -127,7 +127,7 @@ describe('settings-store', () => {
 
     expect(store.settings.apiPool[0].apiKey).toBe('sk-runtime-secret');
     expect((await getApiEndpoints())[0].apiKey).toBe('sk-runtime-secret');
-    const raw = localStorage.getItem('fated-poem-settings')!;
+    const raw = localStorage.getItem('narrative-engine-settings')!;
     expect(raw).not.toContain('sk-runtime-secret');
     expect(JSON.parse(raw).apiPool[0].apiKey).toBe('');
   });
@@ -147,7 +147,7 @@ describe('settings-store', () => {
     });
 
     expect(store.settings.apiPool[0].contextWindowTokens).toBe(128000);
-    const raw = JSON.parse(localStorage.getItem('fated-poem-settings')!);
+    const raw = JSON.parse(localStorage.getItem('narrative-engine-settings')!);
     expect(raw.apiPool[0].contextWindowTokens).toBe(128000);
     const rows = await getApiEndpoints();
     expect(rows[0].contextWindowTokens).toBe(128000);
@@ -247,7 +247,7 @@ describe('settings-store', () => {
 
   it('旧 localStorage 密钥校验落库后才擦除，并在运行时恢复', async () => {
     store_.set(
-      'fated-poem-settings',
+      'narrative-engine-settings',
       JSON.stringify({
         plotMode: 'main',
         apiPool: [
@@ -272,13 +272,26 @@ describe('settings-store', () => {
     expect(outcome.status).toBe('migrated');
     expect(legacyStore.settings.apiPool[0].apiKey).toBe('sk-legacy-secret');
     expect((await getApiEndpoints())[0].apiKey).toBe('sk-legacy-secret');
-    expect(localStorage.getItem('fated-poem-settings')).not.toContain('sk-legacy-secret');
+    expect(localStorage.getItem('narrative-engine-settings')).not.toContain('sk-legacy-secret');
   });
 
   it('再次创建 store 应从 localStorage 恢复', () => {
     store.settings.plotMode = 'main';
     const store2 = useSettingsStore();
     expect(store2.settings.plotMode).toBe('main');
+  });
+
+  it('旧键（fated-poem-settings）一次性迁移到新键', () => {
+    // 清掉本轮 store 已写过的新键，种上旧键快照
+    localStorage.removeItem('narrative-engine-settings');
+    localStorage.setItem('fated-poem-settings', JSON.stringify({ plotMode: 'main' }));
+
+    setActivePinia(createPinia());
+    const migrated = useSettingsStore();
+
+    expect(migrated.settings.plotMode).toBe('main');
+    expect(localStorage.getItem('narrative-engine-settings')).toContain('main');
+    expect(localStorage.getItem('fated-poem-settings')).toBeNull();
   });
 
   it('resetAll 应恢复默认值', () => {
@@ -347,7 +360,7 @@ describe('settings-store', () => {
   it('启动任务不得在密钥迁移验证通过之前覆写 localStorage（老档唯一副本保护）', async () => {
     // 老档：密钥的**唯一副本**还在 localStorage；另有一个 presets 键触发镜像迁移。
     store_.set(
-      'fated-poem-settings',
+      'narrative-engine-settings',
       JSON.stringify({
         presets: [],
         apiPool: [
@@ -373,13 +386,13 @@ describe('settings-store', () => {
     // 🔴 迁移尚未验证，localStorage 仍是唯一副本，一个字节都不许动。
     //    此前这里会被写成 `apiKey: ""`：Dexie 若写不进（无痕 / 配额 / IndexedDB 不可用），
     //    用户的密钥就永久没了。
-    expect(localStorage.getItem('fated-poem-settings')).toContain('sk-only-copy');
+    expect(localStorage.getItem('narrative-engine-settings')).toContain('sk-only-copy');
 
     // 迁移跑完之后才允许脱敏落盘，且运行时仍读得到
     const outcome = await legacyStore.initApiSecrets();
     expect(outcome.status).toBe('migrated');
     expect(legacyStore.settings.apiPool[0].apiKey).toBe('sk-only-copy');
-    expect(localStorage.getItem('fated-poem-settings')).not.toContain('sk-only-copy');
+    expect(localStorage.getItem('narrative-engine-settings')).not.toContain('sk-only-copy');
     legacyStore.$dispose();
   });
 

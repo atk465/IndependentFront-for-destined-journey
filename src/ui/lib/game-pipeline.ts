@@ -3905,7 +3905,7 @@ export class GamePipeline {
    * 🔴 2026-08-02 批量 item_gen 的单批上限。
    *
    * 一次打包过多请求会让 item_gen 单次调用耗时暴涨（9 个请求 ≈ 240s+，见
-   * fated-poem-debug-2743e219），且 AI 思考过重（7817 字 reasoning）容易撞超时。
+   * narrative-debug-2743e219），且 AI 思考过重（7817 字 reasoning）容易撞超时。
    * 超上限时按此值分批，每批仍是一次调用（相对逐条 N 次已大幅缩减）。
    * 5 个/批 ≈ 2 批，总耗时 ≈ 2 × 单批时间，比 9 个挤一批更稳。
    */

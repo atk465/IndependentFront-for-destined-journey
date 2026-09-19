@@ -228,8 +228,8 @@
       <canvas id="drift-canvas"></canvas>
       <div class="vignette"></div>
       <div class="title" id="title">
-        <h1>命定之诗</h1>
-        <p>FATED POEM</p>
+        <h1>叙事引擎</h1>
+        <p>NARRATIVE ENGINE</p>
       </div>
       <div class="hud" id="hud">
         <div class="hud-readout">
@@ -837,13 +837,62 @@
       // ==================================================================================
       function buildVeils() {
         const SPECS = [
-          { pos: [-7.5, 2.4, -14], size: 21, tint: PALETTE.veilBlue, alpha: 0.26, spin: 0.012, drift: 0.0075 },
-          { pos: [8.2, -1.4, -17], size: 25, tint: PALETTE.veilViolet, alpha: 0.22, spin: -0.009, drift: -0.0058 },
-          { pos: [0.5, -5.2, -10], size: 19, tint: PALETTE.veilTeal, alpha: 0.17, spin: 0.016, drift: 0.0092 },
-          { pos: [-11, -4.5, -22], size: 30, tint: PALETTE.veilBlue, alpha: 0.15, spin: -0.006, drift: 0.0041 },
-          { pos: [12, 5.5, -24], size: 28, tint: PALETTE.veilViolet, alpha: 0.13, spin: 0.008, drift: -0.0067 },
-          { pos: [-2, 6.5, -19], size: 22, tint: PALETTE.veilTeal, alpha: 0.11, spin: -0.013, drift: 0.0053 },
-          { pos: [3.5, 0.5, -7], size: 15, tint: PALETTE.veilBlue, alpha: 0.1, spin: 0.02, drift: -0.011 },
+          {
+            pos: [-7.5, 2.4, -14],
+            size: 21,
+            tint: PALETTE.veilBlue,
+            alpha: 0.26,
+            spin: 0.012,
+            drift: 0.0075,
+          },
+          {
+            pos: [8.2, -1.4, -17],
+            size: 25,
+            tint: PALETTE.veilViolet,
+            alpha: 0.22,
+            spin: -0.009,
+            drift: -0.0058,
+          },
+          {
+            pos: [0.5, -5.2, -10],
+            size: 19,
+            tint: PALETTE.veilTeal,
+            alpha: 0.17,
+            spin: 0.016,
+            drift: 0.0092,
+          },
+          {
+            pos: [-11, -4.5, -22],
+            size: 30,
+            tint: PALETTE.veilBlue,
+            alpha: 0.15,
+            spin: -0.006,
+            drift: 0.0041,
+          },
+          {
+            pos: [12, 5.5, -24],
+            size: 28,
+            tint: PALETTE.veilViolet,
+            alpha: 0.13,
+            spin: 0.008,
+            drift: -0.0067,
+          },
+          {
+            pos: [-2, 6.5, -19],
+            size: 22,
+            tint: PALETTE.veilTeal,
+            alpha: 0.11,
+            spin: -0.013,
+            drift: 0.0053,
+          },
+          {
+            pos: [3.5, 0.5, -7],
+            size: 15,
+            tint: PALETTE.veilBlue,
+            alpha: 0.1,
+            spin: 0.02,
+            drift: -0.011,
+          },
         ];
 
         const geometry = new THREE.PlaneGeometry(1, 1);
@@ -1145,8 +1194,7 @@
           const armAngle = (arm / ARMS) * TAU;
           // Arm spread must stay well under the arm spacing (TAU/ARMS) or the arms merge.
           const spread = inHalo ? 1.2 : 0.05 + t * 0.19;
-          const angle =
-            armAngle + Math.log(1 + radius * WIND_K) * WIND_GAIN + gaussian() * spread;
+          const angle = armAngle + Math.log(1 + radius * WIND_K) * WIND_GAIN + gaussian() * spread;
 
           // A little extra radial jitter breaks the "drawn with a compass" look at the rim.
           const jitter = gaussian() * (0.02 + t * 0.11);
@@ -1710,7 +1758,9 @@
           const originX = handed * (7 + Math.random() * 13);
           const originY = 5 + Math.random() * 9;
           const originZ = -6 - Math.random() * 22;
-          direction.set(-handed * (0.55 + Math.random() * 0.5), -(0.72 + Math.random() * 0.4), 0.06).normalize();
+          direction
+            .set(-handed * (0.55 + Math.random() * 0.5), -(0.72 + Math.random() * 0.4), 0.06)
+            .normalize();
           sideways.crossVectors(direction, forward).normalize();
 
           const seed = Math.random();

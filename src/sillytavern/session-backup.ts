@@ -25,6 +25,7 @@ import {
   DB_VERSION,
 } from './database';
 import type { ContentPackRecord } from './database';
+import { LEGACY_PACK_ID_MAP } from './types-content';
 // 记忆编号分配器与 generateMemoryId() **共用同一个实现**（两处各写一份就是漂移的来路：
 // 一边补齐到 6 位、另一边截断到 6 位，撞号了也不会有任何报错）。
 import { allocateMemoryIds } from './memory-summarizer';
@@ -91,7 +92,7 @@ interface SessionDependencies {
 
 /** 单存档备份文件的顶层结构 */
 export interface SessionBackup {
-  kind: 'fated-poem-session-save';
+  kind: 'narrative-session-save';
   /**
    * = `DB_VERSION`。导入侧**只拿它做一个方向的判断**（与 FullBackup 同口径，2026-08-17 评审补）：
    * 戳 > 本机 `DB_VERSION` 直接拒（`assertBackupNotFromFuture`：备份比本机新，导进来
@@ -131,7 +132,20 @@ export interface SessionImportCheck {
   missingStoryPreset?: { id: string; name: string };
 }
 
-const SESSION_BACKUP_KIND = 'fated-poem-session-save';
+const SESSION_BACKUP_KIND = 'narrative-session-save';
+/**
+ * 2026-09-20 去 fated-poem 化前的旧 kind（兼容层）。旧备份文件是用户的游戏进度，
+ * 导入侧**永久**接受旧 kind——只判结构，不做淘汰。
+ */
+const LEGACY_SESSION_BACKUP_KINDS: readonly string[] = ['fated-poem-session-save'];
+
+/** kind 是否为可接受的单存档备份（现役 kind 或旧版兼容 kind） */
+function isSessionBackupKind(value: unknown): boolean {
+  return (
+    value === SESSION_BACKUP_KIND ||
+    (typeof value === 'string' && LEGACY_SESSION_BACKUP_KINDS.includes(value))
+  );
+}
 
 // ═══════════════════════════════════════════════════════════
 // 结构判定
@@ -145,7 +159,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 /** 结构判定 —— 只认 `kind`，够 UI 在「这是哪种备份文件」的岔路口分流 */
 export function isSessionBackup(data: unknown): data is SessionBackup {
   const rec = asRecord(data);
-  return rec !== null && rec.kind === SESSION_BACKUP_KIND;
+  return rec !== null && isSessionBackupKind(rec.kind);
 }
 
 /**
@@ -378,17 +392,19 @@ export async function checkSessionSaveDependencies(
   const installedPacks = new Map(packs.map((p) => [p.packId, p]));
   const packMismatches: SessionImportCheck['packMismatches'] = [];
   for (const want of deps.packs ?? []) {
-    const installed = installedPacks.get(want.packId);
+    // 旧备份里记录的是改名前的官方包 packId，映射到新 id 再查（永久兼容）
+    const wantId = LEGACY_PACK_ID_MAP[want.packId] ?? want.packId;
+    const installed = installedPacks.get(wantId);
     if (!installed) {
       packMismatches.push({
-        packId: want.packId,
+        packId: wantId,
         ...(want.name ? { name: want.name } : {}),
         expectedVersion: want.packVersion,
         installedVersion: null,
       });
     } else if (installed.packVersion !== want.packVersion) {
       packMismatches.push({
-        packId: want.packId,
+        packId: wantId,
         ...(want.name ? { name: want.name } : {}),
         expectedVersion: want.packVersion,
         installedVersion: installed.packVersion,
@@ -466,7 +482,7 @@ function validateSessionBackupOrThrow(backup: unknown): Record<string, unknown> 
   if (!rec) {
     throw new Error('备份格式无效：非对象');
   }
-  if (rec.kind !== SESSION_BACKUP_KIND) {
+  if (!isSessionBackupKind(rec.kind)) {
     throw new Error('备份格式无效：不是单存档备份文件（kind 不匹配）');
   }
   if (typeof rec.version !== 'number' || !Number.isFinite(rec.version)) {

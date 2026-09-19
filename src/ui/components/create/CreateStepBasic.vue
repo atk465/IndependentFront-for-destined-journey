@@ -311,7 +311,7 @@ function applyBackground(bg: BackgroundTemplate | null) {
             </div>
             <div class="money-item">
               <FormStepper
-                v-model="store.destinyPoints"
+                v-model="store.startingPoints"
                 label="命运点数 (FP)"
                 :min="0"
                 :max="9999"

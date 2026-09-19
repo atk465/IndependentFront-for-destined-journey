@@ -1034,7 +1034,7 @@ describe('buildAgentMessages × 能力面接线', () => {
   it('engine：拿得到引擎标识与能力探测', () => {
     const ctx = makeContext();
     const out = render('<%= engine.name %>|<%= engine.has("lore.get") %>', ctx);
-    expect(out).toContain('poem-of-destiny|true');
+    expect(out).toContain('narrative-engine|true');
   });
 
   it('别名层同样接线（存量条目走的是这条）', () => {

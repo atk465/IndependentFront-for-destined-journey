@@ -368,7 +368,7 @@ export const useCreateStore = defineStore('create', () => {
   // ═══════════════════════════════════════════════════════
   // 经济 — 对齐原版消耗公式
   // ═══════════════════════════════════════════════════════
-  const destinyPoints = ref(0);
+  const startingPoints = ref(0);
   const money = ref(0);
 
   const raceCost = computed(() => lookupCost(catalog.value.raceCosts, race.value));
@@ -381,7 +381,7 @@ export const useCreateStore = defineStore('create', () => {
     return tpl ? talentExchangePrice(tpl) : 0;
   });
   const moneyCost = computed(() => Math.ceil(money.value / 100));
-  const destinyCost = computed(() => Math.ceil(destinyPoints.value / 2));
+  const startingPointCost = computed(() => Math.ceil(startingPoints.value / 2));
   const levelCost = computed(() => Math.max(0, level.value - 1) * 5);
 
   const totalCost = computed(
@@ -393,7 +393,7 @@ export const useCreateStore = defineStore('create', () => {
       cardCost.value +
       talentCost.value +
       moneyCost.value +
-      destinyCost.value,
+      startingPointCost.value,
   );
   const remainingPoints = computed(() => reincarnationPoints.value - totalCost.value);
 
@@ -1333,7 +1333,6 @@ export const useCreateStore = defineStore('create', () => {
       customFields: {
         // M6 T2: saveId/gender/personality/physics/backstory 已升一等字段停写
         age: age.value,
-        destinyPoints: destinyPoints.value,
         extra: extra.value.trim(),
       },
     };
@@ -1581,7 +1580,7 @@ export const useCreateStore = defineStore('create', () => {
       save,
       era: era.value,
       experienceMode: experienceMode.value === 'easy' ? ('easy' as const) : ('normal' as const),
-      destinyPoints: destinyPoints.value,
+      startingPoints: startingPoints.value,
       outline,
       events: confirmed
         ? outlineToEvents(JSON.parse(JSON.stringify(plotOutlineChapters.value)), saveId)
@@ -1685,7 +1684,7 @@ export const useCreateStore = defineStore('create', () => {
         basePoints: { ...basePoints.value },
         attributePoints: { ...attributePoints.value },
         money: money.value,
-        destinyPoints: destinyPoints.value,
+        startingPoints: startingPoints.value,
       },
       cards: [...selectedCards.value],
       plotSettings: plotSettings.value,
@@ -1717,7 +1716,7 @@ export const useCreateStore = defineStore('create', () => {
     basePoints.value = { ...data.character.basePoints };
     attributePoints.value = { ...data.character.attributePoints };
     money.value = data.character.money;
-    destinyPoints.value = data.character.destinyPoints;
+    startingPoints.value = data.character.startingPoints;
     clearAllSelections();
     // 旧预设的 equipments/items/skills 字段已随卡牌化退役，容错忽略
     for (const card of data.cards ?? []) {
@@ -1791,7 +1790,7 @@ export const useCreateStore = defineStore('create', () => {
     level.value = 1;
     basePoints.value = { 力量: 0, 敏捷: 0, 体质: 0, 智力: 0, 精神: 0 };
     attributePoints.value = { 力量: 0, 敏捷: 0, 体质: 0, 智力: 0, 精神: 0 };
-    destinyPoints.value = 0;
+    startingPoints.value = 0;
     money.value = 0;
     clearAllSelections();
     plotOutline.value = null;
@@ -1879,14 +1878,14 @@ export const useCreateStore = defineStore('create', () => {
     spPreview,
     // 经济
     reincarnationPoints,
-    destinyPoints,
+    startingPoints,
     money,
     raceCost,
     identityCost,
     levelCost,
     cardCost,
     moneyCost,
-    destinyCost,
+    startingPointCost,
     totalCost,
     remainingPoints,
     // Phase 10h: 世界书驱动

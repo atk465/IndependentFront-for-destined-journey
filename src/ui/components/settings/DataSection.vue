@@ -314,7 +314,7 @@ async function exportAll() {
   const u = URL.createObjectURL(b);
   const a = document.createElement('a');
   a.href = u;
-  a.download = `fated-poem-${Date.now()}.json`;
+  a.download = `narrative-backup-${Date.now()}.json`;
   a.click();
   URL.revokeObjectURL(u);
   ui.toast('导出成功', 'success');
