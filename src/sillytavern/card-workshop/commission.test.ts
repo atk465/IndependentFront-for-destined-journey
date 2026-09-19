@@ -51,7 +51,7 @@ describe('coerceCommissions（容错解析）', () => {
         rewards: { materials: [{ name: '火晶' }, { name: '星核', quantity: 3 }] },
       },
     ]);
-    expect(defs[0].requireCard.minTier).toBeUndefined();
+    expect(defs[0].requireCard?.minTier).toBeUndefined();
     expect(defs[0].rewards.materials).toEqual([
       { name: '火晶', quantity: 1 },
       { name: '星核', quantity: 3 },

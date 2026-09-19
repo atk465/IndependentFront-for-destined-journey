@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref, watch } from 'vue';
-import { useGameStore, setRewriteLoadoutImpl, setCraftNarrateImpl } from '../../stores/game-store';
+import { useGameStore, setRewriteLoadoutImpl, setCraftNarrateImpl, setCommissionNarrateImpl } from '../../stores/game-store';
 import { useUIStore } from '../../stores/ui-store';
 import { useSettingsStore } from '../../stores/settings-store';
 import { unwireEffectSystem } from '@engine/effect-wiring';
@@ -22,6 +22,7 @@ import DebugPanel from './DebugPanel.vue';
 import CardAlbumPanel from './cards/CardAlbumPanel.vue';
 import FortuneAltar from './cards/FortuneAltar.vue';
 import CommissionBoard from './cards/CommissionBoard.vue';
+import ExplorationPanel from './cards/ExplorationPanel.vue';
 import TalentPanel from './cards/TalentPanel.vue';
 import CraftBench from './cards/CraftBench.vue';
 import SkirmishPanel from './combat/SkirmishPanel.vue';
@@ -97,6 +98,13 @@ onMounted(async () => {
       //     需要 endpoint/clientFactory —— 同样走缝注入，store 与面板不碰装配。
       setCraftNarrateImpl((req) =>
         pipeline ? pipeline.narrateCardCraft(req) : Promise.reject(new Error('游戏管线还没就绪')),
+      );
+      // 🆕 委托终点叙事（2026-09-19 共识稿 #13 修订）：获得瞬间的叙事拍（获得场景，
+      //     非颁授场景）——同一条缝模式，失败回退模板文案，发放永不被叙事阻塞。
+      setCommissionNarrateImpl((req) =>
+        pipeline
+          ? pipeline.narrateCommissionFinale(req)
+          : Promise.reject(new Error('游戏管线还没就绪')),
       );
       // 首次加载 → 自动发送开场 Prompt
       loadingSave.value = false;
@@ -389,6 +397,16 @@ function onModalOpenChange(v: boolean) {
       @update:open="onModalOpenChange"
     >
       <CommissionBoard />
+    </AppModal>
+    <AppModal
+      title="野外探索 · 铭刻纪元"
+      :open="game.activeModal === 'exploration'"
+      size="md"
+      closable
+      @close="game.closeModal()"
+      @update:open="onModalOpenChange"
+    >
+      <ExplorationPanel />
     </AppModal>
     <AppModal
       title="天赋 · 铭刻纪元"

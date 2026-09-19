@@ -22,6 +22,23 @@ import type { CommissionDef } from './card-workshop/commission';
 let installed: readonly CommissionDef[] = [];
 
 /**
+ * 开发者自定义委托的**独立槽**（委托×地图闭环 2026-09-19：委托编写器）。
+ *
+ * 🔴 为什么是独立槽而不是让调用方重装整份清单：清单由内容注册表第 15 面在换包/读档时装，
+ *    而自定义委托随存档走 —— 两条生命周期，塞进同一个安装动作就会出现「装包时自定义
+ *    还没灌回 / 灌回后换包把自定义冲掉」的时序赛。两个槽各装各的，读取时合并。
+ */
+let customDefs: readonly CommissionDef[] = [];
+
+/**
+ * 装入开发者自定义委托（调用方先过 `coerceCustomCommissions` 容错）。
+ * 每次换包 / 清空注册表都必须重装。
+ */
+export function installCustomCommissions(defs: readonly CommissionDef[] | null): void {
+  customDefs = Array.isArray(defs) ? [...defs] : [];
+}
+
+/**
  * 装入当前委托清单（调用方先过 `coerceCommissions` 容错）。
  * 每次换包 / 清空注册表都必须重装，否则会沿上一份清单出委托（随机事件同款症状）。
  */
@@ -29,9 +46,11 @@ export function installCommissionPack(defs: readonly CommissionDef[]): void {
   installed = Array.isArray(defs) ? [...defs] : [];
 }
 
-/** 当前生效的委托清单；没装过 = 空数组（兜底合同不是异常） */
+/** 当前生效的委托清单 = 包清单 + 自定义（自定义覆盖同名内置）；没装过 = 空数组 */
 export function getCommissionDefs(): readonly CommissionDef[] {
-  return installed;
+  if (customDefs.length === 0) return installed;
+  const customNames = new Set(customDefs.map((d) => d.name));
+  return [...installed.filter((d) => !customNames.has(d.name)), ...customDefs];
 }
 
 /** 空包判定（委托板空态 / 注入空串出口共用） */

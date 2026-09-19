@@ -47,6 +47,7 @@ import { applyBond, bondForCard, type BondInfo } from '@engine/card-workshop/aff
 import { cardKindOf } from '@engine/card-workshop/card-kind';
 import { willModifierOf } from '@engine/card-workshop/unsealing';
 import { getCommissionDefs } from '@engine/commission-runtime';
+import { coerceCommissionsFlags } from '@engine/card-workshop/commission-flags';
 import { buildCraftBiasLines } from '@engine/card-workshop/talent-entry';
 import { runTalentFusionNaming } from '@engine/card-workshop/talent-naming';
 import {
@@ -148,6 +149,10 @@ import {
   tryUseToday,
 } from '@engine/card-workshop/daily-ledger';
 import { CARD_CRAFT_NARRATE_AGENT, runCardCraftNarration } from '@engine/card-craft-narrate';
+import {
+  COMMISSION_NARRATE_AGENT,
+  runCommissionNarration,
+} from '@engine/card-workshop/commission-narrate';
 import {
   COMBAT_CRIT_MULTIPLIER,
   DAILY_BUFF_COMBAT_CRIT,
@@ -2384,6 +2389,24 @@ export class GamePipeline {
     );
   }
 
+  /** 委托终点叙事（获得瞬间；共识稿 #13 修订）。失败由 store 侧兜底模板文案。 */
+  async narrateCommissionFinale(req: {
+    saveId: string;
+    commissionName: string;
+    description: string;
+    finaleType: '谜题' | '强敌' | '场景制卡';
+    target: string;
+    cardName: string;
+    midTierName: string;
+  }): Promise<{ narrative: string }> {
+    const endpoint = this.getEndpointForAgent(COMMISSION_NARRATE_AGENT);
+    if (!endpoint) throw new Error('终点叙事未解析到 API 池');
+    return runCommissionNarration(
+      { ...req, endpoint },
+      { clientFactory: (agentId, ep, saveId) => this.getClientFactory()(agentId, ep, saveId) },
+    );
+  }
+
   /** 每日账本：今天这个能力还能不能用（跨天自动恢复，见 daily-ledger.ts） */
   private canUseDaily(key: string, perDay = 1): boolean {
     const ledger = coerceLedger(this.game.saveProfile?.worldFlags?.dailyUses);
@@ -3531,6 +3554,32 @@ export class GamePipeline {
             value: null,
           } as StatePatch);
           if (slap.note) this.emitMessage(`▸ ${slap.note}`, 'assistant');
+        }
+      }
+      // 终点「强敌型」（委托×地图闭环 决议 #13 修订）：在目的地击败目标之敌 → 写证据，
+      // 委托板下一次扫账（scanFinaleCommissions）发卡结案。Code 只记证据不发卡——
+      // 发卡与「已完成」记档在扫账里一次原子提交，避免战斗结算半途插一条交付流。
+      if (session.finished === '胜利' || session.finished === '碾压') {
+        const cFlags = coerceCommissionsFlags(this.game.saveProfile?.worldFlags?.commissions);
+        const cDefs = this.game.allCommissionDefs();
+        for (const activeEntry of cFlags.active ?? []) {
+          const cDef = cDefs.find((d) => d.name === activeEntry.defName);
+          if (cDef?.finale?.type !== '强敌') continue;
+          const finaleTarget = cDef.finale.target;
+          if (!finaleTarget) continue;
+          const enemyName = session.enemyName ?? '';
+          if (!enemyName.includes(finaleTarget) && !finaleTarget.includes(enemyName)) continue;
+          const midTierId = cFlags.currentMidTier?.id;
+          if (cDef.destMidTier && cDef.destMidTier !== midTierId) continue;
+          settlementPatches.push({
+            op: 'set_variable',
+            target: `worldFlags.commissions.finaleEvidence.${cDef.name}`,
+            value: 'battle',
+          } as StatePatch);
+          this.emitMessage(
+            `▸ 【终点】${finaleTarget} 已倒下——委托「${cDef.name}」可以结案了。`,
+            'assistant',
+          );
         }
       }
       // 复生（S「再生」）：败北结算时 HP 不落 0——不死之身，只是这一场输了。

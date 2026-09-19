@@ -30,7 +30,7 @@ import type {
 export interface RandomEventDebugRow {
   name: string;
   priority: number;
-  kind: 'mtth' | 'first_visit';
+  kind: 'mtth' | 'first_visit' | 'exploration';
   /** 仅 mtth */
   mtthDays?: number;
   /** 仅 first_visit：作者点名的地点键 */

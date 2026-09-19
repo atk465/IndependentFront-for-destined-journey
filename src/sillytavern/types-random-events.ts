@@ -126,12 +126,18 @@ interface PlaceFilter {
 }
 
 /**
- * 触发器。两种形态语义完全不同：
+ * 触发器。三种形态语义完全不同：
  * - `mtth`：平均每 `mtthDays` 天触发一次（权重 ×1 时），逐天掷骰 `p = min(1, w / mtthDays)`
  * - `first_visit`：`scope` 命中的地点首次到访时**强制入池**（绕过 MTTH 与全局冷却）
+ * - `exploration`：`scope` 命中的中层里**每轮探索动作**（采集/垂钓）结算时掷一次
+ *   （委托×地图闭环 2026-09-19 决议 #10）。与 mtth 的差别是「按动作不按天」：种子带
+ *   动作序号，同一动作的重复结算不会重掷出不同结果。`chancePct` 缺省 100 —— 权重链
+ *   照常生效，命中多条时权重加权抽一条。
  */
 export type RandomEventTrigger =
-  { type: 'mtth'; mtthDays: number } | { type: 'first_visit'; scope: PlaceFilter };
+  | { type: 'mtth'; mtthDays: number }
+  | { type: 'first_visit'; scope: PlaceFilter }
+  | { type: 'exploration'; scope?: PlaceFilter; chancePct?: number };
 
 /**
  * 一条随机事件定义。全部叙事字段是中文自由文本，**引擎零解释**。

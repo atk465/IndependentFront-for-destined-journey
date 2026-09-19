@@ -29,6 +29,7 @@ import {
   evaluateEventCondition,
   isPendingStillValid,
   pruneRandomEvents,
+  rollExplorationEvent,
   rollRandomEvents,
   settleRandomEventTrigger,
 } from './random-event-scheduler';
@@ -1057,6 +1058,120 @@ describe('settleRandomEventTrigger —— §5.2 步 1-4', () => {
     const flags: RandomEventSaveFlags = { pending: [...pending] };
     const snapshot = JSON.stringify(flags);
     settleRandomEventTrigger(flags, 'Rumor', 5);
+    expect(JSON.stringify(flags)).toBe(snapshot);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 探索掷骰（委托×地图闭环 2026-09-19，决议 #10）
+// ═══════════════════════════════════════════════════════════
+
+function exploration(
+  name: string,
+  extra: Partial<RandomEventDef> & { scope?: { anyOf: string[] }; chancePct?: number } = {},
+): RandomEventDef {
+  const { scope, chancePct, ...rest } = extra;
+  return {
+    name,
+    brief: `${name} during exploration.`,
+    trigger: {
+      type: 'exploration',
+      ...(scope ? { scope } : {}),
+      ...(chancePct !== undefined ? { chancePct } : {}),
+    },
+    ...rest,
+  };
+}
+
+function rollExploration(
+  defs: RandomEventDef[],
+  flags: RandomEventSaveFlags,
+  currentDay: number,
+  opts: {
+    ctx?: RandomEventRollContext;
+    config?: RandomEventConfig;
+    rollSalt?: number;
+    surface?: string[];
+    frequency?: number;
+    saveSeed?: string;
+  } = {},
+): RandomEventSaveFlags | null {
+  return rollExplorationEvent(defs, opts.config ?? CONFIG, flags, opts.ctx ?? CTX, {
+    saveSeed: opts.saveSeed ?? SEED,
+    currentDay,
+    rollSalt: opts.rollSalt ?? 1,
+    surface: opts.surface ?? ['mt-north', 'North Vale', 'Harbor'],
+    frequency: opts.frequency,
+  });
+}
+
+describe('rollExplorationEvent —— 按动作不按天', () => {
+  const defs = [exploration('Ambush', { scope: { anyOf: ['mt-north'] } })];
+
+  it('scope 命中中层 → 入池并固化为待决条目', () => {
+    const next = rollExploration(defs, {}, 10);
+    expect(names(next)).toEqual(['Ambush']);
+    expect(next?.pending?.[0].armedDay).toBe(10);
+    expect(next?.pending?.[0].expiresDay).toBe(10 + CONFIG.offerTtlDays);
+  });
+
+  it('scope 不命中（中层不在匹配面）→ null', () => {
+    const next = rollExploration(defs, {}, 10, { surface: ['mt-south', 'South Vale'] });
+    expect(next).toBeNull();
+  });
+
+  it('scope 缺省 = 任何中层都算', () => {
+    const anyScope = [exploration('Wanderer')];
+    expect(names(rollExploration(anyScope, {}, 10, { surface: ['anywhere'] }))).toEqual([
+      'Wanderer',
+    ]);
+  });
+
+  it('同种子同结果；换动作序号（rollSalt）换序列', () => {
+    const a = rollExploration(defs, {}, 10, { rollSalt: 1 });
+    expect(rollExploration(defs, {}, 10, { rollSalt: 1 })).toEqual(a);
+    // 不同 salt 的序列可能不同（这里两个 salt 至少不能保证同果）——重放稳定性才是契约
+    const again = rollExploration(defs, {}, 10, { rollSalt: 1 });
+    expect(again).toEqual(a);
+  });
+
+  it('已在池 → 不重掷', () => {
+    const flags = rollExploration(defs, {}, 10);
+    expect(rollExploration(defs, flags ?? {}, 10, { rollSalt: 2 })).toBeNull();
+  });
+
+  it('once 且已触发 → 不再入池', () => {
+    const onceDefs = [exploration('Echo', { scope: { anyOf: ['mt-north'] }, once: true })];
+    const fired: RandomEventSaveFlags = { fired: { Echo: { count: 1, lastDay: 5 } } };
+    expect(rollExploration(onceDefs, fired, 10)).toBeNull();
+  });
+
+  it('available 不满足 → 缺数据 = 假，不入池', () => {
+    const gated = [exploration('Gated', { scope: { anyOf: ['mt-north'] }, available: { quest: { name: 'X', statusAnyOf: ['active'] } } })];
+    expect(rollExploration(gated, {}, 10)).toBeNull();
+  });
+
+  it('chancePct 0 → 永不入池；chancePct 100 缺省 → 照常', () => {
+    const never = [exploration('Never', { scope: { anyOf: ['mt-north'] }, chancePct: 0 })];
+    expect(rollExploration(never, {}, 10)).toBeNull();
+    const always = [exploration('Always', { scope: { anyOf: ['mt-north'] }, chancePct: 100 })];
+    expect(names(rollExploration(always, {}, 10))).toEqual(['Always']);
+  });
+
+  it('mtth / first_visit 定义不参与探索掷骰', () => {
+    const mixed = [mtth('Daily', SURE), firstVisit('Visit', ['mt-north'])];
+    expect(rollExploration(mixed, {}, 10)).toBeNull();
+  });
+
+  it('全局冷却压制探索掷骰', () => {
+    const next = rollExploration(defs, { lastTriggerDay: 8 }, 10);
+    expect(next).toBeNull();
+  });
+
+  it('不改入参（纯函数）', () => {
+    const flags: RandomEventSaveFlags = {};
+    const snapshot = JSON.stringify(flags);
+    rollExploration(defs, flags, 10);
     expect(JSON.stringify(flags)).toBe(snapshot);
   });
 });

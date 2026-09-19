@@ -15,6 +15,7 @@ const allTools = [
   { id: 'cardAlbum', label: '卡册', icon: 'fa-solid fa-clone' },
   { id: 'fortuneAltar', label: '祭坛', icon: 'fa-solid fa-monument' },
   { id: 'commissionBoard', label: '委托', icon: 'fa-solid fa-bullhorn' },
+  { id: 'exploration', label: '探索', icon: 'fa-solid fa-compass' },
   { id: 'talentPanel', label: '天赋', icon: 'fa-solid fa-fingerprint' },
   { id: 'craftBench', label: '制台', icon: 'fa-solid fa-wand-magic-sparkles' },
   { id: 'characters', label: '角色', icon: 'fa-solid fa-users' },

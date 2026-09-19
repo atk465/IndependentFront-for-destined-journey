@@ -23,6 +23,7 @@ import type {
   StatusEffect,
   Skill,
   InventoryItem,
+  CardItem,
   Snapshot,
 } from './types';
 import {
@@ -78,6 +79,8 @@ import {
   getRandomEventFlags,
   updateRandomEventFlags,
   setRandomEventFlagsInPlace,
+  getCommissionsFlags,
+  updateCommissionsFlags,
 } from './save-profile';
 import { clampAffection } from './affection-system';
 import { advanceTime, getSeason, toEpochMinutes, MINUTES_PER_GAME_DAY } from './time-system';
@@ -86,9 +89,20 @@ import { advanceTime, getSeason, toEpochMinutes, MINUTES_PER_GAME_DAY } from './
 // 静态 import 因此不成环（map-* 一律不 import 本模块）。
 import { getMapIndex, getMapPack } from './map-runtime';
 import { isEmptyMapPack } from './map-pack';
-import { findTileByName, resolveTileByLocation, type MapIndex } from './map-index';
+import { findTileByName, midTierOfTile, resolveTileByLocation, type MapIndex } from './map-index';
 import { findPath } from './map-path';
 import { weatherAt, weatherZoneOfTile } from './map-weather';
+// 委托×地图闭环（2026-09-19）：抵达对账（补足/到访/抵达判定）与探索事件掷骰的接线。
+// 依赖形状同地图那组：commission-flags / daily-ledger / random-event-scheduler 全是
+// 纯函数叶（零 I/O / 零时钟 / 零随机——骰值由本层注入），静态 import 不成环。
+import {
+  coerceCommissionsFlags,
+  planArrivalSync,
+  EXPLORATION_ROLL_COUNTER_KEY,
+  type ArrivalSyncOutcome,
+} from './card-workshop/commission-flags';
+import { addCounter, coerceCounters, counterOf } from './card-workshop/daily-ledger';
+import { rollExplorationEvent } from './random-event-scheduler';
 // 地图 v1.2 接线（ADR-33 §2 六个 op / §4 结算钩子 / §F5 首访记档）。同上一组的依赖形状：
 // `map-dynamics` 是纯函数叶（零 I/O、零时钟、零随机），中文措辞与钱的账全在本接线层。
 import {
@@ -1354,6 +1368,7 @@ export class StateManager {
       existing.quantity += quantity;
     } else {
       // 新物品: 不写 id（铁律1，id @deprecated），枚举字段归一
+      const cardValue = value as Partial<CardItem>;
       char.inventory.push({
         name: value.name,
         quantity,
@@ -1376,6 +1391,18 @@ export class StateManager {
         divinity: value.divinity,
         // 🆕 战斗 v3 (S3 2026-08-01): <automaton> DSL 自由效果落库保留（compileEffectProgram 编译进 activeEffects）
         automata: value.automata,
+        // 🆕 卡牌顶层字段直通（委托×地图闭环 2026-09-19）：此前的白名单只有 InventoryItem
+        //     字段，CardItem 的档位/词条/配方落库即丢——制卡主路、购卡、委托发卡三条路
+        //     全走 add_item，掉的是所有新卡的 cardTier 与词条。给值才写，非卡物品零影响。
+        ...(cardValue.cardTier !== undefined ? { cardTier: cardValue.cardTier } : {}),
+        ...(cardValue.词条 !== undefined ? { 词条: [...cardValue.词条] } : {}),
+        ...(cardValue.recipe !== undefined ? { recipe: cardValue.recipe } : {}),
+        ...(cardValue.sealed !== undefined ? { sealed: cardValue.sealed } : {}),
+        ...(cardValue.cardExp !== undefined ? { cardExp: cardValue.cardExp } : {}),
+        ...(cardValue.cardPowerBonus !== undefined
+          ? { cardPowerBonus: cardValue.cardPowerBonus }
+          : {}),
+        ...(cardValue.战技 !== undefined ? { 战技: cardValue.战技 } : {}),
       });
     }
     await this.persistCharacter(char);
@@ -2666,6 +2693,141 @@ export class StateManager {
       });
     } catch (err) {
       console.warn('[StateManager] 在途旗同步失败（不影响正文与已落库状态）:', err);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // 🗺 委托×地图闭环接线（2026-09-19 共识稿 决议 #4/#5/#8/#10）
+  // ═══════════════════════════════════════════════════════════
+  //
+  // 两条公共钩子（落位对账 / 探索掷骰），形状照 `syncMapJourney`：
+  //   · 由**调用方**（UI 落位动作 / 采集动作 / orchestrator 旅程胶水）在提交后调用
+  //   · 锁内一段连续 RMW（读 profile → 纯函数算 → 命名写入口落库）
+  //   · 整段 try/catch：这是旁路账本，失败绝不能让正文状态提交失败
+  //
+  // 🔴 为什么不挂在 `applySetLocation` 尾部：补足要调时间推进、时间推进自己的锁段与
+  //    提交作用域互斥（铁律②，锁内嵌套 = 自死锁），所以对账必须发生在提交**之后**的
+  //    独立锁段里 —— 与 `applyTimeAdvance` 尾部自提交刻意留在锁外是同一条理由。
+
+  /**
+   * 落位对账（共识稿 #4/#5/#8）：到访计数 + 旅程补足 + 抵达判定，一次跑完。
+   *
+   * 由 `setPlayerLocation`（UI）与 orchestrator 的旅程胶水（AI 落位）在提交后调用；
+   * 也可以在任何时间推进之后补跑（幂等：没移动就只刷新记账格）。
+   */
+  async syncCommissionArrival(): Promise<ArrivalSyncOutcome | null> {
+    const pack = getMapPack();
+    if (isEmptyMapPack(pack)) return null;
+
+    try {
+      return await withSaveWriteLock(this.saveId, async () => {
+        const profile = await getProfile(this.saveId);
+        const { flags: mapFlags } = await this.ensureMapFlags(profile, pack);
+        const lastTileId = mapFlags.lastTileId ?? null;
+        if (lastTileId === null) return null;
+
+        const index = getMapIndex();
+        const midTier = midTierOfTile(index, lastTileId);
+        const midTierSnapshot = midTier
+          ? {
+              id: midTier.id,
+              name: midTier.name,
+              ...(midTier.gathering?.specialty
+                ? { specialty: midTier.gathering.specialty }
+                : {}),
+              ...(midTier.gathering?.danger !== undefined
+                ? { danger: midTier.gathering.danger }
+                : {}),
+              ...(midTier.gathering?.materialTable
+                ? { materialTable: midTier.gathering.materialTable }
+                : {}),
+            }
+          : null;
+
+        const current = coerceCommissionsFlags(getCommissionsFlags(profile));
+        const prevTile = current.lastTileIdSeen;
+        const route =
+          prevTile !== undefined && prevTile !== lastTileId
+            ? findPath(pack, prevTile, lastTileId)
+            : null;
+
+        const d20 = 1 + Math.floor(Math.random() * 20);
+        const outcome = planArrivalSync({
+          flags: current,
+          lastTileId,
+          today: this.gameDayOf(profile),
+          routeDays: route?.days ?? null,
+          midTier: midTierSnapshot,
+          d20,
+        });
+
+        // 到访计数（counters 段，永不过期——到过就是到过）
+        if (outcome.visitCounterKey) {
+          const counters = coerceCounters(
+            (profile.worldFlags as Record<string, unknown> | undefined)?.['counters'],
+          );
+          const nextCounters = addCounter(counters, outcome.visitCounterKey, 1);
+          if (profile.worldFlags === undefined || profile.worldFlags === null) {
+            profile.worldFlags = {};
+          }
+          (profile.worldFlags as Record<string, unknown>)['counters'] = nextCounters;
+        }
+
+        // 补足制：差额天数直接落进 gameTime（锁内同段持久），然后按 applyTimeAdvance
+        // 的同款顺序补天气断言与随机事件掷骰 —— 旅途跨过的天，天气与事件一样作数
+        if (outcome.topUpMinutes > 0) {
+          profile.gameTime = advanceTime(profile.gameTime, outcome.topUpMinutes);
+          await this.syncMapWeather(profile);
+          await this.syncRandomEvents(profile);
+        }
+
+        await updateCommissionsFlags(profile, outcome.flags);
+        return outcome;
+      });
+    } catch (err) {
+      console.warn('[StateManager] 委托抵达对账失败（不影响正文状态）:', err);
+      return null;
+    }
+  }
+
+  /**
+   * 探索事件掷骰（共识稿 #10）：一轮探索动作（采集/垂钓）结算后调用，至多入池一条。
+   *
+   * `surface` 由调用方给（中层 id / 中层名 / 地块名 / 位置路径段），`rollSalt` 用
+   * `worldFlags.counters['探索掷骰']` 的累计值 —— 同一动作重放稳定，不同动作独立。
+   */
+  async syncExplorationRoll(surface: string[]): Promise<boolean> {
+    const settings = getEngineSettings();
+    const pack = getRandomEventPack();
+    if (isEmptyRandomEventPack(pack)) return false;
+    if (!settings.randomEventsEnabled) return false;
+    if (surface.length === 0) return false;
+
+    try {
+      return await withSaveWriteLock(this.saveId, async () => {
+        const profile = await getProfile(this.saveId);
+        const ctx = await this.buildRandomEventContext(profile);
+        const currentDay = this.gameDayOf(profile);
+        const current = getRandomEventFlags(profile);
+        const counters = coerceCounters(
+          (profile.worldFlags as Record<string, unknown> | undefined)?.['counters'],
+        );
+        const rollSalt = counterOf(counters, EXPLORATION_ROLL_COUNTER_KEY);
+
+        const rolled = rollExplorationEvent(pack.defs, pack.config, current, ctx, {
+          saveSeed: this.saveId,
+          currentDay,
+          rollSalt,
+          surface,
+          frequency: settings.randomEventsFrequency,
+        });
+        if (rolled === null) return false;
+        await updateRandomEventFlags(profile, rolled);
+        return true;
+      });
+    } catch (err) {
+      console.warn('[StateManager] 探索事件掷骰失败（不影响正文状态）:', err);
+      return false;
     }
   }
 

@@ -14,6 +14,7 @@
 
 import type { Rarity } from '../field-enums';
 import { RARITY_LEVELS } from '../field-enums';
+import type { MidTierGathering } from '../types-map';
 
 // ════════════════════════════════════════════════════════════════════
 // 环境表（加环境 = 加两行数据：特产 + 危险系数）
@@ -109,6 +110,26 @@ export const ENVIRONMENT_TABLE: Readonly<Record<GatherEnvironment, EnvironmentDe
 };
 
 // ════════════════════════════════════════════════════════════════════
+// 查表链：中层覆写 → 环境表（委托×地图闭环 决议 #6）
+// ════════════════════════════════════════════════════════════════════
+
+/**
+ * 采集表解析：中层覆写表逐键优先，缺键逐键回退该地块地形对应的环境表。
+ * 中层没写覆写 = 返回值与直接查环境表逐字段一致（存量地图包零迁移）。
+ */
+export function resolveGatherDef(
+  environment: GatherEnvironment,
+  midTier?: MidTierGathering,
+): EnvironmentDef {
+  const base = ENVIRONMENT_TABLE[environment];
+  return {
+    specialty: midTier?.specialty ?? base.specialty,
+    danger: midTier?.danger ?? base.danger,
+    materialTable: midTier?.materialTable ?? base.materialTable,
+  };
+}
+
+// ════════════════════════════════════════════════════════════════════
 // 天赋加成（读自条目）
 // ════════════════════════════════════════════════════════════════════
 
@@ -197,14 +218,16 @@ function pickName(table: Record<number, string[]>, rank: number, rng: () => numb
  *
  * 特产品质 +2 / 非特产品质 −1（环境特化模型）。
  * 产出 1~3 份素材，特产出现概率 60%、非特产 40%。
+ * `midTier`：所在中层的采集覆写（缺省 = 纯环境表）——独家素材/危险系数从这来。
  */
 export function planGather(
   environment: GatherEnvironment,
   bonus: GatherBonus,
   playerLevel: number,
   rng: () => number = Math.random,
+  midTier?: MidTierGathering,
 ): GatherResult {
-  const def = ENVIRONMENT_TABLE[environment];
+  const def = resolveGatherDef(environment, midTier);
   const count = 1 + Math.floor(rng() * 3); // 1~3 份
   const baseRank = Math.max(0, Math.min(4, Math.floor(playerLevel / 5)));
   const items: GatherItem[] = [];
@@ -330,15 +353,16 @@ export type RiskEventType =
  * @param d20 d20 骰值（调用方传入）
  * @param riskDC 风险 DC（骰值 ≤ DC 则触发；DC 越高越容易触发）
  * @param environment 当前环境（决定事件类型倾向）
+ * @param midTier 所在中层的采集覆写（危险系数逐键覆写环境表）
  */
 export function rollRiskEvent(
   d20: number,
   riskDC: number,
   environment: GatherEnvironment,
+  midTier?: MidTierGathering,
 ): { triggered: boolean; eventType?: RiskEventType } {
   if (d20 > riskDC) return { triggered: false };
-  const def = ENVIRONMENT_TABLE[environment];
-  const danger = def?.danger ?? 0;
+  const danger = resolveGatherDef(environment, midTier).danger;
   // 危险环境偏「魔兽来袭」；安全环境偏「空手/打断」
   const eventType: RiskEventType =
     danger >= 2 ? '魔兽来袭' : danger >= 1 ? (d20 % 2 === 0 ? '素材损坏' : '路人打断') : '空手而归';
@@ -348,11 +372,15 @@ export function rollRiskEvent(
 /**
  * 计算风险 DC（纯函数）。
  *
- * 连续行动 3 次起开始有风险，每多一次 DC +2；环境危险系数加到 DC 上。
+ * 连续行动 3 次起开始有风险，每多一次 DC +2；环境危险系数加到 DC 上
+ * （中层覆写表可拉高——「极度危险」是数据声明，引擎只认数字）。
  */
-export function riskDCFor(consecutiveActions: number, environment: GatherEnvironment): number {
+export function riskDCFor(
+  consecutiveActions: number,
+  environment: GatherEnvironment,
+  midTier?: MidTierGathering,
+): number {
   if (consecutiveActions < 3) return 0; // 前 3 次无风险
-  const def = ENVIRONMENT_TABLE[environment];
-  const danger = def?.danger ?? 0;
+  const danger = resolveGatherDef(environment, midTier).danger;
   return Math.min(18, 12 + (consecutiveActions - 3) * 2 + danger);
 }

@@ -81,6 +81,59 @@ import { TWIN_ENTRY, areTwins, coerceTwinBonds } from '@engine/card-workshop/bat
 import { cardPower } from '@engine/card-workshop/deck-power';
 import { cardKindOf } from '@engine/card-workshop/card-kind';
 import {
+  coerceCustomCommissions,
+  coerceCustomEvents,
+  getCustomCommissions,
+  getCustomEvents,
+  registerCustomCommission,
+  registerCustomEvent,
+  replaceCustomCommissions,
+  replaceCustomEvents,
+} from '@engine/card-workshop/custom-commissions';
+import { installCustomCommissions } from '@engine/commission-runtime';
+import { installCustomEventDefs } from '@engine/random-event-runtime';
+import type { RandomEventDef } from '@engine/types-random-events';
+// 委托×地图闭环（2026-09-19）：接取/交付分流/违约/终点 + 采集/垂钓接线
+import {
+  MAX_ACTIVE_COMMISSIONS,
+  abandonActive,
+  activeOf,
+  breachPenaltyOf,
+  canAcceptCommission,
+  countMaterialOf,
+  planAccept,
+  planMaterialDelivery,
+  planVisitDelivery,
+  splitExpiredCommissions,
+  visitProgressOf,
+} from '@engine/card-workshop/commission-active';
+import {
+  advanceGatherStreak,
+  alertPenaltyActive,
+  coerceCommissionsFlags,
+  gatherStreakCount,
+  EXPLORATION_ROLL_COUNTER_KEY,
+  type CommissionsFlags,
+} from '@engine/card-workshop/commission-flags';
+import {
+  GATHER_SP_COST,
+  GATHER_TIME_MINUTES,
+  FISH_SP_COST,
+  FISH_TIME_MINUTES,
+  fishBonusOf,
+  gatherBonusOf,
+  planFish,
+  planGather,
+  riskDCFor,
+  rollRiskEvent,
+  type GatherEnvironment,
+  type GatherItem,
+  type RiskEventType,
+} from '@engine/card-workshop/gathering';
+import { refreshGeneratedCommissions as refreshGeneratedPure } from '@engine/card-workshop/commission-generator';
+import { getMapPack } from '@engine/map-runtime';
+import { isEmptyMapPack } from '@engine/map-pack';
+import {
   MISFORTUNE_KEY,
   planTrain,
   type TrainDirection,
@@ -133,6 +186,8 @@ import {
   getReputation as getTalentReputation,
   getCustomTalentFlags,
   getCustomCardFlags,
+  getCustomCommissionFlags,
+  getCustomEventFlags,
   updateCustomContentFlags,
   setCustomContentFlagsInPlace,
   getProfile,
@@ -221,6 +276,38 @@ let craftNarrateImpl: CraftNarrateImpl | null = null;
 /** 由 GamePage 在创建 GamePipeline 后调用（与 setRewriteLoadoutImpl 同款） */
 export function setCraftNarrateImpl(impl: CraftNarrateImpl): void {
   craftNarrateImpl = impl;
+}
+
+/** 终点/获得瞬间的叙事拍输入（共识稿 #13 修订：仪式感 = 获得场景，不是颁授场景） */
+interface CommissionNarrateInput {
+  saveId: string;
+  commissionName: string;
+  description: string;
+  finaleType: '谜题' | '强敌' | '场景制卡';
+  target: string;
+  cardName: string;
+  midTierName: string;
+}
+
+type CommissionNarrateImpl = (input: CommissionNarrateInput) => Promise<{ narrative: string }>;
+
+/** 采集/垂钓动作的返回：风险与轮盘信息由 UI 呈现（战斗邀请、事件提示） */
+export interface GatherOutcome {
+  ok: boolean;
+  reason?: string;
+  summary?: string;
+  items: GatherItem[];
+  risk?: { d20: number; dc: number; eventType?: RiskEventType };
+  battlePrompt?: boolean;
+  explorationEventArmed?: boolean;
+  finaleNarratives?: string[];
+}
+
+let commissionNarrateImpl: CommissionNarrateImpl | null = null;
+
+/** 由 GamePage 在创建 GamePipeline 后调用；未挂接 = 回退模板文案（发放永不被叙事阻塞） */
+export function setCommissionNarrateImpl(impl: CommissionNarrateImpl): void {
+  commissionNarrateImpl = impl;
 }
 
 /** 由 GamePage 在创建 GamePipeline 后调用，把引擎实现挂进 store（照 scene-image-seams 的缝模式） */
@@ -413,6 +500,602 @@ export const useGameStore = defineStore('game', () => {
     return { ok: true };
   }
 
+  // ═══════════════════════════════════════════════════════════
+  // 委托×地图闭环（2026-09-19 共识稿）：接取 / 放弃 / 交付分流 / 违约 / 终点
+  // ═══════════════════════════════════════════════════════════
+
+  /** 全量委托清单：静态（内容包第 15 面）+ 动态（事件委托）+ 生成填充 */
+  function allCommissionDefs(): CommissionDef[] {
+    const flags = commissionsFlags();
+    return [
+      ...getCommissionDefs(),
+      ...activeEventCommissions.value.map((ec) => ec.def),
+      ...(flags.generated ?? []).map((gc) => gc.def),
+    ];
+  }
+
+  /**
+   * 生成委托保洁 + 补充（决议 #7）：摘过期、补到目标数。打开委托板时调用。
+   * 素材池自动取自中层覆写表（装了地图包才有原料；没包 = 委托板没有生成项）。
+   */
+  async function refreshGeneratedCommissions(): Promise<void> {
+    if (!activeSaveId.value) return;
+    const pack = getMapPack();
+    if (isEmptyMapPack(pack)) return;
+    const flags = commissionsFlags();
+    const day = currentGameDay();
+    const reservedNames = new Set<string>([
+      ...getCommissionDefs().map((d) => d.name),
+      ...activeEventCommissions.value.map((ec) => ec.def.name),
+      ...(flags.active ?? []).map((a) => a.defName),
+    ]);
+    const midTiers = pack.midTiers.filter(
+      (m) => !!m.gathering?.materialTable && Object.keys(m.gathering.materialTable).length > 0,
+    );
+    const { kept, generated } = refreshGeneratedPure({
+      existing: flags.generated,
+      midTiers,
+      today: day,
+      rng: Math.random,
+      reservedNames,
+    });
+    if (generated.length === 0 && kept.length === (flags.generated ?? []).length) return;
+    await commitCommissionsBag({ ...flags, generated: [...kept, ...generated] });
+  }
+
+  /** worldFlags.commissions 只读视图（抵达对账钩子写、UI 读） */
+  function commissionsFlags(): CommissionsFlags {
+    return coerceCommissionsFlags(saveProfile.value?.worldFlags?.commissions);
+  }
+
+  /** 进行中的委托（委托板「进行中」栏） */
+  const activeCommissions = computed(() => commissionsFlags().active ?? []);
+
+  /** 已完成的委托名 → 完成日（链解锁判据：完成第 N 节解锁第 N+1 节） */
+  const completedCommissions = computed(() => commissionsFlags().completed ?? {});
+
+  /** 进行中委托的进度视图（UI 两栏里的进度条；素材按持有量、到访按基线差） */
+  const commissionProgress = computed(() => {
+    const flags = commissionsFlags();
+    const defs = allCommissionDefs();
+    const inv = player.value?.inventory ?? [];
+    return (flags.active ?? []).map((a) => {
+      const def = defs.find((d) => d.name === a.defName);
+      if (def?.requireMaterial) {
+        return {
+          defName: a.defName,
+          kind: '素材' as const,
+          have: countMaterialOf(inv, def.requireMaterial.name),
+          need: def.requireMaterial.count,
+          expiresDay: a.expiresDay,
+        };
+      }
+      if (def?.requireVisit) {
+        return {
+          defName: a.defName,
+          kind: '到访' as const,
+          have: visitProgressOf(a, counters(), def.requireVisit),
+          need: def.requireVisit.count,
+          expiresDay: a.expiresDay,
+        };
+      }
+      if (def?.finale) {
+        return {
+          defName: a.defName,
+          kind: '终点' as const,
+          have: 0,
+          need: 1,
+          expiresDay: a.expiresDay,
+        };
+      }
+      return { defName: a.defName, kind: '收卡' as const, have: 0, need: 1, expiresDay: a.expiresDay };
+    });
+  });
+
+  /** 奖励独家卡解析：卡池（内容包 + 自定义卡）→ 完整卡定义；解析不到返回 undefined */
+  function resolveRewardCard(name: string): CardItem | undefined {
+    const def = findCardDefinition(name);
+    return def ? cardCatalogToItem(def) : undefined;
+  }
+
+  /** 提交一份完整的 worldFlags.commissions 袋子（袋内语义 = 整份覆盖） */
+  async function commitCommissionsBag(
+    next: CommissionsFlags,
+  ): Promise<{ ok: boolean; reason?: string }> {
+    if (!activeSaveId.value) return { ok: false, reason: '无活跃存档' };
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState([
+      {
+        op: 'set_variable',
+        target: 'worldFlags.commissions',
+        value: next as unknown as Record<string, unknown>,
+      } as StatePatch,
+    ]);
+    if (!result.success) return { ok: false, reason: result.errors.join('; ') };
+    await refreshFromDb();
+    return { ok: true };
+  }
+
+  /** 接取委托（最多并行 3 个；接取瞬间快照到访基线与时限） */
+  async function acceptCommissionByName(defName: string): Promise<{ ok: boolean; reason?: string }> {
+    if (!activeSaveId.value) return { ok: false, reason: '无活跃存档' };
+    const def = allCommissionDefs().find((d) => d.name === defName);
+    if (!def) return { ok: false, reason: `委托板上没有名为【${defName}】的委托` };
+    if (def.finale) {
+      const prev = def.chainId
+        ? allCommissionDefs().find((d) => d.chainId === def.chainId && d.chainOrder === (def.chainOrder ?? 1) - 1)
+        : undefined;
+      if (prev && completedCommissions.value[prev.name] === undefined) {
+        return { ok: false, reason: `要先完成「${prev.name}」才能接这条` };
+      }
+    }
+    const flags = commissionsFlags();
+    if (!canAcceptCommission(flags.active)) {
+      return { ok: false, reason: `同时最多进行 ${MAX_ACTIVE_COMMISSIONS} 个委托，先交掉一条吧` };
+    }
+    if (activeOf(flags.active, defName)) return { ok: false, reason: '这条委托已经接了' };
+    const accepted = planAccept({ def, counters: counters(), day: currentGameDay() });
+    const sm = createStateManager(activeSaveId.value);
+    // 接取同时立同名任务（状态「进行中」）：AI 注入与链节探索事件的 available
+    // 门（quest 条件）都以任务为准 —— 双轨同源，不另造第三份接取状态
+    const result = await sm.commitChatState([
+      {
+        op: 'set_variable',
+        target: 'worldFlags.commissions',
+        value: {
+          ...flags,
+          active: [...(flags.active ?? []), accepted],
+        } as unknown as Record<string, unknown>,
+      } as StatePatch,
+      {
+        op: 'update_quest',
+        target: 'profile.quests',
+        value: { name: defName, status: '进行中' },
+      } as StatePatch,
+    ]);
+    if (!result.success) return { ok: false, reason: result.errors.join('; ') };
+    await refreshFromDb();
+    return { ok: true };
+  }
+
+  /** 放弃进行中的委托（基线作废；重接重新快照——链不卡死的软恢复） */
+  async function abandonCommissionByName(defName: string): Promise<{ ok: boolean; reason?: string }> {
+    const flags = commissionsFlags();
+    if (!activeOf(flags.active, defName)) return { ok: false, reason: '没有接这条委托' };
+    return commitCommissionsBag({ ...flags, active: abandonActive(flags.active, defName) });
+  }
+
+  /** 完成时的任务收尾补丁（与「已完成」记档同一次提交，AI 注入与事件门同步收口） */
+  function questDonePatch(defName: string): StatePatch {
+    return {
+      op: 'update_quest',
+      target: 'profile.quests',
+      value: { name: defName, status: '已完成' },
+    } as StatePatch;
+  }
+
+  /**
+   * 统一交付入口：按委托类型分流（收卡 / 素材 / 到访 / 终点）。
+   * A/S 级的发布地校验在 planXxxDelivery 里（人不在发布中层会被拦下）。
+   */
+  async function deliverCommissionByName(
+    defName: string,
+    cardName?: string,
+  ): Promise<{ ok: boolean; reason?: string; note?: string }> {
+    const playerChar = player.value;
+    if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
+    const def = allCommissionDefs().find((d) => d.name === defName);
+    if (!def) return { ok: false, reason: `委托板上没有名为【${defName}】的委托` };
+    const flags = commissionsFlags();
+    const currentMidTierId = flags.currentMidTier?.id;
+
+    if (def.requireMaterial) {
+      const rewardCard =
+        def.rewards.card && def.rewards.card.grantAt !== 'scene'
+          ? resolveRewardCard(def.rewards.card.name)
+          : undefined;
+      const plan = planMaterialDelivery({
+        def,
+        inventory: playerChar.inventory,
+        playerName: playerChar.name,
+        currentMidTierId,
+        rewardCard,
+      });
+      if (!plan.ok) return { ok: false, reason: plan.reason };
+      const sm = createStateManager(activeSaveId.value);
+      const result = await sm.commitChatState([...plan.patches, questDonePatch(defName)]);
+      if (!result.success) return { ok: false, reason: result.errors.join('; ') };
+      await refreshFromDb();
+      return {
+        ok: true,
+        note:
+          def.rewards.card && !rewardCard
+            ? `奖励卡「${def.rewards.card.name}」不在卡池/自定义卡里，本次没有发放`
+            : undefined,
+      };
+    }
+
+    if (def.requireVisit) {
+      const plan = planVisitDelivery({
+        def,
+        active: activeOf(flags.active, defName),
+        counters: counters(),
+        playerName: playerChar.name,
+        currentMidTierId,
+      });
+      if (!plan.ok) return { ok: false, reason: plan.reason };
+      // 交付成功 = 完成：从进行中摘除并记档（链解锁判据）+ 任务收尾
+      const completed = { ...(flags.completed ?? {}), [def.name]: currentGameDay() };
+      const sm = createStateManager(activeSaveId.value);
+      const result = await sm.commitChatState([
+        ...plan.patches,
+        questDonePatch(defName),
+        {
+          op: 'set_variable',
+          target: 'worldFlags.commissions',
+          value: {
+            ...flags,
+            active: abandonActive(flags.active, defName),
+            completed,
+          } as unknown as Record<string, unknown>,
+        } as StatePatch,
+      ]);
+      if (!result.success) return { ok: false, reason: result.errors.join('; ') };
+      await refreshFromDb();
+      return { ok: true };
+    }
+
+    if (def.finale) {
+      return {
+        ok: false,
+        reason:
+          def.finale.type === '场景制卡'
+            ? '在目的地中层把目标卡现场制出来，委托会自动完成'
+            : def.finale.type === '强敌'
+              ? '在目的地击败目标之敌，委托会自动完成'
+              : '在目的地解开谜题（触发终点事件并完成），委托会自动完成',
+      };
+    }
+
+    // 收卡委托走原有通道（上交制）
+    if (!cardName || cardName.length === 0) {
+      return { ok: false, reason: '这条委托要交一张卡' };
+    }
+    return deliverCommission(defName, cardName);
+  }
+
+  /**
+   * 违约结算（共识稿 #12）：过期委托摘除接取位；A/S 级扣声望（悬赏总署不高兴），
+   * 低级静默过期；链节回榜可重接（基线重拍，进度不报销）。
+   */
+  async function settleCommissionBreaches(): Promise<{
+    breached: { name: string; penalty: number }[];
+  }> {
+    const playerChar = player.value;
+    if (!activeSaveId.value || !playerChar) return { breached: [] };
+    const flags = commissionsFlags();
+    const { kept, expired } = splitExpiredCommissions(flags.active, currentGameDay());
+    if (expired.length === 0) return { breached: [] };
+
+    const defs = allCommissionDefs();
+    const breached = expired.map((a) => ({
+      name: a.defName,
+      penalty: breachPenaltyOf(defs.find((d) => d.name === a.defName)),
+    }));
+    const penaltyTotal = breached.reduce((sum, b) => sum + b.penalty, 0);
+
+    const patches: StatePatch[] = [
+      {
+        op: 'set_variable',
+        target: 'worldFlags.commissions',
+        value: { ...flags, active: kept } as unknown as Record<string, unknown>,
+      } as StatePatch,
+    ];
+    if (penaltyTotal > 0) {
+      patches.push({
+        op: 'delta_variable',
+        target: 'profile.reputation',
+        amount: -penaltyTotal,
+        metadata: { source: 'commission-breach' },
+      } as StatePatch);
+    }
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState(patches);
+    if (!result.success) return { breached: [] };
+    await refreshFromDb();
+    return { breached };
+  }
+
+  /** 完成一条终点委托：发卡（Code 保底）+ 记档 + 叙事拍（AI 失败回退模板，发放永不被阻塞） */
+  async function completeFinaleCommission(
+    def: CommissionDef,
+    flags: CommissionsFlags,
+  ): Promise<{ patches: StatePatch[]; next: CommissionsFlags; narrative: string; playerName: string }> {
+    const playerChar = player.value!;
+    const day = currentGameDay();
+    const rewardCard =
+      def.rewards.card && resolveRewardCard(def.rewards.card.name)
+        ? resolveRewardCard(def.rewards.card.name)
+        : undefined;
+    const cardPatches: StatePatch[] = rewardCard
+      ? [
+          {
+            op: 'add_item',
+            target: `characters.${playerChar.name}`,
+            value: rewardCard as unknown as Record<string, unknown>,
+          },
+        ]
+      : [];
+
+    // 叙事拍（卡名/链节/发布地供词；失败回退模板文案）
+    let narrative = `那件东西终于到了你手里——「${def.rewards.card?.name ?? def.finale?.target ?? def.name}」。`;
+    if (commissionNarrateImpl) {
+      try {
+        const said = await commissionNarrateImpl({
+          saveId: activeSaveId.value!,
+          commissionName: def.name,
+          description: def.description ?? '',
+          finaleType: def.finale?.type ?? '谜题',
+          target: def.finale?.target ?? '',
+          cardName: def.rewards.card?.name ?? '',
+          midTierName: flags.currentMidTier?.name ?? '',
+        });
+        if (said.narrative) narrative = said.narrative;
+      } catch (err) {
+        console.warn('[game-store] 终点叙事失败（用兜底文案）:', err);
+      }
+    }
+
+    const next: CommissionsFlags = {
+      ...flags,
+      active: abandonActive(flags.active, def.name),
+      completed: { ...(flags.completed ?? {}), [def.name]: day },
+    };
+    const patches: StatePatch[] = [
+      ...cardPatches,
+      questDonePatch(def.name),
+      {
+        op: 'set_variable',
+        target: 'worldFlags.commissions',
+        value: next as unknown as Record<string, unknown>,
+      } as StatePatch,
+    ];
+    return { patches, next, narrative, playerName: playerChar.name };
+  }
+
+  /**
+   * 终点扫账（谜题型在这里收口；强敌/场景制卡在各自结算点写证据后也走这里消费）：
+   * 谜题型 = 终点事件已发生（fired 足迹）+ 人在目的地中层；证据型 = finaleEvidence 有名字。
+   */
+  async function scanFinaleCommissions(): Promise<{ completed: string[]; narratives: string[] }> {
+    const playerChar = player.value;
+    if (!activeSaveId.value || !playerChar) return { completed: [], narratives: [] };
+    const flags = commissionsFlags();
+    const defs = allCommissionDefs();
+    const firedEvents = saveProfile.value?.worldFlags?.randomEvents?.fired ?? {};
+
+    const done: string[] = [];
+    const narratives: string[] = [];
+    let next: CommissionsFlags = { ...flags };
+    const evidence = { ...(flags.finaleEvidence ?? {}) };
+
+    for (const active of flags.active ?? []) {
+      const def = defs.find((d) => d.name === active.defName);
+      if (!def?.finale) continue;
+      const evidenceHit = evidence[def.name] !== undefined;
+      const riddleHit =
+        def.finale.type === '谜题' &&
+        !!def.finale.target &&
+        firedEvents[def.finale.target] !== undefined &&
+        flags.currentMidTier?.id !== undefined &&
+        (def.destMidTier === undefined || def.destMidTier === flags.currentMidTier.id);
+      if (!evidenceHit && !riddleHit) continue;
+
+      const { patches, next: nextFlags, narrative } = await completeFinaleCommission(def, next);
+      const sm = createStateManager(activeSaveId.value);
+      const result = await sm.commitChatState(patches);
+      if (!result.success) continue;
+      delete evidence[def.name];
+      next = nextFlags;
+      done.push(def.name);
+      narratives.push(narrative);
+    }
+
+    // 清掉已消费的证据
+    if (done.length > 0 && Object.keys(evidence).length !== Object.keys(flags.finaleEvidence ?? {}).length) {
+      await commitCommissionsBag({ ...next, finaleEvidence: evidence });
+    }
+    if (done.length > 0) await refreshFromDb();
+    return { completed: done, narratives };
+  }
+
+  /**
+   * 场景制卡型终点（共识稿 #13 修订）：制卡结算后调用——人在目的地中层、制出的卡
+   * 与终点目标同名 → 委托当场完成（卡来自制卡本身，不需要额外发卡）。
+   */
+  async function tryCompleteCraftFinale(productName: string): Promise<string | null> {
+    if (!activeSaveId.value) return null;
+    const flags = commissionsFlags();
+    const midTierId = flags.currentMidTier?.id;
+    if (!midTierId) return null;
+    for (const active of flags.active ?? []) {
+      const def = allCommissionDefs().find((d) => d.name === active.defName);
+      if (def?.finale?.type !== '场景制卡') continue;
+      if (def.destMidTier && def.destMidTier !== midTierId) continue;
+      const target = def.finale.target ?? def.rewards.card?.name;
+      if (!target || productName !== target) continue;
+      const { patches, narrative } = await completeFinaleCommission(def, flags);
+      const sm = createStateManager(activeSaveId.value);
+      const result = await sm.commitChatState(patches);
+      if (!result.success) return null;
+      await refreshFromDb();
+      return narrative;
+    }
+    return null;
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // 采集 / 垂钓动作（gathering.ts 的管线接线；探索事件轮盘挂在这里）
+  // ═══════════════════════════════════════════════════════════
+
+  /** 采集/垂钓共用的结算骨架：风险判定 → 产出 → SP/时间 → 探索掷骰 → 终点扫账 */
+  async function settleExploration(
+    kind: '采集' | '垂钓',
+    produce: (midTier: CommissionsFlags['currentMidTier']) => {
+      items: GatherItem[];
+      summary: string;
+      risk: { d20: number; dc: number; eventType?: RiskEventType };
+    },
+    spCost: number,
+    timeCostMinutes: number,
+  ): Promise<GatherOutcome> {
+    const playerChar = player.value;
+    if (!activeSaveId.value || !playerChar) {
+      return { ok: false, reason: '无活跃存档', items: [] };
+    }
+    if ((playerChar.sp ?? 0) < spCost) {
+      return { ok: false, reason: `体力不足（${kind}要 ${spCost} SP）`, items: [] };
+    }
+
+    const day = currentGameDay();
+    const flags = commissionsFlags();
+    const midTier = flags.currentMidTier;
+    const produced = produce(midTier);
+
+    // 风险落账：魔兽/打断 = 白干（素材没了），损坏 = 损失最后一份，来袭 = 还会引来战斗
+    let items = produced.items;
+    let battlePrompt = false;
+    if (produced.risk.eventType === '空手而归' || produced.risk.eventType === '路人打断') {
+      items = [];
+    } else if (produced.risk.eventType === '素材损坏') {
+      items = items.slice(0, Math.max(0, items.length - 1));
+    } else if (produced.risk.eventType === '魔兽来袭') {
+      items = [];
+      battlePrompt = true;
+    }
+
+    // 一次原子提交：SP + 产出 + 连击 + 掷骰序号
+    const streak = advanceGatherStreak(flags.gatherStreak, day);
+    const countersBag = counters();
+    countersBag[EXPLORATION_ROLL_COUNTER_KEY] =
+      counterOf(countersBag, EXPLORATION_ROLL_COUNTER_KEY) + 1;
+    const nextBag: CommissionsFlags = { ...flags, gatherStreak: streak.next };
+    const target = `characters.${playerChar.name}`;
+    const patches: StatePatch[] = [
+      {
+        op: 'update_character',
+        target,
+        value: { sp: -spCost },
+        metadata: { delta: true, source: 'exploration' },
+      } as StatePatch,
+      ...(kind === '采集'
+        ? items.map(
+            (item) =>
+              ({
+                op: 'add_item',
+                target,
+                value: { name: item.name, quantity: item.quantity, type: '材料', rarity: item.rarity },
+              }) as StatePatch,
+          )
+        : items.map(
+            (item) =>
+              ({
+                op: 'add_item',
+                target,
+                value: { name: item.name, quantity: item.quantity, type: '材料' },
+              }) as StatePatch,
+          )),
+      {
+        op: 'set_variable',
+        target: 'worldFlags.commissions',
+        value: nextBag as unknown as Record<string, unknown>,
+      } as StatePatch,
+      {
+        op: 'set_variable',
+        target: 'worldFlags.counters',
+        value: countersBag as unknown as Record<string, unknown>,
+      } as StatePatch,
+    ];
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState(patches);
+    if (!result.success) return { ok: false, reason: result.errors.join('; '), items: [] };
+    // 时间成本走既有时间推进（天气/事件逐天钩子照常跑）
+    if (timeCostMinutes > 0) await sm.applyTimeAdvance(timeCostMinutes);
+    await refreshFromDb();
+
+    // 探索事件轮盘（决议 #10）：匹配面 = 中层 id/名 + 位置路径最深段
+    const surface = [
+      midTier?.id,
+      midTier?.name,
+      ...(playerChar.location ? playerChar.location.split('-') : []),
+    ].filter((s): s is string => !!s && s.length > 0);
+    const armed = await sm.syncExplorationRoll(surface);
+
+    // 终点扫账：谜题型终点可能因为这次探索而成立
+    const finale = await scanFinaleCommissions();
+
+    return {
+      ok: true,
+      summary: produced.summary,
+      items,
+      risk: produced.risk,
+      battlePrompt,
+      explorationEventArmed: armed,
+      finaleNarratives: finale.narratives,
+    };
+  }
+
+  /** 采集（决议 #2/#6）：中层覆写表优先出独家素材，环境表兜底 */
+  async function gatherMaterials(environment: GatherEnvironment): Promise<GatherOutcome> {
+    const playerChar = player.value;
+    return settleExploration(
+      '采集',
+      (midTier) => {
+        const day = currentGameDay();
+        const flags = commissionsFlags();
+        const consecutive = gatherStreakCount(flags.gatherStreak, day) + 1;
+        const alert = alertPenaltyActive(flags.alertedMidTier, midTier?.id, day);
+        const d20 = 1 + Math.floor(Math.random() * 20);
+        const dc = riskDCFor(consecutive, environment, midTier) + (alert ? 2 : 0);
+        const risk = rollRiskEvent(d20, dc, environment, midTier);
+        const gather = planGather(
+          environment,
+          gatherBonusOf(playerChar?.talents?.list),
+          playerChar?.level ?? 1,
+          Math.random,
+          midTier,
+        );
+        return { items: gather.items, summary: gather.summary, risk: { d20, dc, ...risk } };
+      },
+      GATHER_SP_COST,
+      GATHER_TIME_MINUTES,
+    );
+  }
+
+  /** 垂钓（决议 #9 的轮盘同样适用） */
+  async function fishAt(depth: number): Promise<GatherOutcome> {
+    const playerChar = player.value;
+    return settleExploration(
+      '垂钓',
+      () => {
+        const day = currentGameDay();
+        const flags = commissionsFlags();
+        const consecutive = gatherStreakCount(flags.gatherStreak, day) + 1;
+        const alert = alertPenaltyActive(flags.alertedMidTier, flags.currentMidTier?.id, day);
+        const d20 = 1 + Math.floor(Math.random() * 20);
+        const dc = riskDCFor(consecutive, '水域') + (alert ? 2 : 0);
+        const risk = rollRiskEvent(d20, dc, '水域');
+        const fish = planFish(depth, fishBonusOf(playerChar?.talents?.list), Math.random);
+        return {
+          items: fish.items.map((f) => ({ ...f, isSpecialty: false })),
+          summary: fish.caught ? fish.summary : '什么也没钓到。',
+          risk: { d20, dc, ...risk },
+        };
+      },
+      FISH_SP_COST,
+      FISH_TIME_MINUTES,
+    );
+  }
   /** 当前 gameDay（存档 gameTime → 整数天；与 state-manager.gameDayOf 同一公式） */
   function currentGameDay(): number {
     const gt = saveProfile.value?.gameTime;
@@ -973,6 +1656,8 @@ export const useGameStore = defineStore('game', () => {
    */
   const sessionCustomTalents = new Map<string, TalentTemplate>();
   const sessionCustomCards = new Map<string, CardCatalogItem>();
+  const sessionCustomCommissions = new Map<string, CommissionDef>();
+  const sessionCustomEvents = new Map<string, RandomEventDef>();
 
   /** 保存自定义天赋列表到 worldFlags（开发者模式） */
   function saveCustomTalents(list: TalentTemplate[]): void {
@@ -1001,6 +1686,55 @@ export const useGameStore = defineStore('game', () => {
     );
     clearCustomTalents();
     for (const t of list) registerCustomTalent(t);
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // 自定义委托 / 链节探索事件（委托编写器，2026-09-19）
+  // 照 saveCustomTalents 同款三层：运行时注册表 + 会话稿 + worldFlags 持久化。
+  // 注册表在引擎缝（commission-runtime / random-event-runtime 的自定义槽）里，
+  // 读取侧由缝合并进 getCommissionDefs / getRandomEventPack —— 全仓消费点零改动。
+  // ═══════════════════════════════════════════════════════════
+
+  /** 保存自定义委托列表到 worldFlags（开发者模式；同步装进委托缝的自定义槽） */
+  function saveCustomCommissions(list: CommissionDef[]): void {
+    const before = new Set(getCustomCommissions().map((d) => d.name));
+    const names = new Set(list.map((d) => d.name));
+    for (const d of list) if (!before.has(d.name)) sessionCustomCommissions.set(d.name, d);
+    for (const name of [...sessionCustomCommissions.keys()]) {
+      if (!names.has(name)) sessionCustomCommissions.delete(name);
+    }
+    replaceCustomCommissions(list);
+    installCustomCommissions(list);
+    void persistCustomContent({ commissions: list });
+  }
+
+  /** 保存自定义链节探索事件列表（同步装进随机事件缝的自定义槽） */
+  function saveCustomEvents(list: RandomEventDef[]): void {
+    const before = new Set(getCustomEvents().map((d) => d.name));
+    const names = new Set(list.map((d) => d.name));
+    for (const d of list) if (!before.has(d.name)) sessionCustomEvents.set(d.name, d);
+    for (const name of [...sessionCustomEvents.keys()]) {
+      if (!names.has(name)) sessionCustomEvents.delete(name);
+    }
+    replaceCustomEvents(list);
+    installCustomEventDefs(list);
+    void persistCustomContent({ events: list });
+  }
+
+  /** 读档灌回：自定义委托 + 探索事件 → 各自运行时缝（loadCustomContent 尾部调用） */
+  function loadCustomCommissionsAndEvents(): void {
+    const profile = saveProfile.value ?? ({} as SaveProfile);
+    const commissions = coerceCustomCommissions(getCustomCommissionFlags(profile));
+    const events = coerceCustomEvents(getCustomEventFlags(profile));
+    replaceCustomCommissions(commissions);
+    installCustomCommissions(commissions);
+    replaceCustomEvents(events);
+    installCustomEventDefs(events);
+    // 会话稿盖回（同 loadCustomContent 的理由：先写内容再开档不白写）
+    for (const d of sessionCustomCommissions.values()) registerCustomCommission(d);
+    for (const d of sessionCustomEvents.values()) registerCustomEvent(d);
+    installCustomCommissions(getCustomCommissions());
+    installCustomEventDefs(getCustomEvents());
   }
 
   /**
@@ -1032,6 +1766,8 @@ export const useGameStore = defineStore('game', () => {
   async function persistCustomContent(content: {
     talents?: readonly TalentTemplate[];
     cards?: readonly CardCatalogItem[];
+    commissions?: readonly CommissionDef[];
+    events?: readonly RandomEventDef[];
   }): Promise<void> {
     const profile = saveProfile.value;
     if (!activeSaveId.value || !profile) return;
@@ -1056,6 +1792,7 @@ export const useGameStore = defineStore('game', () => {
   function loadCustomContent(): void {
     loadCustomTalents();
     loadCustomCards();
+    loadCustomCommissionsAndEvents();
     // 会话稿盖回（见 sessionCustomTalents 的说明）：读档按存档重建注册表后，
     // 把"这次会话在编辑器里写的"重新注册上去，否则先写内容再开档会白写。
     for (const t of sessionCustomTalents.values()) registerCustomTalent(t);
@@ -1325,6 +2062,11 @@ export const useGameStore = defineStore('game', () => {
     const result = await sm.commitChatState(patches);
     if (!result.success) return { ok: false, reason: result.errors.join('; ') };
     await refreshFromDb();
+
+    // 场景制卡型终点（委托×地图闭环 决议 #13 修订）：人在目的地制出目标卡 → 委托当场
+    // 完成，叙事拍（获得场景）附加在制卡叙事之后
+    const finaleNarrative = await tryCompleteCraftFinale(productName);
+
     return {
       ok: true,
       productName,
@@ -1333,7 +2075,7 @@ export const useGameStore = defineStore('game', () => {
       cost: plan.cost,
       exp: plan.exp,
       audit: plan.audit,
-      narrative,
+      narrative: finaleNarrative ? `${narrative}\n\n${finaleNarrative}` : narrative,
     };
   }
 
@@ -3646,6 +4388,9 @@ export const useGameStore = defineStore('game', () => {
     const result = await sm.commitChatState([
       { op: 'set_location', target: `characters.${playerName}`, value: name },
     ]);
+    // 委托×地图闭环（决议 #4/#5/#8）：提交后跑抵达对账（到访计数 + 旅程补足 + 抵达判定）
+    // —— 必须在提交作用域外的独立锁段里（补足要推进时间，与提交锁互斥），所以在这里
+    if (result.success) await sm.syncCommissionArrival();
     // 回读是必须的：`saveProfile` 里的落位投影由引擎钩子写，不刷新则地图上的棋子不动
     if (result.success) await refreshFromDb();
     return result.success ? { ok: true } : { ok: false, error: result.errors.join('; ') };
@@ -3758,6 +4503,8 @@ export const useGameStore = defineStore('game', () => {
     craftCard,
     ensureSoulWeapon,
     saveCustomTalents,
+    saveCustomCommissions,
+    saveCustomEvents,
     loadCustomTalents,
     loadCustomContent,
     addCustomCard,
@@ -3847,6 +4594,21 @@ export const useGameStore = defineStore('game', () => {
     invalidatePendingLoads,
     refreshFromDb,
     clearActive,
+    // 委托×地图闭环（2026-09-19）
+    activeCommissions,
+    completedCommissions,
+    commissionProgress,
+    commissionsFlags,
+    currentGameDay,
+    allCommissionDefs,
+    acceptCommissionByName,
+    abandonCommissionByName,
+    deliverCommissionByName,
+    settleCommissionBreaches,
+    scanFinaleCommissions,
+    refreshGeneratedCommissions,
+    gatherMaterials,
+    fishAt,
     pendingInput,
     fillInput,
     clearPendingInput,

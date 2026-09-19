@@ -116,6 +116,23 @@ function coerceTrigger(raw: unknown, name: string): RandomEventTrigger | null {
     return { type: 'first_visit', scope: { anyOf } };
   }
 
+  if (raw.type === 'exploration') {
+    // scope 可缺省（= 任何中层都算），给了就必须能收出非空 anyOf
+    const scope = isRecord(raw.scope) ? raw.scope : null;
+    const anyOf = collectNonEmptyTexts(scope?.anyOf);
+    const chanceRaw = readNumber(raw.chancePct);
+    const chancePct = chanceRaw === null ? undefined : Math.max(0, Math.min(100, chanceRaw));
+    if (scope && anyOf.length === 0) {
+      warn(`${LOG_TAG} def "${name}": exploration trigger has an empty scope.anyOf, skipped.`);
+      return null;
+    }
+    return {
+      type: 'exploration',
+      ...(anyOf.length > 0 ? { scope: { anyOf } } : {}),
+      ...(chancePct !== undefined ? { chancePct } : {}),
+    };
+  }
+
   warn(`${LOG_TAG} def "${name}": unknown trigger.type, skipped.`);
   return null;
 }

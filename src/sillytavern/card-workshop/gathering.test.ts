@@ -8,6 +8,7 @@ import {
   GATHER_TIME_MINUTES,
   planFish,
   planGather,
+  resolveGatherDef,
   riskDCFor,
   rollRiskEvent,
   type GatherEnvironment,
@@ -108,6 +109,41 @@ describe('rollRiskEvent / riskDCFor', () => {
   it('触发→有事件类型', () => {
     const r = rollRiskEvent(1, 15, '森林');
     if (r.triggered) expect(r.eventType).toBeDefined();
+  });
+
+  it('中层覆写危险系数逐键生效', () => {
+    // 冰原 danger=2；覆写拉到 5 → DC 抬高、事件倾向魔兽来袭
+    const ov = { danger: 5 };
+    expect(riskDCFor(3, '冰原', ov)).toBeGreaterThan(riskDCFor(3, '冰原'));
+    expect(rollRiskEvent(1, 15, '森林', ov).eventType).toBe('魔兽来袭');
+  });
+});
+
+describe('resolveGatherDef / 中层覆写查表链', () => {
+  it('无覆写 = 逐字段等于环境表', () => {
+    const def = resolveGatherDef('冰原');
+    expect(def).toEqual(ENVIRONMENT_TABLE['冰原']);
+  });
+
+  it('三键逐键覆写，缺键回退环境表', () => {
+    const def = resolveGatherDef('冰原', { specialty: '雪莲' });
+    expect(def.specialty).toBe('雪莲');
+    expect(def.danger).toBe(ENVIRONMENT_TABLE['冰原'].danger);
+    expect(def.materialTable).toBe(ENVIRONMENT_TABLE['冰原'].materialTable);
+    const full = resolveGatherDef('冰原', { specialty: '雪莲', danger: 5, materialTable: { 4: ['千年雪莲'] } });
+    expect(full.danger).toBe(5);
+    expect(full.materialTable).toEqual({ 4: ['千年雪莲'] });
+  });
+
+  it('中层独家素材从覆写表出产（雪莲只出自北境）', () => {
+    const noBonus = { qualityBoost: 0, extraChance: 0 };
+    const override = { materialTable: { 0: ['雪莲'], 1: ['雪莲'], 2: ['雪莲'], 3: ['雪莲'], 4: ['雪莲'] } };
+    const r = planGather('冰原', noBonus, 25, () => 0.5, override);
+    expect(r.items.length).toBeGreaterThan(0);
+    for (const item of r.items) expect(item.name).toBe('雪莲');
+    // 无覆写的同参数采集不出雪莲
+    const plain = planGather('冰原', noBonus, 25, () => 0.5);
+    for (const item of plain.items) expect(item.name).not.toBe('雪莲');
   });
 });
 

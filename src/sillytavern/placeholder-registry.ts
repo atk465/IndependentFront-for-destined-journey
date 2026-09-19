@@ -610,17 +610,38 @@ function flattenCommissionText(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
 }
 
-/** 需求摘要（minTier / formEntry / elements / exactName 全可选，只摘有值的） */
-function renderCommissionRequirement(req: CommissionDef['requireCard']): string {
-  const parts: string[] = [];
-  if (req.exactName) parts.push(`指定卡「${req.exactName}」`);
-  if (req.minTier) parts.push(`品质不低于${req.minTier}`);
-  if (req.formEntry) parts.push(`${req.formEntry}类`);
-  if (req.elements && req.elements.length > 0) parts.push(`含${req.elements.join('、')}元素`);
-  return parts.length > 0 ? parts.join('，') : '不限';
+/** 需求摘要（卡/素材/到访/终点四选一，只摘有值的） */
+function renderCommissionRequirement(def: CommissionDef): string {
+  const req = def.requireCard;
+  const cardParts: string[] = [];
+  if (req?.exactName) cardParts.push(`指定卡「${req.exactName}」`);
+  if (req?.minTier) cardParts.push(`品质不低于${req.minTier}`);
+  if (req?.formEntry) cardParts.push(`${req.formEntry}类`);
+  if (req?.elements && req.elements.length > 0) cardParts.push(`含${req.elements.join('、')}元素`);
+  if (cardParts.length > 0) return `收卡（${cardParts.join('，')}）`;
+  if (def.requireMaterial) return `缴纳「${def.requireMaterial.name}」×${def.requireMaterial.count}`;
+  if (def.requireVisit) {
+    return `接取后亲赴中层「${def.requireVisit.midTier}」${def.requireVisit.count} 次`;
+  }
+  if (def.finale) {
+    if (def.finale.type === '谜题') return `解开「${def.finale.target ?? def.destMidTier ?? '目的地'}」深处的谜题`;
+    if (def.finale.type === '强敌') return `在「${def.destMidTier ?? '目的地'}」击败${def.finale.target ?? '守卫之敌'}`;
+    return `在「${def.destMidTier ?? '目的地'}」现场制出「${def.finale.target ?? '禁忌之卡'}」`;
+  }
+  return '不限';
 }
 
-/** 奖励摘要（gc / reputation / materials 只摘有值的） */
+/** 委托的路程注脚（目的地/发布地/时限，只摘有值的） */
+function renderCommissionRoute(def: CommissionDef): string {
+  const parts: string[] = [];
+  if (def.grade) parts.push(`${def.grade}级`);
+  if (def.destMidTier) parts.push(`目的地：${def.destMidTier}`);
+  if (def.issuerMidTier) parts.push(`交差地：${def.issuerMidTier}`);
+  if (def.chainId) parts.push(`任务链「${def.chainId}」第${def.chainOrder ?? '?'}节`);
+  return parts.length > 0 ? ` ｜ ${parts.join('，')}` : '';
+}
+
+/** 奖励摘要（gc / reputation / materials / card 只摘有值的） */
 function renderCommissionRewards(req: CommissionDef['rewards']): string {
   const parts: string[] = [];
   if (req.gc) parts.push(`赏金 ${req.gc}G`);
@@ -628,14 +649,15 @@ function renderCommissionRewards(req: CommissionDef['rewards']): string {
   if (req.materials && req.materials.length > 0) {
     parts.push(`素材 ${req.materials.map((m) => `${m.name}×${m.quantity}`).join('、')}`);
   }
+  if (req.card) parts.push(`独家卡「${req.card.name}」`);
   return parts.length > 0 ? parts.join('，') : '面议';
 }
 
-/** 委托清单 → `<commissions>` 块（一条一行：名称｜描述｜收卡要求｜报酬） */
+/** 委托清单 → `<commissions>` 块（一条一行：名称｜描述｜要求｜报酬｜路程） */
 function renderCommissionsBlock(defs: readonly CommissionDef[]): string {
   const lines = defs.map((d) => {
     const desc = d.description ? `：${flattenCommissionText(d.description)}` : '';
-    const line = `「${d.name}」${desc} ｜ 收卡：${renderCommissionRequirement(d.requireCard)} ｜ 报酬：${renderCommissionRewards(d.rewards)}`;
+    const line = `「${d.name}」${desc} ｜ 要求：${renderCommissionRequirement(d)} ｜ 报酬：${renderCommissionRewards(d.rewards)}${renderCommissionRoute(d)}`;
     return flattenCommissionText(line);
   });
   return [

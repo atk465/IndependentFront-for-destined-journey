@@ -476,6 +476,42 @@ export function setRandomEventFlagsInPlace(
 }
 
 // ═══════════════════════════════════════════════════════════
+// 委托×地图闭环状态（worldFlags.commissions，2026-09-19）
+// ═══════════════════════════════════════════════════════════
+
+import type { CommissionsFlags } from './card-workshop/commission-flags';
+
+/** `worldFlags.commissions` 在 profile 里的键 —— 只在本节出现，读写两侧共用一处 */
+const COMMISSIONS_FLAGS_KEY = 'commissions';
+
+/**
+ * 读委托闭环状态（`worldFlags.commissions`）。
+ * 缺席返回**空袋子**（同 `getRandomEventFlags` 口径）；返回的是新对象，写它不落库。
+ */
+export function getCommissionsFlags(profile: SaveProfile): CommissionsFlags {
+  const raw = profile.worldFlags?.[COMMISSIONS_FLAGS_KEY];
+  return raw !== null && typeof raw === 'object' ? (raw as CommissionsFlags) : {};
+}
+
+/**
+ * 整份覆盖委托闭环状态 —— **只改内存不落库**。落库走 `updateCommissionsFlags`。
+ */
+export function setCommissionsFlagsInPlace(profile: SaveProfile, flags: CommissionsFlags): void {
+  if (profile.worldFlags === undefined || profile.worldFlags === null) profile.worldFlags = {};
+  profile.worldFlags[COMMISSIONS_FLAGS_KEY] = flags;
+}
+
+/** 整份覆盖委托闭环状态（命名写入口，形状照 `updateRandomEventFlags`） */
+export async function updateCommissionsFlags(
+  profile: SaveProfile,
+  flags: CommissionsFlags,
+): Promise<SaveProfile> {
+  setCommissionsFlagsInPlace(profile, flags);
+  await updateProfile(profile);
+  return profile;
+}
+
+// ═══════════════════════════════════════════════════════════
 // 地块事实态（地图 v1.2 / ADR-33 §3）
 // ═══════════════════════════════════════════════════════════
 
@@ -711,6 +747,8 @@ export async function clearNarrativeIntent(saveId: string, talent: string): Prom
  */
 const CUSTOM_TALENTS_KEY = 'customTalents';
 const CUSTOM_CARDS_KEY = 'customCards';
+const CUSTOM_COMMISSIONS_KEY = 'customCommissions';
+const CUSTOM_EVENTS_KEY = 'customExplorationEvents';
 
 /**
  * 读自定义内容（开发者模式编辑器写的那两份列表）。
@@ -734,6 +772,16 @@ export function getCustomCardFlags(profile: SaveProfile): unknown {
   return profile.worldFlags?.[CUSTOM_CARDS_KEY];
 }
 
+/** 读自定义委托列表（委托编写器，2026-09-19；原样，同 `getCustomTalentFlags`） */
+export function getCustomCommissionFlags(profile: SaveProfile): unknown {
+  return profile.worldFlags?.[CUSTOM_COMMISSIONS_KEY];
+}
+
+/** 读自定义链节探索事件列表（原样，同 `getCustomTalentFlags`） */
+export function getCustomEventFlags(profile: SaveProfile): unknown {
+  return profile.worldFlags?.[CUSTOM_EVENTS_KEY];
+}
+
 /**
  * 整份覆盖自定义内容（**命名写入口**，先例 `updateMapFlags` / `setMapFlagsInPlace`）。
  *
@@ -742,7 +790,12 @@ export function getCustomCardFlags(profile: SaveProfile): unknown {
  */
 export async function updateCustomContentFlags(
   profile: SaveProfile,
-  content: { talents?: readonly unknown[]; cards?: readonly unknown[] },
+  content: {
+    talents?: readonly unknown[];
+    cards?: readonly unknown[];
+    commissions?: readonly unknown[];
+    events?: readonly unknown[];
+  },
 ): Promise<SaveProfile> {
   setCustomContentFlagsInPlace(profile, content);
   await updateProfile(profile);
@@ -752,10 +805,21 @@ export async function updateCustomContentFlags(
 /** 整份覆盖自定义内容 —— **只改内存不落库**（`updateCustomContentFlags` 的纯变更那一半） */
 export function setCustomContentFlagsInPlace(
   profile: SaveProfile,
-  content: { talents?: readonly unknown[]; cards?: readonly unknown[] },
+  content: {
+    talents?: readonly unknown[];
+    cards?: readonly unknown[];
+    commissions?: readonly unknown[];
+    events?: readonly unknown[];
+  },
 ): void {
   // 存量记录（与手搓的测试 profile）可能整个缺 worldFlags；缺了就补一个空袋子
   if (profile.worldFlags === undefined || profile.worldFlags === null) profile.worldFlags = {};
   if (content.talents !== undefined) profile.worldFlags[CUSTOM_TALENTS_KEY] = [...content.talents];
   if (content.cards !== undefined) profile.worldFlags[CUSTOM_CARDS_KEY] = [...content.cards];
+  if (content.commissions !== undefined) {
+    profile.worldFlags[CUSTOM_COMMISSIONS_KEY] = [...content.commissions];
+  }
+  if (content.events !== undefined) {
+    profile.worldFlags[CUSTOM_EVENTS_KEY] = [...content.events];
+  }
 }

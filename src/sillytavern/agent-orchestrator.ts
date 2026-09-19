@@ -1095,6 +1095,16 @@ export class AgentOrchestrator {
         // 时间也刚推进过，在途旗要基于**这两者之后**的状态算 —— 顺序不能提前。
         // 它自己就是 no-op 安全的（没装地图包 / 目的地为空 / 落位失败一律不写），所以不加条件。
         await this.syncMapJourney('request_dispatcher');
+
+        // 🗺 委托×地图闭环（2026-09-19 决议 #4/#5/#8）：AI 落位后跑抵达对账
+        // （到访计数 + 旅程补足 + 抵达判定）。它同样 no-op 安全（没装包 / 没落位不写），
+        // 且必须在时间推进之后——补足算的是「实际流逝 vs 旅程天数」的差额。
+        try {
+          const { createStateManager: createSm } = await import('./state-manager');
+          await createSm(this.saveId).syncCommissionArrival();
+        } catch (err) {
+          console.warn('[Orchestrator] 抵达对账失败（不影响正文）:', err);
+        }
       }
 
       // Step C: 新格式 request 标签 → 并行回调
