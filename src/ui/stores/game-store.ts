@@ -93,6 +93,10 @@ import {
 import { installCustomCommissions } from '@engine/commission-runtime';
 import { installCustomEventDefs } from '@engine/random-event-runtime';
 import type { RandomEventDef } from '@engine/types-random-events';
+import {
+  QUEST_CHAIN_COMMISSION_SEEDS,
+  QUEST_CHAIN_EVENT_SEEDS,
+} from '@engine/card-workshop/quest-chain-seeds';
 // 委托×地图闭环（2026-09-19）：接取/交付分流/违约/终点 + 采集/垂钓接线
 import {
   MAX_ACTIVE_COMMISSIONS,
@@ -188,6 +192,8 @@ import {
   getCustomCardFlags,
   getCustomCommissionFlags,
   getCustomEventFlags,
+  getCommissionsFlags,
+  setCommissionsFlagsInPlace,
   updateCustomContentFlags,
   setCustomContentFlagsInPlace,
   getProfile,
@@ -1760,6 +1766,59 @@ export const useGameStore = defineStore('game', () => {
     for (const d of sessionCustomEvents.values()) registerCustomEvent(d);
     installCustomCommissions(getCustomCommissions());
     installCustomEventDefs(getCustomEvents());
+    // 禁忌卡七链播种：customCommissions 为空且从未播过 → 投入七链 21 委托 + 4 终点事件
+    // （questChainSeeded 标记防「编辑器里删光后重读档又长回来」；内容真源 = 资产仓
+    //   quest-chains-seed.json，quest-chain-seeds.ts 是它的播种投影）
+    const seeded =
+      (saveProfile.value?.worldFlags as Record<string, unknown> | undefined)?.questChainSeeded ===
+      true;
+    if (commissions.length === 0 && !seeded) {
+      const mergedCommissions = [...getCustomCommissions(), ...QUEST_CHAIN_COMMISSION_SEEDS];
+      const mergedEvents = [...getCustomEvents(), ...QUEST_CHAIN_EVENT_SEEDS];
+      replaceCustomCommissions(mergedCommissions);
+      installCustomCommissions(mergedCommissions);
+      replaceCustomEvents(mergedEvents);
+      installCustomEventDefs(mergedEvents);
+      for (const d of mergedCommissions) sessionCustomCommissions.set(d.name, d);
+      for (const d of mergedEvents) sessionCustomEvents.set(d.name, d);
+      // 内存袋同步 chainSeeded（setPlayerLocation 等「单提交契约」的测试盯着
+      // commitChatState——标记不另开提交，与 seed 落库同一次写）
+      const seededBag: CommissionsFlags = { ...commissionsFlags(), chainSeeded: true };
+      if (saveProfile.value) setCommissionsFlagsInPlace(saveProfile.value, seededBag);
+      // 🔴 落库延迟一拍并读 DB 最新态合并：loadSave 路径上的 seed 与玩家/测试紧接着的
+      //    addCustomCard 等整份 profile 落库存在写竞争——早拷贝晚落库会把并发写入洗掉。
+      //    先 setTimeout 让同 tick 的其他落库先行，再以 DB 最新 profile 为基只写两键。
+      const saveIdAtSeed = activeSaveId.value;
+      setTimeout(() => {
+        void (async () => {
+          try {
+            if (!saveIdAtSeed || saveIdAtSeed !== activeSaveId.value) return;
+            // 🔴 字段级窄写（只动 worldFlags 键）：整份 profile 落库会覆盖读档后发生的
+            //    一切顶层状态流转（fp/回滚恢复/gameTime）——测试实证过这场竞争。
+            const fresh = await getProfile(saveIdAtSeed);
+            const base = coerceCommissionsFlags(getCommissionsFlags(fresh));
+            const nextBag: CommissionsFlags = { ...base, chainSeeded: true };
+            const nextWorldFlags = {
+              ...(fresh.worldFlags ?? {}),
+              customCommissions: mergedCommissions,
+              customExplorationEvents: mergedEvents,
+              commissions: nextBag,
+            };
+            const { getDatabase } = await import('@engine/database');
+            await getDatabase().saveProfiles.update(saveIdAtSeed, {
+              worldFlags: nextWorldFlags,
+            });
+            // 内存同步（只并 worldFlags，不整份覆盖内存 profile）
+            if (saveProfile.value) {
+              saveProfile.value.worldFlags = nextWorldFlags;
+            }
+            await refreshFromDb();
+          } catch (err) {
+            console.warn('[game-store] 七链播种落库失败（下次读档会重试）:', err);
+          }
+        })();
+      }, 0);
+    }
   }
 
   /**

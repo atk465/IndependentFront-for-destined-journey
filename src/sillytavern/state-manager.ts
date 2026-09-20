@@ -887,7 +887,78 @@ export class StateManager {
 
   // ========== Patch Handlers ==========
 
+  /**
+   * 🔴 worldFlags 前缀路由（2026-09-19 双袋修复）：`set_variable worldFlags.x` 此前落进
+   * `variables.sys.worldFlags`——一个**零读者的死袋**（读侧全部走 `profile.worldFlags`），
+   * 宿敌/败犬烙印/每日账本/排查足迹等全部写路径从未真正生效。路由后写 `profile.worldFlags`
+   * 子树（提交作用域内改内存打脏标记，与 `applySetLocation` 同款）。
+   * @returns true = 已按 worldFlags 路由处理，调用方不再走 variables 通道
+   */
+  private async applyWorldFlagsVariable(
+    op: 'set' | 'delta' | 'remove' | 'move' | 'insert',
+    patch: StatePatch,
+  ): Promise<GameEvent | null> {
+    const target = patch.target;
+    if (!target.startsWith('worldFlags.') || target.startsWith('worldFlags..')) return null;
+    const subPath = target.slice('worldFlags.'.length);
+    if (!subPath) return null;
+    const profile = await this.readProfile();
+    if (profile.worldFlags === undefined || profile.worldFlags === null) profile.worldFlags = {};
+    const bag = profile.worldFlags as Record<string, unknown>;
+    // 🔴 不能用 var-resolver 的 setVar：它是命名空间化纯函数（默认 sys 前缀 + 深拷贝
+    //    返回新树），对 worldFlags 子树写入会静默落空。这里自己写点路径（bag 是引擎
+    //    自治袋，不含命名空间语义）。
+    const parts = subPath.split('.');
+    const writeLeaf = (value: unknown) => {
+      let cur: Record<string, unknown> = bag;
+      for (let i = 0; i < parts.length - 1; i++) {
+        const k = parts[i];
+        if (typeof cur[k] !== 'object' || cur[k] === null) cur[k] = {};
+        cur = cur[k] as Record<string, unknown>;
+      }
+      cur[parts[parts.length - 1]] = value;
+    };
+    const readLeaf = (): unknown => {
+      let cur: unknown = bag;
+      for (const k of parts) {
+        if (typeof cur !== 'object' || cur === null) return undefined;
+        cur = (cur as Record<string, unknown>)[k];
+      }
+      return cur;
+    };
+    if (op === 'set' || op === 'insert') {
+      writeLeaf(patch.value);
+    } else if (op === 'delta') {
+      const current = readLeaf();
+      writeLeaf((typeof current === 'number' ? current : 0) + (patch.amount ?? 0));
+    } else if (op === 'remove') {
+      writeLeaf(undefined);
+    } else {
+      // move：from 在 worldFlags 内——读旧值并删除，随后按 toPath 写回（toPath 同样
+      // 以 worldFlags. 开头时落在 bag 内；跨袋 move 现实无用例，按不支持处理）
+      const value = readLeaf();
+      writeLeaf(undefined);
+      const toPath = (patch.metadata?.toPath as string) ?? '';
+      if (toPath.startsWith('worldFlags.')) {
+        const toParts = toPath.slice('worldFlags.'.length).split('.');
+        let cur: Record<string, unknown> = bag;
+        for (let i = 0; i < toParts.length - 1; i++) {
+          const k = toParts[i];
+          if (typeof cur[k] !== 'object' || cur[k] === null) cur[k] = {};
+          cur = cur[k] as Record<string, unknown>;
+        }
+        cur[toParts[toParts.length - 1]] = value;
+      } else {
+        writeLeaf(value);
+      }
+    }
+    await this.persistProfile(profile);
+    return this.createEvent('variable_change', patch);
+  }
+
   private async applySetVariable(patch: StatePatch): Promise<GameEvent> {
+    const routed = await this.applyWorldFlagsVariable('set', patch);
+    if (routed) return routed;
     // 读取当前 save 的 variables（真源: SaveProfile.variables，M5）
     const vars = await this.getCurrentVariables();
     const path = patch.target.startsWith('variables.')
@@ -899,6 +970,8 @@ export class StateManager {
   }
 
   private async applyDeltaVariable(patch: StatePatch): Promise<GameEvent> {
+    const routed = await this.applyWorldFlagsVariable('delta', patch);
+    if (routed) return routed;
     const vars = await this.getCurrentVariables();
     const path = patch.target.startsWith('variables.')
       ? patch.target.slice('variables.'.length)
@@ -911,6 +984,8 @@ export class StateManager {
   }
 
   private async applyRemoveVariable(patch: StatePatch): Promise<GameEvent> {
+    const routed = await this.applyWorldFlagsVariable('remove', patch);
+    if (routed) return routed;
     const vars = await this.getCurrentVariables();
     const path = patch.target.startsWith('variables.')
       ? patch.target.slice('variables.'.length)
@@ -921,6 +996,8 @@ export class StateManager {
   }
 
   private async applyMoveVariable(patch: StatePatch): Promise<GameEvent> {
+    const routed = await this.applyWorldFlagsVariable('move', patch);
+    if (routed) return routed;
     const vars = await this.getCurrentVariables();
     const fromPath = patch.target.startsWith('variables.')
       ? patch.target.slice('variables.'.length)
@@ -935,6 +1012,8 @@ export class StateManager {
   }
 
   private async applyInsertVariable(patch: StatePatch): Promise<GameEvent> {
+    const routed = await this.applyWorldFlagsVariable('insert', patch);
+    if (routed) return routed;
     const vars = await this.getCurrentVariables();
     const path = patch.target.startsWith('variables.')
       ? patch.target.slice('variables.'.length)

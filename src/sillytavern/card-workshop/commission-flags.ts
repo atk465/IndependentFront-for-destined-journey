@@ -117,6 +117,8 @@ export interface CommissionsFlags {
   currentMidTier?: CurrentMidTierSnapshot;
   /** 采集连击（当日；风险 DC 递增用） */
   gatherStreak?: { day: number; count: number };
+  /** 禁忌卡七链已播种标记（quest-chain-seeds；防删光后重读档又长回来） */
+  chainSeeded?: boolean;
 }
 
 /** 容错解析（坏格子逐格丢，永不抛） */
@@ -217,6 +219,8 @@ export function coerceCommissionsFlags(raw: unknown): CommissionsFlags {
       };
     }
   }
+
+  if (c['chainSeeded'] === true) out.chainSeeded = true;
 
   const streak = c['gatherStreak'];
   if (
