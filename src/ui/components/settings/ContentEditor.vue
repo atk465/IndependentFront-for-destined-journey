@@ -279,8 +279,10 @@ async function importContent(e: Event) {
 
     const skippedT = (Array.isArray(raw.talents) ? raw.talents.length : 0) - talents.length;
     const skippedC = (Array.isArray(raw.cards) ? raw.cards.length : 0) - cards.length;
-    const skippedK = (Array.isArray(raw.commissions) ? raw.commissions.length : 0) - commissions.length;
-    const skippedE = (Array.isArray(raw.explorationEvents) ? raw.explorationEvents.length : 0) - events.length;
+    const skippedK =
+      (Array.isArray(raw.commissions) ? raw.commissions.length : 0) - commissions.length;
+    const skippedE =
+      (Array.isArray(raw.explorationEvents) ? raw.explorationEvents.length : 0) - events.length;
     const skipped =
       skippedT + skippedC + skippedK + skippedE > 0
         ? `（跳过 ${skippedT} 条天赋、${skippedC} 张卡、${skippedK} 条委托、${skippedE} 条事件：形状不合法）`
@@ -341,7 +343,9 @@ const kMsg = ref('');
 const kErr = ref('');
 
 /** 中层选项（装了地图包才有；没包时手填 id 也可以——下拉换成输入框） */
-const midTierOptions = computed(() => getMapPack().midTiers.map((m) => ({ id: m.id, name: m.name })));
+const midTierOptions = computed(() =>
+  getMapPack().midTiers.map((m) => ({ id: m.id, name: m.name })),
+);
 /** 奖励卡选项：卡池（内容包 + 自定义卡）——下拉只能选存在的卡（写错名报红的结构化解法） */
 const cardOptions = computed(() => getPurchasableCardPool().map((c) => c.name));
 
@@ -409,14 +413,20 @@ async function saveCommission() {
         kErr.value = '素材委托要填素材名';
         return;
       }
-      def.requireMaterial = { name: kMatName.value.trim(), count: Math.max(1, Math.round(kMatCount.value)) };
+      def.requireMaterial = {
+        name: kMatName.value.trim(),
+        count: Math.max(1, Math.round(kMatCount.value)),
+      };
       break;
     case '到访':
       if (!kVisitMidTier.value) {
         kErr.value = '探索委托要选目的地中层';
         return;
       }
-      def.requireVisit = { midTier: kVisitMidTier.value, count: Math.max(1, Math.round(kVisitCount.value)) };
+      def.requireVisit = {
+        midTier: kVisitMidTier.value,
+        count: Math.max(1, Math.round(kVisitCount.value)),
+      };
       break;
     case '终点': {
       const target = kFinaleTarget.value.trim() || (kHasEvent.value ? kEventName.value.trim() : '');
@@ -426,7 +436,10 @@ async function saveCommission() {
         ...(kFinaleType.value === '场景制卡' && kFinaleMatName.value.trim()
           ? {
               materials: [
-                { name: kFinaleMatName.value.trim(), quantity: Math.max(1, Math.round(kFinaleMatQty.value)) },
+                {
+                  name: kFinaleMatName.value.trim(),
+                  quantity: Math.max(1, Math.round(kFinaleMatQty.value)),
+                },
               ],
             }
           : {}),
@@ -451,7 +464,8 @@ async function saveCommission() {
     const eventName = kEventName.value.trim();
     const event: RandomEventDef = {
       name: eventName,
-      brief: kEventBrief.value.trim() || `【${name}】的终点时刻到了——${kFinaleType.value}的最后一搏。`,
+      brief:
+        kEventBrief.value.trim() || `【${name}】的终点时刻到了——${kFinaleType.value}的最后一搏。`,
       trigger: {
         type: 'exploration',
         ...(kDest.value ? { scope: { anyOf: [kDest.value] } } : {}),
@@ -527,7 +541,13 @@ function removeCommission(name: string) {
         <button
           type="button"
           class="tab-btn"
-          :title="tab === 'talent' ? '下载天赋 JSON 模板' : tab === 'card' ? '下载卡牌 JSON 模板' : '下载整包模板'"
+          :title="
+            tab === 'talent'
+              ? '下载天赋 JSON 模板'
+              : tab === 'card'
+                ? '下载卡牌 JSON 模板'
+                : '下载整包模板'
+          "
           @click="downloadTemplate(tab === 'commission' ? 'bundle' : tab)"
         >
           模板
@@ -677,8 +697,12 @@ function removeCommission(name: string) {
         >
       </div>
       <label class="full"
-        >描述<textarea v-model="kDesc" rows="2" placeholder="给玩家看的一句话（也供 AI 叙事取材）"
-      /></label>
+        >描述<textarea
+          v-model="kDesc"
+          rows="2"
+          placeholder="给玩家看的一句话（也供 AI 叙事取材）"
+        />
+      </label>
 
       <div class="field-row">
         <label
@@ -723,12 +747,7 @@ function removeCommission(name: string) {
         </div>
         <div class="field-row">
           <span class="inline-label">元素（可多选）：</span>
-          <label
-            v-for="e in ELEMENTS.slice(1)"
-            :key="e"
-            class="check-label"
-            style="flex: 0 0 auto"
-          >
+          <label v-for="e in ELEMENTS.slice(1)" :key="e" class="check-label" style="flex: 0 0 auto">
             <input v-model="kElements" :value="e" type="checkbox" />{{ e }}
           </label>
         </div>
@@ -737,7 +756,9 @@ function removeCommission(name: string) {
       <!-- 素材要求 -->
       <div v-else-if="kReqType === '素材'" class="sub-form">
         <div class="field-row">
-          <label>素材名<input v-model="kMatName" placeholder="如：雪莲（建议用中层独家素材）" /></label>
+          <label
+            >素材名<input v-model="kMatName" placeholder="如：雪莲（建议用中层独家素材）"
+          /></label>
           <label>数量<input v-model.number="kMatCount" type="number" min="1" step="1" /></label>
         </div>
       </div>
@@ -753,7 +774,9 @@ function removeCommission(name: string) {
               </option>
             </select></label
           >
-          <label>到访次数<input v-model.number="kVisitCount" type="number" min="1" step="1" /></label>
+          <label
+            >到访次数<input v-model.number="kVisitCount" type="number" min="1" step="1"
+          /></label>
         </div>
         <p class="hint">接取后到访才计数（基线快照）——接取前去过的不算。</p>
       </div>
@@ -770,7 +793,11 @@ function removeCommission(name: string) {
             >目标<input
               v-model="kFinaleTarget"
               :placeholder="
-                kFinaleType === '谜题' ? '终点事件名（可由下方事件生成）' : kFinaleType === '强敌' ? '敌人名' : '目标卡名'
+                kFinaleType === '谜题'
+                  ? '终点事件名（可由下方事件生成）'
+                  : kFinaleType === '强敌'
+                    ? '敌人名'
+                    : '目标卡名'
               "
           /></label>
         </div>
@@ -794,7 +821,12 @@ function removeCommission(name: string) {
         /></label>
         <label>任务链 id<input v-model="kChainId" placeholder="留空 = 散委托" /></label>
         <label v-if="kChainId.trim()"
-          >链内节序<input v-model.number="kChainOrder" type="number" min="1" step="1" placeholder="1"
+          >链内节序<input
+            v-model.number="kChainOrder"
+            type="number"
+            min="1"
+            step="1"
+            placeholder="1"
         /></label>
       </div>
 
@@ -802,7 +834,9 @@ function removeCommission(name: string) {
       <div class="sub-form">
         <p class="sub-title">奖励</p>
         <div class="field-row">
-          <label>赏金（GC）<input v-model.number="kGc" type="number" min="0" placeholder="0" /></label>
+          <label
+            >赏金（GC）<input v-model.number="kGc" type="number" min="0" placeholder="0"
+          /></label>
           <label>声望<input v-model.number="kRep" type="number" step="1" placeholder="0" /></label>
           <label
             >独家卡<select v-model="kCardReward">
@@ -835,17 +869,18 @@ function removeCommission(name: string) {
         >
         <template v-if="kHasEvent">
           <div class="field-row">
-            <label>事件名<input v-model="kEventName" placeholder="终点事件的逻辑键（唯一）" /></label>
+            <label
+              >事件名<input v-model="kEventName" placeholder="终点事件的逻辑键（唯一）"
+            /></label>
           </div>
           <label class="full"
             >事件简报<textarea
               v-model="kEventBrief"
               rows="2"
               placeholder="给 AI 的事件简报（留空 = 自动生成）"
-          /></label>
-          <p class="hint">
-            事件随任务链走：只在目的地中层、且本委托接取中时可能触发，全程一次。
-          </p>
+            />
+          </label>
+          <p class="hint">事件随任务链走：只在目的地中层、且本委托接取中时可能触发，全程一次。</p>
         </template>
       </div>
 
@@ -868,7 +903,9 @@ function removeCommission(name: string) {
       </div>
       <div v-if="customEventList.length > 0" class="custom-list">
         <span>自定义探索事件（{{ customEventList.length }}）：</span>
-        <span v-for="d in customEventList" :key="d.name" class="chip static-chip">{{ d.name }}</span>
+        <span v-for="d in customEventList" :key="d.name" class="chip static-chip">{{
+          d.name
+        }}</span>
       </div>
     </div>
   </div>

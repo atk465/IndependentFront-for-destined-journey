@@ -1116,7 +1116,12 @@ describe('coerceCountries / coerceMidTiers', () => {
             gathering: {
               specialty: 'Frost Lotus',
               danger: 5,
-              materialTable: { 0: ['Snow Herb'], 4: ['Millennium Lotus'], 9: ['越界档'], 2: 'not-array' },
+              materialTable: {
+                0: ['Snow Herb'],
+                4: ['Millennium Lotus'],
+                9: ['越界档'],
+                2: 'not-array',
+              },
             },
           },
           { id: 'mt-partial', gathering: { danger: -1 } },

@@ -24,9 +24,7 @@ const lastOutcome = ref<GatherOutcome | null>(null);
 const midTier = computed(() => game.commissionsFlags().currentMidTier);
 const threat = computed(() => game.commissionsFlags().arrivalThreat);
 const alert = computed(() => game.commissionsFlags().alertedMidTier);
-const alertActive = computed(
-  () => alert.value && alert.value.midTierId === midTier.value?.id,
-);
+const alertActive = computed(() => alert.value && alert.value.midTierId === midTier.value?.id);
 
 async function onGather() {
   busy.value = true;
@@ -121,14 +119,16 @@ async function onFish() {
           <template v-if="item.isSpecialty"> · 特产</template>
         </li>
       </ul>
-      <p v-if="lastOutcome.risk?.eventType" class="risk-note" :class="{ battle: lastOutcome.battlePrompt }">
+      <p
+        v-if="lastOutcome.risk?.eventType"
+        class="risk-note"
+        :class="{ battle: lastOutcome.battlePrompt }"
+      >
         <template v-if="lastOutcome.battlePrompt">
           ⚔ 魔兽来袭！{{ lastOutcome.risk.eventType }}——采到的东西全没了。回正文里迎战它，
           或在战斗面板开启一场交锋。
         </template>
-        <template v-else>
-          ✕ {{ lastOutcome.risk.eventType }}——这一趟白干了。
-        </template>
+        <template v-else> ✕ {{ lastOutcome.risk.eventType }}——这一趟白干了。 </template>
       </p>
       <p v-if="lastOutcome.explorationEventArmed" class="event-note">
         <i class="fa-solid fa-bell" aria-hidden="true"></i>

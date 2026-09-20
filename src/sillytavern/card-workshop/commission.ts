@@ -40,7 +40,7 @@ export interface CommissionRequirement {
 export type CommissionGrade = 'D' | 'C' | 'B' | 'A' | 'S';
 
 /** 品级显示顺序（UI 排序用） */
-export const COMMISSION_GRADES: readonly CommissionGrade[] = ['D', 'C', 'B', 'A', 'S'];
+const COMMISSION_GRADES: readonly CommissionGrade[] = ['D', 'C', 'B', 'A', 'S'];
 
 /** 素材需求（素材即凭证：独家素材只在中层覆写表里出产，拿到 = 去过的证明） */
 export interface MaterialRequirement {
@@ -56,9 +56,9 @@ export interface VisitRequirement {
 }
 
 /** 链终点型（场景获得：卡在那座危险的地方被换来，不是回城被递过来） */
-export type CommissionFinaleType = '谜题' | '强敌' | '场景制卡';
+type CommissionFinaleType = '谜题' | '强敌' | '场景制卡';
 
-export interface CommissionFinale {
+interface CommissionFinale {
   type: CommissionFinaleType;
   /** 谜题型=终点事件名；强敌型=遭遇/敌人名；场景制卡型=目标卡名 */
   target?: string;
@@ -67,7 +67,7 @@ export interface CommissionFinale {
 }
 
 /** 卡奖励（终点是机械承诺：Code 补丁保底 + AI 叙事拍给仪式，发放永不被叙事阻塞） */
-export interface CardReward {
+interface CardReward {
   /** 卡名——引用卡池/自定义卡（单一真源），不内嵌卡定义 */
   name: string;
   /** delivery=交付时发（默认）；scene=终点场景行为完成时发（finale 委托用） */
@@ -109,7 +109,9 @@ export interface CommissionDef {
 }
 
 /** A/S 级交付地校验：有发布中层的 A/S 级委托必须人在发布中层才能交差（品级分流） */
-export function requiresIssuerDelivery(def: Pick<CommissionDef, 'grade' | 'issuerMidTier'>): boolean {
+export function requiresIssuerDelivery(
+  def: Pick<CommissionDef, 'grade' | 'issuerMidTier'>,
+): boolean {
   return (def.grade === 'A' || def.grade === 'S') && !!def.issuerMidTier;
 }
 
@@ -169,7 +171,7 @@ export function coerceCommissions(raw: unknown): CommissionDef[] {
                 ? ((m as Record<string, unknown>)['quantity'] as number)
                 : 1,
           }))
-        : undefined;
+      : undefined;
     const requireCard: CommissionRequirement = {
       minTier: (CARD_TIERS as readonly string[]).includes(req['minTier'] as string)
         ? (req['minTier'] as CardTier)
@@ -189,7 +191,9 @@ export function coerceCommissions(raw: unknown): CommissionDef[] {
     const grade = (COMMISSION_GRADES as readonly string[]).includes(c['grade'] as string)
       ? (c['grade'] as CommissionGrade)
       : undefined;
-    const rawCard = isRecord(rewards['card']) ? (rewards['card'] as Record<string, unknown>) : undefined;
+    const rawCard = isRecord(rewards['card'])
+      ? (rewards['card'] as Record<string, unknown>)
+      : undefined;
     out.push({
       name: c['name'],
       description: typeof c['description'] === 'string' ? c['description'] : undefined,
@@ -204,10 +208,14 @@ export function coerceCommissions(raw: unknown): CommissionDef[] {
       ...(typeof c['issuerMidTier'] === 'string' && c['issuerMidTier'].length > 0
         ? { issuerMidTier: c['issuerMidTier'] }
         : {}),
-      ...(typeof c['deadlineDays'] === 'number' && Number.isFinite(c['deadlineDays']) && c['deadlineDays'] > 0
+      ...(typeof c['deadlineDays'] === 'number' &&
+      Number.isFinite(c['deadlineDays']) &&
+      c['deadlineDays'] > 0
         ? { deadlineDays: Math.floor(c['deadlineDays']) }
         : {}),
-      ...(typeof c['chainId'] === 'string' && c['chainId'].length > 0 ? { chainId: c['chainId'] } : {}),
+      ...(typeof c['chainId'] === 'string' && c['chainId'].length > 0
+        ? { chainId: c['chainId'] }
+        : {}),
       ...(typeof c['chainOrder'] === 'number' && Number.isFinite(c['chainOrder'])
         ? { chainOrder: Math.max(1, Math.floor(c['chainOrder'])) }
         : {}),

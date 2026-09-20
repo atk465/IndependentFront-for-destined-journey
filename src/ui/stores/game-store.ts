@@ -588,7 +588,13 @@ export const useGameStore = defineStore('game', () => {
           expiresDay: a.expiresDay,
         };
       }
-      return { defName: a.defName, kind: '收卡' as const, have: 0, need: 1, expiresDay: a.expiresDay };
+      return {
+        defName: a.defName,
+        kind: '收卡' as const,
+        have: 0,
+        need: 1,
+        expiresDay: a.expiresDay,
+      };
     });
   });
 
@@ -617,13 +623,17 @@ export const useGameStore = defineStore('game', () => {
   }
 
   /** 接取委托（最多并行 3 个；接取瞬间快照到访基线与时限） */
-  async function acceptCommissionByName(defName: string): Promise<{ ok: boolean; reason?: string }> {
+  async function acceptCommissionByName(
+    defName: string,
+  ): Promise<{ ok: boolean; reason?: string }> {
     if (!activeSaveId.value) return { ok: false, reason: '无活跃存档' };
     const def = allCommissionDefs().find((d) => d.name === defName);
     if (!def) return { ok: false, reason: `委托板上没有名为【${defName}】的委托` };
     if (def.finale) {
       const prev = def.chainId
-        ? allCommissionDefs().find((d) => d.chainId === def.chainId && d.chainOrder === (def.chainOrder ?? 1) - 1)
+        ? allCommissionDefs().find(
+            (d) => d.chainId === def.chainId && d.chainOrder === (def.chainOrder ?? 1) - 1,
+          )
         : undefined;
       if (prev && completedCommissions.value[prev.name] === undefined) {
         return { ok: false, reason: `要先完成「${prev.name}」才能接这条` };
@@ -659,7 +669,9 @@ export const useGameStore = defineStore('game', () => {
   }
 
   /** 放弃进行中的委托（基线作废；重接重新快照——链不卡死的软恢复） */
-  async function abandonCommissionByName(defName: string): Promise<{ ok: boolean; reason?: string }> {
+  async function abandonCommissionByName(
+    defName: string,
+  ): Promise<{ ok: boolean; reason?: string }> {
     const flags = commissionsFlags();
     if (!activeOf(flags.active, defName)) return { ok: false, reason: '没有接这条委托' };
     return commitCommissionsBag({ ...flags, active: abandonActive(flags.active, defName) });
@@ -810,7 +822,12 @@ export const useGameStore = defineStore('game', () => {
   async function completeFinaleCommission(
     def: CommissionDef,
     flags: CommissionsFlags,
-  ): Promise<{ patches: StatePatch[]; next: CommissionsFlags; narrative: string; playerName: string }> {
+  ): Promise<{
+    patches: StatePatch[];
+    next: CommissionsFlags;
+    narrative: string;
+    playerName: string;
+  }> {
     const playerChar = player.value!;
     const day = currentGameDay();
     const rewardCard =
@@ -902,7 +919,10 @@ export const useGameStore = defineStore('game', () => {
     }
 
     // 清掉已消费的证据
-    if (done.length > 0 && Object.keys(evidence).length !== Object.keys(flags.finaleEvidence ?? {}).length) {
+    if (
+      done.length > 0 &&
+      Object.keys(evidence).length !== Object.keys(flags.finaleEvidence ?? {}).length
+    ) {
       await commitCommissionsBag({ ...next, finaleEvidence: evidence });
     }
     if (done.length > 0) await refreshFromDb();
@@ -994,7 +1014,12 @@ export const useGameStore = defineStore('game', () => {
               ({
                 op: 'add_item',
                 target,
-                value: { name: item.name, quantity: item.quantity, type: '材料', rarity: item.rarity },
+                value: {
+                  name: item.name,
+                  quantity: item.quantity,
+                  type: '材料',
+                  rarity: item.rarity,
+                },
               }) as StatePatch,
           )
         : items.map(

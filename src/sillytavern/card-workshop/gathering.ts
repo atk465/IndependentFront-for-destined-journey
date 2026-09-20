@@ -20,6 +20,12 @@ import type { MidTierGathering } from '../types-map';
 // 环境表（加环境 = 加两行数据：特产 + 危险系数）
 // ════════════════════════════════════════════════════════════════════
 
+/**
+ * 环境名的**类型真源**（`GatherEnvironment` 由它派生）—— 仓库惯用写法，同
+ * `field-enums.ts` 的 `CARD_TIERS`。当前没有运行时消费方（环境名从地图侧以
+ * 联合类型传入，不走字符串解析），保持导出以备 UI/工具遍历环境表；
+ * knip 视作未消费导出，已按「确属有意保留」入基线（见提交说明）。
+ */
 export const ENV_NAMES = ['森林', '矿山', '水域', '冰原', '沙漠', '沼泽'] as const;
 
 export type GatherEnvironment = (typeof ENV_NAMES)[number];
@@ -264,7 +270,7 @@ export function planGather(
 // 垂钓
 // ════════════════════════════════════════════════════════════════════
 
-export interface FishCatch {
+interface FishCatch {
   name: string;
   rarity: Rarity;
   quantity: number;

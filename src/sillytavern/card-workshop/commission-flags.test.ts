@@ -223,11 +223,7 @@ describe('采集连击与惊动守卫', () => {
 describe('coerceCommissionsFlags（容错解析）', () => {
   it('坏格子逐格丢', () => {
     const flags = coerceCommissionsFlags({
-      active: [
-        { defName: '雪莲采集', acceptDay: 10, expiresDay: 17 },
-        { defName: '' },
-        '垃圾',
-      ],
+      active: [{ defName: '雪莲采集', acceptDay: 10, expiresDay: 17 }, { defName: '' }, '垃圾'],
       completed: { a: 5, b: 'x' },
       finaleEvidence: { c: 'battle', d: 3 },
       lastTileIdSeen: 'x',

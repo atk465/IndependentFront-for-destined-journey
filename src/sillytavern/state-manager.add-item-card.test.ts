@@ -6,12 +6,7 @@
  * 加卡路径全走 add_item。修复后：给值才写，非卡物品零影响。
  */
 import { beforeEach, describe, expect, it } from 'vitest';
-import {
-  initializeDatabase,
-  clearAllData,
-  saveCharacter,
-  getCharacters,
-} from './database';
+import { initializeDatabase, clearAllData, saveCharacter, getCharacters } from './database';
 import { createStateManager } from './state-manager';
 import { createDefaultCharacterState } from './types';
 import type { CardItem } from './types';

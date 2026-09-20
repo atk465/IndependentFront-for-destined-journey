@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref, watch } from 'vue';
-import { useGameStore, setRewriteLoadoutImpl, setCraftNarrateImpl, setCommissionNarrateImpl } from '../../stores/game-store';
+import {
+  useGameStore,
+  setRewriteLoadoutImpl,
+  setCraftNarrateImpl,
+  setCommissionNarrateImpl,
+} from '../../stores/game-store';
 import { useUIStore } from '../../stores/ui-store';
 import { useSettingsStore } from '../../stores/settings-store';
 import { unwireEffectSystem } from '@engine/effect-wiring';

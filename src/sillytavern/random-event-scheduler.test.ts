@@ -1147,7 +1147,12 @@ describe('rollExplorationEvent —— 按动作不按天', () => {
   });
 
   it('available 不满足 → 缺数据 = 假，不入池', () => {
-    const gated = [exploration('Gated', { scope: { anyOf: ['mt-north'] }, available: { quest: { name: 'X', statusAnyOf: ['active'] } } })];
+    const gated = [
+      exploration('Gated', {
+        scope: { anyOf: ['mt-north'] },
+        available: { quest: { name: 'X', statusAnyOf: ['active'] } },
+      }),
+    ];
     expect(rollExploration(gated, {}, 10)).toBeNull();
   });
 

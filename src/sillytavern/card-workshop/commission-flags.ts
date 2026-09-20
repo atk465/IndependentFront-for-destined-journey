@@ -42,7 +42,7 @@ export function isGeneratedCommissionActive(gc: GeneratedCommission, day: number
 }
 
 /** 容错解析生成委托清单（坏条目逐条丢，永不抛） */
-export function coerceGeneratedCommissions(raw: unknown): GeneratedCommission[] {
+function coerceGeneratedCommissions(raw: unknown): GeneratedCommission[] {
   if (!Array.isArray(raw)) return [];
   const out: GeneratedCommission[] = [];
   for (const item of raw) {
@@ -68,7 +68,7 @@ export function coerceGeneratedCommissions(raw: unknown): GeneratedCommission[] 
 // ═══════════════════════════════════════════════════════════
 
 /** 当前所在中层的快照（采集/交付/终点判定都从这读，UI 不用自己查地图包） */
-export interface CurrentMidTierSnapshot {
+interface CurrentMidTierSnapshot {
   id: string;
   name: string;
   /** 该中层的采集覆写（缺键回退由 gathering.resolveGatherDef 在使用侧做） */
@@ -79,7 +79,7 @@ export interface CurrentMidTierSnapshot {
 }
 
 /** 抵达判定的结果记录（UI 展示 + AI 注入共用） */
-export interface ArrivalThreat {
+interface ArrivalThreat {
   midTierId: string;
   midTierName: string;
   day: number;
@@ -301,8 +301,7 @@ export function planArrivalSync(input: ArrivalSyncInput): ArrivalSyncOutcome {
   }
 
   // ── 到访计数（中层变化） ──
-  const midTierChanged =
-    input.midTier !== null && input.midTier.id !== prev.lastVisitMidTier;
+  const midTierChanged = input.midTier !== null && input.midTier.id !== prev.lastVisitMidTier;
   const visitCounterKey_ =
     midTierChanged && input.midTier !== null ? visitCounterKey(input.midTier.id) : undefined;
 
@@ -351,7 +350,8 @@ export function planArrivalSync(input: ArrivalSyncInput): ArrivalSyncOutcome {
   }
   if (threat) {
     next.arrivalThreat = threat;
-    if (threat.kind === 'alerted') next.alertedMidTier = { midTierId: threat.midTierId, day: today };
+    if (threat.kind === 'alerted')
+      next.alertedMidTier = { midTierId: threat.midTierId, day: today };
   } else if (midTierChanged) {
     delete next.arrivalThreat;
   }
@@ -382,10 +382,7 @@ export function advanceGatherStreak(
 }
 
 /** 当前采集连击数（读侧；跨日读 0） */
-export function gatherStreakCount(
-  streak: CommissionsFlags['gatherStreak'],
-  today: number,
-): number {
+export function gatherStreakCount(streak: CommissionsFlags['gatherStreak'], today: number): number {
   if (!streak || streak.day !== Math.floor(today)) return 0;
   return Math.max(0, streak.count);
 }

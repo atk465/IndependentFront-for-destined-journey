@@ -18,11 +18,7 @@
  */
 
 import type { StatePatch, CardItem } from '../types';
-import type {
-  CommissionDef,
-  MaterialRequirement,
-  VisitRequirement,
-} from './commission';
+import type { CommissionDef, MaterialRequirement, VisitRequirement } from './commission';
 import { rewardPatches, requiresIssuerDelivery } from './commission';
 import type { Counters } from './daily-ledger';
 import { counterOf } from './daily-ledger';
@@ -38,7 +34,7 @@ export const MAX_ACTIVE_COMMISSIONS = 3;
 export const GENERATED_COMMISSION_TTL_DAYS = 7;
 
 /** 到访计数的账本键前缀（counters 段，永不过期——到过就是到过） */
-export const VISIT_COUNTER_PREFIX = '到访.';
+const VISIT_COUNTER_PREFIX = '到访.';
 
 /** 到访计数键：`到访.<中层id>` */
 export function visitCounterKey(midTierId: string): string {
@@ -77,7 +73,9 @@ export function coerceActiveCommissions(raw: unknown): ActiveCommission[] {
     out.push({
       defName: a['defName'],
       acceptDay: Math.floor(a['acceptDay']),
-      ...(typeof a['expiresDay'] === 'number' && Number.isFinite(a['expiresDay']) && a['expiresDay'] > 0
+      ...(typeof a['expiresDay'] === 'number' &&
+      Number.isFinite(a['expiresDay']) &&
+      a['expiresDay'] > 0
         ? { expiresDay: Math.floor(a['expiresDay']) }
         : {}),
       ...(Object.keys(baselines).length > 0 ? { visitBaselines: baselines } : {}),
@@ -300,7 +298,11 @@ export function planVisitDelivery(input: {
     return { ok: false, reason: `「${input.def.name}」不是探索委托`, patches: [] };
   }
   if (!input.active) {
-    return { ok: false, reason: `「${input.def.name}」还没接取（到访要接了之后才计数）`, patches: [] };
+    return {
+      ok: false,
+      reason: `「${input.def.name}」还没接取（到访要接了之后才计数）`,
+      patches: [],
+    };
   }
   const progress = visitProgressOf(input.active, input.counters, req);
   if (progress < req.count) {

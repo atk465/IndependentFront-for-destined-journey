@@ -8,10 +8,7 @@
  * 空渲染 = 零 token —— 这是「叙事血肉按需付费」共识的机械保证。
  */
 import { describe, expect, it } from 'vitest';
-import {
-  renderWorldBookEntries,
-  clearEjsCompileCache,
-} from './worldbook-loader';
+import { renderWorldBookEntries, clearEjsCompileCache } from './worldbook-loader';
 import type { WorldBookEntry } from './types';
 import type { EjsEvalContext } from './ejs-runtime';
 
@@ -51,7 +48,13 @@ describe('世界书 EJS 自门控（批 2 验证）', () => {
       ctx({
         capabilities: {
           mapSnapshot: {
-            current: { name: '灰笺矿区', terrain: '山脉', midTierName: '灰笺乡', water: null, impassable: false },
+            current: {
+              name: '灰笺矿区',
+              terrain: '山脉',
+              midTierName: '灰笺乡',
+              water: null,
+              impassable: false,
+            },
             neighbors: [],
             developmentLevels: [],
           },
@@ -74,7 +77,13 @@ describe('世界书 EJS 自门控（批 2 验证）', () => {
       ctx({
         capabilities: {
           mapSnapshot: {
-            current: { name: '帝都·冕京', terrain: '平原', midTierName: '冕京京畿', water: null, impassable: false },
+            current: {
+              name: '帝都·冕京',
+              terrain: '平原',
+              midTierName: '冕京京畿',
+              water: null,
+              impassable: false,
+            },
             neighbors: [],
             developmentLevels: [],
           },

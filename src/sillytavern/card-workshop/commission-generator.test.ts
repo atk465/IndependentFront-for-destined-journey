@@ -158,7 +158,11 @@ describe('refreshGeneratedCommissions（保洁 + 补充）', () => {
   it('在板生成委托的名占用命名空间（补充不与自己撞名）', () => {
     const existing = [
       {
-        def: { name: '碎冰征集·北境雪原', requireMaterial: { name: '碎冰', count: 1 }, rewards: {} },
+        def: {
+          name: '碎冰征集·北境雪原',
+          requireMaterial: { name: '碎冰', count: 1 },
+          rewards: {},
+        },
         armedDay: 96,
         expiresDay: 103,
       },

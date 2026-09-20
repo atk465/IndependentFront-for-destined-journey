@@ -14,6 +14,7 @@
 
 import type { CommissionGrade } from './commission';
 import type { GeneratedCommission } from './commission-flags';
+import { isGeneratedCommissionActive } from './commission-flags';
 import { GENERATED_COMMISSION_TTL_DAYS } from './commission-active';
 
 /** 生成委托的目标在板数（常数起步；打开委托板时保洁 + 补充） */
@@ -71,9 +72,7 @@ function reputationFor(grade: CommissionGrade): number | undefined {
  * 生成一批填充委托（纯函数）。原料不足（没写覆写表的中层 / 表全空）返回空数组——
  * 生成填充是**填充**，没有原料就安静地让委托板空着，绝不凭空造要求。
  */
-export function generateFillerCommissions(
-  input: GenerateFillerInput,
-): GeneratedCommission[] {
+export function generateFillerCommissions(input: GenerateFillerInput): GeneratedCommission[] {
   const count = Math.max(0, Math.floor(input.count ?? GENERATED_COMMISSION_TARGET_COUNT));
   const day = Math.floor(input.day);
   if (count === 0) return [];
@@ -156,7 +155,9 @@ export function refreshGeneratedCommissions(input: {
   count?: number;
 }): { kept: GeneratedCommission[]; generated: GeneratedCommission[] } {
   const today = Math.floor(input.today);
-  const kept = (input.existing ?? []).filter((gc) => today < gc.expiresDay);
+  // 过期判据**只有一处**（commission-flags 的谓词）—— 此前这里内联了一份 `today < expiresDay`，
+  // 与谓词同规则却各写一遍：改规则时容易只改一处。
+  const kept = (input.existing ?? []).filter((gc) => isGeneratedCommissionActive(gc, today));
   const reserved = new Set(input.reservedNames);
   for (const gc of kept) reserved.add(gc.def.name);
   const shortfall =

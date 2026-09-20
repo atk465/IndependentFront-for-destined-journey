@@ -36,7 +36,12 @@ describe('visitCounterKey', () => {
 describe('coerceActiveCommissions（容错解析）', () => {
   it('坏条目逐条丢；expiresDay/baselines 认不出就省略', () => {
     const list = coerceActiveCommissions([
-      { defName: '雪莲采集', acceptDay: 10, expiresDay: 17, visitBaselines: { '到访.mt-north': 4 } },
+      {
+        defName: '雪莲采集',
+        acceptDay: 10,
+        expiresDay: 17,
+        visitBaselines: { '到访.mt-north': 4 },
+      },
       { defName: '', acceptDay: 1 },
       { defName: '无接取日' },
       { defName: '坏日期', acceptDay: 'x' },
@@ -259,7 +264,12 @@ describe('planVisitDelivery', () => {
   };
 
   it('没接取不给交', () => {
-    const plan = planVisitDelivery({ def, active: undefined, counters: undefined, playerName: '玩家' });
+    const plan = planVisitDelivery({
+      def,
+      active: undefined,
+      counters: undefined,
+      playerName: '玩家',
+    });
     expect(plan.ok).toBe(false);
     expect(plan.reason).toContain('接取');
   });

@@ -17,7 +17,14 @@ import { getTalentTemplate, hasWorkingMechanic, TALENT_CATALOG } from './talent-
 
 describe('ENVIRONMENT_TABLE', () => {
   it('六种环境全覆盖', () => {
-    expect(Object.keys(ENVIRONMENT_TABLE)).toEqual(['森林', '矿山', '水域', '冰原', '沙漠', '沼泽']);
+    expect(Object.keys(ENVIRONMENT_TABLE)).toEqual([
+      '森林',
+      '矿山',
+      '水域',
+      '冰原',
+      '沙漠',
+      '沼泽',
+    ]);
   });
   it('每个环境有特产+危险系数+素材表', () => {
     for (const [env, def] of Object.entries(ENVIRONMENT_TABLE)) {
@@ -67,7 +74,10 @@ describe('planFish', () => {
     let found = false;
     for (let i = 0; i < 100; i++) {
       const r = planFish(1, noBonus, () => i / 100);
-      if (!r.caught) { found = true; break; }
+      if (!r.caught) {
+        found = true;
+        break;
+      }
     }
     expect(found).toBe(true);
   });
@@ -130,14 +140,20 @@ describe('resolveGatherDef / 中层覆写查表链', () => {
     expect(def.specialty).toBe('雪莲');
     expect(def.danger).toBe(ENVIRONMENT_TABLE['冰原'].danger);
     expect(def.materialTable).toBe(ENVIRONMENT_TABLE['冰原'].materialTable);
-    const full = resolveGatherDef('冰原', { specialty: '雪莲', danger: 5, materialTable: { 4: ['千年雪莲'] } });
+    const full = resolveGatherDef('冰原', {
+      specialty: '雪莲',
+      danger: 5,
+      materialTable: { 4: ['千年雪莲'] },
+    });
     expect(full.danger).toBe(5);
     expect(full.materialTable).toEqual({ 4: ['千年雪莲'] });
   });
 
   it('中层独家素材从覆写表出产（雪莲只出自北境）', () => {
     const noBonus = { qualityBoost: 0, extraChance: 0 };
-    const override = { materialTable: { 0: ['雪莲'], 1: ['雪莲'], 2: ['雪莲'], 3: ['雪莲'], 4: ['雪莲'] } };
+    const override = {
+      materialTable: { 0: ['雪莲'], 1: ['雪莲'], 2: ['雪莲'], 3: ['雪莲'], 4: ['雪莲'] },
+    };
     const r = planGather('冰原', noBonus, 25, () => 0.5, override);
     expect(r.items.length).toBeGreaterThan(0);
     for (const item of r.items) expect(item.name).toBe('雪莲');
@@ -168,7 +184,9 @@ describe('天赋接线', () => {
   it('野外生存(C)：采集强化', () => {
     const tpl = getTalentTemplate('野外生存');
     expect(tpl?.grade).toBe('C');
-    expect(tpl!.entries).toEqual([{ kind: '采集强化', channel: 'universal', params: { qualityBoost: 1, extraChance: 0 } }]);
+    expect(tpl!.entries).toEqual([
+      { kind: '采集强化', channel: 'universal', params: { qualityBoost: 1, extraChance: 0 } },
+    ]);
     expect(hasWorkingMechanic(tpl!)).toBe(true);
   });
 
@@ -182,7 +200,9 @@ describe('天赋接线', () => {
   it('冰渊垂钓者(C)：垂钓强化', () => {
     const tpl = getTalentTemplate('冰渊垂钓者');
     expect(tpl?.grade).toBe('C');
-    expect(tpl!.entries).toEqual([{ kind: '垂钓强化', channel: 'universal', params: { depthBonus: 1, rareChance: 15 } }]);
+    expect(tpl!.entries).toEqual([
+      { kind: '垂钓强化', channel: 'universal', params: { depthBonus: 1, rareChance: 15 } },
+    ]);
     expect(hasWorkingMechanic(tpl!)).toBe(true);
   });
 });

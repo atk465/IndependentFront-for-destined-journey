@@ -496,7 +496,7 @@ export function getCommissionsFlags(profile: SaveProfile): CommissionsFlags {
 /**
  * 整份覆盖委托闭环状态 —— **只改内存不落库**。落库走 `updateCommissionsFlags`。
  */
-export function setCommissionsFlagsInPlace(profile: SaveProfile, flags: CommissionsFlags): void {
+function setCommissionsFlagsInPlace(profile: SaveProfile, flags: CommissionsFlags): void {
   if (profile.worldFlags === undefined || profile.worldFlags === null) profile.worldFlags = {};
   profile.worldFlags[COMMISSIONS_FLAGS_KEY] = flags;
 }

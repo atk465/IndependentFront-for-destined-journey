@@ -28,43 +28,6 @@ describe('CharGenSystemCard', () => {
       appearance: '银白长发及腰，冰蓝色瞳孔，皮肤苍白如雪，身材纤细修长',
       clothing: '身着冰蓝色法师长袍，腰间挂满符文水晶，胸前佩戴霜语氏族徽章',
       likes: '冰霜魔法、古老符文、极寒荒原的风雪',
-      ascension: {
-        enabled: true,
-        path: '冰霜之道 — 极寒主宰',
-        description: '掌控绝对零度之力',
-        deityPosition: '冰霜之神',
-        divineKingdom: {
-          name: '永冻圣域',
-          description:
-            '一片永远冰封的极寒领域，寒风中回荡着古老的霜语，冰晶构筑的宫殿在极光下熠熠生辉',
-        },
-        elements: [
-          // 要素/权能的 effects 是 string[]（char-gen-agent 按行切 <element> 正文），不是 name→desc 表
-          {
-            name: '极寒元素',
-            description: '纯粹的冰霜之力凝聚体，可冻结万物',
-            effects: ['冰霜伤害+30%', '冻结概率+15%'],
-          },
-          { name: '凛冬之风', description: '来自极北荒原的刺骨寒风', effects: ['速度降低20%'] },
-        ],
-        authorities: [
-          {
-            name: '冰封纪元',
-            description: '将一片区域瞬间冻结，进入冰河时代',
-            effects: ['范围冻结100m', '持续时间30s'],
-            costDescription: '消耗100 MP，冷却60秒',
-          },
-        ],
-        laws: [
-          {
-            name: '绝对零度法则',
-            description: '触及绝对零度边界的禁忌之力',
-            passiveEffects: ['冰霜抗性+50%', '冻结免疫'],
-            activeEffects: ['绝对零度爆发'],
-            costDescription: '每次触发消耗10% MP',
-          },
-        ],
-      },
       skills: [
         {
           name: '冰霜箭矢',
@@ -123,16 +86,6 @@ describe('CharGenSystemCard', () => {
       clothing: '',
       personality: '',
       likes: '',
-      ascension: {
-        enabled: false,
-        path: '',
-        description: '',
-        elements: [],
-        authorities: [],
-        laws: [],
-        deityPosition: '',
-        divineKingdom: { name: '', description: '' },
-      },
       skills: [],
       equipment: [],
       inventory: [],
@@ -159,16 +112,6 @@ describe('CharGenSystemCard', () => {
       appearance: '高大魁梧',
       clothing: '',
       likes: '',
-      ascension: {
-        enabled: false,
-        path: '',
-        description: '',
-        elements: [],
-        authorities: [],
-        laws: [],
-        deityPosition: '',
-        divineKingdom: { name: '', description: '' },
-      },
       skills: [],
       equipment: [],
       inventory: [],

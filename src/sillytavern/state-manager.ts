@@ -2732,9 +2732,7 @@ export class StateManager {
           ? {
               id: midTier.id,
               name: midTier.name,
-              ...(midTier.gathering?.specialty
-                ? { specialty: midTier.gathering.specialty }
-                : {}),
+              ...(midTier.gathering?.specialty ? { specialty: midTier.gathering.specialty } : {}),
               ...(midTier.gathering?.danger !== undefined
                 ? { danger: midTier.gathering.danger }
                 : {}),

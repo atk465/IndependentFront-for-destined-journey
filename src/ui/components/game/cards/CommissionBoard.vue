@@ -43,16 +43,12 @@ const allDefs = computed(() => {
 
 /** 进行中（接取状态） */
 const activeList = computed(() => {
-  const progressByName = new Map(
-    (game.commissionProgress ?? []).map((p) => [p.defName, p]),
-  );
+  const progressByName = new Map((game.commissionProgress ?? []).map((p) => [p.defName, p]));
   const defs = allDefs.value;
   return (game.activeCommissions ?? [])
     .map((a) => {
       const def = defs.find((d) => d.name === a.defName);
-      return def
-        ? { def, progress: progressByName.get(a.defName), acceptDay: a.acceptDay }
-        : null;
+      return def ? { def, progress: progressByName.get(a.defName), acceptDay: a.acceptDay } : null;
     })
     .filter((x): x is NonNullable<typeof x> => x !== null);
 });
@@ -60,9 +56,7 @@ const activeList = computed(() => {
 const activeNames = computed(() => new Set((game.activeCommissions ?? []).map((a) => a.defName)));
 
 /** 可接 = 全量 − 进行中（完成任务链前置的解锁判定在 store 的接取动作里拦） */
-const availableList = computed(() =>
-  allDefs.value.filter((d) => !activeNames.value.has(d.name)),
-);
+const availableList = computed(() => allDefs.value.filter((d) => !activeNames.value.has(d.name)));
 
 const reputation = computed(() => (game.saveProfile ? getReputation(game.saveProfile) : 0));
 /** 冒险者等级 = 声望派生（card-workshop/adventurer-rank，不落库自动更新） */
@@ -72,9 +66,7 @@ const selectedName = ref<string | null>(null);
 const feedback = ref<{ kind: 'ok' | 'err'; msg: string } | null>(null);
 const busy = ref(false);
 
-const selected = computed(
-  () => allDefs.value.find((c) => c.name === selectedName.value) ?? null,
-);
+const selected = computed(() => allDefs.value.find((c) => c.name === selectedName.value) ?? null);
 
 function pick(id: string) {
   selectedName.value = selectedName.value === id ? null : id;
@@ -179,12 +171,14 @@ function requirementText(def: CommissionDef): string {
   if (req?.exactName) cardParts.push(`指定卡「${req.exactName}」`);
   if (req?.minTier) cardParts.push(`品质 ≥ ${req.minTier}`);
   if (req?.formEntry) cardParts.push(`${req.formEntry}类`);
-  if (req?.elements && req.elements.length > 0) cardParts.push(`含 ${req.elements.join('、')} 元素`);
+  if (req?.elements && req.elements.length > 0)
+    cardParts.push(`含 ${req.elements.join('、')} 元素`);
   if (cardParts.length > 0) return `收卡：${cardParts.join(' · ')}`;
   if (def.requireMaterial) return `缴纳：${def.requireMaterial.name} ×${def.requireMaterial.count}`;
   if (def.requireVisit) return `亲赴「${def.requireVisit.midTier}」${def.requireVisit.count} 次`;
   if (def.finale) {
-    if (def.finale.type === '谜题') return `终点：解开${def.finale.target ? `「${def.finale.target}」` : '谜题'}`;
+    if (def.finale.type === '谜题')
+      return `终点：解开${def.finale.target ? `「${def.finale.target}」` : '谜题'}`;
     if (def.finale.type === '强敌') return `终点：击败${def.finale.target ?? '守卫之敌'}`;
     return `终点：现场制出「${def.finale.target ?? '目标卡'}」`;
   }
@@ -222,9 +216,7 @@ function routeText(def: CommissionDef): string {
       <i class="fa-solid fa-scroll" aria-hidden="true"></i>
       进行中（{{ activeList.length }}/3）
     </p>
-    <p v-if="activeList.length === 0" class="board-empty">
-      手头没有进行中的委托——接一条，出发吧。
-    </p>
+    <p v-if="activeList.length === 0" class="board-empty">手头没有进行中的委托——接一条，出发吧。</p>
     <ul v-else class="commission-list">
       <li
         v-for="entry in activeList"
@@ -238,7 +230,9 @@ function routeText(def: CommissionDef): string {
             <span v-if="entry.def.grade" class="c-grade" :class="gradeClass(entry.def.grade)">{{
               entry.def.grade
             }}</span>
-            <span v-if="isEventDef(entry.def)" class="c-event-tag" title="由随机事件触发">事件</span>
+            <span v-if="isEventDef(entry.def)" class="c-event-tag" title="由随机事件触发"
+              >事件</span
+            >
           </span>
           <span v-if="entry.def.description" class="c-desc">{{ entry.def.description }}</span>
           <span class="c-meta">
@@ -302,7 +296,12 @@ function routeText(def: CommissionDef): string {
               </button>
             </div>
           </template>
-          <button type="button" class="abandon-btn" :disabled="busy" @click="onAbandon(entry.def.name)">
+          <button
+            type="button"
+            class="abandon-btn"
+            :disabled="busy"
+            @click="onAbandon(entry.def.name)"
+          >
             放弃（基线作废）
           </button>
         </div>
@@ -329,12 +328,12 @@ function routeText(def: CommissionDef): string {
             <span class="c-name">{{ c.name }}</span>
             <span v-if="c.grade" class="c-grade" :class="gradeClass(c.grade)">{{ c.grade }}</span>
             <span v-if="isEventDef(c)" class="c-event-tag" title="由随机事件触发——限时">事件</span>
-            <span v-else-if="isGeneratedDef(c)" class="c-gen-tag" title="公会自动张贴的征集">征集</span>
+            <span v-else-if="isGeneratedDef(c)" class="c-gen-tag" title="公会自动张贴的征集"
+              >征集</span
+            >
           </span>
           <span v-if="c.description" class="c-desc">{{ c.description }}</span>
-          <span class="c-meta">
-            {{ requirementText(c) }} ｜ 报酬：{{ rewardsText(c) }}
-          </span>
+          <span class="c-meta"> {{ requirementText(c) }} ｜ 报酬：{{ rewardsText(c) }} </span>
           <span v-if="routeText(c)" class="c-meta">📍 {{ routeText(c) }}</span>
           <span
             v-if="isGeneratedDef(c) && generatedRemainingDays(c) !== null"

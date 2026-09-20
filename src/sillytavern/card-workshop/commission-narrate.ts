@@ -12,7 +12,7 @@
 import type { ApiEndpoint } from '../types';
 
 /** 终点叙事所需的内容（全部来自 Code 侧已定案的事实） */
-export interface CommissionNarrateContent {
+interface CommissionNarrateContent {
   /** 委托名 */
   commissionName: string;
   /** 委托描述（供叙事取材） */
@@ -42,7 +42,7 @@ export const COMMISSION_NARRATE_AGENT = 'card_craft_narrate';
  * 组装叙事消息（纯函数）。硬约束与制卡叙事同源：**事实已定案**——委托已完成、
  * 卡已在手，AI 写的是那个瞬间，不是结果判定。
  */
-export function buildCommissionNarrateMessages(
+function buildCommissionNarrateMessages(
   req: CommissionNarrateContent,
 ): Array<{ role: string; content: string }> {
   const system = [
@@ -80,7 +80,7 @@ export function buildCommissionNarrateMessages(
 }
 
 /** 从 AI 输出里解析叙事（纯函数；没按格式来就整段当叙事） */
-export function parseCommissionNarration(raw: string): CommissionNarration {
+function parseCommissionNarration(raw: string): CommissionNarration {
   const text = String(raw ?? '').trim();
   if (!text) return { narrative: '' };
   const narrMatch = /<narrative>([\s\S]*?)<\/narrative>/i.exec(text);

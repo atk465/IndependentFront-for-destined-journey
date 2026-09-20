@@ -619,13 +619,16 @@ function renderCommissionRequirement(def: CommissionDef): string {
   if (req?.formEntry) cardParts.push(`${req.formEntry}类`);
   if (req?.elements && req.elements.length > 0) cardParts.push(`含${req.elements.join('、')}元素`);
   if (cardParts.length > 0) return `收卡（${cardParts.join('，')}）`;
-  if (def.requireMaterial) return `缴纳「${def.requireMaterial.name}」×${def.requireMaterial.count}`;
+  if (def.requireMaterial)
+    return `缴纳「${def.requireMaterial.name}」×${def.requireMaterial.count}`;
   if (def.requireVisit) {
     return `接取后亲赴中层「${def.requireVisit.midTier}」${def.requireVisit.count} 次`;
   }
   if (def.finale) {
-    if (def.finale.type === '谜题') return `解开「${def.finale.target ?? def.destMidTier ?? '目的地'}」深处的谜题`;
-    if (def.finale.type === '强敌') return `在「${def.destMidTier ?? '目的地'}」击败${def.finale.target ?? '守卫之敌'}`;
+    if (def.finale.type === '谜题')
+      return `解开「${def.finale.target ?? def.destMidTier ?? '目的地'}」深处的谜题`;
+    if (def.finale.type === '强敌')
+      return `在「${def.destMidTier ?? '目的地'}」击败${def.finale.target ?? '守卫之敌'}`;
     return `在「${def.destMidTier ?? '目的地'}」现场制出「${def.finale.target ?? '禁忌之卡'}」`;
   }
   return '不限';
