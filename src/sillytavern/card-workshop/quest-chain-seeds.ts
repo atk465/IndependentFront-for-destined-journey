@@ -228,68 +228,90 @@ import type { TalentTemplate } from './talent-entry';
  *  权能/代价/每场限一次是 AI 叙事面的执行合同，交锋系统的数值集成为后续工程。 */
 export const QUEST_CHAIN_CARD_SEEDS: readonly CardCatalogItem[] = [
   {
-    forbidden: true,
-        id: 'forbidden-wuminghe', name: '禁忌卡·无名河', cardTier: '星辉', formEntry: '技能',
-    element: '水', cost: 0,
-    description:
-      '打出（每场限一次）：指定一名敌人「除名」——河水漫过它的铭文，其属性与战技整场失效。' +
-      '代价：名字会被一同卷走，随机封印你自己的一个天赋三场。持有印记：无名者的庇护（见天赋页）。',
-  },
-  {
-    forbidden: true,
-        id: 'forbidden-shinianli', name: '禁忌卡·失年历', cardTier: '星辉', formEntry: '技能',
-    element: '暗', cost: 0,
-    description:
-      '打出（每场限一次）：被撕的那一页盖下，敌方全体跳过下一轮——他们的时间被收进历里。' +
-      '代价：你也交出一段时间，本级经验清空回起点。持有印记：偷来的岁月（见天赋页）。',
-  },
-  {
-    forbidden: true,
-        id: 'forbidden-fentianyin', name: '禁忌卡·焚天引', cardTier: '星辉', formEntry: '技能',
-    element: '火', cost: 0,
-    description:
-      '打出（每场限一次）：裂痕之力直落，对敌方全体毁灭性伤害，无视防御。' +
-      '代价：你在裂痕正下方，自身 HP 锁至 1；且天空多出一道小疤——世界记得每一次使用。' +
-      '持有印记：疤之领航（见天赋页）。',
-  },
-  {
-    forbidden: true,
-        id: 'forbidden-wanshouyuan', name: '禁忌卡·万兽园', cardTier: '星辉', formEntry: '召唤',
-    element: '木', cost: 0,
-    description:
-      '打出（每场限一次）：园门大开，召唤三头兽族战友为你作战至战斗结束。' +
-      '代价：头狼的作保不免费——兽族与野兽自此记住你，遭遇时首轮必被先手。' +
-      '持有印记：园主的客（见天赋页）。',
-  },
-  {
-    forbidden: true,
-        id: 'forbidden-chengxinchen', name: '禁忌卡·称心秤', cardTier: '星辉', formEntry: '技能',
-    element: '金', cost: 0,
-    description:
-      '打出（每场限一次）：实现一个愿望，三档自选——小愿全队回复；中愿灭一名敌；大愿逆转败局全队复活。' +
-      '代价：命当砝码，生命上限永久扣除（小 10% / 中 30% / 大 50%），不可恢复。' +
-      '持有印记：等价的眼（见天赋页）。',
-  },
-  {
-    forbidden: true,
-        id: 'forbidden-bailacheng', name: '禁忌卡·白蜡城', cardTier: '星辉', formEntry: '领域',
-    element: '冰', cost: 0,
-    description:
-      '打出（每场限一次）：把战场封进城的最后一夜——一切伤害与效果静止一轮，唯你自由行动（治伤、布阵、撤离）。' +
-      '代价：蜡会记住你，身上多一道蜡痕；集满三道，某座城会在某一夜把你也封进去。' +
-      '持有印记：蜡封之躯（见天赋页）。',
-  },
-  {
-    forbidden: true,
-        id: 'forbidden-diyi-canming', name: '第一行·残铭', cardTier: '星辉', formEntry: '装备',
+    id: 'forbidden-wuminghe',
+    name: '禁忌卡·无名河',
+    cardTier: '星辉',
+    formEntry: '技能',
+    element: '水',
     cost: 0,
+    forbidden: true,
+    description:
+      '打出（每场限一次）：指定一名敌人「除名」——无论气血深浅，它被从这场战斗中彻底抹去；对盟主级的存在降格为剥光全部强化与战技，只剩白板躯壳。战场之外亦可使用（每日一次）：撕掉一纸通缉令、抹去一个仇家的敌意之名、让一扇有名有姓的封印门忘记自己锁着。' +
+      '代价：名字会被一同卷走——随机封印你自己的一个天赋三场。持有印记：无名者的庇护（见天赋页）。',
+  },
+  {
+    id: 'forbidden-shinianli',
+    name: '禁忌卡·失年历',
+    cardTier: '星辉',
+    formEntry: '技能',
+    element: '暗',
+    cost: 0,
+    forbidden: true,
+    description:
+      '打出（每场限一次）：被撕的那一页盖下——敌方全体状态回溯至入场之时（气血、强化、负面全部重置），并跳过他们的下一轮。战场之外亦可使用（每日一次）：把一段难熬的时间翻页过去——重伤卧床期一夜消散、封禁期跳完、寒冬直接开春。' +
+      '代价：你也交出一段时间——本级经验清空回起点。持有印记：偷来的岁月（见天赋页）。',
+  },
+  {
+    id: 'forbidden-fentianyin',
+    name: '禁忌卡·焚天引',
+    cardTier: '星辉',
+    formEntry: '技能',
+    element: '火',
+    cost: 0,
+    forbidden: true,
+    description:
+      '打出（每场限一次）：裂痕之力直落——对敌方全体毁灭性伤害，无视一切防御、护盾、免疫与减免，并烧尽敌方所有持续效果。战场之外亦可使用（每日一次）：烧开一切障碍——熔封印、破冰墙、在暴风雪里撕出一条暖廊。' +
+      '代价：你在裂痕正下方——自身 HP 锁至 1；且天空多出一道小疤，世界记得每一次使用。持有印记：疤之领航（见天赋页）。',
+  },
+  {
+    id: 'forbidden-wanshouyuan',
+    name: '禁忌卡·万兽园',
+    cardTier: '星辉',
+    formEntry: '召唤',
+    element: '木',
+    cost: 0,
+    forbidden: true,
+    description:
+      '打出（每场限一次）：园门大开——兽潮涌出，持续冲击敌方至战斗结束；被击退的兽回园整队，下一轮再冲，不可消灭。战场之外亦可使用（每日一次）：兽群为你效力——驮运重物、嗅寻失踪者、驮你穿越兽域。' +
+      '代价：头狼的作保不免费——兽族与野兽自此记住你，遭遇时首轮必被先手。持有印记：园主的客（见天赋页）。',
+  },
+  {
+    id: 'forbidden-chengxinchen',
+    name: '禁忌卡·称心秤',
+    cardTier: '星辉',
+    formEntry: '技能',
+    element: '金',
+    cost: 0,
+    forbidden: true,
+    description:
+      '打出（每场限一次）：许一个愿，秤替你实现——小愿全队回复；中愿把一名敌人称到秤的另一端（战斗结束才回来）；大愿逆转败局、全队复活并回复全状态。许什么由你，档位由秤裁。战场之外亦可使用（每日一次）：秤出真伪——审讯、鉴定、测谎；或以命换一个小机遇。' +
+      '代价：命当砝码——生命上限永久扣除（小 10% / 中 30% / 大 50%），战斗内外同价，不可恢复。持有印记：等价的眼（见天赋页）。',
+  },
+  {
+    id: 'forbidden-bailacheng',
+    name: '禁忌卡·白蜡城',
+    cardTier: '星辉',
+    formEntry: '领域',
+    element: '冰',
+    cost: 0,
+    forbidden: true,
+    description:
+      '打出（每场限一次）：把战场封进城的最后一夜——一切伤害与效果静止一轮，唯你自由行动（治伤、布阵、撤离）。战场之外亦可使用（每日一次）：把你自己封进城里的一夜——追杀、暴风雪、本该死的重伤夜，外面的事与你无关；时间照走，但你绝对安全。' +
+      '代价：蜡会记住你——身上多一道蜡痕；集满三道，某座城会在某一夜把你也封进去。持有印记：蜡封之躯（见天赋页）。',
+  },
+  {
+    id: 'forbidden-diyi-canming',
+    name: '第一行·残铭',
+    cardTier: '星辉',
+    formEntry: '装备',
+    cost: 0,
+    forbidden: true,
     description:
       '底石第一行铭文的拓片残角。无战技——它的功能就是位阶本身：装备后，一切禁忌卡（含仿卡）无法对你发动。' +
       '代价：铭法院知道有人读了第一行，通缉名录永久挂着你的名字。',
   },
 ];
 
-/** 六正本+残铭的专属天赋（持卡绑定：对应禁忌卡在背包时生效） */
 export const QUEST_CHAIN_TALENT_SEEDS: readonly TalentTemplate[] = [
   {
     name: '无名者的庇护', source: 'story', grade: 'S',

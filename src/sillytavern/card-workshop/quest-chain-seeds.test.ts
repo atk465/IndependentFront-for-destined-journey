@@ -144,6 +144,11 @@ describe('卡与专属天赋种子（六持一遇）', () => {
     expect(playables.every((c) => ['技能', '召唤', '领域'].includes(c.formEntry))).toBe(true);
     // 打出合同写进卡面（AI 叙事面执行合同）
     for (const c of playables) expect(c.description).toContain('每场限一次');
+    // 战斗外权能：纯叙事每日一次（六持一遇的全场景可用）
+    for (const c of playables) {
+      expect(c.description).toContain('战场之外亦可使用');
+      expect(c.description).toContain('每日一次');
+    }
     // 代价原则：每张可打出卡都写了代价
     for (const c of playables) expect(c.description).toContain('代价');
   });
