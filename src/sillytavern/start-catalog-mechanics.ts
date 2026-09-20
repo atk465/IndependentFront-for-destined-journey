@@ -113,6 +113,9 @@ export interface CardCatalogItem {
   cost: number;
   /** 召唤卡专属：首召实体化的伙伴种子（军团卡不需要——群像不个体化） */
   companion?: CompanionSeed;
+  /** 🔴 禁忌正本标记（委托×地图 2026-09-19）：不入购卡池（getPurchasableCardPool
+   *  过滤），只能经对应任务链获取；findCardDefinition 可查（rewards.card 发放读取点） */
+  forbidden?: boolean;
   /** 物资卡专属：使用产出定义（无此字段的物资卡不可使用——避免白消耗玩家的卡） */
   yield?: CardYield;
   /** 禁忌仿卡专属：配方（素材名组合）与所仿的传说卡名。有此字段的卡不进抽卡池/开局购卡 */

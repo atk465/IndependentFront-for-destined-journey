@@ -674,6 +674,17 @@ export const useGameStore = defineStore('game', () => {
     return { ok: true };
   }
 
+  /**
+   * 隐藏一条七链 seed 委托/事件（玩家「删除」seed 的真实语义）：名字记进
+   * chainHidden，运行时合并层过滤。不落 customCommissions——seed 是常驻内容。
+   */
+  async function hideQuestChainSeed(name: string): Promise<{ ok: boolean; reason?: string }> {
+    const flags = commissionsFlags();
+    const hidden = [...(flags.chainHidden ?? [])];
+    if (!hidden.includes(name)) hidden.push(name);
+    return commitCommissionsBag({ ...flags, chainHidden: hidden });
+  }
+
   /** 放弃进行中的委托（基线作废；重接重新快照——链不卡死的软恢复） */
   async function abandonCommissionByName(
     defName: string,
@@ -1755,8 +1766,20 @@ export const useGameStore = defineStore('game', () => {
   /** 读档灌回：自定义委托 + 探索事件 → 各自运行时缝（loadCustomContent 尾部调用） */
   function loadCustomCommissionsAndEvents(): void {
     const profile = saveProfile.value ?? ({} as SaveProfile);
-    const commissions = coerceCustomCommissions(getCustomCommissionFlags(profile));
-    const events = coerceCustomEvents(getCustomEventFlags(profile));
+    const bag = coerceCommissionsFlags(getCommissionsFlags(profile));
+    const hidden = new Set(bag.chainHidden ?? []);
+    const commissions = [
+      ...coerceCustomCommissions(getCustomCommissionFlags(profile)).filter(
+        (d) => !hidden.has(d.name),
+      ),
+      ...QUEST_CHAIN_COMMISSION_SEEDS.filter((d) => !hidden.has(d.name)),
+    ];
+    const events = [
+      ...coerceCustomEvents(getCustomEventFlags(profile)).filter(
+        (e) => !hidden.has(e.name),
+      ),
+      ...QUEST_CHAIN_EVENT_SEEDS.filter((e) => !hidden.has(e.name)),
+    ];
     replaceCustomCommissions(commissions);
     installCustomCommissions(commissions);
     replaceCustomEvents(events);
@@ -1766,59 +1789,6 @@ export const useGameStore = defineStore('game', () => {
     for (const d of sessionCustomEvents.values()) registerCustomEvent(d);
     installCustomCommissions(getCustomCommissions());
     installCustomEventDefs(getCustomEvents());
-    // 禁忌卡七链播种：customCommissions 为空且从未播过 → 投入七链 21 委托 + 4 终点事件
-    // （questChainSeeded 标记防「编辑器里删光后重读档又长回来」；内容真源 = 资产仓
-    //   quest-chains-seed.json，quest-chain-seeds.ts 是它的播种投影）
-    const seeded =
-      (saveProfile.value?.worldFlags as Record<string, unknown> | undefined)?.questChainSeeded ===
-      true;
-    if (commissions.length === 0 && !seeded) {
-      const mergedCommissions = [...getCustomCommissions(), ...QUEST_CHAIN_COMMISSION_SEEDS];
-      const mergedEvents = [...getCustomEvents(), ...QUEST_CHAIN_EVENT_SEEDS];
-      replaceCustomCommissions(mergedCommissions);
-      installCustomCommissions(mergedCommissions);
-      replaceCustomEvents(mergedEvents);
-      installCustomEventDefs(mergedEvents);
-      for (const d of mergedCommissions) sessionCustomCommissions.set(d.name, d);
-      for (const d of mergedEvents) sessionCustomEvents.set(d.name, d);
-      // 内存袋同步 chainSeeded（setPlayerLocation 等「单提交契约」的测试盯着
-      // commitChatState——标记不另开提交，与 seed 落库同一次写）
-      const seededBag: CommissionsFlags = { ...commissionsFlags(), chainSeeded: true };
-      if (saveProfile.value) setCommissionsFlagsInPlace(saveProfile.value, seededBag);
-      // 🔴 落库延迟一拍并读 DB 最新态合并：loadSave 路径上的 seed 与玩家/测试紧接着的
-      //    addCustomCard 等整份 profile 落库存在写竞争——早拷贝晚落库会把并发写入洗掉。
-      //    先 setTimeout 让同 tick 的其他落库先行，再以 DB 最新 profile 为基只写两键。
-      const saveIdAtSeed = activeSaveId.value;
-      setTimeout(() => {
-        void (async () => {
-          try {
-            if (!saveIdAtSeed || saveIdAtSeed !== activeSaveId.value) return;
-            // 🔴 字段级窄写（只动 worldFlags 键）：整份 profile 落库会覆盖读档后发生的
-            //    一切顶层状态流转（fp/回滚恢复/gameTime）——测试实证过这场竞争。
-            const fresh = await getProfile(saveIdAtSeed);
-            const base = coerceCommissionsFlags(getCommissionsFlags(fresh));
-            const nextBag: CommissionsFlags = { ...base, chainSeeded: true };
-            const nextWorldFlags = {
-              ...(fresh.worldFlags ?? {}),
-              customCommissions: mergedCommissions,
-              customExplorationEvents: mergedEvents,
-              commissions: nextBag,
-            };
-            const { getDatabase } = await import('@engine/database');
-            await getDatabase().saveProfiles.update(saveIdAtSeed, {
-              worldFlags: nextWorldFlags,
-            });
-            // 内存同步（只并 worldFlags，不整份覆盖内存 profile）
-            if (saveProfile.value) {
-              saveProfile.value.worldFlags = nextWorldFlags;
-            }
-            await refreshFromDb();
-          } catch (err) {
-            console.warn('[game-store] 七链播种落库失败（下次读档会重试）:', err);
-          }
-        })();
-      }, 0);
-    }
   }
 
   /**
@@ -4687,6 +4657,7 @@ export const useGameStore = defineStore('game', () => {
     allCommissionDefs,
     acceptCommissionByName,
     abandonCommissionByName,
+    hideQuestChainSeed,
     deliverCommissionByName,
     settleCommissionBreaches,
     scanFinaleCommissions,

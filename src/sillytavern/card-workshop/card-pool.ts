@@ -14,6 +14,17 @@
 import { parseCatalogData, type CardCatalogItem } from '../start-catalog-mechanics';
 import { getContentRegistry } from '../content-registry-runtime';
 import { getCustomCards, mergeCards } from './custom-content';
+import { QUEST_CHAIN_CARD_SEEDS } from './quest-chain-seeds';
+
+/**
+ * 禁忌卡七链的七张卡（六正本 + 第一行残铭）——**内置只读内容**（builtin 模式，
+ * 照 builtin-worldbooks 先例）：常驻卡池、不落库、玩家不可编辑（它们是链的终点
+ * 奖励，不是素材）。同名自定义卡可覆盖（开发者想调(description/元素)时有用）。
+ */
+function mergeQuestChainCards(base: CardCatalogItem[]): CardCatalogItem[] {
+  const names = new Set(base.map((c) => c.name));
+  return [...base, ...QUEST_CHAIN_CARD_SEEDS.filter((c) => !names.has(c.name))];
+}
 
 /**
  * 当前卡池：内容仓 `catalog.cardPool` + 自定义卡（同 id 覆盖内置）。
@@ -24,12 +35,12 @@ import { getCustomCards, mergeCards } from './custom-content';
  */
 export function getCardPool(): CardCatalogItem[] {
   const base = parseCatalogData(getContentRegistry().catalog).cardPool;
-  return mergeCards(base, getCustomCards());
+  return mergeQuestChainCards(mergeCards(base, getCustomCards()));
 }
 
-/** 可购买卡池（排除禁忌仿卡 —— 仿卡只能靠仿制配方产出，不在商店出售） */
+/** 可购买卡池（排除禁忌仿卡与禁忌正本——前者只能仿制产出，后者只能经任务链获取） */
 export function getPurchasableCardPool(): CardCatalogItem[] {
-  return getCardPool().filter((c) => !c.imitation);
+  return getCardPool().filter((c) => !c.imitation && !c.forbidden);
 }
 
 /**
@@ -41,5 +52,7 @@ export function getPurchasableCardPool(): CardCatalogItem[] {
 export function findCardDefinition(name: string): CardCatalogItem | undefined {
   const custom = getCustomCards().find((c) => c.name === name);
   if (custom) return custom;
+  const seed = QUEST_CHAIN_CARD_SEEDS.find((c) => c.name === name);
+  if (seed) return seed;
   return parseCatalogData(getContentRegistry().catalog).cardPool.find((c) => c.name === name);
 }

@@ -7911,11 +7911,15 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
 export function getTalentTemplate(name: string): TalentTemplate | undefined {
   const custom = customTalentMap.get(name);
   if (custom) return custom;
+  const chainSeed = QUEST_CHAIN_TALENT_SEEDS.find((t) => t.name === name);
+  if (chainSeed) return chainSeed;
   return TALENT_CATALOG.find((t) => t.name === name);
 }
 
 /** 捏人出身可选清单：通用池 + 出身独占（融合产物除外） */
 export function getCreationCatalog(): TalentTemplate[] {
+  // 禁忌卡七链的专属天赋不入创作目录（source='story'，经对应任务链获取）——
+  // getTalentTemplate 的按名查询仍可命中（持卡绑定判定的读取点）
   const custom = getCustomTalents().filter(
     (t) => !t.fusionOnly && (t.source === 'universal' || t.source === 'creation'),
   );
@@ -8117,3 +8121,4 @@ export function buildCraftBiasLines(talents: readonly CraftBiasTalentLike[] | un
   }
   return lines;
 }
+import { QUEST_CHAIN_TALENT_SEEDS } from './quest-chain-seeds';

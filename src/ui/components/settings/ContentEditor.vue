@@ -30,8 +30,10 @@ import {
   registerCustomEvent,
 } from '@engine/card-workshop/custom-commissions';
 import type { CommissionDef } from '@engine/card-workshop/commission';
+import { QUEST_CHAIN_COMMISSION_SEEDS } from '@engine/card-workshop/quest-chain-seeds';
 import type { RandomEventDef } from '@engine/types-random-events';
 import { getMapPack } from '@engine/map-runtime';
+import { getCommissionDefs } from '@engine/commission-runtime';
 import { getPurchasableCardPool } from '@engine/card-workshop/card-pool';
 import {
   TALENT_TEMPLATE,
@@ -351,7 +353,12 @@ const cardOptions = computed(() => getPurchasableCardPool().map((c) => c.name));
 
 const customCommissionList = computed(() => {
   void listsVersion.value;
-  return getCustomCommissions();
+  // 合并视图：包内置 + 七链种子 + 自定义（与委托板同源）；种子条目可「隐藏」
+  const customNames = new Set(getCustomCommissions().map((d) => d.name));
+  return getCommissionDefs().map((d) => ({
+    def: d,
+    isSeed: !customNames.has(d.name) && QUEST_CHAIN_COMMISSION_SEEDS.some((s) => s.name === d.name),
+  }));
 });
 const customEventList = computed(() => {
   void listsVersion.value;
@@ -500,8 +507,12 @@ async function saveCommission() {
   kRewardMats.value = [];
 }
 
-function removeCommission(name: string) {
-  game.saveCustomCommissions(getCustomCommissions().filter((d) => d.name !== name));
+function removeCommission(item: { def: { name: string }; isSeed: boolean }) {
+  if (item.isSeed) {
+    game.hideQuestChainSeed(item.def.name);
+  } else {
+    game.saveCustomCommissions(getCustomCommissions().filter((d) => d.name !== item.def.name));
+  }
   refreshLists();
 }
 </script>
@@ -891,14 +902,14 @@ function removeCommission(name: string) {
       >
 
       <div v-if="customCommissionList.length > 0" class="custom-list">
-        <span>自定义委托（{{ customCommissionList.length }}）：</span>
+        <span>委托总览（{{ customCommissionList.length }}）：</span>
         <span
-          v-for="d in customCommissionList"
-          :key="d.name"
+          v-for="item in customCommissionList"
+          :key="item.def.name"
           class="chip"
-          title="点击删除"
-          @click="removeCommission(d.name)"
-          >{{ d.name }} ✕</span
+          :title="item.isSeed ? '内置七链委托——点击隐藏（可再导入恢复）' : '点击删除'"
+          @click="removeCommission(item)"
+          >{{ item.def.name }}{{ item.isSeed ? ' ·内置' : ' ✕' }}</span
         >
       </div>
       <div v-if="customEventList.length > 0" class="custom-list">

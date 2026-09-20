@@ -176,7 +176,7 @@ export const QUEST_CHAIN_COMMISSION_SEEDS: readonly CommissionDef[] = [
     description: '第三块拓角「可能就在你身边」。老院长交接词只有四个字：接着不看。当你终于明白这四个字是钥匙而不是拒绝——第一行会翻到你看的那一行。', destMidTier: '无名录·腹地',
     finale: { type: '谜题', target: '第一行之页' },
     issuerMidTier: '冕京京畿', deadlineDays: 14,
-    rewards: { gc: 3000, reputation: 15, card: { name: '禁忌卡·第一行', grantAt: 'scene' } },
+    rewards: { gc: 3000, reputation: 15, card: { name: '第一行·残铭', grantAt: 'scene' } },
   },
 ];
 
@@ -213,5 +213,120 @@ export const QUEST_CHAIN_EVENT_SEEDS: readonly RandomEventDef[] = [
     once: true,
     priority: 10,
     available: { quest: { name: '第一行·接着不看', statusAnyOf: ['进行中'] } },
+  },
+];
+
+
+// ═══════════════════════════════════════════════════════════
+// 卡与专属天赋种子（六持一遇：六正本入包 + 第一行残铭不可持）
+// ═══════════════════════════════════════════════════════════
+
+import type { CardCatalogItem } from '../start-catalog-mechanics';
+import type { TalentTemplate } from './talent-entry';
+
+/** 七张卡的卡池定义（六正本=技能可打出；残铭=装备位阶）。语义见各 description——
+ *  权能/代价/每场限一次是 AI 叙事面的执行合同，交锋系统的数值集成为后续工程。 */
+export const QUEST_CHAIN_CARD_SEEDS: readonly CardCatalogItem[] = [
+  {
+    forbidden: true,
+        id: 'forbidden-wuminghe', name: '禁忌卡·无名河', cardTier: '星辉', formEntry: '技能',
+    element: '水', cost: 0,
+    description:
+      '打出（每场限一次）：指定一名敌人「除名」——河水漫过它的铭文，其属性与战技整场失效。' +
+      '代价：名字会被一同卷走，随机封印你自己的一个天赋三场。持有印记：无名者的庇护（见天赋页）。',
+  },
+  {
+    forbidden: true,
+        id: 'forbidden-shinianli', name: '禁忌卡·失年历', cardTier: '星辉', formEntry: '技能',
+    element: '暗', cost: 0,
+    description:
+      '打出（每场限一次）：被撕的那一页盖下，敌方全体跳过下一轮——他们的时间被收进历里。' +
+      '代价：你也交出一段时间，本级经验清空回起点。持有印记：偷来的岁月（见天赋页）。',
+  },
+  {
+    forbidden: true,
+        id: 'forbidden-fentianyin', name: '禁忌卡·焚天引', cardTier: '星辉', formEntry: '技能',
+    element: '火', cost: 0,
+    description:
+      '打出（每场限一次）：裂痕之力直落，对敌方全体毁灭性伤害，无视防御。' +
+      '代价：你在裂痕正下方，自身 HP 锁至 1；且天空多出一道小疤——世界记得每一次使用。' +
+      '持有印记：疤之领航（见天赋页）。',
+  },
+  {
+    forbidden: true,
+        id: 'forbidden-wanshouyuan', name: '禁忌卡·万兽园', cardTier: '星辉', formEntry: '召唤',
+    element: '木', cost: 0,
+    description:
+      '打出（每场限一次）：园门大开，召唤三头兽族战友为你作战至战斗结束。' +
+      '代价：头狼的作保不免费——兽族与野兽自此记住你，遭遇时首轮必被先手。' +
+      '持有印记：园主的客（见天赋页）。',
+  },
+  {
+    forbidden: true,
+        id: 'forbidden-chengxinchen', name: '禁忌卡·称心秤', cardTier: '星辉', formEntry: '技能',
+    element: '金', cost: 0,
+    description:
+      '打出（每场限一次）：实现一个愿望，三档自选——小愿全队回复；中愿灭一名敌；大愿逆转败局全队复活。' +
+      '代价：命当砝码，生命上限永久扣除（小 10% / 中 30% / 大 50%），不可恢复。' +
+      '持有印记：等价的眼（见天赋页）。',
+  },
+  {
+    forbidden: true,
+        id: 'forbidden-bailacheng', name: '禁忌卡·白蜡城', cardTier: '星辉', formEntry: '领域',
+    element: '冰', cost: 0,
+    description:
+      '打出（每场限一次）：把战场封进城的最后一夜——一切伤害与效果静止一轮，唯你自由行动（治伤、布阵、撤离）。' +
+      '代价：蜡会记住你，身上多一道蜡痕；集满三道，某座城会在某一夜把你也封进去。' +
+      '持有印记：蜡封之躯（见天赋页）。',
+  },
+  {
+    forbidden: true,
+        id: 'forbidden-diyi-canming', name: '第一行·残铭', cardTier: '星辉', formEntry: '装备',
+    cost: 0,
+    description:
+      '底石第一行铭文的拓片残角。无战技——它的功能就是位阶本身：装备后，一切禁忌卡（含仿卡）无法对你发动。' +
+      '代价：铭法院知道有人读了第一行，通缉名录永久挂着你的名字。',
+  },
+];
+
+/** 六正本+残铭的专属天赋（持卡绑定：对应禁忌卡在背包时生效） */
+export const QUEST_CHAIN_TALENT_SEEDS: readonly TalentTemplate[] = [
+  {
+    name: '无名者的庇护', source: 'story', grade: 'S',
+    description: '持【禁忌卡·无名河】生效：无名之人，无从指认——敌人对你的首次指向效果落空。',
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
+  },
+  {
+    name: '偷来的岁月', source: 'story', grade: 'S',
+    description: '持【禁忌卡·失年历】生效：每场战斗开始时，随机回复一截状态——那是从被撕的一页里漏出来的时间。',
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
+  },
+  {
+    name: '疤之领航', source: 'story', grade: 'S',
+    description: '持【禁忌卡·焚天引】生效：老疤指路——命中提升。天上的裂痕是全大陆最诚实的坐标。',
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
+  },
+  {
+    name: '园主的客', source: 'story', grade: 'S',
+    description: '持【禁忌卡·万兽园】生效：兽族与野兽敌人开局一轮不主动攻击你——客气是园主给的，仇恨是你自己挣的。',
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
+  },
+  {
+    name: '等价的眼', source: 'story', grade: 'S',
+    description: '持【禁忌卡·称心秤】生效：感知素材真实价值，看穿谎报的价。秤过命的眼睛，不会被价钱糊弄。',
+    entries: [{ kind: '鉴定', channel: 'universal', params: {} }],
+  },
+  {
+    name: '蜡封之躯', source: 'story', grade: 'S',
+    description: '持【禁忌卡·白蜡城】生效：负面状态附着效果减半——蜡封得住状态，也封得住你。',
+    entries: [{ kind: '叙事意图', channel: 'universal', params: {} }],
+  },
+  {
+    name: '半行威压', source: 'story', grade: 'SSS',
+    description: '持【第一行·残铭】生效：你读懂了半行——七笔在你面前要客气。敌方全体属性降低。',
+    entries: [
+      { kind: '威压', channel: 'universal', params: { percent: 30 } },
+      { kind: '叙事意图', channel: 'universal', params: {} },
+    ],
   },
 ];

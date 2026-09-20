@@ -87,11 +87,15 @@ describe('禁忌卡七链种子（数据合同）', () => {
     }
   });
 
-  it('末节卡奖励 grantAt=scene 且指向对应禁忌卡', () => {
+  it('末节卡奖励 grantAt=scene：六链发禁忌本尊，第一行链发残铭（六持一遇）', () => {
     for (const def of parsed) {
       if (def.chainOrder === 3) {
         expect(def.rewards.card?.grantAt).toBe('scene');
-        expect(def.rewards.card?.name).toMatch(/^禁忌卡·/);
+        if (def.chainId === 'chain_diyi') {
+          expect(def.rewards.card?.name).toBe('第一行·残铭');
+        } else {
+          expect(def.rewards.card?.name).toMatch(/^禁忌卡·/);
+        }
       }
     }
   });
@@ -127,5 +131,45 @@ describe('七链终点事件种子（数据合同）', () => {
         expect(eventNames.has(def.finale.target!), `${def.name} → ${def.finale.target}`).toBe(true);
       }
     }
+  });
+});
+
+describe('卡与专属天赋种子（六持一遇）', () => {
+  it('七张卡定义齐全：六正本可打出（技能/召唤/领域），残铭为装备且无战技语义', async () => {
+    const { QUEST_CHAIN_CARD_SEEDS } = await import('./quest-chain-seeds');
+    expect(QUEST_CHAIN_CARD_SEEDS).toHaveLength(7);
+    const canming = QUEST_CHAIN_CARD_SEEDS.find((c) => c.name === '第一行·残铭');
+    expect(canming?.formEntry).toBe('装备');
+    const playables = QUEST_CHAIN_CARD_SEEDS.filter((c) => c.name !== '第一行·残铭');
+    expect(playables.every((c) => ['技能', '召唤', '领域'].includes(c.formEntry))).toBe(true);
+    // 打出合同写进卡面（AI 叙事面执行合同）
+    for (const c of playables) expect(c.description).toContain('每场限一次');
+    // 代价原则：每张可打出卡都写了代价
+    for (const c of playables) expect(c.description).toContain('代价');
+  });
+
+  it('七个专属天赋过 validateTalentEntries，且描述写明持卡绑定', async () => {
+    const { QUEST_CHAIN_TALENT_SEEDS } = await import('./quest-chain-seeds');
+    const { validateTalentEntries } = await import('./talent-entry');
+    expect(QUEST_CHAIN_TALENT_SEEDS).toHaveLength(7);
+    for (const t of QUEST_CHAIN_TALENT_SEEDS) {
+      expect(validateTalentEntries(t.entries).ok, t.name).toBe(true);
+      expect(t.description).toContain('生效');
+    }
+    // 半行威压是真机械（威压）
+    const weiya = QUEST_CHAIN_TALENT_SEEDS.find((t) => t.name === '半行威压');
+    expect(weiya?.entries.some((e) => e.kind === '威压')).toBe(true);
+    // 等价的眼是真机械（鉴定）
+    const yan = QUEST_CHAIN_TALENT_SEEDS.find((t) => t.name === '等价的眼');
+    expect(yan?.entries.some((e) => e.kind === '鉴定')).toBe(true);
+  });
+
+  it('奖励卡名与卡种子对齐：第一行链发残铭，不发禁忌本尊', async () => {
+    const { QUEST_CHAIN_CARD_SEEDS } = await import('./quest-chain-seeds');
+    const diyib = parsed.find((d) => d.chainId === 'chain_diyi' && d.chainOrder === 3);
+    const name = diyib?.rewards.card?.name;
+    expect(name).toBe('第一行·残铭');
+    expect(QUEST_CHAIN_CARD_SEEDS.some((c) => c.name === name)).toBe(true);
+    expect(name).not.toBe('禁忌卡·第一行');
   });
 });

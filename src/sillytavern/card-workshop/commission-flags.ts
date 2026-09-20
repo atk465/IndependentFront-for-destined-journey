@@ -117,8 +117,8 @@ export interface CommissionsFlags {
   currentMidTier?: CurrentMidTierSnapshot;
   /** 采集连击（当日；风险 DC 递增用） */
   gatherStreak?: { day: number; count: number };
-  /** 禁忌卡七链已播种标记（quest-chain-seeds；防删光后重读档又长回来） */
-  chainSeeded?: boolean;
+  /** 被玩家隐藏（删除）的七链 seed 委托/事件名——合并层据此过滤运行时常驻种子 */
+  chainHidden?: string[];
 }
 
 /** 容错解析（坏格子逐格丢，永不抛） */
@@ -220,7 +220,11 @@ export function coerceCommissionsFlags(raw: unknown): CommissionsFlags {
     }
   }
 
-  if (c['chainSeeded'] === true) out.chainSeeded = true;
+  const hiddenList = c['chainHidden'];
+  if (Array.isArray(hiddenList)) {
+    const names = hiddenList.filter((n): n is string => typeof n === 'string' && n.length > 0);
+    if (names.length > 0) out.chainHidden = names;
+  }
 
   const streak = c['gatherStreak'];
   if (
