@@ -386,6 +386,11 @@ export const useGameStore = defineStore('game', () => {
     trueName: () => Promise<void>;
     /** 热插拔模块（S「模块化天才」） */
     hotSwap: () => Promise<void>;
+    /** 禁忌卡打出（委托×地图七链；wishTier 仅称心秤用） */
+    castForbidden: (
+      cardName: string,
+      wishTier?: 'small' | 'mid' | 'grand',
+    ) => Promise<void>;
   } | null>(null);
 
   /** controller 未就绪时点下的开战请求（attach 后自动补发——消灭「点了没反应」的时序窗） */
@@ -405,6 +410,8 @@ export const useGameStore = defineStore('game', () => {
       trueName: () => Promise<void>;
       /** 热插拔模块（S「模块化天才」） */
       hotSwap: () => Promise<void>;
+      /** 禁忌卡打出 */
+      castForbidden: (cardName: string, wishTier?: 'small' | 'mid' | 'grand') => Promise<void>;
     } | null,
   ) {
     skirmishController.value = c;
@@ -2441,6 +2448,14 @@ export const useGameStore = defineStore('game', () => {
   /** 献祭召唤（S「召唤媒介系统」） */
   async function sacrificeSummon(): Promise<void> {
     await skirmishController.value?.sacrifice();
+  }
+
+  /** 禁忌卡打出（委托×地图七链；wishTier 仅称心秤用） */
+  async function castForbiddenCard(
+    cardName: string,
+    wishTier?: 'small' | 'mid' | 'grand',
+  ): Promise<void> {
+    await skirmishController.value?.castForbidden(cardName, wishTier);
   }
 
   /** 念出真名（S「真名看破系统」） */
@@ -4585,6 +4600,7 @@ export const useGameStore = defineStore('game', () => {
     twinBonds,
     declareDuel,
     sacrificeSummon,
+    castForbiddenCard,
     speakTrueName,
     hotSwapModule,
     rollFortuneDice,

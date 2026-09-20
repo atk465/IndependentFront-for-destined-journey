@@ -72,6 +72,28 @@ async function doSacrifice() {
   await game.sacrificeSummon();
 }
 
+/** 禁忌卡六正本（委托×地图七链）：背包持有且本场未用的可打出 */
+const FORBIDDEN_CARDS = [
+  '禁忌卡·无名河',
+  '禁忌卡·失年历',
+  '禁忌卡·焚天引',
+  '禁忌卡·万兽园',
+  '禁忌卡·称心秤',
+  '禁忌卡·白蜡城',
+] as const;
+const heldForbiddenCards = computed(() =>
+  FORBIDDEN_CARDS.filter(
+    (n) =>
+      (game.player?.inventory ?? []).some((i) => i.name === n && i.type === '卡牌') &&
+      !(session.value?.forbiddenUsed ?? []).includes(n),
+  ),
+);
+const wishTier = ref<'small' | 'mid' | 'grand'>('small');
+async function doCastForbidden(cardName: string) {
+  const tier = cardName === '禁忌卡·称心秤' ? wishTier.value : undefined;
+  await game.castForbiddenCard(cardName, tier);
+}
+
 /** 念出真名（S「真名看破系统」）：每场一次的精神冲击 */
 const canTrueName = computed(() => game.hasMechanicGate('真名'));
 const trueNameUsed = computed(() => session.value?.trueNameUsed === true);
@@ -265,6 +287,24 @@ function dismiss() {
       >
         念出真名
       </button>
+      <button
+        v-for="cardName in heldForbiddenCards"
+        :key="cardName"
+        type="button"
+        class="counter-btn forbidden"
+        :disabled="game.skirmishBusy"
+        :title="`打出禁忌正本【${cardName}】——规则改写，每场限一次，代价照收`"
+        @click="doCastForbidden(cardName)"
+      >
+        禁忌·{{ cardName.replace('禁忌卡·', '') }}
+      </button>
+      <div v-if="heldForbiddenCards.includes('禁忌卡·称心秤')" class="wish-tier-row">
+        <span class="wish-label">称心秤档位：</span>
+        <label v-for="t in (['small', 'mid', 'grand'] as const)" :key="t" class="wish-opt">
+          <input v-model="wishTier" type="radio" :value="t" :disabled="game.skirmishBusy" />
+          {{ t === 'small' ? '小愿(回复)' : t === 'mid' ? '中愿(称走一敌)' : '大愿(逆转)' }}
+        </label>
+      </div>
       <button
         type="button"
         class="counter-btn flee"

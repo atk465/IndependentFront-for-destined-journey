@@ -55,7 +55,7 @@ describe('交锋拍状态桥', () => {
     const sacrifice = vi.fn(async () => {});
     const trueName = vi.fn(async () => {});
     const hotSwap = vi.fn(async () => {});
-    game.setSkirmishController({ start, counter, flee, nuke, duel, sacrifice, trueName, hotSwap });
+    game.setSkirmishController({ start, counter, flee, nuke, duel, sacrifice, trueName, hotSwap, castForbidden: vi.fn(async () => {}) });
     game.setSkirmishSession(session());
 
     const r = await game.startSkirmish('熔岩巨兽', '灼热盆地');
@@ -85,6 +85,7 @@ describe('交锋拍状态桥', () => {
       trueName: vi.fn(),
       hotSwap: vi.fn(),
       nuke: vi.fn(),
+      castForbidden: vi.fn(),
     });
     // 挂起请求在 attach 时自动补发（异步触发，不阻塞 attach）
     await vi.waitFor(() => expect(start).toHaveBeenCalledWith('熔岩巨兽', undefined));
@@ -109,6 +110,7 @@ describe('交锋拍状态桥', () => {
       trueName: vi.fn(),
       hotSwap: vi.fn(),
       nuke: vi.fn(),
+      castForbidden: vi.fn(),
     });
 
     const first = game.startSkirmish();
@@ -138,6 +140,7 @@ describe('交锋拍状态桥', () => {
       sacrifice,
       trueName,
       hotSwap,
+      castForbidden: vi.fn(async () => {}),
     });
 
     await game.submitSkirmishCounter({ kind: '卡', name: '燎原符卡' });

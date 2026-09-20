@@ -48,6 +48,8 @@ import { cardKindOf } from '@engine/card-workshop/card-kind';
 import { willModifierOf } from '@engine/card-workshop/unsealing';
 import { getCommissionDefs } from '@engine/commission-runtime';
 import { coerceCommissionsFlags } from '@engine/card-workshop/commission-flags';
+/** 蜡痕计数键（白蜡城代价；worldFlags.counters 段） */
+const WAX_MARKS_KEY = '蜡痕';
 import { buildCraftBiasLines } from '@engine/card-workshop/talent-entry';
 import { runTalentFusionNaming } from '@engine/card-workshop/talent-naming';
 import {
@@ -148,6 +150,7 @@ import {
   spendCounter,
   tryUseToday,
 } from '@engine/card-workshop/daily-ledger';
+import { getRequiredXpForLevel, xpToNextNumber } from '@engine/exp-table';
 import { CARD_CRAFT_NARRATE_AGENT, runCardCraftNarration } from '@engine/card-craft-narrate';
 import {
   COMMISSION_NARRATE_AGENT,
@@ -2480,6 +2483,8 @@ export class GamePipeline {
       sacrifice: () => this.sacrificeSummon(),
       trueName: () => this.speakTrueName(),
       hotSwap: () => this.hotSwapModule(),
+      castForbidden: (cardName, wishTier) =>
+        this.castForbiddenCard(cardName, wishTier),
     });
   }
 
@@ -2644,6 +2649,140 @@ export class GamePipeline {
     if (next.finished) await this.settleAndNarrate(next);
   }
 
+  /**
+   * 禁忌卡六正本打出（委托×地图 2026-09-19 七链）：每张每场限一次，代价在打出瞬间落账。
+   * 权能是规则改写（除名/岁除/天罚/兽潮/许愿/蜡封之夜），数值面在 playBeat 的
+   * forbidden 分支；代价的存档面（封印天赋/经验清空/maxHp 永久扣/蜡痕）在本方法落。
+   */
+  async castForbiddenCard(
+    cardName: string,
+    wishTier?: 'small' | 'mid' | 'grand',
+  ): Promise<void> {
+    const session = this.game.skirmishSession;
+    const playerC = this.game.player;
+    if (!session || session.finished !== null || !playerC) return;
+    if ((session.forbiddenUsed ?? []).includes(cardName)) {
+      this.emitMessage(`【${cardName}】本场已听过它的声音——同一张禁忌卡，一场只应一次。`, 'assistant');
+      return;
+    }
+    // 持卡校验：背包里有这张禁忌正本（forbidden 标记的真源是卡定义，背包看名字）
+    if (!playerC.inventory.some((i) => i.name === cardName && i.type === '卡牌')) {
+      this.emitMessage(`【${cardName}】不在你手里——力量要放在身边才作数。`, 'assistant');
+      return;
+    }
+
+    const play = async (opts: {
+      forbiddenCard: string;
+      barrenName?: boolean;
+      ageEnd?: boolean;
+      heavenScourge?: boolean;
+      beastTideAmount?: number;
+      wish?: 'small' | 'mid' | 'grand';
+      waxNight?: boolean;
+    }): Promise<void> => {
+      const next = playBeat(
+        session,
+        { label: cardName, power: 0, tags: [] },
+        1 + Math.floor(Math.random() * 20),
+        opts,
+      );
+      this.game.setSkirmishSession(next);
+      this.emitMessage(next.log.slice(session.log.length).join('; '), 'assistant');
+      if (next.finished) await this.settleAndNarrate(next);
+    };
+
+    const costPatches: StatePatch[] = [];
+
+    if (cardName === '禁忌卡·无名河') {
+      await play({ forbiddenCard: cardName, barrenName: true });
+      // 代价：随机封印一个天赋三场（worldFlags.sealedTalents，结算时逐场递减）
+      const pool = (playerC.talents?.list ?? []).map((t) => t.name).filter(Boolean);
+      if (pool.length > 0) {
+        const sealed = pool[Math.floor(Math.random() * pool.length)];
+        const ledger = coerceCounters(this.game.saveProfile?.worldFlags?.sealedTalents);
+        costPatches.push({
+          op: 'set_variable',
+          target: `worldFlags.sealedTalents.${sealed}`,
+          value: 3,
+        } as StatePatch);
+        this.emitMessage(`▸ 【无名河】代价兑现——天赋【${sealed}】被河水卷走（三场之后归还）`, 'assistant');
+        void ledger;
+      }
+    } else if (cardName === '禁忌卡·失年历') {
+      await play({ forbiddenCard: cardName, ageEnd: true });
+      // 代价：本级经验清空回起点
+      const floor = playerC.level > 1 ? getRequiredXpForLevel(playerC.level - 1) : 0;
+      if (typeof floor === 'number' && playerC.totalExp > floor) {
+        costPatches.push({
+          op: 'update_character',
+          target: `characters.${playerC.name}`,
+          value: {
+            totalExp: floor,
+            expToNext: xpToNextNumber(playerC.level),
+          },
+        } as StatePatch);
+        this.emitMessage(
+          `▸ 【失年历】代价兑现——你交出了一段修炼的时日（经验回到本级起点）`,
+          'assistant',
+        );
+      }
+    } else if (cardName === '禁忌卡·焚天引') {
+      await play({ forbiddenCard: cardName, heavenScourge: true });
+      this.emitMessage(`▸ 【焚天引】代价兑现——HP 锁至 1，天上多了一道小疤`, 'assistant');
+    } else if (cardName === '禁忌卡·万兽园') {
+      const tide = 10 + playerC.level * 2;
+      await play({ forbiddenCard: cardName, beastTideAmount: tide });
+      this.emitMessage(
+        `▸ 【万兽园】代价兑现——兽族与野兽记住了你（遭遇时首轮被先手）`,
+        'assistant',
+      );
+    } else if (cardName === '禁忌卡·称心秤') {
+      const tier = wishTier ?? 'small';
+      const pct = tier === 'grand' ? 50 : tier === 'mid' ? 30 : 10;
+      const newMax = Math.max(1, Math.round(playerC.maxHp * (1 - pct / 100)));
+      await play({ forbiddenCard: cardName, wish: tier });
+      costPatches.push({
+        op: 'update_character',
+        target: `characters.${playerC.name}`,
+        value: { maxHp: newMax, hp: Math.min(playerC.hp, newMax) },
+      } as StatePatch);
+      this.emitMessage(
+        `▸ 【称心秤】代价兑现——愿望的分量称走了你 ${playerC.maxHp - newMax} 点气血上限（永久）`,
+        'assistant',
+      );
+    } else if (cardName === '禁忌卡·白蜡城') {
+      await play({ forbiddenCard: cardName, waxNight: true });
+      const marks = counterOf(
+        coerceCounters(this.game.saveProfile?.worldFlags?.counters),
+        WAX_MARKS_KEY,
+      );
+      const nextMarks = marks + 1;
+      costPatches.push({
+        op: 'set_variable',
+        target: `worldFlags.waxMarks`,
+        value: nextMarks,
+      } as StatePatch);
+      this.emitMessage(
+        nextMarks >= 3
+          ? `▸ 【白蜡城】第三道蜡痕落定——你感到某座城在夜里翻了身（叙事钩已挂）`
+          : `▸ 【白蜡城】代价兑现——蜡痕 ${nextMarks}/3`,
+        'assistant',
+      );
+    } else {
+      this.emitMessage(`【${cardName}】不是七链的禁忌正本——打不出它的力量。`, 'assistant');
+      return;
+    }
+
+    if (costPatches.length > 0) {
+      const sm = createStateManager(this.game.activeSaveId!);
+      const result = await sm.commitChatState(costPatches);
+      if (!result.success) {
+        console.warn('[GamePipeline] 禁忌卡代价落账失败:', result.errors);
+      }
+    }
+  }
+
+  /** 开战：敌情评估预提交整场意图 → 会话入账 → 战报开场注入正文流。
   /** 开战：敌情评估预提交整场意图 → 会话入账 → 战报开场注入正文流。
    *  返回结果供调用方明示反馈（dev 按钮/触发方）——评估失败不开战，绝不静默。 */
   private async runSkirmishEncounter(

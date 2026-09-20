@@ -378,3 +378,107 @@ describe('contractBacklash（纯函数）', () => {
     expect(contractBacklash(undefined, { counters: ['强攻'] }).total).toBe(0);
   });
 });
+
+// ═══ 禁忌卡六正本（2026-09-19 七链；forbiddenCard 守卫 + 规则改写效果） ═══
+describe('playBeat — 禁忌卡六正本', () => {
+  const base = {
+    intents: [{ label: '撕咬', threat: 6, tags: [] }],
+    playerHp: 50,
+    playerMaxHp: 50,
+    enemyHp: 80,
+    enemyMaxHp: 80,
+  };
+  const start = () => startSkirmish({ ...base, enemyName: '熔岩巨兽', enemyLevel: 10 });
+
+  it('无名河·除名：即刻终局胜利，落 forbiddenUsed 账', () => {
+    const s = start();
+    const next = playBeat(s, { label: '打', power: 1, tags: [] }, 10, {
+      forbiddenCard: '禁忌卡·无名河',
+      barrenName: true,
+    });
+    expect(next.finished).toBe('胜利');
+    expect(next.forbiddenUsed).toEqual(['禁忌卡·无名河']);
+  });
+
+  it('同名守卫：已用过再打无效（战斗照常进行）', () => {
+    const s = start();
+    const first = playBeat(s, { label: '打', power: 1, tags: [] }, 10, {
+      forbiddenCard: '禁忌卡·无名河',
+      barrenName: true,
+    });
+    expect(first.finished).toBe('胜利');
+  });
+
+  it('失年历·岁除：敌方 stun 两轮', () => {
+    const s = start();
+    const next = playBeat(s, { label: '打', power: 1, tags: [] }, 10, {
+      forbiddenCard: '禁忌卡·失年历',
+      ageEnd: true,
+    });
+    const stun = next.activeEffects.find((e) => e.type === 'stun');
+    expect(stun?.beatsLeft).toBe(2);
+  });
+
+  it('焚天引·天罚：70% 真实伤害 + 玩家 HP 锁 1', () => {
+    const s = start();
+    const next = playBeat(s, { label: '打', power: 1, tags: [] }, 10, {
+      forbiddenCard: '禁忌卡·焚天引',
+      heavenScourge: true,
+    });
+    // 天罚基于 max(当前,上限)×70% 真实伤害——敌残必然被打到两成半以下
+    expect(next.enemyHp).toBeLessThan(20);
+    expect(next.enemyHp).toBeGreaterThanOrEqual(0);
+    expect(next.playerHp).toBe(1);
+  });
+
+  it('万兽园·兽潮：无期限 dot（每拍结算不消失）', () => {
+    const s = start();
+    const next = playBeat(s, { label: '打', power: 1, tags: [] }, 10, {
+      forbiddenCard: '禁忌卡·万兽园',
+      beastTideAmount: 12,
+    });
+    const tide = next.activeEffects.find((e) => e.type === 'dot');
+    expect(tide?.amount).toBe(12);
+    expect(tide?.beatsLeft).toBeUndefined();
+    // 第二拍：兽潮仍在（无期限）
+    const r2 = playBeat(next, { label: '打', power: 1, tags: [] }, 10, {});
+    expect(r2.activeEffects.some((e) => e.type === 'dot' && e.amount === 12)).toBe(true);
+    expect(r2.enemyHp).toBeLessThan(next.enemyHp); // 兽潮每拍啃血
+  });
+
+  it('称心秤·小愿：全回复；中愿：敌方被称走（终局胜利）', () => {
+    const hurt = startSkirmish({
+      ...base,
+      enemyName: '熔岩巨兽',
+      playerHp: 10,
+    });
+    const small = playBeat(hurt, { label: '打', power: 1, tags: [] }, 10, {
+      forbiddenCard: '禁忌卡·称心秤',
+      wish: 'small',
+    });
+    expect(small.playerHp).toBe(50);
+    const mid = start();
+    const midNext = playBeat(mid, { label: '打', power: 1, tags: [] }, 10, {
+      forbiddenCard: '禁忌卡·称心秤',
+      wish: 'mid',
+    });
+    expect(midNext.finished).toBe('胜利');
+    expect(midNext.forbiddenUsed).toEqual(['禁忌卡·称心秤']);
+  });
+
+  it('白蜡城·蜡封之夜：敌方跳两轮 + 玩家回复三成', () => {
+    const s = start();
+    const next = playBeat(s, { label: '打', power: 1, tags: [] }, 10, {
+      forbiddenCard: '禁忌卡·白蜡城',
+      waxNight: true,
+    });
+    expect(next.activeEffects.some((e) => e.type === 'stun' && e.beatsLeft === 2)).toBe(true);
+    expect(next.playerHp).toBe(50); // 满血 clamp
+    const hurt = startSkirmish({ ...base, enemyName: '熔岩巨兽', playerHp: 30 });
+    const healed = playBeat(hurt, { label: '打', power: 1, tags: [] }, 10, {
+      forbiddenCard: '禁忌卡·白蜡城',
+      waxNight: true,
+    });
+    expect(healed.playerHp).toBe(30 + 15); // 30% of 50
+  });
+});

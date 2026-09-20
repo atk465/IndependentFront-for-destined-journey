@@ -80,6 +80,8 @@ export interface SkirmishSession {
   enemyCount?: number;
   /** 敌方体型（战斗维度：体格差压制；缺省「常人」） */
   enemyScale?: string;
+  /** 禁忌卡本场已用卡名账（每张每场限一次；2026-09-19 禁忌卡七链） */
+  forbiddenUsed?: string[];
 }
 
 export interface StartSkirmishInput {
@@ -102,6 +104,8 @@ export interface StartSkirmishInput {
   enemyCount?: number;
   /** 敌方体型（战斗维度：体格差压制；缺省「常人」） */
   enemyScale?: string;
+  /** 禁忌卡本场已用卡名账（每张每场限一次；2026-09-19 禁忌卡七链） */
+  forbiddenUsed?: string[];
 }
 
 const clampHp = (n: number, fallback: number): number => {
@@ -221,6 +225,21 @@ export interface BeatOptions {
   comboFired?: string[];
   /** 本拍念出了真名 → 记入会话账（每场一次） */
   trueNameUsed?: boolean;
+  // ── 禁忌卡六正本（2026-09-19 七链；每张每场限一次，代价由调用方结算层落） ──
+  /** 本拍打出的禁忌卡名（守卫：同名每场一次；落 forbiddenUsed 账） */
+  forbiddenCard?: string;
+  /** 无名河·除名：敌方从本场战斗中彻底抹去（即刻终局·胜利） */
+  barrenName?: boolean;
+  /** 失年历·岁除：敌方状态回溯至入场之时（跳过下两轮） */
+  ageEnd?: boolean;
+  /** 焚天引·天罚：无视减免的真实伤害（敌方 max(当前,上限) 的 70%），打出后玩家 HP 锁 1 */
+  heavenScourge?: boolean;
+  /** 万兽园·兽潮：无期限的援军持续伤害（每拍结算） */
+  beastTideAmount?: number;
+  /** 称心秤·许愿：small=全回复 / mid=把敌方称到另一端（终局·胜利）/ grand=全回复+敌方跳两轮 */
+  wish?: 'small' | 'mid' | 'grand';
+  /** 白蜡城·蜡封之夜：敌方跳过下两轮 + 玩家回复最大气血的三成 */
+  waxNight?: boolean;
 }
 
 export const FINAL_CHAPTER_BEAT = ENTRY_STRENGTH_BASELINE.终章.beats;
@@ -319,7 +338,70 @@ export function playBeat(
   if (chapterActive && afterContract > 0) {
     lines.push(`▸ 【第六终章】第 ${s.beat + 1} 次行动——抹除发动：敌方 −${afterContract}（归零）`);
   }
-  const enemyHpFinal = chapterActive ? 0 : afterContract;
+  let enemyHpFinal = chapterActive ? 0 : afterContract;
+
+  // ── 禁忌卡六正本（2026-09-19 七链；每张每场限一次，代价由调用方结算层落） ──
+  const forbiddenCard = opts?.forbiddenCard;
+  const forbiddenGuard =
+    !!forbiddenCard && !(s.forbiddenUsed ?? []).includes(forbiddenCard);
+  let playerHpOverride: number | null = null;
+  if (forbiddenGuard && forbiddenCard) {
+    // 无名河·除名：从本场战斗中彻底抹去一名敌人（无论气血深浅）→ 即刻终局
+    if (opts?.barrenName === true) {
+      lines.push(
+        `▸ 【禁忌卡·无名河】除名发动——河水漫过它的铭文：【${s.enemyName}】从这场战斗中被彻底抹去`,
+      );
+      enemyHpFinal = 0;
+    }
+    // 失年历·岁除：敌方状态回溯至入场之时，并跳过下两轮
+    if (opts?.ageEnd === true) {
+      lines.push(
+        `▸ 【禁忌卡·失年历】岁除发动——被撕的那一页盖下：敌方回溯至入场之时，并失去下两轮`,
+      );
+    }
+    // 焚天引·天罚：无视一切减免的真实伤害 + 玩家 HP 锁 1（你在裂痕正下方）
+    if (opts?.heavenScourge === true) {
+      const scourge = Math.max(1, Math.round(Math.max(enemyHpFinal, s.enemyMaxHp) * 0.7));
+      lines.push(
+        `▸ 【禁忌卡·焚天引】天罚发动——撕裂法则的一击：敌方 −${scourge}（无视一切减免）`,
+      );
+      enemyHpFinal = Math.max(0, enemyHpFinal - scourge);
+      playerHpOverride = 1;
+      lines.push(`▸ 【焚天引】代价兑现——你在裂痕正下方：HP 锁至 1`);
+    }
+    // 万兽园·兽潮：无期限援军（每拍结算持续伤害，不可消灭）
+    const tide = opts?.beastTideAmount;
+    if (typeof tide === 'number' && tide > 0) {
+      lines.push(`▸ 【禁忌卡·万兽园】园门大开——兽潮涌入（此后每拍敌方 −${tide}，不可消灭）`);
+    }
+    // 称心秤·许愿：small=全回复 / mid=把敌方称到另一端 / grand=全回复+敌方跳两轮
+    const wish = opts?.wish;
+    if (wish === 'small') {
+      lines.push(`▸ 【禁忌卡·称心秤】小愿兑现——全队气血回复如初`);
+      playerHpOverride = s.playerMaxHp;
+    } else if (wish === 'mid') {
+      lines.push(
+        `▸ 【禁忌卡·称心秤】中愿兑现——砝码落下：【${s.enemyName}】被称到秤的另一端（战斗结束才回来）`,
+      );
+      enemyHpFinal = 0;
+    } else if (wish === 'grand') {
+      lines.push(
+        `▸ 【禁忌卡·称心秤】大愿兑现——败局被称了回去：全队气血回复如初，敌方失去下两轮`,
+      );
+      playerHpOverride = s.playerMaxHp;
+    }
+    // 白蜡城·蜡封之夜：敌方跳过下两轮 + 玩家回复最大气血的三成
+    if (opts?.waxNight === true) {
+      const heal = Math.max(1, Math.round(s.playerMaxHp * 0.3));
+      lines.push(
+        `▸ 【禁忌卡·白蜡城】蜡封之夜发动——战场封进城里的一夜：敌方静止两轮，你回复 ${heal} HP`,
+      );
+      playerHpOverride =
+        playerHpOverride === null
+          ? Math.min(s.playerMaxHp, s.playerHp + heal)
+          : Math.min(playerHpOverride + heal, s.playerMaxHp);
+    }
+  }
 
   // 暴走/反噬反冲（启封失败的代价）：拍末玩家扣血，可致死
   const recoil = opts?.recoil ?? 0;
@@ -346,11 +428,18 @@ export function playBeat(
     );
   }
 
+  // 禁忌卡 HP 覆盖（天罚锁 1 / 许愿回复 / 蜡封回复）——优先级高于反冲与吸魔
+  const playerHpAfterOverride =
+    playerHpOverride !== null ? Math.min(playerHpOverride, s.playerMaxHp) : playerHpAfterRegen;
+  if (playerHpOverride !== null && playerHpAfterOverride !== playerHpAfterRegen) {
+    lines.push(`▸ 禁忌之力改写了你的气血：${playerHpAfterRegen} → ${playerHpAfterOverride}`);
+  }
+
   // 免死（绞刑架幸存者）：HP 本会归零 → 锁血续战（每场一次；MP 回满由调用方落库）
   const lastStand = opts?.lastStand;
-  const lastStandFires = !!lastStand && playerHpAfterRegen <= 0 && s.lastStandUsed !== true;
+  const lastStandFires = !!lastStand && playerHpAfterOverride <= 0 && s.lastStandUsed !== true;
   const playerHpFinal =
-    lastStandFires && lastStand ? Math.max(1, Math.round(lastStand.hpFloor)) : playerHpAfterRegen;
+    lastStandFires && lastStand ? Math.max(1, Math.round(lastStand.hpFloor)) : playerHpAfterOverride;
   if (lastStandFires) {
     lines.push(
       `▸ 【绞刑架幸存者】颈上的旧痕绷紧了——锁血至 ${playerHpFinal} HP，你没有倒下（本场仅此一次）`,
@@ -362,6 +451,14 @@ export function playBeat(
     e.beatsLeft !== undefined ? { ...e, beatsLeft: Math.max(0, e.beatsLeft - 1) } : e,
   );
   const activateList = activateListOf(opts?.activate);
+  const stunBeats: number | null =
+    (opts?.ageEnd === true && forbiddenGuard) || (opts?.waxNight === true && forbiddenGuard)
+      ? 2
+      : opts?.wish === 'grand' && forbiddenGuard
+        ? 2
+        : null;
+  const tideAmount: number | null =
+    opts?.beastTideAmount !== undefined && forbiddenGuard ? opts.beastTideAmount : null;
   const nextEffects = [
     ...decremented.filter((e) => e.beatsLeft === undefined || e.beatsLeft > 0),
     ...activateList.map((a) => ({
@@ -372,6 +469,13 @@ export function playBeat(
       // 领域/场景卡建立的环境随效果存续（环境加成天赋据此判定）
       ...(a.env ? { env: a.env } : {}),
     })),
+    // 禁忌卡效果（岁除/蜡封之夜/大愿=stun；兽潮=无期限 dot）
+    ...(stunBeats !== null
+      ? [{ name: forbiddenCard ?? '禁忌卡', type: 'stun' as const, amount: 0, beatsLeft: stunBeats }]
+      : []),
+    ...(tideAmount !== null
+      ? [{ name: forbiddenCard ?? '禁忌卡', type: 'dot' as const, amount: tideAmount }]
+      : []),
   ];
   for (const a of activateList) {
     const line =
@@ -392,6 +496,9 @@ export function playBeat(
     ...(lastStandFires ? { lastStandUsed: true } : {}),
     ...(opts?.comboFired ? { comboFired: opts.comboFired } : {}),
     ...(opts?.trueNameUsed ? { trueNameUsed: true } : {}),
+    ...(forbiddenCard && forbiddenGuard
+      ? { forbiddenUsed: [...(s.forbiddenUsed ?? []), forbiddenCard] }
+      : {}),
     ...(s.duel ? { duel: s.duel } : {}),
     ...(s.hotSwapsUsed ? { hotSwapsUsed: s.hotSwapsUsed } : {}),
     ...(s.enemyCount !== undefined ? { enemyCount: s.enemyCount } : {}),
