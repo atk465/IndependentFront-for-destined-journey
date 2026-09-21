@@ -300,7 +300,7 @@ function dismiss() {
       </button>
       <div v-if="heldForbiddenCards.includes('禁忌卡·称心秤')" class="wish-tier-row">
         <span class="wish-label">称心秤档位：</span>
-        <label v-for="t in (['small', 'mid', 'grand'] as const)" :key="t" class="wish-opt">
+        <label v-for="t in ['small', 'mid', 'grand'] as const" :key="t" class="wish-opt">
           <input v-model="wishTier" type="radio" :value="t" :disabled="game.skirmishBusy" />
           {{ t === 'small' ? '小愿(回复)' : t === 'mid' ? '中愿(称走一敌)' : '大愿(逆转)' }}
         </label>

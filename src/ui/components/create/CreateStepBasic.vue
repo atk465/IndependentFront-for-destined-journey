@@ -13,6 +13,11 @@ import BackgroundList from './BackgroundList.vue';
 
 const store = useCreateStore();
 
+/** 当前选中起始地点的简短介绍（叶子 desc；自定义地点无介绍） */
+const selectedLocationDesc = computed(
+  () => store.flatLocationOptions.find((o) => o.value === store.startLocation)?.desc ?? '',
+);
+
 /** 三条资源条的最大值，用于统一比例尺 */
 const peakMax = computed(() => Math.max(store.hpPreview, store.mpPreview, store.spPreview, 1));
 
@@ -80,6 +85,7 @@ function applyBackground(bg: BackgroundTemplate | null) {
           :options="store.flatLocationOptions"
           placeholder="选择起始地点"
         />
+        <p v-if="selectedLocationDesc" class="form-hint">{{ selectedLocationDesc }}</p>
         <FormInput
           v-if="store.startLocation === '自定义'"
           v-model="store.customStartLocation"

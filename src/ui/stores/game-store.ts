@@ -70,6 +70,7 @@ import {
   tryUseToday,
   type DailyLedger,
 } from '@engine/card-workshop/daily-ledger';
+import { coerceSealedTalents, filterSealedTalents } from '@engine/card-workshop/sealed-talents';
 import { isRerollFace, rollOnTable } from '@engine/card-workshop/fortune-dice';
 import { DAILY_BUFF_CRAFT_LUCK } from '@engine/card-workshop/fortune-dice';
 import type { FortuneDiceTable } from '@engine/card-workshop/fortune-dice';
@@ -193,7 +194,6 @@ import {
   getCustomCommissionFlags,
   getCustomEventFlags,
   getCommissionsFlags,
-  setCommissionsFlagsInPlace,
   updateCustomContentFlags,
   setCustomContentFlagsInPlace,
   getProfile,
@@ -387,10 +387,7 @@ export const useGameStore = defineStore('game', () => {
     /** 热插拔模块（S「模块化天才」） */
     hotSwap: () => Promise<void>;
     /** 禁忌卡打出（委托×地图七链；wishTier 仅称心秤用） */
-    castForbidden: (
-      cardName: string,
-      wishTier?: 'small' | 'mid' | 'grand',
-    ) => Promise<void>;
+    castForbidden: (cardName: string, wishTier?: 'small' | 'mid' | 'grand') => Promise<void>;
   } | null>(null);
 
   /** controller 未就绪时点下的开战请求（attach 后自动补发——消灭「点了没反应」的时序窗） */
@@ -689,7 +686,11 @@ export const useGameStore = defineStore('game', () => {
     const flags = commissionsFlags();
     const hidden = [...(flags.chainHidden ?? [])];
     if (!hidden.includes(name)) hidden.push(name);
-    return commitCommissionsBag({ ...flags, chainHidden: hidden });
+    const result = await commitCommissionsBag({ ...flags, chainHidden: hidden });
+    if (!result.ok) return result;
+    // 藏匿立即生效：读档同款合并重装运行时槽——否则委托板/编辑器要等下次读档才消失
+    loadCustomCommissionsAndEvents();
+    return { ok: true };
   }
 
   /** 放弃进行中的委托（基线作废；重接重新快照——链不卡死的软恢复） */
@@ -1487,7 +1488,9 @@ export const useGameStore = defineStore('game', () => {
 
   /** 天赋门槛：玩家是否持有解锁该机制的天赋（吞噬一切/军团熔炉/素材之王/万物归一/律师函警告/第六终章） */
   function hasMechanicGate(kind: TalentEntryKind): boolean {
-    return hasEntryKind(player.value?.talents?.list, kind);
+    // 无名河封印中的天赋不算数——交锋动作按钮随之隐藏，与 pipeline 战斗面同口径
+    const sealed = coerceSealedTalents(saveProfile.value?.worldFlags?.sealedTalents);
+    return hasEntryKind(filterSealedTalents(player.value?.talents?.list, sealed), kind);
   }
 
   /**
@@ -1782,9 +1785,7 @@ export const useGameStore = defineStore('game', () => {
       ...QUEST_CHAIN_COMMISSION_SEEDS.filter((d) => !hidden.has(d.name)),
     ];
     const events = [
-      ...coerceCustomEvents(getCustomEventFlags(profile)).filter(
-        (e) => !hidden.has(e.name),
-      ),
+      ...coerceCustomEvents(getCustomEventFlags(profile)).filter((e) => !hidden.has(e.name)),
       ...QUEST_CHAIN_EVENT_SEEDS.filter((e) => !hidden.has(e.name)),
     ];
     replaceCustomCommissions(commissions);

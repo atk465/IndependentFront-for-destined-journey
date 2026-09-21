@@ -9,16 +9,12 @@
  */
 import { describe, it, expect } from 'vitest';
 import { coerceCommissions } from './commission';
-import {
-  QUEST_CHAIN_COMMISSION_SEEDS,
-  QUEST_CHAIN_EVENT_SEEDS,
-} from './quest-chain-seeds';
+import { QUEST_CHAIN_COMMISSION_SEEDS, QUEST_CHAIN_EVENT_SEEDS } from './quest-chain-seeds';
 import { coerceRandomEventPack } from '../random-event-pack';
 
 const parsed = coerceCommissions(QUEST_CHAIN_COMMISSION_SEEDS);
 
 describe('禁忌卡七链种子（数据合同）', () => {
-
   it('21 条委托全部通过 coerceCommissions 门禁（无丢弃）', () => {
     expect(QUEST_CHAIN_COMMISSION_SEEDS).toHaveLength(21);
     expect(parsed).toHaveLength(21);
@@ -35,12 +31,15 @@ describe('禁忌卡七链种子（数据合同）', () => {
     }
     expect(chains.size).toBe(7);
     for (const [id, orders] of chains) {
-      expect([...orders].sort((a, b) => a - b), id).toEqual([1, 2, 3]);
+      expect(
+        [...orders].sort((a, b) => a - b),
+        id,
+      ).toEqual([1, 2, 3]);
     }
   });
 
   it('首节 visit / 中节 material / 末节 finale 的三段式', () => {
-    const byChain = new Map<string, Map<number, typeof parsed[number]>>();
+    const byChain = new Map<string, Map<number, (typeof parsed)[number]>>();
     for (const def of parsed) {
       const m = byChain.get(def.chainId!) ?? new Map();
       m.set(def.chainOrder!, def);
@@ -55,7 +54,10 @@ describe('禁忌卡七链种子（数据合同）', () => {
         return 'none';
       });
       // 每节恰好一类要求，末节必为 finale，全链至少各含一次 visit 与 material
-      expect(kinds.filter((k) => k === 'none'), beats.get(1)!.chainId).toEqual([]);
+      expect(
+        kinds.filter((k) => k === 'none'),
+        beats.get(1)!.chainId,
+      ).toEqual([]);
       expect(kinds[2]).toBe('finale');
       expect(kinds).toContain('visit');
       expect(kinds).toContain('material');
@@ -75,8 +77,13 @@ describe('禁忌卡七链种子（数据合同）', () => {
 
   it('场景制卡的 target 是钥匙卡，不是任何禁忌卡本尊（玩家不可制作红线）', () => {
     const forbiddenNames = [
-      '禁忌卡·无名河', '禁忌卡·失年历', '禁忌卡·焚天引', '禁忌卡·万兽园',
-      '禁忌卡·称心秤', '禁忌卡·白蜡城', '禁忌卡·第一行',
+      '禁忌卡·无名河',
+      '禁忌卡·失年历',
+      '禁忌卡·焚天引',
+      '禁忌卡·万兽园',
+      '禁忌卡·称心秤',
+      '禁忌卡·白蜡城',
+      '禁忌卡·第一行',
     ];
     for (const def of parsed) {
       if (def.finale?.type === '场景制卡') {

@@ -342,8 +342,7 @@ export function playBeat(
 
   // ── 禁忌卡六正本（2026-09-19 七链；每张每场限一次，代价由调用方结算层落） ──
   const forbiddenCard = opts?.forbiddenCard;
-  const forbiddenGuard =
-    !!forbiddenCard && !(s.forbiddenUsed ?? []).includes(forbiddenCard);
+  const forbiddenGuard = !!forbiddenCard && !(s.forbiddenUsed ?? []).includes(forbiddenCard);
   let playerHpOverride: number | null = null;
   if (forbiddenGuard && forbiddenCard) {
     // 无名河·除名：从本场战斗中彻底抹去一名敌人（无论气血深浅）→ 即刻终局
@@ -355,16 +354,12 @@ export function playBeat(
     }
     // 失年历·岁除：敌方状态回溯至入场之时，并跳过下两轮
     if (opts?.ageEnd === true) {
-      lines.push(
-        `▸ 【禁忌卡·失年历】岁除发动——被撕的那一页盖下：敌方回溯至入场之时，并失去下两轮`,
-      );
+      lines.push(`▸ 【禁忌卡·失年历】岁除发动——被撕的那一页盖下：敌方回溯至入场之时，并失去下两轮`);
     }
     // 焚天引·天罚：无视一切减免的真实伤害 + 玩家 HP 锁 1（你在裂痕正下方）
     if (opts?.heavenScourge === true) {
       const scourge = Math.max(1, Math.round(Math.max(enemyHpFinal, s.enemyMaxHp) * 0.7));
-      lines.push(
-        `▸ 【禁忌卡·焚天引】天罚发动——撕裂法则的一击：敌方 −${scourge}（无视一切减免）`,
-      );
+      lines.push(`▸ 【禁忌卡·焚天引】天罚发动——撕裂法则的一击：敌方 −${scourge}（无视一切减免）`);
       enemyHpFinal = Math.max(0, enemyHpFinal - scourge);
       playerHpOverride = 1;
       lines.push(`▸ 【焚天引】代价兑现——你在裂痕正下方：HP 锁至 1`);
@@ -385,9 +380,7 @@ export function playBeat(
       );
       enemyHpFinal = 0;
     } else if (wish === 'grand') {
-      lines.push(
-        `▸ 【禁忌卡·称心秤】大愿兑现——败局被称了回去：全队气血回复如初，敌方失去下两轮`,
-      );
+      lines.push(`▸ 【禁忌卡·称心秤】大愿兑现——败局被称了回去：全队气血回复如初，敌方失去下两轮`);
       playerHpOverride = s.playerMaxHp;
     }
     // 白蜡城·蜡封之夜：敌方跳过下两轮 + 玩家回复最大气血的三成
@@ -439,7 +432,9 @@ export function playBeat(
   const lastStand = opts?.lastStand;
   const lastStandFires = !!lastStand && playerHpAfterOverride <= 0 && s.lastStandUsed !== true;
   const playerHpFinal =
-    lastStandFires && lastStand ? Math.max(1, Math.round(lastStand.hpFloor)) : playerHpAfterOverride;
+    lastStandFires && lastStand
+      ? Math.max(1, Math.round(lastStand.hpFloor))
+      : playerHpAfterOverride;
   if (lastStandFires) {
     lines.push(
       `▸ 【绞刑架幸存者】颈上的旧痕绷紧了——锁血至 ${playerHpFinal} HP，你没有倒下（本场仅此一次）`,
@@ -471,7 +466,14 @@ export function playBeat(
     })),
     // 禁忌卡效果（岁除/蜡封之夜/大愿=stun；兽潮=无期限 dot）
     ...(stunBeats !== null
-      ? [{ name: forbiddenCard ?? '禁忌卡', type: 'stun' as const, amount: 0, beatsLeft: stunBeats }]
+      ? [
+          {
+            name: forbiddenCard ?? '禁忌卡',
+            type: 'stun' as const,
+            amount: 0,
+            beatsLeft: stunBeats,
+          },
+        ]
       : []),
     ...(tideAmount !== null
       ? [{ name: forbiddenCard ?? '禁忌卡', type: 'dot' as const, amount: tideAmount }]

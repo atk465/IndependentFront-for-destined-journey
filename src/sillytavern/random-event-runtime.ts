@@ -55,15 +55,6 @@ let installedPack: RandomEventPack = createEmptyPack();
 let customDefs: RandomEventDef[] = [];
 
 /**
- * 链节探索事件的隐藏名单槽（玩家删除 seed 事件时记名）。
- */
-let chainEventHidden: readonly string[] = [];
-
-export function installQuestChainEventHidden(names: readonly string[] | null): void {
-  chainEventHidden = Array.isArray(names) ? [...names] : [];
-}
-
-/**
  * 装上开发者自定义探索事件（调用方先过 `coerceCustomEvents` 容错）。
  * `null` = 清空（读档/清存档时调用）。每次换包/清空注册表都必须重装。
  */
@@ -120,5 +111,4 @@ export function installRandomEventPack(pack: RandomEventPack | null): void {
 export function resetRandomEventRuntime(): void {
   installedPack = createEmptyPack();
   customDefs = [];
-  chainEventHidden = [];
 }

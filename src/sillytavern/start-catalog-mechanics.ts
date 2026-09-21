@@ -188,6 +188,8 @@ export interface CascaderOption {
   label: string;
   value: string;
   children?: CascaderOption[];
+  /** 简短介绍（2026-09-19 起始地点扩展）：叶子节点带一句描述，选中时展示 */
+  desc?: string;
 }
 
 /**
@@ -371,12 +373,12 @@ export function costTableOptions(table: Record<string, number>): string[] {
 export function flattenLocationTree(
   nodes: readonly CascaderOption[],
   prefix = '',
-): { label: string; value: string }[] {
-  const result: { label: string; value: string }[] = [];
+): { label: string; value: string; desc?: string }[] {
+  const result: { label: string; value: string; desc?: string }[] = [];
   for (const n of nodes) {
     const label = prefix ? `${prefix} > ${n.label}` : n.label;
     if (!n.children || n.children.length === 0) {
-      result.push({ label, value: n.value });
+      result.push({ label, value: n.value, ...(n.desc ? { desc: n.desc } : {}) });
     } else {
       result.push(...flattenLocationTree(n.children, label));
     }

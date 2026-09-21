@@ -27,9 +27,7 @@ describe('worldFlags 前缀路由（set/delta/remove 写 profile.worldFlags）',
     expect(r.success).toBe(true);
     const profile = await getProfile('probe');
     expect((profile.worldFlags as Record<string, unknown>).probe).toBe(1);
-    expect(
-      (profile.variables as Record<string, any>)?.sys?.worldFlags?.probe,
-    ).toBeUndefined();
+    expect((profile.variables as Record<string, any>)?.sys?.worldFlags?.probe).toBeUndefined();
   });
 
   it('嵌套子路径（fired.事件名 形态）正确落树', async () => {
@@ -65,9 +63,7 @@ describe('worldFlags 前缀路由（set/delta/remove 写 profile.worldFlags）',
 
   it('非 worldFlags target 不受路由影响（variables 正常）', async () => {
     const sm = createStateManager('probe');
-    await sm.commitChatState([
-      { op: 'set_variable', target: 'variables.sys.天气', value: '雨' },
-    ]);
+    await sm.commitChatState([{ op: 'set_variable', target: 'variables.sys.天气', value: '雨' }]);
     const profile = await getProfile('probe');
     expect((profile.variables as Record<string, any>).sys.天气).toBe('雨');
   });

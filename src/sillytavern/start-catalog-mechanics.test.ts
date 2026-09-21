@@ -237,6 +237,22 @@ describe('flattenLocationTree', () => {
     expect(values).not.toContain('north-greystone');
   });
 
+  it('desc 透传到叶子；无 desc 的叶子不带该字段（形状不漂移）', () => {
+    const withDesc: CascaderOption[] = [
+      { label: '谷地', value: 'v-a', desc: '一句简介。' },
+      { label: '山口', value: 'v-b' },
+    ];
+    expect(flattenLocationTree(withDesc)).toEqual([
+      { label: '谷地', value: 'v-a', desc: '一句简介。' },
+      { label: '山口', value: 'v-b' },
+    ]);
+    // 中间节点的 desc 不进结果（只有叶子被选）
+    const midDesc: CascaderOption[] = [
+      { label: '某国', value: 'c', desc: '中间层简介', children: [{ label: '城', value: 'v-c' }] },
+    ];
+    expect(flattenLocationTree(midDesc)).toEqual([{ label: '某国 > 城', value: 'v-c' }]);
+  });
+
   it('空树 / children 为空数组 → 空结果或叶子', () => {
     expect(flattenLocationTree([])).toEqual([]);
     expect(flattenLocationTree([{ label: '孤峰', value: 'v', children: [] }])).toEqual([

@@ -24,7 +24,8 @@ import { rankForReputation } from '@engine/card-workshop/adventurer-rank';
 import type { CommissionDef } from '@engine/card-workshop/commission';
 
 const game = useGameStore();
-const staticCommissions = getCommissionDefs();
+/** 静态清单（内容包 + 七链种子 + 自定义）：computed 读运行时槽——藏匿 seed 重装后立即反映 */
+const staticCommissions = computed(() => getCommissionDefs());
 /** 动态事件委托（随机事件 × 委托板融合）：存档 flags 里仍有效的部分 */
 const eventCommissions = computed(() => game.eventCommissions ?? []);
 /** 生成填充（D/C/B；素材池取自中层覆写表） */
@@ -36,7 +37,7 @@ const allDefs = computed(() => {
   const dynamicNames = new Set(eventCommissions.value.map((ec) => ec.def.name));
   return [
     ...eventCommissions.value.map((ec) => ec.def),
-    ...staticCommissions.filter((d) => !dynamicNames.has(d.name)),
+    ...staticCommissions.value.filter((d) => !dynamicNames.has(d.name)),
     ...generated.value.map((gc) => gc.def).filter((d) => !dynamicNames.has(d.name)),
   ];
 });

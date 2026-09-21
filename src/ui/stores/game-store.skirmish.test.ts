@@ -55,7 +55,17 @@ describe('交锋拍状态桥', () => {
     const sacrifice = vi.fn(async () => {});
     const trueName = vi.fn(async () => {});
     const hotSwap = vi.fn(async () => {});
-    game.setSkirmishController({ start, counter, flee, nuke, duel, sacrifice, trueName, hotSwap, castForbidden: vi.fn(async () => {}) });
+    game.setSkirmishController({
+      start,
+      counter,
+      flee,
+      nuke,
+      duel,
+      sacrifice,
+      trueName,
+      hotSwap,
+      castForbidden: vi.fn(async () => {}),
+    });
     game.setSkirmishSession(session());
 
     const r = await game.startSkirmish('熔岩巨兽', '灼热盆地');

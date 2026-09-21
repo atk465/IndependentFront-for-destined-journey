@@ -151,6 +151,11 @@ import {
   tryUseToday,
 } from '@engine/card-workshop/daily-ledger';
 import { getRequiredXpForLevel, xpToNextNumber } from '@engine/exp-table';
+import {
+  coerceSealedTalents,
+  decrementSealedTalents,
+  filterSealedTalents,
+} from '@engine/card-workshop/sealed-talents';
 import { CARD_CRAFT_NARRATE_AGENT, runCardCraftNarration } from '@engine/card-craft-narrate';
 import {
   COMMISSION_NARRATE_AGENT,
@@ -2464,7 +2469,7 @@ export class GamePipeline {
    */
   private rollSkirmishD20(): number {
     const first = this.rollD20();
-    if (!hasBetterRoll(flatEntriesOf(this.game.player?.talents?.list))) return first;
+    if (!hasBetterRoll(flatEntriesOf(this.combatTalents()))) return first;
     const second = this.rollD20();
     const best = Math.max(first, second);
     this.emitMessage(`▸ 判定取优：d20 ${first}/${second} → 取 ${best}`, 'assistant');
@@ -2483,8 +2488,7 @@ export class GamePipeline {
       sacrifice: () => this.sacrificeSummon(),
       trueName: () => this.speakTrueName(),
       hotSwap: () => this.hotSwapModule(),
-      castForbidden: (cardName, wishTier) =>
-        this.castForbiddenCard(cardName, wishTier),
+      castForbidden: (cardName, wishTier) => this.castForbiddenCard(cardName, wishTier),
     });
   }
 
@@ -2495,10 +2499,9 @@ export class GamePipeline {
   private async hotSwapModule(): Promise<void> {
     const session = this.game.skirmishSession;
     const playerC = this.game.player;
+    const combatTalents = this.combatTalents();
     if (!session || session.finished !== null || !playerC) return;
-    if (
-      !(playerC.talents?.list ?? []).some((t) => (t.entries ?? []).some((e) => e.kind === '模块化'))
-    ) {
+    if (!(combatTalents ?? []).some((t) => (t.entries ?? []).some((e) => e.kind === '模块化'))) {
       this.emitMessage('【模块化天才】需要持有对应天赋。', 'assistant');
       return;
     }
@@ -2512,7 +2515,7 @@ export class GamePipeline {
       card: card ?? { name: hit?.name ?? '空', 词条: [] },
       current: hit,
       used: session.hotSwapsUsed ?? 0,
-      maxSwaps: entryStrength(playerC.talents?.list, '模块化', 'swaps'),
+      maxSwaps: entryStrength(combatTalents, '模块化', 'swaps'),
     });
     if (!swap.ok || !swap.switched) {
       this.emitMessage(`【模块化天才】${swap.reason ?? '换不了'}`, 'assistant');
@@ -2538,14 +2541,13 @@ export class GamePipeline {
   private async speakTrueName(): Promise<void> {
     const session = this.game.skirmishSession;
     const playerC = this.game.player;
+    const combatTalents = this.combatTalents();
     if (!session || session.finished !== null || !playerC) return;
     if (session.trueNameUsed === true) {
       this.emitMessage('【真名看破】这一场已经念过了——一个名字一场只压得住一次。', 'assistant');
       return;
     }
-    const has = (playerC.talents?.list ?? []).some((t) =>
-      (t.entries ?? []).some((e) => e.kind === '真名'),
-    );
+    const has = (combatTalents ?? []).some((t) => (t.entries ?? []).some((e) => e.kind === '真名'));
     if (!has) {
       this.emitMessage('【真名看破】需要持有对应天赋。', 'assistant');
       return;
@@ -2553,8 +2555,8 @@ export class GamePipeline {
     const known = coerceTrueNames(this.game.saveProfile?.worldFlags?.trueNames);
     const alreadyKnown = hasTrueName(known, session.enemyName);
     const shock = trueNameShockPower({
-      base: entryStrength(playerC.talents?.list, '真名', 'shockBase'),
-      perLevel: entryStrength(playerC.talents?.list, '真名', 'shockPerLevel'),
+      base: entryStrength(combatTalents, '真名', 'shockBase'),
+      perLevel: entryStrength(combatTalents, '真名', 'shockPerLevel'),
       playerLevel: playerC.level,
       alreadyKnown,
     });
@@ -2583,19 +2585,18 @@ export class GamePipeline {
   private async declareDuel(): Promise<void> {
     const session = this.game.skirmishSession;
     const playerC = this.game.player;
+    const combatTalents = this.combatTalents();
     if (!session || session.finished !== null || !playerC) return;
     if (session.duel) {
       this.emitMessage('【决斗】已经在决斗中了。', 'assistant');
       return;
     }
-    const has = (playerC.talents?.list ?? []).some((t) =>
-      (t.entries ?? []).some((e) => e.kind === '决斗'),
-    );
+    const has = (combatTalents ?? []).some((t) => (t.entries ?? []).some((e) => e.kind === '决斗'));
     if (!has) {
       this.emitMessage('【决斗】需要持有对应天赋。', 'assistant');
       return;
     }
-    const noCompanion = entryStrength(playerC.talents?.list, '决斗', 'noCompanion') > 0;
+    const noCompanion = entryStrength(combatTalents, '决斗', 'noCompanion') > 0;
     this.game.setSkirmishSession({
       ...session,
       duel: { noCompanion },
@@ -2615,17 +2616,16 @@ export class GamePipeline {
   private async sacrificeSummon(): Promise<void> {
     const session = this.game.skirmishSession;
     const playerC = this.game.player;
+    const combatTalents = this.combatTalents();
     if (!session || session.finished !== null || !playerC) return;
-    const has = (playerC.talents?.list ?? []).some((t) =>
-      (t.entries ?? []).some((e) => e.kind === '献祭'),
-    );
+    const has = (combatTalents ?? []).some((t) => (t.entries ?? []).some((e) => e.kind === '献祭'));
     if (!has) {
       this.emitMessage('【献祭召唤】需要持有对应天赋。', 'assistant');
       return;
     }
-    const hpPct = entryStrength(playerC.talents?.list, '献祭', 'hpPct');
-    const beats = entryStrength(playerC.talents?.list, '献祭', 'beats');
-    const mult = entryStrength(playerC.talents?.list, '献祭', 'critMult');
+    const hpPct = entryStrength(combatTalents, '献祭', 'hpPct');
+    const beats = entryStrength(combatTalents, '献祭', 'beats');
+    const mult = entryStrength(combatTalents, '献祭', 'critMult');
     const cost = Math.max(1, Math.round((session.playerHp * hpPct) / 100));
     if (session.playerHp - cost <= 0) {
       this.emitMessage('【献祭召唤】血不够——再献就死了。', 'assistant');
@@ -2650,19 +2650,28 @@ export class GamePipeline {
   }
 
   /**
+   * 交锋结算面读的天赋表：去掉被无名河封印中的天赋（代价面，2026-09-21 消费端）。
+   * 战斗动作/开战评估/拍结算/免死/大招/战后结算一律读这份；制卡流与叙事读原表不受封印影响。
+   */
+  private combatTalents() {
+    const ledger = coerceSealedTalents(this.game.saveProfile?.worldFlags?.sealedTalents);
+    return filterSealedTalents(this.game.player?.talents?.list, ledger);
+  }
+
+  /**
    * 禁忌卡六正本打出（委托×地图 2026-09-19 七链）：每张每场限一次，代价在打出瞬间落账。
    * 权能是规则改写（除名/岁除/天罚/兽潮/许愿/蜡封之夜），数值面在 playBeat 的
    * forbidden 分支；代价的存档面（封印天赋/经验清空/maxHp 永久扣/蜡痕）在本方法落。
    */
-  async castForbiddenCard(
-    cardName: string,
-    wishTier?: 'small' | 'mid' | 'grand',
-  ): Promise<void> {
+  async castForbiddenCard(cardName: string, wishTier?: 'small' | 'mid' | 'grand'): Promise<void> {
     const session = this.game.skirmishSession;
     const playerC = this.game.player;
     if (!session || session.finished !== null || !playerC) return;
     if ((session.forbiddenUsed ?? []).includes(cardName)) {
-      this.emitMessage(`【${cardName}】本场已听过它的声音——同一张禁忌卡，一场只应一次。`, 'assistant');
+      this.emitMessage(
+        `【${cardName}】本场已听过它的声音——同一张禁忌卡，一场只应一次。`,
+        'assistant',
+      );
       return;
     }
     // 持卡校验：背包里有这张禁忌正本（forbidden 标记的真源是卡定义，背包看名字）
@@ -2695,18 +2704,25 @@ export class GamePipeline {
 
     if (cardName === '禁忌卡·无名河') {
       await play({ forbiddenCard: cardName, barrenName: true });
-      // 代价：随机封印一个天赋三场（worldFlags.sealedTalents，结算时逐场递减）
-      const pool = (playerC.talents?.list ?? []).map((t) => t.name).filter(Boolean);
+      // 代价：随机封印一个天赋三场（worldFlags.sealedTalents；交锋结算面禁用，
+      // 每场终局在 settleAndNarrate 递减一场、归零归还）。已封印中的不再重复入选。
+      const pool = filterSealedTalents(
+        playerC.talents?.list,
+        coerceSealedTalents(this.game.saveProfile?.worldFlags?.sealedTalents),
+      )
+        .map((t) => t.name)
+        .filter(Boolean);
       if (pool.length > 0) {
         const sealed = pool[Math.floor(Math.random() * pool.length)];
-        const ledger = coerceCounters(this.game.saveProfile?.worldFlags?.sealedTalents);
         costPatches.push({
           op: 'set_variable',
           target: `worldFlags.sealedTalents.${sealed}`,
           value: 3,
         } as StatePatch);
-        this.emitMessage(`▸ 【无名河】代价兑现——天赋【${sealed}】被河水卷走（三场之后归还）`, 'assistant');
-        void ledger;
+        this.emitMessage(
+          `▸ 【无名河】代价兑现——天赋【${sealed}】被河水卷走（三场之后归还）`,
+          'assistant',
+        );
       }
     } else if (cardName === '禁忌卡·失年历') {
       await play({ forbiddenCard: cardName, ageEnd: true });
@@ -2732,10 +2748,7 @@ export class GamePipeline {
     } else if (cardName === '禁忌卡·万兽园') {
       const tide = 10 + playerC.level * 2;
       await play({ forbiddenCard: cardName, beastTideAmount: tide });
-      this.emitMessage(
-        `▸ 【万兽园】代价兑现——兽族与野兽记住了你（遭遇时首轮被先手）`,
-        'assistant',
-      );
+      this.emitMessage(`▸ 【万兽园】代价兑现——兽族与野兽记住了你（遭遇时首轮被先手）`, 'assistant');
     } else if (cardName === '禁忌卡·称心秤') {
       const tier = wishTier ?? 'small';
       const pct = tier === 'grand' ? 50 : tier === 'mid' ? 30 : 10;
@@ -2759,7 +2772,7 @@ export class GamePipeline {
       const nextMarks = marks + 1;
       costPatches.push({
         op: 'set_variable',
-        target: `worldFlags.waxMarks`,
+        target: `worldFlags.counters.${WAX_MARKS_KEY}`,
         value: nextMarks,
       } as StatePatch);
       this.emitMessage(
@@ -2779,10 +2792,11 @@ export class GamePipeline {
       if (!result.success) {
         console.warn('[GamePipeline] 禁忌卡代价落账失败:', result.errors);
       }
+      // 落库后立即回读：封印/扣上限等代价必须当场被交锋结算读到（否则读的是内存旧账）
+      await this.game.refreshFromDb(this.saveId);
     }
   }
 
-  /** 开战：敌情评估预提交整场意图 → 会话入账 → 战报开场注入正文流。
   /** 开战：敌情评估预提交整场意图 → 会话入账 → 战报开场注入正文流。
    *  返回结果供调用方明示反馈（dev 按钮/触发方）——评估失败不开战，绝不静默。 */
   private async runSkirmishEncounter(
@@ -2790,6 +2804,7 @@ export class GamePipeline {
     sceneHint?: string,
   ): Promise<{ ok: boolean; reason?: string }> {
     const playerC = this.game.player;
+    const combatTalents = this.combatTalents();
     if (!playerC) return { ok: false, reason: '没有玩家角色（存档未就绪）' };
     const endpoint = this.getEndpointForAgent('skirmish_eval');
     if (!endpoint) {
@@ -2800,14 +2815,10 @@ export class GamePipeline {
       return { ok: false, reason: 'skirmish_eval 未解析到 API 池（设置 → Agent 配置）' };
     }
     // 规则钩子（名字表）：全属性倍率（女王领域 +50%）——此前 getter 写好了没人调
-    const startHooks = collectRuleHooks(playerC.talents?.list);
+    const startHooks = collectRuleHooks(combatTalents);
     // 条件数值（A 级批次③：荒野镖客 / 战争之王 / 集群母狗）：条件成立才乘。
     // 与「女王领域」的全属性倍率并进同一条乘法链——都是 statMultiplier 的语义。
-    const condBonus = totalCondBonus(
-      playerC.talents?.list,
-      playerC.cardAlbum?.deck,
-      playerC.inventory,
-    );
+    const condBonus = totalCondBonus(combatTalents, playerC.cardAlbum?.deck, playerC.inventory);
     const stats = applyStatMultiplier(
       deriveBaseCombatStats({ attributes: playerC.attributes, level: playerC.level }),
       statMultiplierOf(startHooks) * (1 + condBonus.percent / 100),
@@ -2825,7 +2836,7 @@ export class GamePipeline {
     const spirits = coerceSpirits(this.game.saveProfile?.worldFlags?.behindSpirits);
     const spiritGuard =
       spirits.length > 0
-        ? spirits.length * entryStrength(playerC.talents?.list, '成灵', 'guardPerSpirit')
+        ? spirits.length * entryStrength(combatTalents, '成灵', 'guardPerSpirit')
         : 0;
     if (spiritGuard > 0) {
       this.emitMessage(
@@ -2852,7 +2863,7 @@ export class GamePipeline {
       );
       // 规则层数值条目（此前只查了名字钩子，这几条一直是死接线）：
       //  体魄 → HP 上限 ×(1+percent/100)；威压 → 敌方威胁 ×(1−percent/100)
-      const talentList = playerC.talents?.list;
+      const talentList = combatTalents;
       const physiquePct = hasTitanPhysique(flatEntriesOf(talentList))
         ? entryStrength(talentList, '体魄', 'percent')
         : 0;
@@ -2993,11 +3004,12 @@ export class GamePipeline {
   private async submitSkirmishCounter(choice: SkirmishChoice): Promise<void> {
     const session = this.game.skirmishSession;
     const playerC = this.game.player;
+    const combatTalents = this.combatTalents();
     if (!session || session.finished !== null || !playerC) return;
 
     // 连战递增（天赋）：每多打一拍行动值 +条目量（第一拍无加成）
     let escalate = 0;
-    for (const t of playerC.talents?.list ?? []) {
+    for (const t of combatTalents ?? []) {
       for (const e of t.entries) {
         if (e.kind === '连战递增') escalate += Math.max(0, Math.round(e.params.amount ?? 0));
       }
@@ -3013,25 +3025,25 @@ export class GamePipeline {
     let comboFired: string[] | undefined;
     /** 终章（SSS「第六终章」）：持天赋则第 N 拍起自动抹除敌方。
      *  N = 条目 `终章{beats}` 的强度档（缺省基准 6 拍）——档位让更弱的天赋也能共用这条机制。 */
-    const finalChapter = (playerC.talents?.list ?? []).some((t) =>
+    const finalChapter = (combatTalents ?? []).some((t) =>
       (t.entries ?? []).some((e) => e.kind === '终章'),
     );
     const chapterOpts = finalChapter
       ? {
           finalChapter: true,
-          finalChapterBeats: entryStrength(playerC.talents?.list, '终章', 'beats'),
+          finalChapterBeats: entryStrength(combatTalents, '终章', 'beats'),
         }
       : {};
     // 行为合同（SSS 律师函警告）：本拍出卡时登记的禁条；反噬伤害取 `合同{backlash}` 档
     if (choice.kind === '卡' && choice.contractForbidden) {
-      const hasContractGate = (playerC.talents?.list ?? []).some((t) =>
+      const hasContractGate = (combatTalents ?? []).some((t) =>
         (t.entries ?? []).some((e) => e.kind === '合同'),
       );
       if (hasContractGate) {
         contract = {
           name: `行为合同·禁${choice.contractForbidden}`,
           forbidden: choice.contractForbidden,
-          backlash: entryStrength(playerC.talents?.list, '合同', 'backlash'),
+          backlash: entryStrength(combatTalents, '合同', 'backlash'),
         };
       }
     }
@@ -3127,11 +3139,7 @@ export class GamePipeline {
       {
         // 条件加成（A 级批次③）：这里要重算一次——它在另一条方法里，作用域不通用。
         // 只用到「伙伴卡数」这一条件（战争之王），代价是一次卡组扫描。
-        const deckCond = totalCondBonus(
-          playerC.talents?.list,
-          playerC.cardAlbum?.deck,
-          playerC.inventory,
-        );
+        const deckCond = totalCondBonus(combatTalents, playerC.cardAlbum?.deck, playerC.inventory);
         const fx = planEffects(plan);
         // 战争之王（A 级批次③）：伙伴卡越多，在场助战越强。
         // 只放大**召唤/军团卡带来的 buff**——那正是「伙伴卡的攻击力」在拍制里的形态。
@@ -3204,7 +3212,7 @@ export class GamePipeline {
     }
     // 暴击（A/B 战斗维度）：持 `暴击` 条目者，拍内掷 d100 判定暴击。
     {
-      const critEntry = (playerC.talents?.list ?? [])
+      const critEntry = (combatTalents ?? [])
         .flatMap((t) => t.entries ?? [])
         .find((e) => e.kind === '暴击');
       if (critEntry) {
@@ -3222,14 +3230,14 @@ export class GamePipeline {
         }
       }
       // 体格差压制（B「体格差压制」）：敌方体型远小于玩家 → 行动值加成
-      const holdsCrush = (playerC.talents?.list ?? []).some((t) =>
+      const holdsCrush = (combatTalents ?? []).some((t) =>
         (t.entries ?? []).some((e) => e.kind === '体型压制'),
       );
       if (holdsCrush && session.enemyScale) {
         const crush = bodyScaleCrushBonus(
           playerBodyScale(playerC.level),
           coerceBodyScale(session.enemyScale),
-          entryStrength(playerC.talents?.list, '体型压制', 'crushPct'),
+          entryStrength(combatTalents, '体型压制', 'crushPct'),
         );
         if (crush.percent > 0) {
           action = { ...action, power: Math.round(action.power * (1 + crush.percent / 100)) };
@@ -3240,7 +3248,7 @@ export class GamePipeline {
     // 一拳超人系统的代价（SS）：今天已经挥过那一拳 → 当日虚弱（行动值 ×0.5）。
     // 「24 小时」在这套时间里就是「今天」，跨天由 daily-ledger 的 gameDay 比对自动解除。
     if (
-      dailyNukePercentOf(collectRuleHooks(playerC.talents?.list)) > 0 &&
+      dailyNukePercentOf(collectRuleHooks(combatTalents)) > 0 &&
       !this.canUseDaily('一拳超人系统')
     ) {
       action = { ...action, power: Math.round(action.power * DAILY_NUKE_WEAKNESS) };
@@ -3259,7 +3267,7 @@ export class GamePipeline {
     }
     // 环境加成（天赋，如 SS「黑潮之子」）：域/场景卡建立了对应环境时，
     // 防御/闪避应对（= 敏捷与防御那一路）获得档位加成。环境随领域/场景卡存续。
-    const envBonuses = envBonusesOf(playerC.talents?.list);
+    const envBonuses = envBonusesOf(combatTalents);
     if (envBonuses.length > 0) {
       const activeEnv = new Set(
         session.activeEffects.map((e) => e.env).filter((v): v is string => !!v),
@@ -3276,7 +3284,7 @@ export class GamePipeline {
       }
     }
     // 下克上（天赋）：敌方原生等级高于你时，行动值按档位加成（「无视部分防御」的等价兑现）
-    const vsHigh = entryStrength(playerC.talents?.list, '克上', 'vsHigherLevel');
+    const vsHigh = entryStrength(combatTalents, '克上', 'vsHigherLevel');
     if (vsHigh > 0 && session.enemyLevel > playerC.level) {
       const boosted = Math.round(action.power * (1 + vsHigh / 100));
       action = { ...action, power: boosted };
@@ -3291,8 +3299,8 @@ export class GamePipeline {
       const asCard = playedCard?.type === '卡牌' ? (playedCard as CardItem) : undefined;
       if (asCard && isLazyCard(asCard)) {
         const outcome = resolveLazyCard(asCard, action.power, this.rollD100(), {
-          skipPct: entryStrength(playerC.talents?.list, '惰性', 'skipPct'),
-          critMult: entryStrength(playerC.talents?.list, '惰性', 'critMult'),
+          skipPct: entryStrength(combatTalents, '惰性', 'skipPct'),
+          critMult: entryStrength(combatTalents, '惰性', 'critMult'),
         });
         if (outcome.kind !== '正常') {
           action = { ...action, power: outcome.power };
@@ -3307,7 +3315,7 @@ export class GamePipeline {
           bonds,
           playedCards: session.playedCards,
           alreadyFired: (session.comboFired ?? []).includes(asCard.name),
-          comboMult: entryStrength(playerC.talents?.list, '羁绊', 'comboMult'),
+          comboMult: entryStrength(combatTalents, '羁绊', 'comboMult'),
         });
         if (combo.fired) {
           action = { ...action, power: Math.round(action.power * combo.power) };
@@ -3317,7 +3325,7 @@ export class GamePipeline {
       }
     }
     // 免死（绞刑架幸存者）：持天赋且本场没用过 → 允许本拍锁血续战
-    const lastStand = this.lastStandOption(playerC, session);
+    const lastStand = this.lastStandOption(session);
     const next = playBeat(
       session,
       action,
@@ -3340,7 +3348,7 @@ export class GamePipeline {
         (playerC.inventory.find((i) => i.name === choice.name) as CardItem | undefined)?.词条 ?? [],
       ) === '技能'
     ) {
-      const hasQuick = (playerC.talents?.list ?? []).some((t) =>
+      const hasQuick = (combatTalents ?? []).some((t) =>
         (t.entries ?? []).some((e) => e.kind === '快咏'),
       );
       cd = startCooldown(cd, choice.name, hasQuick ? 1 : 2);
@@ -3350,7 +3358,7 @@ export class GamePipeline {
     this.emitMessage(next.log.slice(session.log.length).join('\n'), 'assistant');
     // 免死刚发动 → 补上「瞬间获得满额 MP」（会话只记 HP；MP 是角色字段，得在这里落库）
     if (next.lastStandUsed === true && session.lastStandUsed !== true && this.ownsActiveSave) {
-      if (entryStrength(playerC.talents?.list, '免死', 'mpRefill') > 0) {
+      if (entryStrength(combatTalents, '免死', 'mpRefill') > 0) {
         const sm = createStateManager(this.saveId);
         await sm.commitChatState([
           {
@@ -3365,18 +3373,14 @@ export class GamePipeline {
     if (next.finished) await this.settleAndNarrate(next);
   }
 
-  /** 免死开关：持「免死」条目且本场未用过时给出 hpFloor */
-  private lastStandOption(
-    playerC: NonNullable<typeof this.game.player>,
-    session: SkirmishSession,
-  ): { hpFloor: number } | undefined {
+  /** 免死开关：持「免死」条目且本场未用过时给出 hpFloor（封印中的天赋不算数） */
+  private lastStandOption(session: SkirmishSession): { hpFloor: number } | undefined {
     if (session.lastStandUsed === true) return undefined;
-    const has = (playerC.talents?.list ?? []).some((t) =>
-      (t.entries ?? []).some((e) => e.kind === '免死'),
-    );
+    const combatTalents = this.combatTalents();
+    const has = combatTalents.some((t) => (t.entries ?? []).some((e) => e.kind === '免死'));
     if (!has) return undefined;
-    if (entryStrength(playerC.talents?.list, '免死', 'perBattle') <= 0) return undefined;
-    return { hpFloor: entryStrength(playerC.talents?.list, '免死', 'hpFloor') };
+    if (entryStrength(combatTalents, '免死', 'perBattle') <= 0) return undefined;
+    return { hpFloor: entryStrength(combatTalents, '免死', 'hpFloor') };
   }
 
   /**
@@ -3388,8 +3392,9 @@ export class GamePipeline {
   private async skirmishNuke(): Promise<void> {
     const session = this.game.skirmishSession;
     const playerC = this.game.player;
+    const combatTalents = this.combatTalents();
     if (!session || session.finished !== null || !playerC) return;
-    const hooks = collectRuleHooks(playerC.talents?.list);
+    const hooks = collectRuleHooks(combatTalents);
     const dailyPct = dailyNukePercentOf(hooks);
     const perBattle = hasOncePerBattleNuke(hooks);
     if (dailyPct <= 0 && !perBattle) {
@@ -3447,17 +3452,18 @@ export class GamePipeline {
   private async settleAndNarrate(session: SkirmishSession): Promise<void> {
     if (!session.finished) return;
     const playerC = this.game.player;
+    const combatTalents = this.combatTalents();
     if (!playerC) return;
     // 规则钩子（名字表）：经验倍率（鸿蒙道体 ×2 / 千秋证果 ×5）——此前 getter 写好了没人调
-    const hooks = collectRuleHooks(playerC.talents?.list);
+    const hooks = collectRuleHooks(combatTalents);
     // 条件经验（S「宿敌认证系统」）：与宿敌战斗经验翻倍
-    const holdsNemesis = flatEntriesOf(playerC.talents?.list).some((e) => e.kind === '宿敌');
+    const holdsNemesis = flatEntriesOf(combatTalents).some((e) => e.kind === '宿敌');
     const nemesis = coerceNemesis(this.game.saveProfile?.worldFlags?.nemesis);
     const nemesisMult = nemesisExpMultiplier({
       holdsTalent: holdsNemesis,
       nemesis,
       enemyName: session.enemyName,
-      expMult: entryStrength(playerC.talents?.list, '宿敌', 'expMult'),
+      expMult: entryStrength(combatTalents, '宿敌', 'expMult'),
     });
     if (nemesisMult.note) this.emitMessage(`▸ ${nemesisMult.note}`, 'assistant');
     const settlement = settleSkirmish(
@@ -3466,7 +3472,7 @@ export class GamePipeline {
       expMultiplierOf(hooks) *
         nemesisMult.mult *
         // 通用经验倍率（C「快速成长」等）：条目 `经验倍率{expMult}` 驱动
-        (entryStrength(playerC.talents?.list, '经验倍率', 'expMult') || 1) *
+        (entryStrength(combatTalents, '经验倍率', 'expMult') || 1) *
         // 败北强化（A「败北强化」）：败北时的经验加成（名字钩子）
         (session.finished === '败北' ? defeatExpMultiplierOf(hooks) : 1),
     );
@@ -3560,7 +3566,7 @@ export class GamePipeline {
       }
       // 自我进化（SSS「最终兵器：她」）：结算时让被立为最终兵器的伙伴卡按战况进化
       {
-        const hasEvolveGate = (playerC.talents?.list ?? []).some((t) =>
+        const hasEvolveGate = (combatTalents ?? []).some((t) =>
           (t.entries ?? []).some((e) => e.kind === '自我进化'),
         );
         if (hasEvolveGate) {
@@ -3589,12 +3595,12 @@ export class GamePipeline {
       // 支配者倒影（S）：战败时抄下敌方**威胁最高的一式**作制卡蓝本。
       //    自动记下并给可见提示——复制本身没代价，用不用在制卡时决定。
       if (session.finished === '败北') {
-        const holdsMirror = flatEntriesOf(playerC.talents?.list).some((e) => e.kind === '倒影');
+        const holdsMirror = flatEntriesOf(combatTalents).some((e) => e.kind === '倒影');
         if (holdsMirror) {
           const target = pickCopyTarget(session.intents);
           if (target) {
             const before = coerceBlueprints(this.game.saveProfile?.worldFlags?.skillBlueprints);
-            const cap = Math.max(1, entryStrength(playerC.talents?.list, '倒影', 'maxHold'));
+            const cap = Math.max(1, entryStrength(combatTalents, '倒影', 'maxHold'));
             const after = addBlueprint(
               before.length >= cap ? before.slice(before.length - cap + 1) : before,
               {
@@ -3661,14 +3667,14 @@ export class GamePipeline {
       }
       // 打脸升级（S）：被嘲讽标记当天打赢 → 海量经验 + 打脸点数
       {
-        const holdsSlap = flatEntriesOf(playerC.talents?.list).some((e) => e.kind === '打脸');
+        const holdsSlap = flatEntriesOf(combatTalents).some((e) => e.kind === '打脸');
         const slap = settleFaceSlap({
           holdsTalent: holdsSlap,
           mark: coerceTaunt(this.game.saveProfile?.worldFlags?.taunted),
           today: this.currentGameDay(),
           finished: session.finished,
-          expBonus: entryStrength(playerC.talents?.list, '打脸', 'expBonus'),
-          pointsPerWin: entryStrength(playerC.talents?.list, '打脸', 'pointsPerWin'),
+          expBonus: entryStrength(combatTalents, '打脸', 'expBonus'),
+          pointsPerWin: entryStrength(combatTalents, '打脸', 'pointsPerWin'),
         });
         if (slap.expBonus > 0 || slap.points > 0) {
           const beforePoints = counterOf(
@@ -3724,11 +3730,11 @@ export class GamePipeline {
       // 复生（S「再生」）：败北结算时 HP 不落 0——不死之身，只是这一场输了。
       // 与「免死」分工：那条管**战中**续战（会话级），这条管**战后**不真死（结算级）。
       if (session.finished === '败北') {
-        const reviveGate = (playerC.talents?.list ?? []).some((t) =>
+        const reviveGate = (combatTalents ?? []).some((t) =>
           (t.entries ?? []).some((e) => e.kind === '复生'),
         );
         if (reviveGate) {
-          const floor = Math.max(1, entryStrength(playerC.talents?.list, '复生', 'hpFloor'));
+          const floor = Math.max(1, entryStrength(combatTalents, '复生', 'hpFloor'));
           settlementPatches.push({
             op: 'update_character',
             target: `characters.${playerC.name}`,
@@ -3743,9 +3749,9 @@ export class GamePipeline {
       // 同契（SS「爱」）：与首张伙伴卡同步成长——战斗经验按 syncPct 同步。
       // 「首张伙伴卡」= 卡组第一张召唤/军团卡（确定序；卡组顺序即玩家心意）。
       if (settlement.exp.total > 0) {
-        const holdsBond = flatEntriesOf(playerC.talents?.list).some((e) => e.kind === '同契');
+        const holdsBond = flatEntriesOf(combatTalents).some((e) => e.kind === '同契');
         if (holdsBond) {
-          const syncPct = entryStrength(playerC.talents?.list, '同契', 'syncPct');
+          const syncPct = entryStrength(combatTalents, '同契', 'syncPct');
           const firstCompanion = (playerC.cardAlbum?.deck ?? [])
             .map((n) => playerC.inventory.find((i) => i.name === n && i.type === '卡牌'))
             .find((c) => {
@@ -3774,7 +3780,7 @@ export class GamePipeline {
       // 败犬烙印（SS）：每次战败在灵魂上留一枚。累计计数走 worldFlags.counters，
       // **不随天失效**——攒着，直到制卡时烧掉一枚扭转命运。
       if (session.finished === '败北') {
-        const scarGate = (playerC.talents?.list ?? []).some((t) =>
+        const scarGate = (combatTalents ?? []).some((t) =>
           (t.entries ?? []).some((e) => e.kind === '烙印'),
         );
         if (scarGate) {
@@ -3782,7 +3788,7 @@ export class GamePipeline {
             coerceCounters(this.game.saveProfile?.worldFlags?.counters),
             '败犬烙印',
           );
-          const cap = entryStrength(playerC.talents?.list, '烙印', 'maxHold');
+          const cap = entryStrength(combatTalents, '烙印', 'maxHold');
           const next = Math.min(cap > 0 ? cap : 9, before + 1);
           if (next > before) {
             settlementPatches.push({
@@ -3804,7 +3810,7 @@ export class GamePipeline {
       }
       // 战败补偿（SSS「世界线的收束点」）：败北 + 持钩子 → 抽三条「如果你赢了」的 if 线，
       // 其中一条成真（经验/金钱/素材三选一），并入同窗 patch
-      if (session.finished === '败北' && hasDefeatReward(collectRuleHooks(playerC.talents?.list))) {
+      if (session.finished === '败北' && hasDefeatReward(collectRuleHooks(combatTalents))) {
         const plan = planDefeatCompensation(playerC.level);
         this.emitMessage(plan.summary, 'assistant');
         const g = plan.granted;
@@ -3837,7 +3843,7 @@ export class GamePipeline {
       // 击杀掠取（天赋）：胜利/碾压时按条目缴获赏金（delta 入账）
       let killGc = 0;
       if (session.finished === '胜利' || session.finished === '碾压') {
-        for (const t of playerC.talents?.list ?? []) {
+        for (const t of combatTalents ?? []) {
           for (const e of t.entries) {
             if (e.kind === '击杀掠取') killGc += Math.max(0, Math.round(e.params.gold ?? 0));
           }
@@ -3851,6 +3857,19 @@ export class GamePipeline {
           metadata: { delta: true, source: 'skirmish-kill' },
         });
         this.emitMessage(`▸ 击杀掠取：缴获 ${killGc} G`, 'assistant');
+      }
+      // 无名河封印账：本场终局递减一场，归零归还（与结算同一次原子落库）
+      const sealedLedger = coerceSealedTalents(this.game.saveProfile?.worldFlags?.sealedTalents);
+      if (Object.keys(sealedLedger).length > 0) {
+        const tick = decrementSealedTalents(sealedLedger);
+        settlementPatches.push({
+          op: 'set_variable',
+          target: 'worldFlags.sealedTalents',
+          value: tick.ledger,
+        } as StatePatch);
+        for (const name of tick.returned) {
+          this.emitMessage(`▸ 【无名河】河水退去——天赋【${name}】回到了你身上`, 'assistant');
+        }
       }
       const result = await sm.commitChatState(settlementPatches);
       if (result.errors.length > 0) {

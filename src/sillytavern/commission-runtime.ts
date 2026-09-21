@@ -39,20 +39,6 @@ export function installCustomCommissions(defs: readonly CommissionDef[] | null):
 }
 
 /**
- * 禁忌卡七链种子的**隐藏名单**槽（2026-09-19）：玩家在委托板/编辑器删除某条 seed 委托时，
- * 名字记进这里（真源 = `worldFlags.commissions.chainHidden`），合并层据此过滤。
- */
-let questChainHidden: readonly string[] = [];
-
-/**
- * 装入七链种子的隐藏名单（2026-09-19）：玩家删除 seed 委托时记名。
- * 过滤发生在 game-store 的 install 合并层（本模块保持 installed+custom 两槽纯净）。
- */
-export function installQuestChainHidden(names: readonly string[] | null): void {
-  questChainHidden = Array.isArray(names) ? [...names] : [];
-}
-
-/**
  * 装入当前委托清单（调用方先过 `coerceCommissions` 容错）。
  * 每次换包 / 清空注册表都必须重装，否则会沿上一份清单出委托（随机事件同款症状）。
  */
