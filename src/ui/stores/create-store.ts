@@ -485,6 +485,9 @@ export const useCreateStore = defineStore('create', () => {
     filterBackgroundsByCategory(catalog.value.backgrounds, activeBackgroundCategory.value),
   );
 
+  /** 内容侧背景预设全表（空 = 当前包不带开局预设：CreateStepBasic 据此隐藏选择入口） */
+  const backgrounds = computed(() => catalog.value.backgrounds);
+
   // ═══════════════════════════════════════════════════════
   // 剧情规划 — 对齐 PlotSettings 类型 (types.ts)
   // ═══════════════════════════════════════════════════════
@@ -1907,6 +1910,7 @@ export const useCreateStore = defineStore('create', () => {
     activeBackgroundCategory,
     backgroundCategories,
     filteredBackgrounds,
+    backgrounds,
     // 剧情
     plotMode,
     plotDurationYears,

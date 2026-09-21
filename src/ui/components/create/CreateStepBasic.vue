@@ -123,8 +123,8 @@ function applyBackground(bg: BackgroundTemplate | null) {
           placeholder="简述角色的身世来历"
           type="textarea"
         />
-        <!-- 背景预设旁挂（精简：原独立背景步并入） -->
-        <div class="bg-picker">
+        <!-- 背景预设旁挂（精简：原独立背景步并入）；内容包不带预设时整块隐藏 -->
+        <div v-if="store.backgrounds.length > 0" class="bg-picker">
           <button
             type="button"
             class="bg-picker-toggle"
