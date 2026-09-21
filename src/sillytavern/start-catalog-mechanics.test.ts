@@ -23,6 +23,7 @@ import {
   countBackgroundsByCategory,
   type BackgroundTemplate,
   type CascaderOption,
+  CUSTOM_OPTION_KEY,
 } from './start-catalog-mechanics';
 
 // ═══════════════════════════════════════════════════════════
@@ -215,6 +216,27 @@ describe('lookupCost / costTableOptions', () => {
 
   it('costTableOptions 对空表也给出「自定义」一项（不会出现空下拉）', () => {
     expect(costTableOptions({})).toEqual(['自定义']);
+  });
+
+  it('parseCatalogData 透传 femaleOnlyIdentities；EMPTY_CATALOG 兜底为空数组', () => {
+    const data = parseCatalogData({ femaleOnlyIdentities: ['酒馆侍女', '贵族养女'] });
+    expect(data.femaleOnlyIdentities).toEqual(['酒馆侍女', '贵族养女']);
+    expect(parseCatalogData({}).femaleOnlyIdentities).toEqual([]);
+    expect(EMPTY_CATALOG.femaleOnlyIdentities).toEqual([]);
+  });
+
+  it('女性专属身份的过滤口径：男/雄性滤除，「自定义」性别保留，「自定义」身份兜底项永不滤', () => {
+    const all = ['非贵族平民', '酒馆侍女', '矿工', '贵族养女', '自定义'];
+    const femaleOnly = ['酒馆侍女', '贵族养女'];
+    const filtered = (gender: string) =>
+      femaleOnly.length === 0 || gender === '自定义'
+        ? all
+        : gender !== '男' && gender !== '雄性'
+          ? all
+          : all.filter((name) => !femaleOnly.includes(name) || name === CUSTOM_OPTION_KEY);
+    expect(filtered('男')).toEqual(['非贵族平民', '矿工', '自定义']);
+    expect(filtered('雄性')).toEqual(['非贵族平民', '矿工', '自定义']);
+    expect(filtered('自定义')).toEqual(all);
   });
 });
 

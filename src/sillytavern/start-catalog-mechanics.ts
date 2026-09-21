@@ -211,6 +211,12 @@ export interface CatalogData {
   raceCosts: Record<string, number>;
   identityCosts: Record<string, number>;
   startLocations: CascaderOption[];
+  /**
+   * 女性专属身份（2026-09-19）：玩家性别为男/雄性时从身份下拉过滤掉
+   * （柱二：持有者可为男性，但「侍女/养女」这类身份在本世界的女性承籍
+   * 社会里不属男性）。缺省空 = 无性别限定，旧包零迁移。
+   */
+  femaleOnlyIdentities: string[];
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -265,6 +271,7 @@ export const EMPTY_CATALOG: CatalogData = Object.freeze({
   raceCosts: {},
   identityCosts: {},
   startLocations: [],
+  femaleOnlyIdentities: [],
 }) as CatalogData;
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -313,6 +320,7 @@ export function parseCatalogData(raw: unknown): CatalogData {
     raceCosts: costFace(raw, 'raceCosts'),
     identityCosts: costFace(raw, 'identityCosts'),
     startLocations: arrayFace<CascaderOption>(raw, 'startLocations'),
+    femaleOnlyIdentities: arrayFace<string>(raw, 'femaleOnlyIdentities'),
   };
 }
 

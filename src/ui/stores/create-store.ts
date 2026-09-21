@@ -67,6 +67,7 @@ import {
   findDifficultyPreset,
   lookupCost,
   costTableOptions,
+  CUSTOM_OPTION_KEY,
   flattenLocationTree,
   filterBackgroundsByCategory,
   countBackgroundsByCategory,
@@ -272,7 +273,30 @@ export const useCreateStore = defineStore('create', () => {
     ];
   });
 
-  const identityOptions = computed(() => costTableOptions(catalog.value.identityCosts));
+  /**
+   * 身份下拉（按玩家性别过滤，2026-09-19）：内容侧 femaleOnlyIdentities 列出的
+   * 身份（侍女/养女这类女性承籍身份）对男/雄性玩家隐藏；「自定义」性别不隐藏
+   * （玩家可能自填任何性别）。自定义兜底项永远保留。
+   */
+  const identityOptions = computed(() => {
+    const all = costTableOptions(catalog.value.identityCosts);
+    const femaleOnly = catalog.value.femaleOnlyIdentities;
+    if (femaleOnly.length === 0 || gender.value === '自定义') return all;
+    if (gender.value !== '男' && gender.value !== '雄性') return all;
+    return all.filter((name) => !femaleOnly.includes(name) || name === CUSTOM_OPTION_KEY);
+  });
+
+  // 性别切换时，被过滤掉的女性专属身份自动回落到「非贵族平民」（自定义兜底不消失）
+  watch(gender, (g) => {
+    const femaleOnly = catalog.value.femaleOnlyIdentities;
+    if (
+      (g === '男' || g === '雄性') &&
+      femaleOnly.length > 0 &&
+      femaleOnly.includes(identity.value)
+    ) {
+      identity.value = '非贵族平民';
+    }
+  });
 
   // ═══════════════════════════════════════════════════════
   // 等级 & 属性 (→ 变量路径) — 对齐原版 custom_start_index.html
