@@ -46,18 +46,8 @@ function applyBackground(bg: BackgroundTemplate | null) {
       <div class="form-left">
         <h3 class="section-label">角色信息</h3>
         <FormInput v-model="store.name" label="角色名" placeholder="输入角色名称" />
-        <FormSelect
-          v-model="store.gender"
-          label="性别"
-          :options="store.GENDER_OPTIONS.map((g) => ({ label: g, value: g }))"
-        />
-        <FormInput
-          v-if="store.gender === '自定义'"
-          v-model="store.customGender"
-          label="自定义性别"
-          placeholder="输入性别（会写进开场白，让叙事知道你该被怎么称呼）"
-          class="custom-field"
-        />
+        <!-- 性别固定为男（2026-09-19 主人裁决：玩家只能是男性，不再提供选择） -->
+        <FormInput model-value="男" label="性别" disabled />
         <FormStepper v-model="store.age" label="年龄" :min="1" :max="999" />
         <FormSelect v-model="store.race" label="种族" :options="store.raceOptions" />
         <FormInput

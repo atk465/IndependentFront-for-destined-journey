@@ -274,29 +274,17 @@ export const useCreateStore = defineStore('create', () => {
   });
 
   /**
-   * 身份下拉（按玩家性别过滤，2026-09-19）：内容侧 femaleOnlyIdentities 列出的
-   * 身份（侍女/养女这类女性承籍身份）对男/雄性玩家隐藏；「自定义」性别不隐藏
-   * （玩家可能自填任何性别）。自定义兜底项永远保留。
+   * 身份下拉（性别已固定为男，2026-09-19）：内容侧 femaleOnlyIdentities 列出的
+   * 女性承籍身份（侍女/养女）永久隐藏；「自定义」身份兜底项永不滤。
    */
   const identityOptions = computed(() => {
     const all = costTableOptions(catalog.value.identityCosts);
     const femaleOnly = catalog.value.femaleOnlyIdentities;
-    if (femaleOnly.length === 0 || gender.value === '自定义') return all;
-    if (gender.value !== '男' && gender.value !== '雄性') return all;
+    if (femaleOnly.length === 0) return all;
     return all.filter((name) => !femaleOnly.includes(name) || name === CUSTOM_OPTION_KEY);
   });
 
   // 性别切换时，被过滤掉的女性专属身份自动回落到「非贵族平民」（自定义兜底不消失）
-  watch(gender, (g) => {
-    const femaleOnly = catalog.value.femaleOnlyIdentities;
-    if (
-      (g === '男' || g === '雄性') &&
-      femaleOnly.length > 0 &&
-      femaleOnly.includes(identity.value)
-    ) {
-      identity.value = '非贵族平民';
-    }
-  });
 
   // ═══════════════════════════════════════════════════════
   // 等级 & 属性 (→ 变量路径) — 对齐原版 custom_start_index.html
@@ -1353,7 +1341,7 @@ export const useCreateStore = defineStore('create', () => {
       currentAction: '',
       bloodlineIds: [],
       // 正式字段（规范 §2.1；M6 T2 双写退役完成，customFields 只留真扩展数据）
-      gender: gender.value === '自定义' ? customGender.value : gender.value,
+      gender: gender.value,
       personality: personality.value.trim(),
       appearance: physics.value.trim(),
       background: [backstory.value.trim(), extra.value.trim()].filter(Boolean).join('\n\n'),
@@ -1506,19 +1494,9 @@ export const useCreateStore = defineStore('create', () => {
     // 此前性别完全不进开场白，而本作世界观是「除玩家外万物全雌」，于是 AI 会
     // 顺理成章地把玩家也默认成「她」（真机反馈的首条信息问题）。玩家是「读铭者」、
     // 不在铭中，性别是角色的显性身份、第一轮就该让 AI 知道。
-    const genderText =
-      gender.value === '自定义'
-        ? customGender.value.trim()
-        : gender.value === '雄性'
-          ? '雄性'
-          : gender.value;
+    const genderText = '男';
     if (genderText) {
-      const pronoun =
-        genderText === '男' || genderText === '雄性'
-          ? '他'
-          : genderText === '女' || genderText === '雌性'
-            ? '她'
-            : null;
+      const pronoun = '他';
       lines.push('');
       lines.push(
         pronoun
