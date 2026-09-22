@@ -139,14 +139,28 @@ describe('resolveGatherDef / 中层覆写查表链', () => {
     const def = resolveGatherDef('冰原', { specialty: '雪莲' });
     expect(def.specialty).toBe('雪莲');
     expect(def.danger).toBe(ENVIRONMENT_TABLE['冰原'].danger);
-    expect(def.materialTable).toBe(ENVIRONMENT_TABLE['冰原'].materialTable);
+    // 只覆写 specialty → 素材表逐键等于环境表（值相等，非同一引用）
+    expect(def.materialTable).toEqual(ENVIRONMENT_TABLE['冰原'].materialTable);
     const full = resolveGatherDef('冰原', {
       specialty: '雪莲',
       danger: 5,
       materialTable: { 4: ['千年雪莲'] },
     });
     expect(full.danger).toBe(5);
-    expect(full.materialTable).toEqual({ 4: ['千年雪莲'] });
+    // 🔴 覆写按档位合并：4 档换成千年雪莲，0-3 档仍是冰原环境表（整表替换会滚出「未知素材」）
+    expect(full.materialTable).toEqual({ ...ENVIRONMENT_TABLE['冰原'].materialTable, 4: ['千年雪莲'] });
+  });
+
+  it('稀疏覆写表缺档回退环境表，绝不产出「未知素材」（真机验收回归）', () => {
+    const noBonus = { qualityBoost: 0, extraChance: 0 };
+    // 灰笺乡的真实形状：只写 1/3 两档
+    const sparse = { materialTable: { 1: ['灰笺矿'], 3: ['灰笺深髓'] } };
+    const merged = resolveGatherDef('森林', sparse);
+    expect(merged.materialTable[0]).toEqual(ENVIRONMENT_TABLE['森林'].materialTable[0]);
+    expect(merged.materialTable[1]).toEqual(['灰笺矿']);
+    // 用「永远滚 0 档」的确定 rng 采集，产出必须是环境表 0 档素材
+    const r = planGather('森林', noBonus, 1, () => 0, sparse);
+    for (const item of r.items) expect(item.name).not.toBe('未知素材');
   });
 
   it('中层独家素材从覆写表出产（雪莲只出自北境）', () => {

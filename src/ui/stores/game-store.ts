@@ -3915,6 +3915,17 @@ export const useGameStore = defineStore('game', () => {
     turnCounter = projection.turn;
     loadCustomContent();
     wireEffectSystem(saveId, projection.characters);
+    // 委托×地图闭环（2026-09-23 真机验收修）：进档补一次抵达对账——
+    // 首跑只记账 + `ensureMapFlags` 自愈补 lastTileId，探索面板/委托板的
+    // 「当前中层」（currentMidTier 快照）依赖它；移动另有调用点，这里幂等兜底。
+    try {
+      if (activeSaveId.value === saveId) {
+        const sm = createStateManager(saveId);
+        if (await sm.syncCommissionArrival()) await refreshFromDb(saveId);
+      }
+    } catch {
+      /* 对账失败不影响进档 */
+    }
     return true;
   }
 

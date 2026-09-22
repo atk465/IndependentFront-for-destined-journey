@@ -122,16 +122,21 @@ export const ENVIRONMENT_TABLE: Readonly<Record<GatherEnvironment, EnvironmentDe
 /**
  * 采集表解析：中层覆写表逐键优先，缺键逐键回退该地块地形对应的环境表。
  * 中层没写覆写 = 返回值与直接查环境表逐字段一致（存量地图包零迁移）。
+ *
+ * 🔴 素材表必须是**逐键合并**（`{...base, ...override}`）：覆写表只写独家素材的档位
+ *    （如灰笺乡只写 1/3 两档），整表替换会让其余档位滚到「未知素材」——
+ *    2026-09-23 真机验收抓到的就是这个。
  */
 export function resolveGatherDef(
   environment: GatherEnvironment,
   midTier?: MidTierGathering,
 ): EnvironmentDef {
   const base = ENVIRONMENT_TABLE[environment];
+  if (!midTier) return { ...base };
   return {
-    specialty: midTier?.specialty ?? base.specialty,
-    danger: midTier?.danger ?? base.danger,
-    materialTable: midTier?.materialTable ?? base.materialTable,
+    specialty: midTier.specialty ?? base.specialty,
+    danger: midTier.danger ?? base.danger,
+    materialTable: { ...base.materialTable, ...midTier.materialTable },
   };
 }
 
