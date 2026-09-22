@@ -189,7 +189,9 @@ function rewardsText(def: CommissionDef): string {
   const rewards = def.rewards;
   const parts: string[] = [];
   if (rewards.gc) parts.push(`${rewards.gc}G`);
-  if (rewards.reputation) parts.push(`声望 +${rewards.reputation}`);
+  // 负声望（如界碑拓片的抄录单 -2）别渲染成「+-2」
+  if (rewards.reputation)
+    parts.push(`声望 ${rewards.reputation > 0 ? '+' : ''}${rewards.reputation}`);
   if (rewards.materials && rewards.materials.length > 0)
     parts.push(rewards.materials.map((m) => `${m.name}×${m.quantity}`).join('、'));
   if (rewards.card) parts.push(`独家卡「${rewards.card.name}」`);
