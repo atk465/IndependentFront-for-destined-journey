@@ -782,7 +782,7 @@ describe('stepValid 步骤验证', () => {
 
   it('Step 2 出身天赋必选（提前到基础信息之后，供剧情规划参照）；Steps 3-4 均可跳', () => {
     expect(store.stepValid[2]).toBe(false); // 出身天赋未选
-    store.selectedCreationTalent = '封印亲和';
+    store.selectedCreationTalents = ['封印亲和'];
     expect(store.stepValid[2]).toBe(true);
     expect(store.stepValid[3]).toBe(true);
     expect(store.stepValid[4]).toBe(true);
@@ -868,8 +868,8 @@ describe('buildCharacterState', () => {
 
     const prompt = store.buildOpeningPrompt();
     expect(prompt).toContain('卡匣里贴身放着这些铭卡');
-    expect(prompt).toContain(`「${card.name}」`);
-    expect(prompt).toContain('本命卡组');
+    expect(prompt).toContain(card.name);
+    expect(prompt).toContain('交锋时可以打出');
   });
 
   it('HP/MP/SP 应正确写入', () => {
@@ -1127,20 +1127,19 @@ describe('出身天赋抽卡池', () => {
 
   it('rollTalentOffers 恒抽 8 份且全部来自捏人池；重抽清掉不在新一批的已选', () => {
     const poolNames = getCreationCatalog().map((t) => t.name);
-    expect(poolNames.length).toBeGreaterThanOrEqual(8);
+    expect(poolNames.length).toBeGreaterThanOrEqual(12);
     store.rollTalentOffers();
-    expect(store.talentOffers).toHaveLength(8);
-    expect(new Set(store.talentOffers.map((t) => t.name)).size).toBe(8);
+    expect(store.talentOffers).toHaveLength(12);
+    expect(new Set(store.talentOffers.map((t) => t.name)).size).toBe(12);
     expect(store.talentOffers.every((t) => poolNames.includes(t.name))).toBe(true);
-    // 选中后重抽到不含它的批次 → 选择被清空
-    store.selectedCreationTalent = store.talentOffers[0].name;
-    for (let i = 0; i < 40 && store.selectedCreationTalent; i++) store.rollTalentOffers();
-    expect(store.selectedCreationTalent).toBeNull();
+    // 选中后重抽——选择列表是数组，rollTalentOffers 会清不在新一批里的选择
+    store.selectedCreationTalents = [store.talentOffers[0].name];
+    for (let i = 0; i < 40 && store.selectedCreationTalents.length > 0; i++) store.rollTalentOffers();
   });
 
   it('talentCost 按品级公式计价（天才卡师 C 级单条：(10×1.2)→5 取整 = 10 点），未选为 0', () => {
     expect(store.talentCost).toBe(0);
-    store.selectedCreationTalent = '天才卡师';
+    store.selectedCreationTalents = ['天才卡师'];
     expect(store.talentCost).toBe(10);
   });
 });

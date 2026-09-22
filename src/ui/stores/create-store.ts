@@ -119,7 +119,7 @@ export const useCreateStore = defineStore('create', () => {
   const stepValid = computed<Record<number, boolean>>(() => ({
     0: difficulty.value !== null,
     1: name.value.trim().length > 0 && race.value !== '' && attributesFullyAllocated.value,
-    2: selectedCreationTalent.value !== null, // 出身天赋（7 选 1 必选；第 3 步，供剧情规划参照）
+    2: selectedCreationTalents.value.length > 0, // 出身天赋（12 抽选 2；第 3 步）
     3: true, // 装备选择
     4: true, // 剧情规划
   }));
@@ -387,11 +387,12 @@ export const useCreateStore = defineStore('create', () => {
   const identityCost = computed(() => lookupCost(catalog.value.identityCosts, identity.value));
   const cardCost = computed(() => selectedCards.value.reduce((n, c) => n + (c.cost || 0), 0));
   /** 出身天赋计价（2026-09-16 分级定价）：与声望兑换同公式（基础×品级乘数），货币为转生点 */
-  const talentCost = computed(() => {
-    if (!selectedCreationTalent.value) return 0;
-    const tpl = getCreationCatalog().find((t) => t.name === selectedCreationTalent.value);
-    return tpl ? talentExchangePrice(tpl) : 0;
-  });
+  const talentCost = computed(() =>
+    selectedCreationTalents.value.reduce((sum, name) => {
+      const tpl = getCreationCatalog().find((t) => t.name === name);
+      return sum + (tpl ? talentExchangePrice(tpl) : 0);
+    }, 0),
+  );
   const moneyCost = computed(() => Math.ceil(money.value / 100));
   const startingPointCost = computed(() => Math.ceil(startingPoints.value / 2));
   const levelCost = computed(() => Math.max(0, level.value - 1) * 5);
@@ -418,24 +419,59 @@ export const useCreateStore = defineStore('create', () => {
   // type:'卡牌'，卡必须直接落背包才能打出。
   // ═══════════════════════════════════════════════════════
   const selectedCards = ref<CardCatalogItem[]>([]);
-  /** 出身天赋（天赋系统 T-S3：捏人第 3 步，必选 1；名字 = TALENT_CATALOG 模板键） */
-  const selectedCreationTalent = ref<string | null>(null);
-  /** 随机天赋_offer（2026-09-16）：洗牌捏人池取前 8（池不足 8 全出），可重抽换一批 */
+  /** 出身天赋（天赋系统 T-S3 改造 2026-09-19）：12 抽选 2；名字 = TALENT_CATALOG 模板键 */
+  const selectedCreationTalents = ref<string[]>([]);
+
+  /** 切换选择（12 抽选 2；已选取消，未选且未满 2 则加入） */
+  function toggleCreationTalent(name: string): void {
+    const idx = selectedCreationTalents.value.indexOf(name);
+    if (idx >= 0) {
+      selectedCreationTalents.value.splice(idx, 1);
+    } else if (selectedCreationTalents.value.length < 2) {
+      selectedCreationTalents.value.push(name);
+    }
+  }
+  /** 随机天赋_offer（2026-09-19 改造）：抽 12 张，F→SSS 每品级保底 1 张，从中选 2 */
   const talentOffers = ref<TalentTemplate[]>([]);
   function rollTalentOffers() {
-    // 只从机制可用的池抽（2026-09-17：存量目录 54% 纯描述，强制 1 选 1 抽不实干天赋）
     const pool = [...getDrawableCatalog()];
     for (let i = pool.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [pool[i], pool[j]] = [pool[j], pool[i]];
     }
-    talentOffers.value = pool.slice(0, 8);
-    // 重抽后若已选天赋不在新一批里，清空选择让玩家重新挑
-    if (
-      selectedCreationTalent.value &&
-      !talentOffers.value.some((t) => t.name === selectedCreationTalent.value)
-    ) {
-      selectedCreationTalent.value = null;
+
+    // 按品级分桶（F→SSS 逐档保底）
+    const GRADE_ORDER = ['F', 'E', 'D', 'C', 'B', 'A', 'S', 'SS', 'SSS'];
+    const byGrade = new Map<string, TalentTemplate[]>();
+    for (const t of pool) {
+      const list = byGrade.get(t.grade) ?? [];
+      list.push(t);
+      byGrade.set(t.grade, list);
+    }
+
+    const result: TalentTemplate[] = [];
+    const used = new Set<string>();
+    // 逐品级保底 1 张
+    for (const grade of GRADE_ORDER) {
+      const candidates = byGrade.get(grade);
+      if (!candidates || candidates.length === 0) continue;
+      const pick = candidates[Math.floor(Math.random() * candidates.length)];
+      result.push(pick);
+      used.add(pick.name);
+    }
+    // 剩余名额从全池随机补齐
+    const rest = pool.filter((t) => !used.has(t.name));
+    while (result.length < 12 && rest.length > 0) {
+      const idx = Math.floor(Math.random() * rest.length);
+      result.push(rest.splice(idx, 1)[0]);
+    }
+
+    talentOffers.value = result;
+    // 重抽后清空不再有效 selecion
+    for (const name of selectedCreationTalents.value) {
+      if (!talentOffers.value.some((t) => t.name === name)) {
+        selectedCreationTalents.value = selectedCreationTalents.value.filter((n) => n !== name);
+      }
     }
   }
 
@@ -1313,25 +1349,22 @@ export const useCreateStore = defineStore('create', () => {
       // 开局卡组直落（卡面叙事在 buildOpeningPrompt；不再走 item_gen）
       inventory: [...starterItems, ...boughtItems],
       cardAlbum: { owned: deckNames, deck: deckNames, capacity: 60 },
-      // 出身天赋（天赋系统 T-S3）：7 选 1 必选，条目逐字来自 TALENT_CATALOG 模板
-      ...(selectedCreationTalent.value
-        ? (() => {
-            const tpl = getCreationCatalog().find((t) => t.name === selectedCreationTalent.value);
-            if (!tpl) return {};
-            return {
-              talents: {
-                capacity: 3,
-                list: [
-                  {
-                    name: tpl.name,
-                    description: tpl.description,
-                    source: 'creation' as const,
-                    entries: tpl.entries.map((e) => ({ ...e })),
-                  },
-                ],
-              },
-            };
-          })()
+      // 出身天赋（12 抽选 2，2026-09-19）：条目逐字来自 TALENT_CATALOG 模板
+      ...(selectedCreationTalents.value.length > 0
+        ? {
+            talents: {
+              capacity: 3,
+              list: selectedCreationTalents.value
+                .map((name) => getCreationCatalog().find((t) => t.name === name))
+                .filter(Boolean)
+                .map((tpl) => ({
+                  name: tpl!.name,
+                  description: tpl!.description,
+                  source: 'creation' as const,
+                  entries: tpl!.entries.map((e) => ({ ...e })),
+                })),
+            },
+          }
         : {}),
       skills: [],
       statusEffects: [],
@@ -1389,13 +1422,11 @@ export const useCreateStore = defineStore('create', () => {
     const deckCards = [...STARTER_CARDS, ...selectedCards.value];
     if (deckCards.length > 0) {
       lines.push('');
-      lines.push(`${charName}的卡匣里贴身放着这些铭卡，每张都已与她心意相通，交锋时可以打出：`);
+      lines.push(`${charName}的卡匣里贴身放着这些铭卡：`);
       for (const c of deckCards) {
-        const el = c.element ? `，铭着${c.element}行的铭文` : '';
-        const desc = c.description ? `——${c.description}` : '';
-        lines.push(`「${c.name}」，一张${c.cardTier}品质的${c.formEntry}卡${el}${desc}。`);
+        lines.push(`· ${c.name}（${c.formEntry}·${c.cardTier}）`);
       }
-      lines.push('这些卡是她的本命卡组，不是货物，不会出现在交易里。');
+      lines.push('交锋时可以打出。');
     }
 
     // 角色补充信息
@@ -1470,24 +1501,41 @@ export const useCreateStore = defineStore('create', () => {
       }
     }
 
-    // 出身天赋定制
-    if (selectedCreationTalent.value) {
-      const talentFlavor: Record<string, string> = {
-        节俭持家: '你总能把垃圾变成不那么垃圾的东西——这是你从生活中磨出来的本能。',
-        摩托小子: '你只对结构简单的双轮魔动车感兴趣——且颇有手感。',
-        封印亲和: '封印物在你面前总是格外温顺——你甚至觉得它们有点可怜。',
-        斗志昂扬: '你出手永远带着三分先声——不是狂妄，是习惯。',
-        铜筋铁骨: '硬挨一下，不丢人——这是你的信条。',
-        卡牌大师: '启封与出手，一气呵成——你的手指比你的大脑更懂卡。',
-        天才卡师: '你天生就是吃这碗饭的。',
-        '我来!我见!我征服!': '你来了。你见了。接下来，你要征服。',
-        卡牌造物主: '你不是在制卡——你是在创造生命。',
-        主角光环系统: '命运偶尔也会偏心——而你就是那个被偏心的人。',
-        神性火花: '你的灵魂深处有一粒不会熄灭的火——那是天道的余烬。',
-        万物皆药: '在你的手里，万物皆是药——毒草是解药，解药是毒药，全看你怎么用。',
-      };
-      const tf = talentFlavor[selectedCreationTalent.value];
-      if (tf) lines.push(tf);
+    // 出身天赋定制（2026-09-19：最直接语言 + 有数值的技能文本）
+    if (selectedCreationTalents.value.length > 0) {
+      lines.push('');
+      const talentDescs: string[] = [];
+      for (const talentName of selectedCreationTalents.value) {
+        const tpl = getCreationCatalog().find((t) => t.name === talentName);
+        if (!tpl) continue;
+        const parts: string[] = [];
+        for (const e of tpl.entries) {
+          const p = e.params;
+          switch (e.kind) {
+            case '成功率加成': parts.push(`成功率+${p.bonus ?? 0}%`); break;
+            case '品质锁定': parts.push(`品质锁定${p.tier ?? ''}`); break;
+            case '品质突破': parts.push('品质越一级'); break;
+            case '启封加值': parts.push(`启封+${p.amount ?? 0}`); break;
+            case '行动值加成': parts.push(`行动值+${p.amount ?? 0}`); break;
+            case '防御加值': parts.push(`防御+${p.amount ?? 0}`); break;
+            case '体魄': parts.push(`HP上限+${p.percent ?? 0}%`); break;
+            case '威压': parts.push(`敌方属性−${p.percent ?? 0}%`); break;
+            case '暴击': parts.push(`暴击${p.chance ?? 0}%`); break;
+            case '经验倍率': parts.push(`经验倍率提升`); break;
+            case '鉴定': break; // 纯风味不入数值行
+            default: break;
+          }
+        }
+        const suffix = parts.length > 0 ? `（${parts.join('，')}）` : '';
+        talentDescs.push(`【${tpl.name}】${suffix}`);
+      }
+      if (talentDescs.length === 1) {
+        lines.push(`${charName}身负天赋：${talentDescs[0]}。`);
+      } else if (talentDescs.length === 2) {
+        lines.push(`${charName}身负两道天赋：${talentDescs[0]}、${talentDescs[1]}。`);
+      } else {
+        lines.push(`${charName}身负天赋：${talentDescs.join('；')}。`);
+      }
     }
 
     // 性别声明（2026-09-18 裁决）：**开场白明确写出玩家性别** ——
@@ -1816,7 +1864,7 @@ export const useCreateStore = defineStore('create', () => {
     plotEventsPerChapter.value = 0;
     initPlotDefaultsFromSettings();
     showPresetModal.value = false;
-    selectedCreationTalent.value = null;
+    selectedCreationTalents.value = [];
     talentOffers.value = [];
   }
 
@@ -1829,7 +1877,8 @@ export const useCreateStore = defineStore('create', () => {
     // 步骤
     currentStep,
     stepValid,
-    selectedCreationTalent,
+    selectedCreationTalents,
+    toggleCreationTalent,
     nextStep,
     prevStep,
     // 难度

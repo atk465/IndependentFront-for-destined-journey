@@ -45,7 +45,7 @@ const entryLines = (tpl: TalentTemplate): string[] => {
 };
 
 function pick(name: string) {
-  store.selectedCreationTalent = name;
+  store.toggleCreationTalent(name);
 }
 
 onMounted(() => {
@@ -76,9 +76,9 @@ function reroll() {
         :key="t.name"
         type="button"
         class="talent-option"
-        :class="{ selected: store.selectedCreationTalent === t.name }"
+        :class="{ selected: store.selectedCreationTalents.includes(t.name) }"
         role="radio"
-        :aria-checked="store.selectedCreationTalent === t.name"
+        :aria-checked="store.selectedCreationTalents.includes(t.name)"
         :data-grade="t.grade"
         @click="pick(t.name)"
       >
