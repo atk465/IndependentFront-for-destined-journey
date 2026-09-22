@@ -248,6 +248,37 @@ function applyBackground(bg: BackgroundTemplate | null) {
           </div>
         </div>
 
+        <!-- 属性购买（转生点消费通道） -->
+        <div class="purchase-section">
+          <div class="purchase-header">
+            <span class="purchase-title">
+              属性突破
+              <span class="purchase-cost">100 点/次 · 每维最多 +4</span>
+            </span>
+            <span class="purchase-total">
+              已购 {{ store.purchasedTotal }}/{{ store.ATTR_PURCHASE_TOTAL_MAX }}
+            </span>
+          </div>
+          <div class="purchase-attrs">
+            <div v-for="attr in ['力量', '敏捷', '体质', '智力', '精神']" :key="attr" class="purchase-attr">
+              <span class="pa-name">{{ attr }}</span>
+              <button
+                type="button"
+                class="pa-btn"
+                :disabled="store.remainingPoints < 100 || store.purchasedPerAttr(attr) >= 4"
+                @click="store.buyPurchasedPoint(attr)"
+              >+</button>
+              <span class="pa-count">{{ store.purchasedPerAttr(attr) }}</span>
+              <button
+                type="button"
+                class="pa-btn"
+                :disabled="store.purchasedPerAttr(attr) <= 0"
+                @click="store.refundPurchasedPoint(attr)"
+              >−</button>
+            </div>
+          </div>
+        </div>
+
         <!-- ResourceBar 预览 (统一比例尺: 以三项中最大值为 100%) -->
         <div class="preview-section">
           <h3 class="section-label">资源预览</h3>
@@ -615,5 +646,77 @@ function applyBackground(bg: BackgroundTemplate | null) {
   color: var(--theme-text-secondary);
   border: 1px solid var(--theme-card-border);
   line-height: 1.6;
+}
+
+.purchase-section {
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px dashed var(--theme-card-border, #72502d);
+  border-radius: var(--theme-radius-md, 6px);
+}
+.purchase-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.purchase-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--theme-text-primary, #eadcc5);
+}
+.purchase-cost {
+  font-size: 0.7rem;
+  color: var(--theme-text-muted, #967756);
+  margin-left: 4px;
+}
+.purchase-total {
+  font-size: 0.7rem;
+  color: var(--theme-accent, #d2a25f);
+}
+.purchase-attrs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.purchase-attr {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.pa-name {
+  font-size: 0.7rem;
+  color: var(--theme-text-secondary, #c7a77e);
+  min-width: 28px;
+}
+.pa-btn {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--theme-card-border, #72502d);
+  border-radius: 3px;
+  background: var(--theme-card-bg, #211810);
+  color: var(--theme-text-primary, #eadcc5);
+  cursor: pointer;
+  font-size: 0.8rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.pa-btn:hover:not(:disabled) {
+  border-color: var(--theme-primary, #c48c4b);
+  background: var(--theme-primary-bg, rgba(196, 140, 75, 0.15));
+}
+.pa-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+.pa-count {
+  min-width: 14px;
+  text-align: center;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--theme-accent, #d2a25f);
 }
 </style>

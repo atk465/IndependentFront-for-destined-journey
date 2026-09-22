@@ -952,15 +952,15 @@ export type TalentGrade = 'SSS' | 'SS' | 'S' | 'A' | 'B' | 'C' | 'D' | 'E' | 'F'
 
 /** 品级 → 兑换定价乘数（初稿：SSS×4 … E×1；数值总表终审对象） */
 export const GRADE_PRICE_MULTIPLIER: Record<TalentGrade, number> = {
-  SSS: 4,
-  SS: 3,
-  S: 2.5,
-  A: 2,
-  B: 1.5,
-  C: 1.2,
-  D: 1,
+  SSS: 128,
+  SS: 64,
+  S: 32,
+  A: 16,
+  B: 8,
+  C: 4,
+  D: 2,
   E: 1,
-  F: 1,
+  F: 0.5,
 };
 
 /** 命名天赋模板：渠道归属 + 品级 + 骨架条目组合（名字即模板键） */

@@ -95,6 +95,10 @@ export type { CreatePreset } from '@engine/types';
 // ===== 原版常量 (custom_start_index.html) =====
 const MAX_BP = 25;
 const BP_PER_ATTR_MAX = 6;
+/** 属性购买：1 属性点 = 100 转生点；每维可购买上限 4 点（6→10）；总购买上限 20 点 */
+const ATTR_PURCHASE_COST = 100;
+const ATTR_PURCHASE_PER_ATTR_MAX = 4;
+const ATTR_PURCHASE_TOTAL_MAX = 20;
 
 function getTier(level: number): number {
   if (level <= 4) return 1;
@@ -293,6 +297,8 @@ export const useCreateStore = defineStore('create', () => {
   /** 🆕 经验档位（简单/普通模式，2026-08-24）：创建存档时写入 SaveProfile.experienceMode，游戏内可随时切换 */
   const experienceMode = ref<ExperienceMode>('normal');
   const basePoints = ref<Record<string, number>>({ 力量: 0, 敏捷: 0, 体质: 0, 智力: 0, 精神: 0 });
+  /** 属性购买（转生点消费通道）：每维额外购买的点数（转生点 100/点） */
+  const purchasedPoints = ref<Record<string, number>>({ 力量: 0, 敏捷: 0, 体质: 0, 智力: 0, 精神: 0 });
   const attributePoints = ref<Record<string, number>>({
     力量: 0,
     敏捷: 0,
@@ -306,6 +312,13 @@ export const useCreateStore = defineStore('create', () => {
   const tierBonus = computed(() => tier.value - 1);
 
   const usedBP = computed(() => Object.values(basePoints.value).reduce((a, b) => a + b, 0));
+  const purchasedTotal = computed(() =>
+    Object.values(purchasedPoints.value).reduce((a, b) => a + b, 0),
+  );
+  const purchasedAttrCost = computed(() => purchasedTotal.value * 100);
+  function purchasedPerAttr(attr: string): number {
+    return purchasedPoints.value[attr] || 0;
+  }
   const remainingBP = computed(() => MAX_BP - usedBP.value);
 
   function addBasePoint(attr: string) {
@@ -313,6 +326,26 @@ export const useCreateStore = defineStore('create', () => {
       basePoints.value = { ...basePoints.value, [attr]: (basePoints.value[attr] || 0) + 1 };
     }
   }
+  function buyPurchasedPoint(attr: string) {
+    const total = purchasedTotal.value;
+    const perAttr = purchasedPerAttr(attr);
+    if (total >= ATTR_PURCHASE_TOTAL_MAX) return;
+    if (perAttr >= ATTR_PURCHASE_PER_ATTR_MAX) return;
+    if (remainingPoints.value < ATTR_PURCHASE_COST) return;
+    purchasedPoints.value = {
+      ...purchasedPoints.value,
+      [attr]: perAttr + 1,
+    };
+  }
+
+  function refundPurchasedPoint(attr: string) {
+    if (purchasedPerAttr(attr) <= 0) return;
+    purchasedPoints.value = {
+      ...purchasedPoints.value,
+      [attr]: purchasedPerAttr(attr) - 1,
+    };
+  }
+
   function removeBasePoint(attr: string) {
     if ((basePoints.value[attr] || 0) > 0) {
       basePoints.value = { ...basePoints.value, [attr]: (basePoints.value[attr] || 0) - 1 };
@@ -358,7 +391,10 @@ export const useCreateStore = defineStore('create', () => {
     const result: Record<string, number> = {};
     for (const attr of ATTRIBUTE_NAMES) {
       result[attr] =
-        (basePoints.value[attr] || 0) + tierBonus.value + (attributePoints.value[attr] || 0);
+        (basePoints.value[attr] || 0) +
+        tierBonus.value +
+        (attributePoints.value[attr] || 0) +
+        (purchasedPoints.value[attr] || 0);
     }
     return result;
   });
@@ -403,6 +439,7 @@ export const useCreateStore = defineStore('create', () => {
       identityCost.value +
       levelCost.value +
       usedAP.value +
+      purchasedAttrCost.value +
       cardCost.value +
       talentCost.value +
       moneyCost.value +
@@ -1842,6 +1879,7 @@ export const useCreateStore = defineStore('create', () => {
     customStartLocation.value = '';
     level.value = 1;
     basePoints.value = { 力量: 0, 敏捷: 0, 体质: 0, 智力: 0, 精神: 0 };
+    purchasedPoints.value = { 力量: 0, 敏捷: 0, 体质: 0, 智力: 0, 精神: 0 };
     attributePoints.value = { 力量: 0, 敏捷: 0, 体质: 0, 智力: 0, 精神: 0 };
     startingPoints.value = 0;
     money.value = 0;
@@ -1919,6 +1957,15 @@ export const useCreateStore = defineStore('create', () => {
     BP_PER_ATTR_MAX,
     usedBP,
     remainingBP,
+    purchasedPoints,
+    purchasedTotal,
+    purchasedAttrCost,
+    purchasedPerAttr,
+    buyPurchasedPoint,
+    refundPurchasedPoint,
+    ATTR_PURCHASE_COST,
+    ATTR_PURCHASE_PER_ATTR_MAX,
+    ATTR_PURCHASE_TOTAL_MAX,
     maxAP,
     usedAP,
     remainingAP,

@@ -235,7 +235,7 @@ describe('TALENT_CATALOG —— 目录条目过种类规则校验（门禁不被
     expect(talentExchangePrice(getExchangeCatalog()[0])).toBeGreaterThanOrEqual(10);
     const 宗师 = getTalentTemplate('卡牌宗师');
     expect(宗师?.entries).toHaveLength(2);
-    expect(talentExchangePrice(宗师!)).toBe(45); // 基础 15 × SS 3
+    expect(talentExchangePrice(宗师!)).toBe(960); // 基础 15 × SS 64（指数定价 2026-09-19）
   });
 });
 
@@ -249,13 +249,13 @@ describe('v2 扩容 —— 品级 / 生成倾向 / 战技赋予（截图灵感�
     }
   });
 
-  it('品级定价乘数：双条目 C 级 20、单条目 SS 级 30（5 的倍数取整）', () => {
+  it('品级定价乘数：双条目 C 级 60、单条目 SS 级 640（指数定价 2026-09-19）', () => {
     const 犬类 = getTalentTemplate('犬类伙伴');
     expect(犬类?.grade).toBe('C');
-    expect(talentExchangePrice(犬类!)).toBe(20); // 基础 15 × C 1.2 = 18 → 取整 20
+    expect(talentExchangePrice(犬类!)).toBe(60); // 基础 15 × C 4 = 60
     const 欧皇 = getTalentTemplate('欧皇系统');
     expect(欧皇?.grade).toBe('SS');
-    expect(talentExchangePrice(欧皇!)).toBe(30); // 基础 10 × SS 3 = 30
+    expect(talentExchangePrice(欧皇!)).toBe(640); // 基础 10 × SS 64 = 640
   });
 
   it('生成倾向条目：词条加权带关键词与档位', () => {

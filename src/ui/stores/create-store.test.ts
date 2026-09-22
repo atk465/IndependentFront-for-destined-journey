@@ -1140,7 +1140,7 @@ describe('出身天赋抽卡池', () => {
   it('talentCost 按品级公式计价（天才卡师 C 级单条：(10×1.2)→5 取整 = 10 点），未选为 0', () => {
     expect(store.talentCost).toBe(0);
     store.selectedCreationTalents = ['天才卡师'];
-    expect(store.talentCost).toBe(10);
+    expect(store.talentCost).toBe(40);
   });
 });
 
