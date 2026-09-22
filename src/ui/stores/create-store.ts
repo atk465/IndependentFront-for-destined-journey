@@ -95,6 +95,8 @@ export type { CreatePreset } from '@engine/types';
 // ===== 原版常量 (custom_start_index.html) =====
 const MAX_BP = 25;
 const BP_PER_ATTR_MAX = 6;
+/** 起始购卡上限（2026-09-19 转生点经济：含保底 2 张在内最多 6 张） */
+const MAX_STARTING_CARDS = 6;
 /** 属性购买：1 属性点 = 100 转生点；每维可购买上限 4 点（6→10）；总购买上限 20 点 */
 const ATTR_PURCHASE_COST = 100;
 const ATTR_PURCHASE_PER_ATTR_MAX = 4;
@@ -531,16 +533,20 @@ export const useCreateStore = defineStore('create', () => {
   /** 点数足够才可加购（已选中的总可以保留） */
   function canSelectCard(card: CardCatalogItem): boolean {
     if (isCardSelected(card)) return true;
+    if (selectedCards.value.length >= MAX_STARTING_CARDS) return false;
     return remainingPoints.value >= (card.cost || 0);
   }
 
   function toggleCard(card: CardCatalogItem) {
     if (isCardSelected(card)) {
       selectedCards.value = selectedCards.value.filter((c) => c.id !== card.id);
-    } else if (canSelectCard(card)) {
+    } else if (canSelectCard(card) && selectedCards.value.length < MAX_STARTING_CARDS) {
       selectedCards.value = [...selectedCards.value, card];
     }
   }
+
+  /** 购卡已达上限（含保底 2 张；UI 据此禁选） */
+  const cardsAtLimit = computed(() => selectedCards.value.length >= MAX_STARTING_CARDS);
 
   function clearAllSelections() {
     selectedCards.value = [];
@@ -2003,6 +2009,8 @@ export const useCreateStore = defineStore('create', () => {
     isCardSelected,
     canSelectCard,
     toggleCard,
+    cardsAtLimit,
+    MAX_STARTING_CARDS,
     clearAllSelections,
     // 背景（预设目录 → 基础信息步身世旁挂选择器）
     activeBackgroundCategory,
