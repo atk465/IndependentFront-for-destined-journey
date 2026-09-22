@@ -624,7 +624,7 @@ export const useGameStore = defineStore('game', () => {
       {
         op: 'set_variable',
         target: 'worldFlags.commissions',
-        value: next as unknown as Record<string, unknown>,
+        value: detach(next) as unknown as Record<string, unknown>,
       } as StatePatch,
     ]);
     if (!result.success) return { ok: false, reason: result.errors.join('; ') };
@@ -662,10 +662,10 @@ export const useGameStore = defineStore('game', () => {
       {
         op: 'set_variable',
         target: 'worldFlags.commissions',
-        value: {
+        value: detach({
           ...flags,
           active: [...(flags.active ?? []), accepted],
-        } as unknown as Record<string, unknown>,
+        }) as unknown as Record<string, unknown>,
       } as StatePatch,
       {
         op: 'update_quest',
@@ -770,11 +770,11 @@ export const useGameStore = defineStore('game', () => {
         {
           op: 'set_variable',
           target: 'worldFlags.commissions',
-          value: {
+          value: detach({
             ...flags,
             active: abandonActive(flags.active, defName),
             completed,
-          } as unknown as Record<string, unknown>,
+          }) as unknown as Record<string, unknown>,
         } as StatePatch,
       ]);
       if (!result.success) return { ok: false, reason: result.errors.join('; ') };
@@ -825,7 +825,7 @@ export const useGameStore = defineStore('game', () => {
       {
         op: 'set_variable',
         target: 'worldFlags.commissions',
-        value: { ...flags, active: kept } as unknown as Record<string, unknown>,
+        value: detach({ ...flags, active: kept }) as unknown as Record<string, unknown>,
       } as StatePatch,
     ];
     if (penaltyTotal > 0) {
@@ -899,7 +899,7 @@ export const useGameStore = defineStore('game', () => {
       {
         op: 'set_variable',
         target: 'worldFlags.commissions',
-        value: next as unknown as Record<string, unknown>,
+        value: detach(next) as unknown as Record<string, unknown>,
       } as StatePatch,
     ];
     return { patches, next, narrative, playerName: playerChar.name };
@@ -1058,12 +1058,12 @@ export const useGameStore = defineStore('game', () => {
       {
         op: 'set_variable',
         target: 'worldFlags.commissions',
-        value: nextBag as unknown as Record<string, unknown>,
+        value: detach(nextBag) as unknown as Record<string, unknown>,
       } as StatePatch,
       {
         op: 'set_variable',
         target: 'worldFlags.counters',
-        value: countersBag as unknown as Record<string, unknown>,
+        value: detach(countersBag) as unknown as Record<string, unknown>,
       } as StatePatch,
     ];
     const sm = createStateManager(activeSaveId.value);
