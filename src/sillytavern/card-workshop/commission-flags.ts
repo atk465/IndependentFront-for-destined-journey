@@ -309,9 +309,13 @@ export function planArrivalSync(input: ArrivalSyncInput): ArrivalSyncOutcome {
   }
 
   // ── 到访计数（中层变化） ──
+  // 🔴 计数键必须与 def 侧（requireVisit.midTier，七链种子/内容包写中层名）同口径——
+  //    此前这里写 id（`visit::mid_dongjing`）而读取按名（`visit::东境`），亲赴永不推进。
   const midTierChanged = input.midTier !== null && input.midTier.id !== prev.lastVisitMidTier;
   const visitCounterKey_ =
-    midTierChanged && input.midTier !== null ? visitCounterKey(input.midTier.id) : undefined;
+    midTierChanged && input.midTier !== null
+      ? visitCounterKey(input.midTier.name.length > 0 ? input.midTier.name : input.midTier.id)
+      : undefined;
 
   // ── 抵达判定（中层变化 × 危险层 × 给了骰值） ──
   let threat: ArrivalThreat | undefined;

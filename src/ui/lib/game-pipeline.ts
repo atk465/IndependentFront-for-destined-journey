@@ -219,6 +219,7 @@ import { backfillMissingMemories, LAZY_BACKFILL_MAX_PER_RECALL } from '@engine/m
 import { toEpochMinutes, MINUTES_PER_GAME_DAY } from '@engine/time-system';
 // 🆕 重铸（2026-08-24）：单条目重铸的引擎侧类型（RewriteTarget = 要重写的技能/装备/物品三选一）
 import type { RewriteTarget } from '@engine/item-gen-chain';
+import { midTierRefHit } from '@engine/card-workshop/commission';
 import type { CommissionDef } from '@engine/card-workshop/commission';
 
 /** EJS `ui.log` 环形缓冲上限（能力面 §6.2） */
@@ -3714,8 +3715,7 @@ export class GamePipeline {
           if (!finaleTarget) continue;
           const enemyName = session.enemyName ?? '';
           if (!enemyName.includes(finaleTarget) && !finaleTarget.includes(enemyName)) continue;
-          const midTierId = cFlags.currentMidTier?.id;
-          if (cDef.destMidTier && cDef.destMidTier !== midTierId) continue;
+          if (!midTierRefHit(cDef.destMidTier, cFlags.currentMidTier)) continue;
           settlementPatches.push({
             op: 'set_variable',
             target: `worldFlags.commissions.finaleEvidence.${cDef.name}`,

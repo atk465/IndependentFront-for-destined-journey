@@ -128,7 +128,8 @@ export function generateFillerCommissions(input: GenerateFillerInput): Generated
         description: `公会在收${picked.midTier.name}出产的${picked.material}——品质越好的越值钱。`,
         requireMaterial: { name: picked.material, count: need },
         grade,
-        destMidTier: picked.midTier.id,
+        // 中层**名**（展示与 def 侧正典口径；id 是地图内部键，见 midTierRefHit 注）
+        destMidTier: picked.midTier.name,
         deadlineDays: GENERATED_COMMISSION_TTL_DAYS,
         rewards: {
           gc,

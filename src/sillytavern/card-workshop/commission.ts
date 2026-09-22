@@ -115,6 +115,27 @@ export function requiresIssuerDelivery(
   return (def.grade === 'A' || def.grade === 'S') && !!def.issuerMidTier;
 }
 
+/**
+ * 中层引用是否命中当前中层（2026-09-23 真机验收修）。
+ *
+ * 🔴 为什么容忍两种口径：def 侧的 `destMidTier` / `issuerMidTier` / `requireVisit.midTier`
+ *    有三个写入方——七链种子与内容包写**中层名**（「东境」），生成器与委托编写器
+ *    历史上写过**中层 id**（`mid_dongjing`）。名字是展示与作者侧正典（名唯一），
+ *    id 是地图内部键；比较时任一命中即同层，别再让「名 vs id」把终点击破。
+ *    `ref` 缺省 = 该委托不限层（恒命中）。
+ */
+export function midTierRefHit(
+  ref: string | undefined,
+  snapshot: { id?: string; name?: string } | undefined,
+): boolean {
+  if (ref === undefined || ref.length === 0) return true;
+  if (!snapshot) return false;
+  return (
+    (snapshot.id !== undefined && snapshot.id === ref) ||
+    (snapshot.name !== undefined && snapshot.name === ref)
+  );
+}
+
 // ═══════════════════════════════════════════════════════════
 // 事件委托（随机事件 × 委托板融合，2026-09-16）
 // ═══════════════════════════════════════════════════════════

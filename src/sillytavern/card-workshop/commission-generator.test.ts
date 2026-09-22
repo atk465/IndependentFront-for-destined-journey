@@ -57,7 +57,8 @@ describe('generateFillerCommissions', () => {
       expect(gc.def.requireMaterial).toBeDefined();
       expect(gc.def.requireCard).toBeUndefined();
       expect(gc.def.requireVisit).toBeUndefined();
-      expect(['mt-north', 'mt-south']).toContain(gc.def.destMidTier);
+      // destMidTier 写中层**名**（展示/def 侧正典口径，2026-09-23）
+      expect(['北境雪原', '南境火山']).toContain(gc.def.destMidTier);
       expect(gc.def.deadlineDays).toBe(GENERATED_COMMISSION_TTL_DAYS);
       // 生成委托不写发布地（面板交付豁免）
       expect(gc.def.issuerMidTier).toBeUndefined();

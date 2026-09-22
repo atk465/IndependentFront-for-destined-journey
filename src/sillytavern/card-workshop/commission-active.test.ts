@@ -174,7 +174,7 @@ describe('交付地分流（A/S 级回发布中层）', () => {
     expect(requiresIssuerDelivery({ grade: 'S' })).toBe(false);
   });
 
-  it('issuerDeliveryBlock：人不在发布中层拦下，D 级豁免', () => {
+  it('issuerDeliveryBlock：人不在发布中层拦下，D 级豁免；名字或 id 任一命中即放行', () => {
     const sDef: CommissionDef = {
       name: '远征',
       requireMaterial: { name: '雪莲', count: 3 },
@@ -182,15 +182,18 @@ describe('交付地分流（A/S 级回发布中层）', () => {
       issuerMidTier: 'mt-capital',
       rewards: {},
     };
-    expect(issuerDeliveryBlock(sDef, 'mt-north')).toContain('发布地');
-    expect(issuerDeliveryBlock(sDef, 'mt-capital')).toBeUndefined();
+    expect(issuerDeliveryBlock(sDef, { id: 'mt-north', name: '北境雪原' })).toContain('发布地');
+    expect(issuerDeliveryBlock(sDef, { id: 'mt-capital', name: '帝都' })).toBeUndefined();
+    // 发布地写中层名（七链种子的口径）也能被 id 快照或名字快照命中
+    const namedDef: CommissionDef = { ...sDef, issuerMidTier: '帝都' };
+    expect(issuerDeliveryBlock(namedDef, { id: 'mt-capital', name: '帝都' })).toBeUndefined();
     const dDef: CommissionDef = {
       name: '小事',
       requireMaterial: { name: '铁矿', count: 1 },
       issuerMidTier: 'mt-capital',
       rewards: {},
     };
-    expect(issuerDeliveryBlock(dDef, 'mt-north')).toBeUndefined();
+    expect(issuerDeliveryBlock(dDef, { id: 'mt-north', name: '北境雪原' })).toBeUndefined();
   });
 });
 
@@ -220,7 +223,7 @@ describe('planMaterialDelivery', () => {
       def,
       inventory: [{ name: '雪莲', quantity: 3 }],
       playerName: '玩家',
-      currentMidTierId: 'mt-north',
+      currentMidTier: { id: 'mt-north', name: '北境雪原' },
     });
     expect(plan.ok).toBe(false);
     expect(plan.reason).toContain('发布地');
@@ -231,7 +234,7 @@ describe('planMaterialDelivery', () => {
       def,
       inventory: [{ name: '雪莲', quantity: 3 }],
       playerName: '玩家',
-      currentMidTierId: 'mt-capital',
+      currentMidTier: { id: 'mt-capital', name: '帝都' },
     });
     expect(plan.ok).toBe(true);
     expect(plan.patches[0]).toMatchObject({

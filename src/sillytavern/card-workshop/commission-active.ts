@@ -19,7 +19,7 @@
 
 import type { StatePatch, CardItem } from '../types';
 import type { CommissionDef, MaterialRequirement, VisitRequirement } from './commission';
-import { rewardPatches, requiresIssuerDelivery } from './commission';
+import { midTierRefHit, rewardPatches, requiresIssuerDelivery } from './commission';
 import type { Counters } from './daily-ledger';
 import { counterOf } from './daily-ledger';
 
@@ -236,13 +236,16 @@ export interface CommissionDeliveryPlan {
   patches: StatePatch[];
 }
 
-/** 交付前置检查：A/S 级有发布中层的委托，必须人在发布中层（「回来」是远征的收尾拍） */
+/**
+ * 交付前置检查：A/S 级有发布中层的委托，必须人在发布中层（「回来」是远征的收尾拍）。
+ * 发布地引用与当前中层按名字或 id 任一命中即同层（`midTierRefHit`，口径双容忍）。
+ */
 export function issuerDeliveryBlock(
   def: CommissionDef,
-  currentMidTierId: string | undefined,
+  currentMidTier: { id?: string; name?: string } | undefined,
 ): string | undefined {
   if (!requiresIssuerDelivery(def)) return undefined;
-  if (currentMidTierId === def.issuerMidTier) return undefined;
+  if (midTierRefHit(def.issuerMidTier, currentMidTier)) return undefined;
   return `「${def.name}」是${def.grade}级委托，要回发布地交差`;
 }
 
@@ -255,7 +258,7 @@ export function planMaterialDelivery(input: {
   def: CommissionDef;
   inventory: readonly { name: string; quantity: number }[] | undefined;
   playerName: string;
-  currentMidTierId?: string;
+  currentMidTier?: { id?: string; name?: string };
   rewardCard?: CardItem;
 }): CommissionDeliveryPlan {
   const req = input.def.requireMaterial;
@@ -270,7 +273,7 @@ export function planMaterialDelivery(input: {
       patches: [],
     };
   }
-  const block = issuerDeliveryBlock(input.def, input.currentMidTierId);
+  const block = issuerDeliveryBlock(input.def, input.currentMidTier);
   if (block) return { ok: false, reason: block, patches: [] };
   const patches: StatePatch[] = [
     {
@@ -291,7 +294,7 @@ export function planVisitDelivery(input: {
   active: ActiveCommission | undefined;
   counters: Counters | undefined;
   playerName: string;
-  currentMidTierId?: string;
+  currentMidTier?: { id?: string; name?: string };
 }): CommissionDeliveryPlan {
   const req = input.def.requireVisit;
   if (!req) {
@@ -312,7 +315,7 @@ export function planVisitDelivery(input: {
       patches: [],
     };
   }
-  const block = issuerDeliveryBlock(input.def, input.currentMidTierId);
+  const block = issuerDeliveryBlock(input.def, input.currentMidTier);
   if (block) return { ok: false, reason: block, patches: [] };
   return { ok: true, patches: rewardPatches(input.def, input.playerName) };
 }

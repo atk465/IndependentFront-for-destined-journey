@@ -94,7 +94,7 @@ describe('planArrivalSync：补足制（决议 #5）', () => {
       d20: 20, // > DC16：安全通过
     });
     expect(out.topUpMinutes).toBe(0);
-    expect(out.visitCounterKey).toBe(visitCounterKey('mt-north'));
+    expect(out.visitCounterKey).toBe(visitCounterKey('北境雪原'));
     expect(out.threat).toBeUndefined();
     expect(out.flags.lastMoveDay).toBe(50);
 
@@ -120,7 +120,8 @@ describe('planArrivalSync：到访计数（决议 #3）', () => {
       routeDays: 1,
       midTier: { id: 'mt-north', name: '北境雪原' },
     });
-    expect(moved.visitCounterKey).toBe('到访.mt-north');
+    // 计数键按中层名（2026-09-23 口径统一，见 midTierRefHit 注）
+    expect(moved.visitCounterKey).toBe('到访.北境雪原');
     expect(moved.flags.lastVisitMidTier).toBe('mt-north');
 
     const same = planArrivalSync({

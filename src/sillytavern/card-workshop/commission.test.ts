@@ -8,6 +8,7 @@ import {
   matchingCommissions,
   buildDeliveryPatches,
   isDeliverableCard,
+  midTierRefHit,
   type CommissionDef,
   planCommissionDelivery,
 } from './commission';
@@ -56,6 +57,21 @@ describe('coerceCommissions（容错解析）', () => {
       { name: '火晶', quantity: 1 },
       { name: '星核', quantity: 3 },
     ]);
+  });
+});
+
+describe('midTierRefHit（def 中层引用 vs 当前中层，名字/id 双口径）', () => {
+  const snapshot = { id: 'mid_dongjing', name: '东境' };
+  it('任一口径命中即同层', () => {
+    expect(midTierRefHit('东境', snapshot)).toBe(true); // 七链种子/内容包口径
+    expect(midTierRefHit('mid_dongjing', snapshot)).toBe(true); // 历史生成器/编写器口径
+    expect(midTierRefHit('西境', snapshot)).toBe(false);
+  });
+  it('ref 缺省 = 不限层（恒命中）；无快照时写了引用即不命中', () => {
+    expect(midTierRefHit(undefined, snapshot)).toBe(true);
+    expect(midTierRefHit('', snapshot)).toBe(true);
+    expect(midTierRefHit('东境', undefined)).toBe(false);
+    expect(midTierRefHit(undefined, undefined)).toBe(true);
   });
 });
 

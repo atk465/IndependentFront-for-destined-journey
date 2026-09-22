@@ -724,7 +724,7 @@ function removeCommission(item: { def: { name: string }; isSeed: boolean }) {
         <label
           >目的地中层<select v-model="kDest">
             <option value="">不限 / 手填</option>
-            <option v-for="m in midTierOptions" :key="m.id" :value="m.id">
+            <option v-for="m in midTierOptions" :key="m.id" :value="m.name">
               {{ m.name }}（{{ m.id }}）
             </option>
           </select></label
@@ -732,7 +732,7 @@ function removeCommission(item: { def: { name: string }; isSeed: boolean }) {
         <label
           >交差地（A/S 级）<select v-model="kIssuer">
             <option value="">面板交付</option>
-            <option v-for="m in midTierOptions" :key="m.id" :value="m.id">
+            <option v-for="m in midTierOptions" :key="m.id" :value="m.name">
               {{ m.name }}（{{ m.id }}）
             </option>
           </select></label
@@ -780,7 +780,7 @@ function removeCommission(item: { def: { name: string }; isSeed: boolean }) {
           <label
             >目的地中层<select v-model="kVisitMidTier">
               <option value="" disabled>选择中层</option>
-              <option v-for="m in midTierOptions" :key="m.id" :value="m.id">
+              <option v-for="m in midTierOptions" :key="m.id" :value="m.name">
                 {{ m.name }}（{{ m.id }}）
               </option>
             </select></label

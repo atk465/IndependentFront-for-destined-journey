@@ -66,6 +66,11 @@ const message = computed(() => {
       ? `内容加载失败：${content.lastFetchError}`
       : '内容加载失败，部分默认配置可能缺失';
   }
+  // pack 态：与「卸载内容包」按钮配套，别再回落到 placeholder 文案
+  if (st === 'pack') {
+    const ver = content.activePackVersion;
+    return ver ? `内容包已安装（v${ver}）` : '内容包已安装';
+  }
   // placeholder
   if (detectedLegacyContent.value) {
     return '检测到本地真实内容，导入内容包以恢复完整默认与后续更新';

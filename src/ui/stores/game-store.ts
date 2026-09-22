@@ -177,7 +177,7 @@ import {
 import { coerceTrueNames } from '@engine/card-workshop/true-name';
 import { materialNameOf } from '@engine/card-workshop/card-dismantle';
 import type { TalentEntry, TalentEntryKind } from '@engine/card-workshop/talent-entry';
-import { planCommissionDelivery } from '@engine/card-workshop/commission';
+import { midTierRefHit, planCommissionDelivery } from '@engine/card-workshop/commission';
 import { getCommissionDefs } from '@engine/commission-runtime';
 import { isEventCommissionActive } from '@engine/card-workshop/event-commission';
 import type { CommissionDef } from '@engine/card-workshop/commission';
@@ -724,7 +724,7 @@ export const useGameStore = defineStore('game', () => {
     const def = allCommissionDefs().find((d) => d.name === defName);
     if (!def) return { ok: false, reason: `委托板上没有名为【${defName}】的委托` };
     const flags = commissionsFlags();
-    const currentMidTierId = flags.currentMidTier?.id;
+    const currentMidTier = flags.currentMidTier;
 
     if (def.requireMaterial) {
       const rewardCard =
@@ -735,7 +735,7 @@ export const useGameStore = defineStore('game', () => {
         def,
         inventory: playerChar.inventory,
         playerName: playerChar.name,
-        currentMidTierId,
+        currentMidTier,
         rewardCard,
       });
       if (!plan.ok) return { ok: false, reason: plan.reason };
@@ -758,7 +758,7 @@ export const useGameStore = defineStore('game', () => {
         active: activeOf(flags.active, defName),
         counters: counters(),
         playerName: playerChar.name,
-        currentMidTierId,
+        currentMidTier,
       });
       if (!plan.ok) return { ok: false, reason: plan.reason };
       // 交付成功 = 完成：从进行中摘除并记档（链解锁判据）+ 任务收尾
@@ -929,8 +929,7 @@ export const useGameStore = defineStore('game', () => {
         def.finale.type === '谜题' &&
         !!def.finale.target &&
         firedEvents[def.finale.target] !== undefined &&
-        flags.currentMidTier?.id !== undefined &&
-        (def.destMidTier === undefined || def.destMidTier === flags.currentMidTier.id);
+        midTierRefHit(def.destMidTier, flags.currentMidTier);
       if (!evidenceHit && !riddleHit) continue;
 
       const { patches, next: nextFlags, narrative } = await completeFinaleCommission(def, next);
@@ -961,12 +960,12 @@ export const useGameStore = defineStore('game', () => {
   async function tryCompleteCraftFinale(productName: string): Promise<string | null> {
     if (!activeSaveId.value) return null;
     const flags = commissionsFlags();
-    const midTierId = flags.currentMidTier?.id;
-    if (!midTierId) return null;
+    const midTierSnapshot = flags.currentMidTier;
+    if (!midTierSnapshot) return null;
     for (const active of flags.active ?? []) {
       const def = allCommissionDefs().find((d) => d.name === active.defName);
       if (def?.finale?.type !== '场景制卡') continue;
-      if (def.destMidTier && def.destMidTier !== midTierId) continue;
+      if (!midTierRefHit(def.destMidTier, midTierSnapshot)) continue;
       const target = def.finale.target ?? def.rewards.card?.name;
       if (!target || productName !== target) continue;
       const { patches, narrative } = await completeFinaleCommission(def, flags);
