@@ -22,7 +22,11 @@
  */
 
 import type { CommissionDef } from './card-workshop/commission';
-import { TALENT_ENTRY_POOL, type TalentEntry } from './card-workshop/talent-entry';
+import {
+  TALENT_ENTRY_POOL,
+  getCustomTalents,
+  type TalentEntry,
+} from './card-workshop/talent-entry';
 import type {
   AgentContext,
   AgentConfig,
@@ -698,6 +702,8 @@ function renderTalentEntryLine(e: TalentEntry): string {
       return `行动值+${p.amount ?? 0}`;
     case '防御加值':
       return `防御+${p.amount ?? 0}`;
+    case '配方解锁':
+      return `已解锁配方（${p.recipe ?? '未具名'}）`;
     default:
       return e.kind;
   }
@@ -747,6 +753,30 @@ function renderTalentsBlock(
     '写路径为 update_character 的 talents 字段（整列表替换，含玩家已有天赋）。',
     '</talents>',
   );
+  return lines.join('\n');
+}
+
+/**
+ * 自定义天赋词表（2026-09-23，天赋制作器 × 天赋词条目组）。
+ *
+ * 天赋制作器（开发者模式）登记的天赋是**运行时数据**，进不了静态世界书——
+ * 而正文 AI 在叙事里撞上这些名字时同样需要口径。这里逐条渲染
+ * 「名字（品级）——描述（条目摘要）」，无自定义时返回空串（零 token）。
+ * 与 {{TALENT}} 主块同门出入：战斗静默、随块注入。
+ */
+function renderCustomTalentWords(): string {
+  const customs = getCustomTalents();
+  if (customs.length === 0) return '';
+  const lines: string[] = [
+    '<天赋词·自定义>',
+    '天赋制作器登记的自定义天赋（叙事中出现这些名字时，按下述口径演绎；它们也可能出现在抽卡或授予中）：',
+  ];
+  for (const t of customs) {
+    const entries = t.entries.map(renderTalentEntryLine).join('，');
+    const desc = t.description ? `——${t.description.replace(/\s+/g, ' ')}` : '';
+    lines.push(`·【${t.name}】（${t.grade}）${desc}${entries ? `（${entries}）` : ''}`);
+  }
+  lines.push('</天赋词·自定义>');
   return lines.join('\n');
 }
 
@@ -1070,8 +1100,10 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
   TALENT: (ctx, _config, _params) => {
     if (ctx.combatActive === true) return '';
     const talents = ctx.talents;
-    if (!talents || !Array.isArray(talents.list) || talents.list.length === 0) return '';
-    return renderTalentsBlock(talents);
+    const words = renderCustomTalentWords();
+    const hasList = talents && Array.isArray(talents.list) && talents.list.length > 0;
+    if (!hasList) return words;
+    return renderTalentsBlock(talents) + (words ? `\n${words}` : '');
   },
 
   /**

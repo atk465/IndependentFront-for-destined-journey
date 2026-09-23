@@ -1532,7 +1532,7 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'SSS' as TalentGrade,
     source: 'story',
     description:
-      '你制作的所有女性伙伴卡将自带天生领域，效果各不相同，每个都拥有强大的buff和debuff。领域内，伙伴卡的全属性提升50%，所有敌方单位的全属性降低50%，并且始终携带【臣服】等降低战斗欲望的词条。',
+      '你制作的所有女性伙伴卡将自带天生领域，效果各不相同，每个都自带一组增益与削弱效果。领域内，伙伴卡的全属性提升50%，所有敌方单位的全属性降低50%，并且始终携带【臣服】等降低战斗欲望的词条。',
     entries: [
       e({ kind: '威压', channel: 'universal', params: { percent: 30 } }),
       e({ kind: '词条加权', channel: 'story', params: { keywords: ['领域', '臣服'], weight: 2 } }),
@@ -1605,7 +1605,7 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'SSS' as TalentGrade,
     source: 'story',
     description:
-      '你制作的卡牌会转化为高傲的【龙娘/龙男】系列生物，继承龙族的强大元素亲和与肉体力量，但性格极度自负，偶尔会无视你的指令。',
+      '你制作的卡牌会转化为高傲的【龙娘/龙男】系列生物，继承龙族的元素亲和与肉体力量，但性格极度自负，偶尔会无视你的指令。',
     entries: [
       e({ kind: '形态转化', channel: 'story', params: { series: '龙娘' } }),
       e({
@@ -2041,7 +2041,7 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'SS' as TalentGrade,
     source: 'universal',
     description:
-      '你天生拥有一把跟自己同步成长，极其强大的【本名剑】装备卡，你不能拿装备其他武器类装备卡，但你在制作剑类装备卡时触发良性进化概率为百分之百。',
+      '你天生拥有一把跟自己同步成长的【本名剑】装备卡，威力随成长水涨船高，你不能拿装备其他武器类装备卡，但你在制作剑类装备卡时触发良性进化概率为百分之百。',
     // 2026-09-18 SS 收尾：本名武器管道（soul-weapon.ts，武器=剑）——制卡台
     // 「唤醒本名武器」动作按等级生成/升档绑定卡；「不能装备其他武器」与
     // 「制剑必良性进化」分别记 backlog 与品质突破（见下方条目）。
@@ -2117,7 +2117,7 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'SS' as TalentGrade,
     source: 'universal',
     description:
-      '你执着于创造完美的幼女。你可以将大量型伙伴与【畸变】类素材进行融合献祭，通过残酷的淘汰与缝合，最终制造出一张拥有强大能力、外表天真可爱、内在绝对服从的强大幼女怪物伙伴。',
+      '你执着于创造完美的幼女。你可以将大量型伙伴与【畸变】类素材进行融合献祭，通过残酷的淘汰与缝合，最终制造出一张能力出众、外表天真可爱、内在绝对服从的幼女怪物伙伴。',
     entries: [{ kind: '配方解锁', channel: 'universal', params: { recipe: '完美人形' } }],
   },
   {
@@ -2143,7 +2143,7 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'SS' as TalentGrade,
     source: 'universal',
     description:
-      '你制作的卡牌是活体寄生卵。你可以将这些"卡牌"植入生物体内，它们会汲取宿主的生命力成长。成熟后，宿主会被瞬间改造，破体而出一个完全忠于你，并且吸收母体和寄生卡牌所有特性的强大生物兵器伙伴卡。被植入者等阶越高，兵器越强。',
+      '你制作的卡牌是活体寄生卵。你可以将这些"卡牌"植入生物体内，它们会汲取宿主的生命力成长。成熟后，宿主会被瞬间改造，破体而出一个完全忠于你，并且吸收母体和寄生卡牌所有特性的生物兵器伙伴卡。被植入者等阶越高，兵器越强。',
     entries: [{ kind: '配方解锁', channel: 'universal', params: { recipe: '寄生卵兵' } }],
   },
   {
@@ -2161,7 +2161,7 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     grade: 'SS' as TalentGrade,
     source: 'universal',
     description:
-      '卡牌的强度不再取决于材料，而取决于你的"画技"。你亲手绘制的卡面越精美、越富神韵，卡牌的最终能力就越强大。你可以随时修改卡面，从而调整卡牌的技能。',
+      '卡牌的强度不再取决于材料，而取决于你的"画技"。你亲手绘制的卡面越精美、越富神韵，卡牌的最终能力就越强。你可以随时修改卡面，从而调整卡牌的技能。',
     // 2026-09-17：复用「突变巫师」的**改造**通道（planReshape）——「随时改卡面调整技能」
     // 在引擎里就是改写卡的形态/系列。制卡台「形态改造」区对持此条目的玩家开放。
     entries: [{ kind: '改造', channel: 'universal', params: {} }],
