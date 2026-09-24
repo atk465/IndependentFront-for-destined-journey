@@ -2010,6 +2010,8 @@ export const useGameStore = defineStore('game', () => {
     narrative?: string;
     /** 名字来源（2026-09-23）：ai=AI 起名生效；fallback=兜底名（意图派生或主素材名） */
     namedBy?: 'ai' | 'fallback';
+    /** namedBy=fallback 时的原因（端点不可用 / 调用报错 / 模型没按格式），供面板显示 */
+    namingNote?: string;
   }> {
     const playerChar = player.value;
     if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
@@ -2048,6 +2050,7 @@ export const useGameStore = defineStore('game', () => {
     const materials = [input.mainName, ...input.subNames].filter(Boolean);
     let productName = plan.product.name;
     let namedBy: 'ai' | 'fallback' = 'fallback';
+    let namingNote: string | undefined;
     let narrative = '';
     if (craftNarrateImpl) {
       try {
@@ -2068,13 +2071,17 @@ export const useGameStore = defineStore('game', () => {
         if (said.name) {
           productName = said.name;
           namedBy = 'ai';
+        } else {
+          namingNote = '模型没有按 <name> 格式给出名字';
         }
         narrative = said.narrative;
       } catch (err) {
+        namingNote = err instanceof Error ? err.message : String(err);
         console.warn('[game-store] 制卡叙事失败（用兜底文案）:', err);
         narrative = fallbackCraftNarration(plan, materials);
       }
     } else {
+      namingNote = '游戏管线还没就绪';
       narrative = fallbackCraftNarration(plan, materials);
     }
 
@@ -2179,6 +2186,7 @@ export const useGameStore = defineStore('game', () => {
       audit: plan.audit,
       narrative: fullNarrative,
       namedBy,
+      namingNote,
     };
   }
 

@@ -568,7 +568,9 @@ async function doCraftCard() {
   }
   craftMsg.value =
     `【${r.productName}】${r.tier}／${r.rating}（造价 ${r.cost} GC，经验 +${r.exp}）` +
-    (r.namedBy === 'fallback' && craftIntent.value.trim() ? '（AI 命名未生效，暂用此名）' : '');
+    (r.namedBy === 'fallback' && craftIntent.value.trim()
+      ? `（AI 命名未生效${r.namingNote ? `：${r.namingNote}` : ''}，暂用此名）`
+      : '');
   craftMain.value = '';
   craftSubA.value = '';
   craftSubB.value = '';

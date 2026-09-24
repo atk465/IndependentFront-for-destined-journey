@@ -2404,8 +2404,13 @@ export class GamePipeline {
     crafterName?: string;
     talentNotes?: string[];
   }): Promise<{ name?: string; narrative: string }> {
-    const endpoint = this.getEndpointForAgent(CARD_CRAFT_NARRATE_AGENT);
-    if (!endpoint) throw new Error('制卡叙事未解析到 API 池');
+    // 🔴 端点锚定正文（2026-09-25 真机）：card_craft_narrate 不在内容包默认层 12 agent
+    //    名单里、用户也没绑过 → getEndpointForAgent 落到「API 池第一个」——那未必是
+    //    正文正在用且可用的那个池（正文能跑、命名挂死的正是这个错位）。叙事链没有
+    //    自己的模型偏好可言，锚到 story 的解析结果；story 也没有再回落默认。
+    const endpoint =
+      this.getEndpointForAgent(CARD_CRAFT_NARRATE_AGENT) ?? this.getEndpointForAgent('story');
+    if (!endpoint) throw new Error('制卡叙事未解析到 API 池（正文端点也不可用）');
     return runCardCraftNarration(
       { ...req, endpoint },
       { clientFactory: (agentId, ep, saveId) => this.getClientFactory()(agentId, ep, saveId) },
@@ -2422,8 +2427,10 @@ export class GamePipeline {
     cardName: string;
     midTierName: string;
   }): Promise<{ narrative: string }> {
-    const endpoint = this.getEndpointForAgent(COMMISSION_NARRATE_AGENT);
-    if (!endpoint) throw new Error('终点叙事未解析到 API 池');
+    // 端点锚定正文（同 narrateCardCraft：不在包默认层的叙事 agent 别赌「池第一个」）
+    const endpoint =
+      this.getEndpointForAgent(COMMISSION_NARRATE_AGENT) ?? this.getEndpointForAgent('story');
+    if (!endpoint) throw new Error('终点叙事未解析到 API 池（正文端点也不可用）');
     return runCommissionNarration(
       { ...req, endpoint },
       { clientFactory: (agentId, ep, saveId) => this.getClientFactory()(agentId, ep, saveId) },
