@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia';
+import { getContentRegistry } from './content-store';
 import { ref, computed } from 'vue';
 import type {
   SaveSlot,
@@ -74,7 +75,7 @@ import { coerceSealedTalents, filterSealedTalents } from '@engine/card-workshop/
 import { isRerollFace, rollOnTable } from '@engine/card-workshop/fortune-dice';
 import { DAILY_BUFF_CRAFT_LUCK } from '@engine/card-workshop/fortune-dice';
 import type { FortuneDiceTable } from '@engine/card-workshop/fortune-dice';
-import { planRarityUpgrade } from '@engine/card-workshop/material';
+import { planRarityUpgrade, registerMaterialElements } from '@engine/card-workshop/material';
 import { planUnequalExchange } from '@engine/card-workshop/unequal-exchange';
 import { floorRarityForLevel, planMaterialGacha } from '@engine/card-workshop/material-gacha';
 import { addSpirit, coerceSpirits } from '@engine/card-workshop/behind-spirits';
@@ -165,6 +166,7 @@ import {
 } from '@engine/card-workshop/talent-entry';
 import type { TalentTemplate } from '@engine/card-workshop/talent-entry';
 import type { CardCatalogItem } from '@engine/start-catalog-mechanics';
+import { parseCatalogData } from '@engine/start-catalog-mechanics';
 import {
   findSoulWeapon,
   planSoulWeapon,
@@ -278,7 +280,7 @@ export type CraftNarrateImpl = (req: {
   intent: string;
   crafterName?: string;
   talentNotes?: string[];
-}) => Promise<{ name?: string; narrative: string }>;
+}) => Promise<{ name?: string; description?: string; narrative: string }>;
 
 let craftNarrateImpl: CraftNarrateImpl | null = null;
 
@@ -1881,6 +1883,9 @@ export const useGameStore = defineStore('game', () => {
     loadCustomTalents();
     loadCustomCards();
     loadCustomCommissionsAndEvents();
+    // 素材元素档案（2026-09-25）：内容包 catalog.materialElements → material.ts 注册表。
+    // 采集素材名大多不含元素字样，按名猜会让词条成片为空；档案由内容仓正典给定。
+    registerMaterialElements(parseCatalogData(getContentRegistry().catalog).materialElements);
     // 会话稿盖回（见 sessionCustomTalents 的说明）：读档按存档重建注册表后，
     // 把"这次会话在编辑器里写的"重新注册上去，否则先写内容再开档会白写。
     for (const t of sessionCustomTalents.values()) registerCustomTalent(t);
@@ -2052,6 +2057,8 @@ export const useGameStore = defineStore('game', () => {
     let namedBy: 'ai' | 'fallback' = 'fallback';
     let namingNote: string | undefined;
     let narrative = '';
+    // 卡面描述：AI 写的 desc 优先；拿不到保留玩家意图原文（buildCardItem 已把 intent 存进 description）
+    let aiDescription: string | undefined;
     if (craftNarrateImpl) {
       try {
         const said = await craftNarrateImpl({
@@ -2074,6 +2081,7 @@ export const useGameStore = defineStore('game', () => {
         } else {
           namingNote = '模型没有按 <name> 格式给出名字';
         }
+        aiDescription = said.description;
         narrative = said.narrative;
       } catch (err) {
         namingNote = err instanceof Error ? err.message : String(err);
@@ -2086,7 +2094,11 @@ export const useGameStore = defineStore('game', () => {
     }
 
     // ③ 一次成型落库：素材消耗 + 产物 + 卡册 + 造价 + 经验（全部 Code 算）
-    const card: CardItem = { ...plan.product, name: productName };
+    const card: CardItem = {
+      ...plan.product,
+      name: productName,
+      ...(aiDescription ? { description: aiDescription } : {}),
+    };
     const album = toPlainCardAlbum(playerChar.cardAlbum ?? { owned: [], deck: [], capacity: 60 });
     const patches: StatePatch[] = [
       ...plan.consumed.map((name) => ({

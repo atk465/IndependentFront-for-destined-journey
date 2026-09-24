@@ -217,6 +217,12 @@ export interface CatalogData {
    * 社会里不属男性）。缺省空 = 无性别限定，旧包零迁移。
    */
   femaleOnlyIdentities: string[];
+  /**
+   * 素材元素档案（2026-09-25）：素材名 → 九元素标签。
+   * 名字关键词推导太稀（世界树嫩芽/精灵花…名字不含元素字），词条会成片为空；
+   * 档案由内容仓正典给定，运行时注册进 material.ts，未登记的名字回落推导。
+   */
+  materialElements: Record<string, string[]>;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -272,6 +278,7 @@ export const EMPTY_CATALOG: CatalogData = Object.freeze({
   identityCosts: {},
   startLocations: [],
   femaleOnlyIdentities: [],
+  materialElements: {},
 }) as CatalogData;
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -283,6 +290,18 @@ function arrayFace<T>(raw: unknown, key: string): T[] {
   if (!isRecord(raw)) return [];
   const v = raw[key];
   return Array.isArray(v) ? (v as T[]) : [];
+}
+
+/** 取一个「名字 → 字符串数组」面；非 Record 退化空对象（不抛） */
+function recordStringArrayFace(raw: unknown, key: string): Record<string, string[]> {
+  if (!isRecord(raw)) return {};
+  const v = raw[key];
+  if (!isRecord(v)) return {};
+  const out: Record<string, string[]> = {};
+  for (const [k, arr] of Object.entries(v)) {
+    if (Array.isArray(arr)) out[k] = arr.filter((x): x is string => typeof x === 'string');
+  }
+  return out;
 }
 
 /**
@@ -321,6 +340,7 @@ export function parseCatalogData(raw: unknown): CatalogData {
     identityCosts: costFace(raw, 'identityCosts'),
     startLocations: arrayFace<CascaderOption>(raw, 'startLocations'),
     femaleOnlyIdentities: arrayFace<string>(raw, 'femaleOnlyIdentities'),
+    materialElements: recordStringArrayFace(raw, 'materialElements'),
   };
 }
 

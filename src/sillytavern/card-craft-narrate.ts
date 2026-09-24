@@ -56,6 +56,8 @@ export interface CardCraftNarrateRequest extends CardCraftNarrateContent {
 export interface CardCraftNarration {
   /** AI 起的卡名（失败时 undefined，调用方用临时名） */
   name?: string;
+  /** AI 写的卡面描述（2026-09-25；失败时 undefined，调用方保留玩家意图原文） */
+  description?: string;
   /** 过程叙事 */
   narrative: string;
 }
@@ -83,8 +85,9 @@ export function buildCraftNarrateMessages(req: CardCraftNarrateContent): Array<{
     '2. 评级若是「失败」或「大失败」，叙事必须是**没做成**的样子（走岔了、火候过了、',
     '   材料废了），但不要写成灾难；失败品也在玩家手里。',
     '3. 必须顺着「制卡师想要的样子」来写——那是玩家亲口说的，是这次制卡的心气所在。',
-    '4. 输出格式严格如下两行开头，不要多余的标题或 JSON：',
+    '4. 输出格式严格如下三行开头，不要多余的标题或 JSON：',
     '   <name>卡名（2~6 字，有铭刻纪元的风味，不要带引号）</name>',
+    '   <desc>卡面描述（40~80 字，第三人称，写这张卡的样子、手感与来路；不写数值）</desc>',
     '   <narrative>过程叙事，200~350 字，第三人称，聚焦制作者的手与心</narrative>',
     '5. 用中文。',
   ].join('\n');
@@ -117,20 +120,26 @@ export function buildCraftNarrateMessages(req: CardCraftNarrateContent): Array<{
   ];
 }
 
-/** 从 AI 输出里解析卡名与叙事（纯函数；解析不出名字就只取叙事） */
+/** 从 AI 输出里解析卡名/卡面描述/叙事（纯函数；解析不出名字就只取叙事） */
 export function parseCraftNarration(raw: string): CardCraftNarration {
   const text = String(raw ?? '').trim();
   if (!text) return { narrative: '' };
   const nameMatch = /<name>([\s\S]*?)<\/name>/i.exec(text);
+  const descMatch = /<desc>([\s\S]*?)<\/desc>/i.exec(text);
   const narrMatch = /<narrative>([\s\S]*?)<\/narrative>/i.exec(text);
   const name = nameMatch?.[1]
     ?.trim()
     .replace(/^["'「『]|["'」』]$/g, '')
     .trim();
+  const description = descMatch?.[1]?.trim() || undefined;
   if (narrMatch) {
-    return { ...(name ? { name } : {}), narrative: narrMatch[1].trim() };
+    return {
+      ...(name ? { name } : {}),
+      ...(description ? { description } : {}),
+      narrative: narrMatch[1].trim(),
+    };
   }
-  // 没按格式来：整段当叙事，名字留空（调用方用临时名兜底）
+  // 没按格式来：整段当叙事，名字与描述留空（调用方用临时名与意图原文兜底）
   return { narrative: text };
 }
 

@@ -41,6 +41,15 @@ describe('parseCraftNarration', () => {
     expect(r.narrative).toBe('他捏着枝条……');
   });
 
+  it('<desc> 解析为卡面描述；缺 desc 时 description 留空（保留意图原文）', () => {
+    const r = parseCraftNarration(
+      '<name>青枝钓竿</name>\n<desc>枝条拧成的钓竿，竿梢一点星芒。</desc>\n<narrative>他捏着枝条……</narrative>',
+    );
+    expect(r.description).toBe('枝条拧成的钓竿，竿梢一点星芒。');
+    const noDesc = parseCraftNarration('<name>X</name>\n<narrative>叙述</narrative>');
+    expect(noDesc.description).toBeUndefined();
+  });
+
   it('没按格式来 → 整段当叙事，名字留空（调用方兜底）', () => {
     const r = parseCraftNarration('AI 没守格式的自由发挥');
     expect(r.name).toBeUndefined();

@@ -7,6 +7,8 @@ import {
   itemTierToMaterialTier,
   materialPriceOf,
   deriveElements,
+  registerMaterialElements,
+  clearMaterialElementOverrides,
   toMaterial,
 } from './material';
 import type { InventoryItem } from '../types';
@@ -56,6 +58,15 @@ describe('deriveElements（名字 + 效果词条命中元素关键词）', () =>
     for (const e of ['火', '水', '风', '冰', '金', '雷', '光', '暗', '土']) {
       expect(ELEMENT_KEYWORDS).toContain(e);
     }
+  });
+  it('素材元素档案优先于名字推导（2026-09-25：采集素材名多不含元素字）', () => {
+    registerMaterialElements({ 世界树嫩芽: ['风'], 精灵花: ['光'], 脏值: [] });
+    expect(deriveElements(item({ name: '世界树嫩芽' }))).toEqual(['风']);
+    expect(deriveElements(item({ name: '精灵花' }))).toEqual(['光']);
+    // 未登记的名字回落关键词推导
+    expect(deriveElements(item({ name: '火焰草' }))).toEqual(['火']);
+    clearMaterialElementOverrides();
+    expect(deriveElements(item({ name: '世界树嫩芽' }))).toEqual([]);
   });
 });
 
