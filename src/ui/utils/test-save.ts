@@ -6,6 +6,7 @@
  * - 3 个 NPC
  * - SaveProfile: FP 500 + 3 quests + 2 news
  * - 基础装备/技能/背包物品
+ * - 七链种子卡全量（六禁忌正本 + 残铭）进背包并记入卡册
  *
  * 🔴 **这里的叙事一律是通用奇幻占位内容**（内容-引擎分离 D27）：人名/地名/势力/纪元
  * 全部是本文件自造的中性词，不引用任何具体世界观。它演示的是**数据形状**而非某个世界——
@@ -22,6 +23,9 @@ import {
   saveMemory,
 } from '@engine/database';
 import { generateMemoryId } from '@engine/memory-summarizer';
+import { QUEST_CHAIN_CARD_SEEDS } from '@engine/card-workshop/quest-chain-seeds';
+import { cardCatalogToItem } from '@engine/start-catalog';
+import { DEFAULT_ALBUM_CAPACITY } from '@engine/card-workshop/album';
 import { createDefaultCharacterState } from '@engine/types';
 import type {
   SaveSlot,
@@ -402,6 +406,16 @@ export async function createTestSave(options: { reset?: boolean } = {}): Promise
       ],
     }),
   ];
+
+  // 🧪 预设卡直配：七链种子卡全量进背包并记入卡册——六正本（禁忌卡·无名河等）可在
+  // 交锋面板直接打出，残铭=位阶被动载体。种子是引擎内置常量（quest-chain-seeds），
+  // 纯静态构造不依赖运行时卡池装配。deck 留空：禁忌卡打出走背包通道，不经卡组抽牌。
+  player.inventory.push(...QUEST_CHAIN_CARD_SEEDS.map((c) => cardCatalogToItem(c)));
+  player.cardAlbum = {
+    owned: QUEST_CHAIN_CARD_SEEDS.map((c) => c.name),
+    deck: [],
+    capacity: DEFAULT_ALBUM_CAPACITY,
+  };
 
   await saveCharacters([player, ...npcs]);
 

@@ -516,9 +516,11 @@ const craftBlueprint = ref('');
 const crafting = ref(false);
 const craftMsg = ref('');
 const craftErr = ref('');
-const craftCard_busy = computed(
-  () => crafting.value || !craftMain.value || craftMain.value === craftSubA.value,
-);
+/**
+ * 只有真正在制才禁用按钮；「没选主素材 / 副素材与主素材相同」走点击校验给提示
+ * （2026-09-23 真机反馈：禁用态视觉不明显，点了没反应像坏了）。
+ */
+const craftCard_busy = computed(() => crafting.value);
 /** 手上的技能蓝本（S「支配者倒影」） */
 const blueprints = computed(() => game.skillBlueprints());
 
@@ -540,7 +542,15 @@ const craftPreview = computed(() => {
 });
 
 async function doCraftCard() {
-  if (!craftMain.value) return;
+  if (crafting.value) return;
+  if (!craftMain.value) {
+    craftErr.value = '先在上方选一件主素材，再开始制卡。';
+    return;
+  }
+  if (craftMain.value === craftSubA.value) {
+    craftErr.value = '副素材甲与主素材相同——换一件，或把它清空。';
+    return;
+  }
   crafting.value = true;
   craftErr.value = '';
   craftMsg.value = '';
