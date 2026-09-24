@@ -262,7 +262,7 @@ const plotDifficultyOptions = [
       <p class="card-desc">
         每轮正文后的可选行动怎么生成：内置「不生成 / 标准三选 / 情绪流 /
         成人向」四方案，也可自建方案（一段自然语言指令，AI 直读；支持
-        {{ '{{user}}' }} 代表玩家名）。方案库为<strong>全局设置</strong>；
+        &#123;&#123;user&#125;&#125; 代表玩家名）。方案库为<strong>全局设置</strong>；
         选哪个方案是<strong>存档级</strong>的——在游戏页选项条标题栏的下拉里切换，下一轮生效。
       </p>
       <div class="option-scheme-list">
