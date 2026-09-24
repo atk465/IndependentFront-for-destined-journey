@@ -22,6 +22,7 @@ import {
   toMaterial,
 } from '@engine/card-workshop/material';
 import type { MaterialSpec } from '@engine/card-workshop/card-fusion';
+import { deriveFallbackProductName } from '@engine/card-craft-narrate';
 import { REPAIR_RECIPE, isDamaged, planQuench, planRepair } from '@engine/card-workshop/repair';
 import type { RepairPlan } from '@engine/card-workshop/repair';
 import { cardKindOf } from '@engine/card-workshop/card-kind';
@@ -534,7 +535,7 @@ const craftPreview = computed(() => {
     intent: craftIntent.value,
     inventory: inv,
     d20: 10, // 预览用中位数骰，实际掷骰在提交时
-    fallbackName: `${craftMain.value}·卡`,
+    fallbackName: deriveFallbackProductName(craftIntent.value) ?? `${craftMain.value}·卡`,
     talents: [],
     lift: {},
     ...(craftBlueprint.value ? { blueprint: { name: craftBlueprint.value } } : {}),
@@ -565,7 +566,9 @@ async function doCraftCard() {
     craftErr.value = r.reason ?? '制卡失败';
     return;
   }
-  craftMsg.value = `【${r.productName}】${r.tier}／${r.rating}（造价 ${r.cost} GC，经验 +${r.exp}）`;
+  craftMsg.value =
+    `【${r.productName}】${r.tier}／${r.rating}（造价 ${r.cost} GC，经验 +${r.exp}）` +
+    (r.namedBy === 'fallback' && craftIntent.value.trim() ? '（AI 命名未生效，暂用此名）' : '');
   craftMain.value = '';
   craftSubA.value = '';
   craftSubB.value = '';
@@ -1471,7 +1474,7 @@ const RATING_HINT: Record<string, string> = {
           v-model="craftIntent"
           class="note-input"
           rows="2"
-          placeholder="你想做成什么样？（只影响叙事，不改变数值）"
+          placeholder="你想做成什么样？（影响卡名与叙事，不改变数值）"
         ></textarea>
         <div v-if="craftPreview?.plan" class="craft-preview">
           <span class="chip">{{ craftPreview.plan.product.cardTier }}</span>

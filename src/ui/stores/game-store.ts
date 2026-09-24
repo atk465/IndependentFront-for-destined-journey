@@ -146,7 +146,10 @@ import {
 import { planFootAlchemy } from '@engine/card-workshop/partner-alchemy';
 import { planCardCraft } from '@engine/card-workshop/card-craft-plan';
 import { coerceBlueprints, consumeBlueprint } from '@engine/card-workshop/opponent-blueprints';
-import { fallbackCraftNarration } from '@engine/card-craft-narrate';
+import {
+  deriveFallbackProductName,
+  fallbackCraftNarration,
+} from '@engine/card-craft-narrate';
 import {
   coerceCustomTalents,
   coerceCustomCards,
@@ -2005,6 +2008,8 @@ export const useGameStore = defineStore('game', () => {
     exp?: number;
     audit?: string[];
     narrative?: string;
+    /** 名字来源（2026-09-23）：ai=AI 起名生效；fallback=兜底名（意图派生或主素材名） */
+    namedBy?: 'ai' | 'fallback';
   }> {
     const playerChar = player.value;
     if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
@@ -2015,6 +2020,9 @@ export const useGameStore = defineStore('game', () => {
       DAILY_BUFF_CRAFT_LUCK,
       currentGameDay(),
     );
+    // 兜底名跟随意图（2026-09-23 真机反馈：写「钓竿」产出「主素材·卡」与制卡理念冲突）——
+    // 短意图直接当名字；AI 命名（②）成功后仍会覆盖它
+    const intentName = deriveFallbackProductName(input.intent);
     const { ok, reason, plan } = planCardCraft({
       mainName: input.mainName,
       subNames: input.subNames,
@@ -2022,7 +2030,7 @@ export const useGameStore = defineStore('game', () => {
       ...(input.blueprintName ? { blueprint: { name: input.blueprintName } } : {}),
       inventory: playerChar.inventory,
       d20: 1 + Math.floor(Math.random() * 20),
-      fallbackName: `${input.mainName}·卡`,
+      fallbackName: intentName ?? `${input.mainName}·卡`,
       talents: playerChar.talents?.list ?? [],
       expMult: strengthOf('经验倍率', 'expMult'),
       lift: {
@@ -2039,6 +2047,7 @@ export const useGameStore = defineStore('game', () => {
     // ② AI 命名 + 叙事（无工具；失败则兜底，绝不影响产物落库）
     const materials = [input.mainName, ...input.subNames].filter(Boolean);
     let productName = plan.product.name;
+    let namedBy: 'ai' | 'fallback' = 'fallback';
     let narrative = '';
     if (craftNarrateImpl) {
       try {
@@ -2056,7 +2065,10 @@ export const useGameStore = defineStore('game', () => {
           crafterName: playerChar.name,
           talentNotes: plan.notes,
         });
-        if (said.name) productName = said.name;
+        if (said.name) {
+          productName = said.name;
+          namedBy = 'ai';
+        }
         narrative = said.narrative;
       } catch (err) {
         console.warn('[game-store] 制卡叙事失败（用兜底文案）:', err);
@@ -2151,6 +2163,11 @@ export const useGameStore = defineStore('game', () => {
     // 场景制卡型终点（委托×地图闭环 决议 #13 修订）：人在目的地制出目标卡 → 委托当场
     // 完成，叙事拍（获得场景）附加在制卡叙事之后
     const finaleNarrative = await tryCompleteCraftFinale(productName);
+    const fullNarrative = finaleNarrative ? `${narrative}\n\n${finaleNarrative}` : narrative;
+
+    // 过程叙事落地聊天流（2026-09-23 真机反馈）：「把过程写成一段话」是制卡主路的
+    // 一半产出，此前只在返回值里、被工坊面板丢弃——AI 写了玩家也看不到。
+    if (fullNarrative.trim()) addMessage(fullNarrative, 'assistant');
 
     return {
       ok: true,
@@ -2160,7 +2177,8 @@ export const useGameStore = defineStore('game', () => {
       cost: plan.cost,
       exp: plan.exp,
       audit: plan.audit,
-      narrative: finaleNarrative ? `${narrative}\n\n${finaleNarrative}` : narrative,
+      narrative: fullNarrative,
+      namedBy,
     };
   }
 

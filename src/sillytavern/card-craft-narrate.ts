@@ -173,3 +173,36 @@ export function fallbackCraftNarration(plan: CardCraftPlan, materials: readonly 
     `他没有多说什么，把做出来的东西收进了卡册。`,
   ].join('');
 }
+
+/**
+ * 从「制卡师想要的样子」派生兜底卡名（2026-09-23 真机反馈）。
+ *
+ * 🔴 为什么要有：AI 命名不可用时，兜底名此前恒为「主素材·卡」——玩家写明
+ * 「一根钓竿」，产出的却是「世界树嫩芽·卡」，与「AI 负责按意图起名」的制卡
+ * 理念冲突。本函数做**保守**派生：只认清洗后 1~6 字的短意图（与 AI 命名提示
+ * 「2~6 字」同带），长句、含糊话一律返回 undefined（调用方回落主素材名）。
+ * 纯函数；真正的命名主路仍是 AI（本函数只是兜底变聪明，不是替代）。
+ */
+export function deriveFallbackProductName(intent: string | undefined): string | undefined {
+  const raw = String(intent ?? '').trim();
+  if (!raw) return undefined;
+  // 引导词 / 量词壳：剥掉后剩下的才可能是「东西的名字」
+  const LEAD_RE =
+    /^(?:我想|我要|我想要|我打算|我想做|我要做|想要|想做|打算|准备|试试|尝试|给我|帮我|帮忙|来|做|造|弄|搞|制)+/;
+  const QUANT_RE = /^(?:一根|一把|一张|一条|一个|一只|一件|一枚|一颗|一粒|副|些|个)+/;
+  for (const clause of raw.split(/[，。！？；、,.!?;:\n\r]+/)) {
+    const s = clause
+      .trim()
+      .replace(LEAD_RE, '')
+      .replace(QUANT_RE, '')
+      .replace(/(?:这张)?卡[片]?$/, '')
+      .trim();
+    if (!s) continue;
+    // 含糊话不配当名字（哪怕够短）
+    if (/随便|什么|啥|看看|玩玩/.test(s)) return undefined;
+    // 只看第一个非空子句：清洗后超 6 字的长句不硬猜，交回调用方用主素材名
+    if (s.length <= 6) return s;
+    return undefined;
+  }
+  return undefined;
+}
