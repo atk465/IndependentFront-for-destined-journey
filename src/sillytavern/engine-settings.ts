@@ -24,6 +24,7 @@
  * 的对应字段 —— 与注册前的行为一致，不是新的降级路径。
  */
 import { DEFAULT_SETTINGS } from './types';
+import type { OptionScheme } from './option-policy';
 
 /**
  * 引擎真正会读的设置字段。
@@ -44,6 +45,8 @@ export interface EngineSettings {
   randomEventsEnabled: boolean;
   /** 随机事件频率系数（0.5 / 1 / 2），乘进每次 MTTH 掷骰的权重 */
   randomEventsFrequency: number;
+  /** 行动选项的自定义方案库（2026-09-23 共识稿；全局，跨存档共用） */
+  optionSchemes: OptionScheme[];
 }
 
 /**
@@ -65,6 +68,7 @@ const FALLBACK: EngineSettings = {
   snapshotRetentionMode: DEFAULT_SETTINGS.snapshotRetentionMode,
   randomEventsEnabled: RANDOM_EVENTS_ENABLED_DEFAULT,
   randomEventsFrequency: RANDOM_EVENTS_FREQUENCY_DEFAULT,
+  optionSchemes: [],
 };
 
 type Provider = () => Partial<EngineSettings> | undefined;
@@ -95,6 +99,7 @@ export function getEngineSettings(): EngineSettings {
       snapshotRetentionMode: partial.snapshotRetentionMode ?? FALLBACK.snapshotRetentionMode,
       randomEventsEnabled: partial.randomEventsEnabled ?? FALLBACK.randomEventsEnabled,
       randomEventsFrequency: partial.randomEventsFrequency ?? FALLBACK.randomEventsFrequency,
+      optionSchemes: partial.optionSchemes ?? FALLBACK.optionSchemes,
     };
   } catch (err) {
     console.error('[engine-settings] provider 抛异常，按缺省值继续:', err);

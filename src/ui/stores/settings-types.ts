@@ -128,6 +128,8 @@ export type UiSettings = {
    *    收窄反而会让「以后想加一档」变成一次跨引擎改动。
    */
   randomEventsFrequency: number;
+  /** 行动选项的自定义方案库（2026-09-23；全局，main.ts provider 转发给引擎） */
+  optionSchemes: import('../../sillytavern/option-policy').OptionScheme[];
 
   // ═══ 记忆 & 缓存 ═══
   memoryRecallCount: number;

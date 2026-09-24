@@ -27,6 +27,7 @@ import {
   getCustomTalents,
   type TalentEntry,
 } from './card-workshop/talent-entry';
+import { renderOptionPolicy, resolveOptionScheme } from './option-policy';
 import type {
   AgentContext,
   AgentConfig,
@@ -1104,6 +1105,21 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
     const hasList = talents && Array.isArray(talents.list) && talents.list.length > 0;
     if (!hasList) return words;
     return renderTalentsBlock(talents) + (words ? `\n${words}` : '');
+  },
+
+  /**
+   * {{OPTION_POLICY}} — 行动选项生成方案（2026-09-23 共识稿）。
+   *
+   * 数据：`ctx.optionSchemeId`（存档级选择，worldFlags）+ `ctx.customOptionSchemes`
+   * （全局自定义方案库，settings）。id 缺席/未知回落「标准三选」——升级兼容：
+   * 旧存档行为与改造前完全一致。玩家名从 ctx.characters 找 player 角色拿，
+   * 供方案文本的 {{user}} 替换。战斗中照常注入（选项在战斗收尾拍照样有用）。
+   */
+  OPTION_POLICY: (ctx, _config, _params) => {
+    const scheme = resolveOptionScheme(ctx.optionSchemeId, ctx.customOptionSchemes);
+    const playerName =
+      (ctx.characters ?? []).find((c) => c.type === 'player')?.name ?? '';
+    return renderOptionPolicy(scheme, playerName);
   },
 
   /**

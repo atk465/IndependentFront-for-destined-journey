@@ -23,6 +23,7 @@ describe('getEngineSettings', () => {
       snapshotRetentionMode: DEFAULT_SETTINGS.snapshotRetentionMode,
       randomEventsEnabled: true,
       randomEventsFrequency: 1,
+        optionSchemes: [],
     });
   });
 
@@ -38,6 +39,7 @@ describe('getEngineSettings', () => {
       snapshotRetentionMode: 'dense',
       randomEventsEnabled: false,
       randomEventsFrequency: 2,
+      optionSchemes: [],
     });
   });
 
@@ -70,6 +72,7 @@ describe('getEngineSettings', () => {
       snapshotRetentionMode: 'dense',
       randomEventsEnabled: true,
       randomEventsFrequency: 1,
+        optionSchemes: [],
     });
   });
 

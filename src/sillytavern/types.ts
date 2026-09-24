@@ -789,6 +789,12 @@ export interface AppSettings {
   maxMemoriesRecall: number;
   /** Phase 4: 剧情模式配置 */
   plotSettings: PlotSettings;
+  /**
+   * 行动选项的自定义方案库（2026-09-23 共识稿：**全局**，跨存档共用）。
+   * 内置方案（off/standard/emotive/adult）在 option-policy.BUILTIN_OPTION_SCHEMES，
+   * 不入此表；当前存档选中哪个方案存 saveProfile.worldFlags（每存档独立）。
+   */
+  optionSchemes: import('./option-policy').OptionScheme[];
   /** Phase 4: Embedding 使用的 API 端点 ID */
   embeddingEndpointId: string | null;
   /** Phase 4: Embedding 模型名 */
@@ -862,6 +868,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   maxMemoriesRecall: 20,
   // Phase 4 新增
   plotSettings: DEFAULT_PLOT_SETTINGS,
+  // 行动选项自定义方案库（全局；默认空 = 只剩内置四方案）
+  optionSchemes: [],
   embeddingEndpointId: null,
   embeddingModel: 'Qwen/Qwen3-Embedding-8B',
   embeddingDimension: 4096,
@@ -1983,6 +1991,13 @@ export interface AgentContext {
   affections?: Record<string, number>;
   /** 玩家选中的焦点任务名，供 EJS `quest.focus()` 用 */
   focusQuest?: string;
+  /**
+   * 行动选项方案（2026-09-23 共识稿）：当前选中的方案 id（存档级，worldFlags）
+   * + 全局自定义方案库（settings）。{{OPTION_POLICY}} 的数据源，同 TALENT 铁律——
+   * buildContext 供值，resolver 只管措辞。id 缺席/未知由 resolveOptionScheme 回落标准三选。
+   */
+  optionSchemeId?: string;
+  customOptionSchemes?: import('./option-policy').OptionScheme[];
   /** EJS `ui.notify` 的出口（不给 = 静默丢弃）。由 game-pipeline 接到 Toast */
   ejsNotify?: (message: string, level: 'info' | 'success' | 'warning' | 'error') => void;
   /** EJS `ui.log` 的出口（不给 = 丢弃）。**绝不落真 console**，免得刷屏 */

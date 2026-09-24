@@ -632,6 +632,30 @@ export const useGameStore = defineStore('game', () => {
     return { ok: true };
   }
 
+  /**
+   * 当前行动选项方案 id（存档级，2026-09-23 共识稿）。
+   * 自定义方案本体在 settings.optionSchemes（全局库），这里只存选中了谁；
+   * 读侧 resolveOptionScheme 对未记录/未知 id 回落「标准三选」。
+   */
+  const optionSchemeId = computed(
+    () =>
+      (saveProfile.value?.worldFlags as Record<string, unknown> | undefined)?.[
+        'optionSchemeId'
+      ] as string | undefined,
+  );
+
+  /** 切换行动选项方案（写 worldFlags.optionSchemeId，走既有 set_variable 通道） */
+  async function setOptionScheme(schemeId: string): Promise<{ ok: boolean; reason?: string }> {
+    if (!activeSaveId.value) return { ok: false, reason: '无活跃存档' };
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState([
+      { op: 'set_variable', target: 'worldFlags.optionSchemeId', value: schemeId } as StatePatch,
+    ]);
+    if (!result.success) return { ok: false, reason: result.errors.join('; ') };
+    await refreshFromDb();
+    return { ok: true };
+  }
+
   /** 接取委托（最多并行 3 个；接取瞬间快照到访基线与时限） */
   async function acceptCommissionByName(
     defName: string,
@@ -4683,6 +4707,8 @@ export const useGameStore = defineStore('game', () => {
     currentGameDay,
     allCommissionDefs,
     acceptCommissionByName,
+    optionSchemeId,
+    setOptionScheme,
     abandonCommissionByName,
     hideQuestChainSeed,
     deliverCommissionByName,

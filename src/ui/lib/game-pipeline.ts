@@ -182,6 +182,7 @@ import { battleReadyCards } from '@engine/card-workshop/deck-power';
 import { cardCombatTags } from '@engine/card-workshop/entry-combat';
 import { runSkirmishIntentResolve } from '@engine/card-workshop/skirmish-agent';
 import { projectStoryOutput, projectStreamingStory } from '@engine/story-output';
+import { filterOptionsForScheme, resolveOptionScheme } from '@engine/option-policy';
 import { loadWorldBooksWithFallback } from '@engine/builtin-worldbooks';
 import { filterBooksByEnabledEntries } from '@engine/worldbook-loader';
 import { buildStatData } from '@engine/stat-projection';
@@ -1130,6 +1131,12 @@ export class GamePipeline {
       // 天赋（卡牌工坊）：玩家 CharacterState.talents 快照（{{TALENT}} 数据源；
       // 玩家无天赋时为 undefined → 块静默，出身必选保证建档即有）。
       talents: this.game.player?.talents,
+      // 行动选项方案（2026-09-23 共识稿）：存档级选择（worldFlags）+ 全局自定义库
+      // （settings）。{{OPTION_POLICY}} 数据源；id 缺席/未知由 resolveOptionScheme 回落标准。
+      optionSchemeId: (this.game.saveProfile?.worldFlags as Record<string, unknown> | undefined)?.[
+        'optionSchemeId'
+      ] as string | undefined,
+      customOptionSchemes: getEngineSettings().optionSchemes,
       // 叙事意图（纯记不向路线）：每天赋一条当前意图，持续注入（再声明即替换）。
       narrativeIntents: this.game.saveProfile?.narrativeIntents ?? [],
       randomEventsEnabled: getEngineSettings().randomEventsEnabled,
@@ -1773,9 +1780,16 @@ export class GamePipeline {
         // lastStoryMessage —— 它是情景插画反查锚点，指向一条不存在的消息只会
         // 让后续开火挂到空处。
         // 🔴 `setPendingOptions` 也必须留在闸门**之后**：孤儿回合的行动选项照样会铺进
-        // 新存档的输入区（2026-08-10 审查逮到，初版把它写在了闸门之前）。
+        //    新存档的输入区（2026-08-10 审查逮到，初版把它写在了闸门之前）。
         if (!message) break;
-        this.game.setPendingOptions(options);
+        // 行动选项方案（2026-09-23）：off 档解析兜底——模型按惯性输出 <option> 时整批丢弃
+        const optionScheme = resolveOptionScheme(
+          (this.game.saveProfile?.worldFlags as Record<string, unknown> | undefined)?.[
+            'optionSchemeId'
+          ] as string | undefined,
+          getEngineSettings().optionSchemes,
+        );
+        this.game.setPendingOptions([...filterOptionsForScheme(options, optionScheme)]);
         this.lastStoryMessage = {
           id: message.id,
           turn: message.turn ?? 0,
