@@ -239,6 +239,22 @@ export interface MapCountry {
   anchorTileId: number | null;
 }
 
+/**
+ * 中层采集覆写（委托×地图闭环 2026-09-19 决议 #6）。
+ *
+ * 三键逐键回退：中层写了哪个键就用哪个，没写的键照用地块地形对应的环境表——
+ * 不写 `gathering` 字段的中层行为与无此字段时逐字节一致（存量地图包零迁移）。
+ * 「极度危险」由作者用 `danger` 声明（≥4 触发抵达判定），引擎只认数字。
+ */
+export interface MidTierGathering {
+  /** 特产素材类型前缀（此层内品质 +2）；缺省 = 沿用环境表 */
+  specialty?: string;
+  /** 危险系数（0 = 基线，越大风险判定越容易触发）；缺省 = 沿用环境表 */
+  danger?: number;
+  /** 具名素材表：品质档索引(0=普通..4=星辉) → 素材名列表；缺省 = 沿用环境表（独家素材写在这里） */
+  materialTable?: Record<number, string[]>;
+}
+
 /** 中层（省/区域）—— 气候区的默认粒度（§7），也是落位「只圈域」的一层（§8.2-1） */
 export interface MapMidTier {
   id: string;
@@ -249,6 +265,8 @@ export interface MapMidTier {
   climateId: string;
   /** 锚地块；`null` = 编译期没算出来 */
   anchorTileId: number | null;
+  /** 采集覆写（缺省 = 整段回落环境表） */
+  gathering?: MidTierGathering;
 }
 
 /** 邻接边：`[地块 A, 地块 B, 共享边像素长]`（无向、去重） */

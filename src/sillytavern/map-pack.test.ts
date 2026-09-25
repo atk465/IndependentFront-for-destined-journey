@@ -1107,6 +1107,41 @@ describe('coerceCountries / coerceMidTiers', () => {
     expect(pack.midTiers[0]!.anchorTileId).toBeNull();
   });
 
+  it('中层 gathering 覆写：三键收下，坏键逐格丢，整段认不出 = 无覆写', () => {
+    const pack = coerceMapPack(
+      raw({
+        midTiers: [
+          {
+            id: 'mt-good',
+            gathering: {
+              specialty: 'Frost Lotus',
+              danger: 5,
+              materialTable: {
+                0: ['Snow Herb'],
+                4: ['Millennium Lotus'],
+                9: ['越界档'],
+                2: 'not-array',
+              },
+            },
+          },
+          { id: 'mt-partial', gathering: { danger: -1 } },
+          { id: 'mt-empty', gathering: {} },
+          { id: 'mt-none' },
+        ],
+      }),
+    );
+    const good = pack.midTiers.find((m) => m.id === 'mt-good')!.gathering;
+    expect(good).toEqual({
+      specialty: 'Frost Lotus',
+      danger: 5,
+      materialTable: { 0: ['Snow Herb'], 4: ['Millennium Lotus'] },
+    });
+    // danger 负数钳到 0（归一化，不丢段）
+    expect(pack.midTiers.find((m) => m.id === 'mt-partial')!.gathering).toEqual({ danger: 0 });
+    expect(pack.midTiers.find((m) => m.id === 'mt-empty')!.gathering).toBeUndefined();
+    expect(pack.midTiers.find((m) => m.id === 'mt-none')!.gathering).toBeUndefined();
+  });
+
   it('anchorTileId 认不出 → null；指向真地块 → 收下', () => {
     const pack = coerceMapPack(
       raw({

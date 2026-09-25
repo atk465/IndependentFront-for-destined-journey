@@ -39,7 +39,6 @@
 import { ref, shallowRef, type Ref } from 'vue';
 
 import { ensureContentRegistryLoaded, getContentRegistry } from './stores/content-store';
-import { setWorkshopConfig } from './lib/workshop-client';
 
 // ═══════════════════════════════════════════════════════════
 // 1. 形状
@@ -92,10 +91,6 @@ export interface BrandingConfig {
   era: string;
   /** 设置页剧情分区的大纲示例；空数组 = 不渲染预览卡 */
   plotTemplate: BrandingPlotBeat[];
-  /** 创意工坊社区源基址（D41）。**空串 = 未配置** → 工坊页渲染空态，不发任何请求 */
-  workshopApiBase: string;
-  /** 工坊登录的前提说明（D41）；空串 = 不追加前提句 */
-  workshopLoginHint: string;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -126,8 +121,6 @@ export const NEUTRAL_BRANDING: Readonly<BrandingConfig> = Object.freeze({
   copyright: '',
   era: '元年',
   plotTemplate: [],
-  workshopApiBase: '',
-  workshopLoginHint: '',
 } satisfies BrandingConfig);
 
 // ═══════════════════════════════════════════════════════════
@@ -217,8 +210,6 @@ export function resolveBranding(
     copyright: str(raw.copyright, base.copyright),
     era: str(raw.era, base.era),
     plotTemplate: plotTemplate(raw.plotTemplate, base.plotTemplate),
-    workshopApiBase: str(raw.workshopApiBase, base.workshopApiBase),
-    workshopLoginHint: str(raw.workshopLoginHint, base.workshopLoginHint),
   };
 }
 
@@ -237,13 +228,8 @@ export function getBranding(): BrandingConfig {
 }
 
 /**
- * 等注册表加载完再读，并把两处**非 Vue 的**消费点一起对齐：
- *
- * 1. `document.title`（D26 的运行时改点）
- * 2. 工坊客户端的社区源 / 登录前提文案（D41）——`workshop-client.ts` 是纯网络层，
- *    刻意不让它 import 本模块（那会把 Pinia + Dexie 拖进它的测试），改成本模块推给它。
- *
- * 幂等、永不抛（`ensureContentRegistryLoaded` 自己就是永不抛的）。
+ * 等注册表加载完再读，并把**非 Vue 的**消费点（`document.title`，D26 的运行时改点）
+ * 一起对齐。幂等、永不抛（`ensureContentRegistryLoaded` 自己就是永不抛的）。
  */
 export async function loadBranding(): Promise<BrandingConfig> {
   await ensureContentRegistryLoaded();
@@ -252,15 +238,11 @@ export async function loadBranding(): Promise<BrandingConfig> {
   return branding;
 }
 
-/** 把品牌面推给 Vue 之外的消费点（`document.title` + 工坊配置）。可单独调用（测试用） */
+/** 把品牌面推给 Vue 之外的消费点（`document.title`）。可单独调用（测试用） */
 export function applyBranding(branding: BrandingConfig): void {
   if (typeof document !== 'undefined') {
     document.title = branding.appTitle;
   }
-  setWorkshopConfig({
-    apiBase: branding.workshopApiBase,
-    loginHint: branding.workshopLoginHint,
-  });
 }
 
 /**

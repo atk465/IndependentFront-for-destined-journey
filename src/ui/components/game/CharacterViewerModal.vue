@@ -34,10 +34,8 @@ import type { AssetType, CharacterState, StatusEffect } from '@engine/types';
 import {
   buildAffectionView,
   buildAlbumGroups,
-  buildAscensionTracks,
   buildProfileFields,
   buildSubtitleSegments,
-  hasAnyAscension,
   itemQuality,
   splitInventory,
   type AlbumTile,
@@ -80,7 +78,6 @@ const TABS: { key: ViewerTab; label: string }[] = [
 const activeTab = ref<ViewerTab>('profile');
 
 /** 展开态 —— 登神条目 / 状态效果 / 相册放大格，都按名字或 id 记单选 */
-const openAscension = ref<string | null>(null);
 const openStatus = ref<string | null>(null);
 const focusedTile = ref<string | null>(null);
 
@@ -94,7 +91,6 @@ watch(
   () => props.name,
   () => {
     activeTab.value = 'profile';
-    openAscension.value = null;
     openStatus.value = null;
     focusedTile.value = null;
   },
@@ -124,8 +120,6 @@ const affection = computed(() =>
   buildAffectionView(props.name ? game.saveProfile?.affections?.[props.name] : 0),
 );
 const profileFields = computed(() => (char.value ? buildProfileFields(char.value) : []));
-const ascensionTracks = computed(() => (char.value ? buildAscensionTracks(char.value) : []));
-const ascensionUnlocked = computed(() => hasAnyAscension(ascensionTracks.value));
 const thoughts = computed(() => (char.value ? game.getThoughts(char.value) : ''));
 
 const ATTR_ROWS: { key: 'str' | 'dex' | 'con' | 'int' | 'spi'; label: string }[] = [
@@ -279,61 +273,6 @@ function toggleTile(tile: AlbumTile) {
               </div>
               <div v-if="char.freeAttrPoints" class="attr-free">
                 未分配自由点 {{ char.freeAttrPoints }}
-              </div>
-            </section>
-
-            <!-- 登神长阶 -->
-            <section class="vw-sec">
-              <h3 class="vw-sec-title">登神长阶</h3>
-              <div class="asc-grid">
-                <div
-                  v-for="track in ascensionTracks"
-                  :key="track.key"
-                  class="asc-track"
-                  :class="{ filled: track.entries.length > 0 }"
-                >
-                  <div class="asc-track-head">
-                    <span class="asc-track-label">{{ track.label }}</span>
-                    <span class="asc-track-count"
-                      >{{ track.entries.length }}<span class="asc-cap">/{{ track.cap }}</span></span
-                    >
-                  </div>
-                  <div v-if="!track.entries.length" class="asc-none">
-                    <span aria-hidden="true">—</span>
-                    <span class="asc-none-hint">{{ track.unlockLevel }} 起</span>
-                  </div>
-                  <div v-else class="asc-entries">
-                    <div v-for="entry in track.entries" :key="entry.name" class="asc-entry">
-                      <button
-                        class="asc-entry-head"
-                        type="button"
-                        :aria-expanded="openAscension === entry.name"
-                        @click="openAscension = openAscension === entry.name ? null : entry.name"
-                      >
-                        <span class="asc-entry-name">{{ entry.name }}</span>
-                        <span class="asc-toggle" aria-hidden="true">{{
-                          openAscension === entry.name ? '−' : '+'
-                        }}</span>
-                      </button>
-                      <Transition name="collapse">
-                        <div v-if="openAscension === entry.name" class="asc-entry-body">
-                          <p v-if="entry.description" class="asc-desc">{{ entry.description }}</p>
-                          <ul v-if="entry.effects.length" class="asc-effects">
-                            <li v-for="(fx, i) in entry.effects" :key="i">{{ fx }}</li>
-                          </ul>
-                          <div v-if="entry.cost" class="asc-cost">消耗 · {{ entry.cost }}</div>
-                        </div>
-                      </Transition>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div class="asc-divine">
-                <span class="dv-label">神位</span>
-                <span class="dv-value">{{ char.ascension?.deityPosition || '—' }}</span>
-                <span class="dv-label">神国</span>
-                <span class="dv-value">{{ char.ascension?.divineKingdom?.name || '—' }}</span>
-                <span v-if="!ascensionUnlocked" class="dv-hint">尚未踏上长阶</span>
               </div>
             </section>
 

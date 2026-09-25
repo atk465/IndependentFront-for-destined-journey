@@ -7,33 +7,242 @@
 // Q-11：本文件唯一的**运行时** import。field-enums 自己零 import（叶子模块），
 // 所以这条边不成环。品质集合是铁律 5 指定的中文枚举 SSOT，`QualityLevel` /
 // `QUALITY_RANK` / `QUALITY_BY_RANK` 一律从它派生，不再手抄第二份。
-import { RARITY_LEVELS, type Rarity } from './field-enums';
+import { RARITY_LEVELS, type Rarity, type CardTier, type CraftIndustry } from './field-enums';
 
 import type { GameTime } from './time-system';
 // type-only 循环安全：effect-types 反向 import 本文件的 AttributeName/DivinityLevel/DamageType 也是 type-only
 import type { Modifier } from './effect-types';
-// type-only 循环安全：combat-v3/types.ts 反向 import 本文件的 CombatParticipant/StatusEffect 也是 type-only
-// EffectAutomaton 定义在 combat-v3/types.ts（v3 内核 DSL），这里只做类型引用不引入运行时
-import type { EffectAutomaton } from './combat-v3/types';
-// type-only 单向边：types-image.ts **不 import 本文件**（图像子系统的类型全部自持），
-// 所以这条边不成环。只为把 SceneImageMarker 接进 DetectedMarker 联合。
-import type { SceneImageMarker } from './types-image';
 // 地图 v1: `AgentContext.mapFlags` 的形状（分册 types-map.ts，口径同上 —— 只 type-only 反向引用）
 // 地图 v1.2: `AgentContext.mapFacts` 的形状（同一分册，同一条 type-only 口径）
 import type { MapFactsFlags, MapSaveFlags } from './types-map';
+
+// ═══════════════════════════════════════════════════════════
+// 效果自动机 DSL 类型（自 combat-v3/types 迁入 —— 卡片词条/物品效果共用；
+// v3 战斗内核已下线，DSL 形状原样保留）
+// ═══════════════════════════════════════════════════════════
+
+export type WindowKey =
+  | 'round.open'
+  | 'round.close'
+  | 'initiative.before'
+  | 'initiative.after'
+  | 'turn.open'
+  | 'turn.close'
+  | 'action.declared'
+  | 'check.intent'
+  | 'check.hit'
+  | 'collect_attacker_mods'
+  | 'collect_defender_mods'
+  | 'damage.preview'
+  | 'damage.compute'
+  | 'damage.after'
+  | 'unit.beforeDown'
+  | 'morale.before'
+  | 'morale.after'
+  | 'settlement.before';
+
+// ActiveEffectIndex（架构 §五 5.3 + §七 7.5）
+
+export type ModifierScope = 'whole_action' | 'per_hit' | 'per_target';
+
+export type ModifierSlot =
+  | 'fixedDamage'
+  | 'damageMult'
+  | 'damageTaken'
+  | 'hitBonus'
+  | 'dodge'
+  | 'initiative'
+  | 'dr'
+  | 'penetration'
+  | 'critThreshold'
+  | 'critDmg'
+  | 'attribute';
+
+export interface ContestInfo {
+  attackerDivinity: number;
+  defenderDivinity: number;
+}
+
+export interface HitPolicy {
+  consumeDice: boolean;
+  advantage?: 'adv' | 'dis' | 'none';
+}
+
+export type EffectIntent =
+  | {
+      kind: 'AddModifier';
+      slot: ModifierSlot;
+      value: number | string;
+      scope: ModifierScope;
+      targetId: string;
+      divinity: number;
+    }
+  | {
+      kind: 'DealDamage';
+      targetId: string;
+      amount: number | string;
+      damageType: 'physical' | 'energy' | 'mental' | 'true';
+      bypass?: ModifierSlot[];
+      isReaction?: boolean;
+      doesNotConsumeSlot?: boolean;
+      rootChainId?: string;
+      /** 反射深度：字面量或表达式串（架构 §九 R1，反伤 depth = 'ctx.depth + 1'） */
+      depth?: number | string;
+      hitPolicy?: HitPolicy;
+    }
+  | {
+      kind: 'Heal';
+      targetId: string;
+      amount: number | string;
+    }
+  | {
+      kind: 'ApplyStatus';
+      targetId: string;
+      statusId: string;
+      duration: number | null;
+      layers?: number;
+      contest?: ContestInfo;
+    }
+  | { kind: 'RemoveStatus'; targetId: string; statusId: string }
+  | {
+      kind: 'SpendResource';
+      targetId: string;
+      resource: 'hp' | 'mp' | 'sp' | 'fp';
+      amount: number;
+    }
+  | {
+      kind: 'PreventDeath';
+      targetId: string;
+      hp: number;
+      slot?: 'death.threshold';
+    }
+  | { kind: 'ConsumeCharge'; amount?: number }
+  | { kind: 'EmitNarrativeCue'; text: string; severity?: number }
+  | {
+      kind: 'OverrideIntent';
+      ruleKey: string;
+      payload: unknown;
+      divinity: number;
+    }
+  | {
+      kind: 'ScheduleIntent';
+      delay: number;
+      intent: EffectIntent;
+    }
+  | {
+      kind: 'SpawnOrDespawnIntent';
+      op: 'spawn' | 'despawn';
+      unitId: string;
+      count?: number;
+      duration?: { rounds: number };
+      joinTiming?: 'this_round_tail' | 'next_round_head';
+      /** 模板引用：命中预生成召唤物池（§6.4）直接实例化，缺省触发 CharGenRequest（A35-1） */
+      templateRef?: string;
+    }
+  | {
+      kind: 'RequestChoiceIntent';
+      choiceId: string;
+      prompt: string;
+      options: readonly string[];
+      cost?: { sp?: number; slot?: 'action' };
+      blockDamageFactor?: number;
+      damageTakenOverrideId?: string;
+    };
+
+export interface EffectAutomatonDecl {
+  id: string;
+  name?: string;
+  source?: string;
+  owner?: string;
+  subscribe: WindowKey;
+  trigger: string;
+  priority?: number;
+  divinity?: number;
+  charges?: { max: number; remaining: number };
+  intents: readonly EffectIntent[];
+}
+
+export interface ChargeTracker {
+  max: number;
+  remaining: number;
+}
+
+export interface EffectAutomaton {
+  id: string;
+  name: string;
+  source: string;
+  owner: string;
+  subscribe: WindowKey;
+  trigger: string;
+  priority: number;
+  divinity: number;
+  charges?: ChargeTracker;
+  intents: readonly EffectIntent[];
+}
+
+export interface SummonedUnitDefinition {
+  /** 展示名（逻辑键，铁律 ①；实例化时补唯一 id） */
+  name: string;
+  /** 种族 */
+  race: string;
+  /** 生命层级 1-7 */
+  tier: number;
+  /** 等级 */
+  level: number;
+  /** 五维 */
+  attributes: { str: number; dex: number; con: number; int: number; spi: number };
+  /** HP / MP / SP（当前=最大，入编满状态） */
+  hp: number;
+  mp: number;
+  sp: number;
+  /** 防御 / DR / 穿透 */
+  defense: number;
+  dr: number;
+  penetration: number;
+  /** 命中 / 闪避加值 */
+  hitBonus: number;
+  dodgeBonus: number;
+  /** 武器攻击力 */
+  weaponAtk: number;
+  /** 登神强度 0-8（v2 §四 4.2） */
+  divinity: number;
+  /** 阵营（默认 player，由召唤者阵营推导，构建时选） */
+  side?: 'player' | 'enemy';
+  /** 技能名列表（供攻击 slot 解析能力） */
+  skills?: readonly string[];
+  /** 参战时机（架构 §十 10.2，缺省内核取 next_round_head 保不变量①纯洁） */
+  joinTiming?: 'this_round_tail' | 'next_round_head';
+  /** 定时消失（架构 §十 10.2 / §十 10.3 到期移除） */
+  duration?: { rounds: number };
+  /** 本轮行动预算（架构 §十 10.2：full=1攻1动 / partial=仅动作 / no_action=0） */
+  actionEconomy?: 'full' | 'partial' | 'no_action';
+  /** 召唤物自带的 DSL automaton（走 compileEffectProgram 编译，失败剔除不阻断） */
+  automata?: readonly EffectAutomaton[];
+  /** 静态管线修正（modifiers[] 编译的 push-handler 已进 automata，此处语义保留给 runCharGenForCombat 透传） */
+  modifiers?: readonly unknown[];
+  /** 召唤来源物品/技能（叙事溯源，进 UnitSummoned.sourceItem） */
+  sourceItem?: string;
+}
+
+/**
+ * 玩卡载荷/编组快照的统一形状（自 combat-v3/types 迁入；交锋卡组与契约损坏判定共用）。
+ * 正规来源是会话层从背包解析的真实 CardItem。
+ */
+export interface DeckCardData {
+  name: string;
+  cardTier: string;
+  词条: readonly string[];
+  fusionKind?: '叠加' | '相生' | '相克';
+  sealed?: boolean;
+  automata?: readonly EffectAutomaton[];
+}
 // 随机事件 v1: `AgentContext.randomEventOffer` 的形状。**type-only，不成环** ——
 // `random-event-context.ts` 自己只 import `random-event-scheduler` 与 `types-random-events`，
 // 两者都不 import 本文件。这里刻意不复述那个形状（复述一份就是第二个真源）。
 import type { RandomEventOfferEntry } from './random-event-context';
 // 捏人预设（`CreatePreset`）里的两个目录形状。**type-only 且不成环** ——
 // `start-catalog-mechanics.ts` 是零 import 的叶子模块（机制半边，D24）。
-import type { CatalogItem, BackgroundTemplate } from './start-catalog-mechanics';
-
-// 音频子系统的接口/seam 类型拆分在 types-audio.ts（本文件已逾 800 行）。
-// 从这里统一再导出，「types.ts 是唯一类型来源」这条 import 路径依然成立。
-// 注意: 音频**数据模型**类型 (AudioTrack / AudioPlaylist / ...) 仍定义在本文件下方，
-// 不在 types-audio.ts 里 —— 避免第二个真相来源。
-export * from './types-audio';
+import type { CardCatalogItem } from './start-catalog-mechanics';
 
 // ========== World Book (Lorebook) Types (v3, deprecated) ==========
 // Phase 8 用新 WorldBook 类型替代，旧 Lorebook/LorebookEntry 保留兼容导入
@@ -55,8 +264,7 @@ export type WorldBookPartition =
   | 'quick_feature' // 快捷功能 — 命运抽卡/盲盒/FP扩展
   | 'extra_setting' // 额外设定 — 数值表/战斗/制作/旅行/状态
   | 'cot' // COT — Chain-of-Thought 推理模板
-  | 'dlc' // DLC — 可开关扩展内容
-  | 'creative_workshop'; // 创意工坊 — 社区二创内容
+  | 'dlc'; // DLC — 可开关扩展内容
 
 export interface WorldBookEntry {
   uid: number; // 唯一标识（来自原版世界书 UID）
@@ -69,18 +277,10 @@ export interface WorldBookEntry {
   order: number; // 排序（越大越靠后）
   position: number; // 世界书内位置分组（ST 兼容保留）
   /**
-   * 条目溯源（D14）—— 仅由安装/更新流程写入，正常编辑不碰。
-   * 目前只有创意工坊一种来源；未来其它来源在此并列加字段，不改 WorldBookEntry 顶层形状。
+   * 条目溯源 —— 预留给「由安装/更新流程写入」的来源信息，正常编辑不碰。
+   * 未来有新来源在此并列加字段，不改 WorldBookEntry 顶层形状。
    */
-  extra?: {
-    workshop?: {
-      projectId: string;
-      projectName: string;
-      sourceUid: string | number; // 上游原始 uid，仅溯源
-      sourceComment: string; // 上游 comment（= 本引擎的 name）
-      sourceHash: string; // 安装时正文哈希 —— 供 D15 精确判定是否被改过
-    };
-  };
+  extra?: Record<string, unknown>;
 }
 
 export interface WorldBook {
@@ -97,78 +297,6 @@ export interface WorldBook {
    * 在每次落库时盖戳。Dexie 索引容忍缺值行（该行不进 updatedAt 索引，主键查询不受影响）。
    */
   updatedAt?: number;
-}
-
-// ========== Creative Workshop Types (D13) ==========
-
-/**
- * 一条处置记录的类别 —— **「丢了」和「装上了但会这样」不是一回事**。
- *
- * 首版把两者合流成一个 `string[]`，UI 统一按「N 项内容未导入」报数，于是一条
- * 装好了、也启用了、只是执行环境受限的正则，会被算进「未导入」——
- * 用户读到的是安装失败，实际内容装得好好的。类别就是为了让 UI 不再说这个谎。
- *
- * - `dropped` —— 上游语义在当前显示路径**确实丢了**（`promptOnly`、不含 AI 输出
- *   位置 2 的规则、`trimStrings`、可达的 findRegex 宏替换；`markdownOnly=false`
- *   的提示词侧改写也只保留显示侧）
- * - `degraded` —— **装了**，但受隔离契约限制（parent/宿主 API 不开放、sessionStorage
- *   仅当前 frame 有效、IndexedDB 不开放、`{{...}}` 宏原样输出；共享 localStorage/
- *   regexStorage、远程资源与网络 API 已开放）
- * - `sideEffect` —— **装了**，且有**规则自身之外**的副作用。富 replacement 进入独立
- *   iframe 后，现行 mapper 不再为 `<style>` 产生这类记录；类型保留以兼容历史行。
- */
-export type WorkshopNoteKind = 'dropped' | 'degraded' | 'sideEffect';
-
-/** 带类别的处置记录 */
-export interface WorkshopNote {
-  kind: WorkshopNoteKind;
-  text: string;
-}
-
-/**
- * 落库形态 —— **裸字符串是历史数据**。
- *
- * P1 首版把 `droppedNotes` 写成了 `string[]`，用户库里已经有这种行了。读侧一律
- * 经 `normalizeWorkshopNotes()` 归一（裸串按 `dropped` 处理，与旧文案语气一致），
- * 不做迁移脚本：这是纯展示字段，为它扫全表升级不划算，就地兼容即可。
- */
-export type WorkshopNoteLike = string | WorkshopNote;
-
-/**
- * 创意工坊项目元数据。
- *
- * 一个项目对应一本 `partition: 'creative_workshop'` 的 WorldBook（D7），
- * 本类型只承载 WorldBook 没有字段位的项目生命周期数据。
- * 上游 `project` 响应有 34 字段，此处只落自己要的 —— 原始响应不整包存库（否则即第二真相来源，违反铁律4）。
- */
-export interface WorkshopProject {
-  id: string; // 上游 uuid，跨版本稳定
-  rootProjectId: string; // 版本族系根
-  name: string;
-  description: string;
-  version: string; // 上游自由填，本引擎只做串比对不解析
-  authorName: string; // authorGlobalName 优先，回退 authorName
-  tags: string[]; // 展示/筛选；保留标签 system/core 会授予核心叙事 Agent 可见性
-  coverUrl?: string;
-  downloadUrl: string;
-  fileSize: number;
-
-  // ===== 本地状态 =====
-  installState: 'installed' | 'update_available' | 'broken';
-  installedVersion: string;
-  installedAt: number;
-  fetchedAt: number; // 上次拉取上游元数据时间（TTL 判定）
-  uidRange: { start: number; end: number };
-  /**
-   * 安装时的处置记录，供 UI 提示。
-   *
-   * ⚠️ 元素类型是 `string | WorkshopNote` 的联合而不只是 `WorkshopNote`：老行里
-   * 存的是裸字符串（P1 首版），读侧必须过 `normalizeWorkshopNotes()`。新写入一律
-   * 是结构化的。
-   */
-  droppedNotes?: WorkshopNoteLike[];
-  /** 最后写入时间（v14 索引字段），每次落库盖戳 */
-  updatedAt: number;
 }
 
 // ========== World Book (Lorebook) Types (v3, deprecated) ==========
@@ -661,6 +789,12 @@ export interface AppSettings {
   maxMemoriesRecall: number;
   /** Phase 4: 剧情模式配置 */
   plotSettings: PlotSettings;
+  /**
+   * 行动选项的自定义方案库（2026-09-23 共识稿：**全局**，跨存档共用）。
+   * 内置方案（off/standard/emotive/adult）在 option-policy.BUILTIN_OPTION_SCHEMES，
+   * 不入此表；当前存档选中哪个方案存 saveProfile.worldFlags（每存档独立）。
+   */
+  optionSchemes: import('./option-policy').OptionScheme[];
   /** Phase 4: Embedding 使用的 API 端点 ID */
   embeddingEndpointId: string | null;
   /** Phase 4: Embedding 模型名 */
@@ -734,6 +868,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   maxMemoriesRecall: 20,
   // Phase 4 新增
   plotSettings: DEFAULT_PLOT_SETTINGS,
+  // 行动选项自定义方案库（全局；默认空 = 只剩内置四方案）
+  optionSchemes: [],
   embeddingEndpointId: null,
   embeddingModel: 'Qwen/Qwen3-Embedding-8B',
   embeddingDimension: 4096,
@@ -1000,6 +1136,55 @@ export interface InventoryItem {
   automata?: EffectAutomaton[];
 }
 
+/**
+ * 卡牌 = InventoryItem 子类型（type:'卡牌'）。复用 material/effects/automata/modifiers/rarity。
+ * 卡牌数值由 card-workshop/card-fusion.ts 确定性产出，AI 不自由生成数字（数据字段规范铁律3）。
+ * 逻辑键=name（铁律1）；卡册只存名字，不存 id。
+ */
+export interface CardItem extends InventoryItem {
+  type: '卡牌';
+  /** 卡牌品质（5 级，独立于 7 级装备品质） */
+  cardTier: CardTier;
+  /** 词条名列表（元素/形态/效果/稀有 四类，由 card-fusion 确定性推导，非 AI 自由文本） */
+  词条: string[];
+  /** 融合配方（确定性内核 card-fusion.ts 的输入/输出快照） */
+  recipe: FusionRecipe;
+  /** 是否未启封（高阶卡封印物；启封判定见后续阶段，复用 dice-tape 确定性骰带） */
+  sealed: boolean;
+  /** 卡牌经验（交锋拍制：参战卡分得玩家战斗经验 50%，见 card-workshop/skirmish.ts）。旧存档可缺 */
+  cardExp?: number;
+  /** 战斗成长累计的卡面战力加成（cardExp 每攒满一管 +1 清空重攒；缺省 0）。旧存档可缺 */
+  cardPowerBonus?: number;
+  /** 战技（「战技附加」天赋制卡时授予）：打出此卡时附加的战斗状态。旧存档可缺 */
+  战技?: { status: string; power: number; beats: number };
+}
+
+/** 融合配方（确定性内核 card-fusion.ts 的输入/输出） */
+export interface FusionRecipe {
+  /** 主素材名（逻辑键=名字） */
+  mainMaterial: string;
+  /** 副素材名（0~2，逻辑键=名字） */
+  subMaterials: string[];
+  /** 产出品质 */
+  tier: CardTier;
+  /** 融合类型：叠加（同类升级）/ 相生（复合）/ 相克（不稳定，造价×0.7） */
+  fusionKind: '叠加' | '相生' | '相克';
+  /** 造价（GC）= Σ素材售价 × 稀有度系数 × 相克折扣 */
+  cost: number;
+  /** 制作评级（可能失败；最终成败由引擎骰带在 rollCraftRating 中裁定） */
+  rating: CraftRating;
+}
+
+/** 卡册状态（CharacterState 内嵌，遵循「物品无 id、逻辑键=名字」铁律） */
+export interface CardAlbumState {
+  /** 已拥有卡牌名（逻辑键） */
+  owned: string[];
+  /** 当前卡组（同名≤2，遵循铁律） */
+  deck: string[];
+  /** 卡册容量 */
+  capacity: number;
+}
+
 /** 状态效果 */
 export interface StatusEffect {
   /** @deprecated 逻辑键=name（规范铁律1）。M2 起引擎不再读写，M3 后翻译层不再生成，仅为旧存档数据兼容保留字段位 */
@@ -1042,43 +1227,6 @@ export interface StatusEffect {
   divinity?: DivinityLevel;
 }
 
-// ===== 登神长阶 (Ascension) 子类型 =====
-
-/** 要素 (Lv.13-16, 上限3) */
-export interface ElementDetail {
-  name: string;
-  description: string;
-  effects: string[]; // 被动效果列表
-  /** 🆕 Phase 9: 词条名→中文描述 (AI 编写, 前端展示, 与 Skill.effects 对齐) */
-  effectDescriptions?: Record<string, string>;
-  /** 🆕 Phase 9: 脚本注册表: lifecycle→JS code (AI 编写, 引擎执行, 与 Skill.scripts 对齐) */
-  scripts?: Record<string, string>;
-}
-
-/** 权能 (Lv.17-20, 3要素→1权能) */
-export interface AuthorityDetail {
-  name: string;
-  description: string;
-  effects: string[];
-  costDescription: string; // 消耗描述 (如 '25% 最大MP+SP+攻击+动作')
-  /** 🆕 Phase 9: 词条名→中文描述 */
-  effectDescriptions?: Record<string, string>;
-  /** 🆕 Phase 9: 脚本注册表 */
-  scripts?: Record<string, string>;
-}
-
-/** 法则 (Lv.21-24) */
-export interface LawDetail {
-  name: string;
-  description: string;
-  effects: string[];
-  costDescription: string;
-  /** 🆕 Phase 9: 词条名→中文描述 */
-  effectDescriptions?: Record<string, string>;
-  /** 🆕 Phase 9: 脚本注册表 */
-  scripts?: Record<string, string>;
-}
-
 /** 统一角色状态 — NPC/主角/怪物/召唤物 共用 */
 export interface CharacterState {
   // ===== 基础信息 =====
@@ -1116,25 +1264,28 @@ export interface CharacterState {
   sp: number;
   maxSp: number;
 
-  // ===== 登神长阶 (Lv.13+) =====
-  ascension: {
-    enabled: boolean; // 是否开启登神长阶
-    elements: ElementDetail[]; // 要素 (Array, 有序, Phase 9: Record→Array)
-    authority: AuthorityDetail[]; // 权能 (Array, 有序, Phase 9: Record→Array)
-    law: LawDetail[]; // 法则 (Array, 有序, Phase 9: Record→Array)
-    deityPosition: string; // 神位 (Lv.25)
-    divineKingdom: {
-      // 神国 (Lv.25巅峰)
-      name: string;
-      description: string;
-    };
-  };
-
   // ===== 装备/技能/背包 =====
   // M2: equipment[] 已删除 — 装备 = inventory 中 equippedSlot 非空的物品（规范 §3）
   skills: Skill[];
   inventory: InventoryItem[];
   statusEffects: StatusEffect[];
+
+  // ===== 卡牌工坊（铭刻纪元世界观 MVP） =====
+  /** 卡册状态：owned=已拥有卡牌名，deck=当前卡组，capacity=容量。逻辑键=名字，无 id */
+  cardAlbum?: CardAlbumState;
+  /** 天赋（设计 §4-天赋，访谈共识 T1~T8 / docs/planning/2026-09-14-talent-system-design.md）：
+   *  只有玩家主角有天赋。两层：name/description = AI 表现层（起名写文案），
+   *  entries = 骨架条目（card-workshop/talent-entry 池内预设，state-manager 写入门禁
+   *  校验——AI 零编数）。列表 + 容量，同名唯一；缺省 = 旧档/伙伴无天赋（既定语义）。 */
+  talents?: {
+    capacity: number;
+    list: Array<{
+      name: string;
+      description?: string;
+      source: import('./card-workshop/talent-entry').TalentChannel;
+      entries: import('./card-workshop/talent-entry').TalentEntry[];
+    }>;
+  };
 
   // ===== 经济 =====
   money: number; // G
@@ -1146,7 +1297,7 @@ export interface CharacterState {
   present: boolean;
 
   // ===== 冒险者等级 =====
-  adventurerRank: string; // '未评级' | 'D' | 'C' | 'B' | 'A' | 'S'
+  /** 冒险者等级已改为声望派生（card-workshop/adventurer-rank），不在角色上存储 */
 
   // ===== 当前行为 =====
   currentAction: string;
@@ -1201,21 +1352,12 @@ export function createDefaultCharacterState(
     maxMp: 50,
     sp: 50,
     maxSp: 50,
-    ascension: {
-      enabled: false,
-      elements: [],
-      authority: [],
-      law: [],
-      deityPosition: '',
-      divineKingdom: { name: '', description: '' },
-    },
     skills: [],
     inventory: [],
     statusEffects: [],
     money: 0,
     location: '',
     present: true,
-    adventurerRank: '未评级',
     currentAction: '',
     customFields: {},
     ...overrides,
@@ -1517,18 +1659,12 @@ export interface CreatePreset {
     basePoints: Record<string, number>;
     attributePoints: Record<string, number>;
     money: number;
-    destinyPoints: number;
+    /** 开局命运点数量（2026-09-20 由 destinyPoints 改名；旧预设数据经 database.ts 的 normalizeCreatePresetData 归一化） */
+    startingPoints: number;
   };
-  equipments: CatalogItem[];
-  items: CatalogItem[];
-  skills: CatalogItem[];
-  background: BackgroundTemplate | null;
-  customBackgroundText: string;
-  destinyCoreId: string | null;
+  /** 开局购卡（2026-09-16 卡牌化）：旧 equipments/items/skills 三字段退役，加载时容错忽略 */
+  cards: CardCatalogItem[];
   plotSettings: PlotSettings | null;
-  /** Phase 10h: 世界书驱动字段 */
-  systemCoreEntryUid?: number | null;
-  enabledCharacterEntryUids?: number[];
   /** 角色补充信息 */
   personality?: string;
   physics?: string;
@@ -1752,6 +1888,13 @@ export interface AgentContext {
    * 自带 hp=0/死亡状态可判。🔴 缺席 = 没有已结算战斗记录（零 token，区块整段不出）。
    */
   recentCombat?: RecentCombatInfo;
+  /**
+   * 叙事意图快照（2026-09-17 纯记不向路线）：`{{NARRATIVE_INTENTS}}` 的数据源。
+   * 玩家在世界规则干预/制卡结果操控/禁忌炼金等纯叙事 SSS 下声明、**尚未被本回合消费**的指令。
+   * 🔴 供值在 game-pipeline 的 buildContext —— 与 mapFlags/recentCombat 同一条铁律：
+   *    漏供的症状不是报错，是区块静默消失。缺席（无意图）= 空串零 token。
+   */
+  narrativeIntents?: NarrativeIntent[];
 
   // --- 随机事件 v1（§5.1 读侧）: `{{RANDOM_EVENTS}}` 的三格输入 ---
   /**
@@ -1765,6 +1908,25 @@ export interface AgentContext {
    * 🔴 缺席 / 空数组 = 池空 → 整段不出（零 token）。
    */
   randomEventOffer?: RandomEventOfferEntry[];
+
+  /**
+   * 委托板（卡牌工坊）：当前生效的委托清单快照（内容注册表第 15 面经
+   * `commission-runtime` 缝的派生值）。
+   *
+   * 🔴 供值在 game-pipeline 的 `buildContext`（与 `randomEventOffer` 同一条铁律）；
+   *    措辞（`<commissions>` 外壳与指令段）在 `PLACEHOLDER_REGISTRY.COMMISSIONS` 的
+   *    resolver 里。缺席 / 空数组 = 无委托 → 整段不出（零 token）。
+   */
+  commissionDefs?: readonly import('./card-workshop/commission').CommissionDef[];
+
+  /**
+   * 天赋（卡牌工坊 §4-天赋）：玩家当前的 `CharacterState.talents` 快照。
+   * `{{TALENT}}` 注入块的数据源（game-pipeline buildContext 供值，同 randomEventOffer
+   * 铁律）；resolver 据此渲染 现有天赋/容量/可授条目池/融合提示。
+   * 缺席或 list 空 = 玩家还没有任何天赋 → 整段不出（零 token；出身天赋为必选，
+   * 正常流程下建档即有第一条）。
+   */
+  talents?: CharacterState['talents'];
   /**
    * 随机事件总开关的当前值（`engine-settings.randomEventsEnabled`）。
    *
@@ -1829,6 +1991,18 @@ export interface AgentContext {
   affections?: Record<string, number>;
   /** 玩家选中的焦点任务名，供 EJS `quest.focus()` 用 */
   focusQuest?: string;
+  /**
+   * 行动选项方案（2026-09-23 共识稿）：当前选中的方案 id（存档级，worldFlags）
+   * + 全局自定义方案库（settings）。{{OPTION_POLICY}} 的数据源，同 TALENT 铁律——
+   * buildContext 供值，resolver 只管措辞。id 缺席/未知由 resolveOptionScheme 回落标准三选。
+   */
+  optionSchemeId?: string;
+  customOptionSchemes?: import('./option-policy').OptionScheme[];
+  /**
+   * 理解修正（2026-09-25 共识：智力=制卡轴）——⌊(智力−10)/2⌋。
+   * {{TALENT}} 块尾的叙事注入行用（鉴定/眼力演绎素材）；缺省 = 未供值按 +0。
+   */
+  insightMod?: number;
   /** EJS `ui.notify` 的出口（不给 = 静默丢弃）。由 game-pipeline 接到 Toast */
   ejsNotify?: (message: string, level: 'info' | 'success' | 'warning' | 'error') => void;
   /** EJS `ui.log` 的出口（不给 = 丢弃）。**绝不落真 console**，免得刷屏 */
@@ -2796,16 +2970,9 @@ export const QUALITY_BY_RANK: QualityLevel[] = [...RARITY_LEVELS];
 
 // ========== Craft Industry & Stage ==========
 
-/** 制作行业类型 (对齐世界书: 4 种) */
-export type CraftIndustry = '锻造' | '炼金' | '烹饪' | '裁缝';
-
-/** 行业→核心属性映射 */
-export const CRAFT_INDUSTRY_ATTRIBUTE: Record<CraftIndustry, string> = {
-  锻造: '力量',
-  炼金: '智力',
-  烹饪: '精神',
-  裁缝: '敏捷',
-};
+/** 制作行业类型 — 定义已收口到 field-enums.ts（铁律5），此处 re-export 保住既有 import 面 */
+export type { CraftIndustry } from './field-enums';
+export { CRAFT_INDUSTRY_ATTRIBUTE } from './field-enums';
 
 /** 制作阶段 (对齐世界书: 3 级加工) */
 export type CraftStage = '基础加工' | '半成品' | '成品';
@@ -3202,13 +3369,33 @@ export interface CraftProduct {
 /** 🆕 经验档位：normal=普通（世界书系数），easy=简单（高经验系数，主人裁定 2026-08-24） */
 export type ExperienceMode = 'normal' | 'easy';
 
+/**
+ * 叙事意图：玩家为该次出牌或世界事件声明的「只记不向」指令。
+ * 纯叙事路径（不进入数值反哺循环），AI 在 {{NARRATIVE_INTENTS}} 注入下看到。
+ */
+export interface NarrativeIntent {
+  /** 创建时间戳（gameTime.minutes） */
+  atMinutes: number;
+  /** 触发者：玩家 | 天赋名（被动触发，如第六终章演出后才记） */
+  from: 'player' | string;
+  /** 天赋名（如「世界规则干预」「制卡结果操控」「禁忌炼金」） */
+  talent: string;
+  /** 玩家输入的原话（一条意图 = 一条持续有效的叙事规则） */
+  text: string;
+}
+
 export interface SaveProfile {
   saveId: string;
   /** 🆕 经验档位：normal=普通（世界书系数），easy=简单（高经验系数）。旧存档缺失时读取侧 `?? 'normal'` 兜底 */
   experienceMode: ExperienceMode;
   fp: number;
   fpHistory: FPTransaction[];
-  contracts: FateContract[];
+  /** 🆕 委托声望（卡牌工坊 单一数值；旧档缺失读侧 `?? 0` 兜底。AI 零写路径——
+   *  唯一变更是 delta_variable profile.reputation 且 metadata.source='commission'
+   *  的引擎委托结算，stat-projection 只读投影） */
+  reputation: number;
+  /** 🪦 命运契约已下线；老档残留字段原样保留，读写口全部移除 */
+  contracts?: FateContract[];
   achievements: Achievement[];
   news: NewsItem[];
   quests: Record<string, Quest>;
@@ -3216,6 +3403,12 @@ export interface SaveProfile {
   focusQuest: string;
   /** 好感度映射: characterId → [-100, +100] */
   affections: Record<string, number>;
+  /**
+   * 叙事意图（2026-09-17 纯记不向路线）：玩家在世界规则干预/制卡结果操控/
+   * 禁忌炼金等纯叙事 SSS 天赋下声明的「只记不向」指令。仅作叙事素材——
+   * AI 看到后镜像叙事但不做数值反哺。读侧缺省 []。
+   */
+  narrativeIntents?: NarrativeIntent[];
   /** 🆕 存档级全局游戏时间 */
   gameTime: GameTime;
   /** 🆕 叙事变量唯一真源（user./sys. 命名空间；从快照寄生迁出，规范 §12。M5 接管读写） */
@@ -3241,6 +3434,7 @@ export interface FPTransaction {
     | 'other';
 }
 
+/** 🪦 命运契约已下线 —— 仅老档兼容保留形状，引擎不再读写 */
 export interface FateContract {
   id: string;
   targetId: string;
@@ -3464,8 +3658,6 @@ export type MarkerType =
   | 'item_gen_request'
   | 'item_update_request' // 物品调度
   | 'craft_gen_request' // 制作调度（统一 _request 后缀）
-  | 'play_audio' // 场景配乐（Story 直接输出，非阻塞）
-  | 'scene_image' // 情景插画（图像生成 v1；标记即锚点，图就地插进正文）
   | 'event_trigger'; // 随机事件触发回执（随机事件 v1 §5.2；Story 认领候选池里的一条）
 
 /** 所有标记的公共字段 */
@@ -3540,36 +3732,10 @@ export interface CharDetectMarker extends DetectedMarkerBase {
 }
 
 /**
- * <play_audio> 标记 — Story AI 在场景/氛围发生转折时输出，切换 BGM。
- *
- * **地点不由 AI 提供**：位置已经在游戏状态里（`player.location`），让 AI 再写一遍
- * 只会多一处漂移源。AI 只负责它独有的判断——此刻是什么情绪、什么情境。
- *
- * 自闭合与成对写法都认：
- *   `<play_audio situation="战斗" mood="紧张"/>`
- *   `<play_audio>战斗, 紧张</play_audio>`（正文按逗号拆成自由词，喂给情绪与情境两维）
- */
-export interface PlayAudioMarker extends DetectedMarkerBase {
-  type: 'play_audio';
-  /** 情境词（探索/战斗/潜行/仪式…），逗号或顿号分隔 */
-  situation?: string;
-  /** 情绪词（紧张/平静/悲壮…），逗号或顿号分隔 */
-  mood?: string;
-  /** 指定人物主题曲（可选；缺省由调用方按在场角色填） */
-  character?: string;
-  /** 氛围变体 A/B */
-  variant?: string;
-  /** `stop` = 停止当前 BGM，不再选曲 */
-  action?: string;
-  /** 标签内部正文：自由词，逗号分隔 */
-  bodyText?: string;
-}
-
-/**
  * `<event_trigger>` 标记 — Story 认领候选池里的一条随机事件（随机事件 v1 §5.2）。
  *
  * 写法是自闭合、写在回复末尾：`<event_trigger name="神秘商人"/>`。成对与漏写闭合两种
- * 写法也认（`lenientClosing`，同 `scene_image` / `play_audio` 的理由：不认就等于
+ * 写法也认（`lenientClosing`：不认就等于
  * 「既不生效、也剥不掉」，那行尖括号会漏到玩家眼前）。
  *
  * 🔴 **`name` 是逻辑键，逐字匹配候选池**（铁则 1：AI 永不见 id）。结算侧
@@ -3595,15 +3761,7 @@ export type DetectedMarker =
   | ItemGenRequestMarker
   | ItemUpdateRequestMarker
   | CraftGenRequestMarker
-  | PlayAudioMarker
-  // 图像生成 v1：`<scene_image>`。定义住在 types-image.ts（子系统类型集中在那里），
-  // 这里只把它接进联合，`marker-protocol.ts` 的 `MarkerOf`/`MarkerFields` 因此对它成立。
-  //
-  // 🔴 加/删 `MarkerType` 成员与改 `MARKER_SPECS` **必须同一次改动**：那张表是
-  //    `{ [K in Exclude<MarkerType,'play_audio'>]: … }` 的映射类型，只改一边当场缺键、
-  //    编译不过（设计 §3.1）。
-  | SceneImageMarker
-  // 随机事件 v1：`<event_trigger>`（§5.2 写侧）。同上一条 —— 它与 `MARKER_SPECS` 里的
+  // 随机事件 v1：`<event_trigger>`（§5.2 写侧）。它与 `MARKER_SPECS` 里的
   // `event_trigger` 一行是同一次改动的两半。
   | EventTriggerMarker;
 
@@ -3642,7 +3800,7 @@ export interface CharUpdateRequestMarker extends DetectedMarkerBase {
 export interface ItemGenRequestMarker extends DetectedMarkerBase {
   type: 'item_gen_request';
   attributes: {
-    itemType: string; // equipment | skill | consumable | material | ascension
+    itemType: string; // equipment | skill | consumable | material
     source?: string; // craft | loot | gift | story
     owner?: string; // 归属角色 ID
   };
@@ -3808,31 +3966,6 @@ export interface CharGenOutput {
   likes: string;
   /** 🆕 心里话（40-80 tokens，角色内心独白/当前真实想法） */
   thoughts?: string;
-  /** 登神长阶 (Lv.13+ 可用) */
-  ascension: {
-    enabled: boolean;
-    /** 登神路径描述 */
-    path: string;
-    description: string;
-    /** 要素 (Lv.13-16, 1-3个) — 使用 ElementDetail 统一类型 */
-    elements: Array<Pick<ElementDetail, 'name' | 'description' | 'effects'>>;
-    /** 权能 (Lv.17-20, 1个) — 使用 AuthorityDetail 统一类型 */
-    authorities: Array<
-      Pick<AuthorityDetail, 'name' | 'description' | 'effects' | 'costDescription'>
-    >;
-    /** 法则 (Lv.21-24, 1-2个) */
-    laws: Array<{
-      name: string;
-      description: string;
-      passiveEffects: string[];
-      activeEffects: string[];
-      costDescription: string;
-    }>;
-    /** 神位 (Lv.25) */
-    deityPosition: string;
-    /** 神国 (Lv.25 巅峰) */
-    divineKingdom: { name: string; description: string };
-  };
   /** 🆕 char_gen 自身生成的技能 (供异步 item_gen 参考，也直接写入角色) */
   skills: Array<{
     name: string;
@@ -3989,17 +4122,6 @@ export interface ItemGenOutput {
     /** 🆕 重铸 (2026-08-24): 声明「把 replace 指定的已知条目替换成本条目」（item_gen `<item replace="...">`） */
     replace?: string;
   }>;
-  /** 🆕 Phase 9: 登神要素 (含 scripts + effectDescriptions) */
-  elements?: Array<
-    Pick<ElementDetail, 'name' | 'description' | 'effects' | 'effectDescriptions' | 'scripts'>
-  >;
-  /** 🆕 Phase 9: 权能 (含 scripts + effectDescriptions) */
-  authorities?: Array<
-    Pick<
-      AuthorityDetail,
-      'name' | 'description' | 'effects' | 'costDescription' | 'effectDescriptions' | 'scripts'
-    >
-  >;
 }
 
 /** Char Gen 链的最终结果 — char_gen → item_gen → 完整 CharacterState + Patches */
@@ -4172,117 +4294,6 @@ export interface MapMarker {
 }
 
 // ═══════════════════════════════════════════════════════════
-// Audio System — 音频子系统 (Dexie v11)
-// 设计: docs/planning/2026-07-26-audio-system-design.md §2
-// ═══════════════════════════════════════════════════════════
-
-/** Where the audio bytes come from. 'url' was cut from v1 — re-adding it is purely additive. */
-export type AudioSourceKind = 'blob' | 'builtin' | 'file';
-
-/** What the track is for. Drives decode policy; the size guard (§4.4) is the rail when it's wrong. */
-export type AudioTrackKind = 'music' | 'sfx';
-
-/** Track metadata — cheap to list, holds no audio bytes (§3.2) */
-export interface AudioTrack {
-  id: string;
-  name: string;
-  kind: AudioTrackKind;
-  source: AudioSourceKind;
-  url?: string; // source='builtin': the manifest path
-  mimeType?: string;
-  size?: number; // compressed bytes
-  duration?: number; // seconds, backfilled after first load
-  tags: string[]; // scene tags — the AI hook's only addressing scheme (§8)
-  builtin?: boolean; // cannot be deleted, only hidden
-  /** source='file': filename within the library folder. The folder handle is stored separately. */
-  relativePath?: string;
-  /** source='file': the file was gone at last scan. Row is kept so tags/playlist slots survive. */
-  missing?: boolean;
-  /**
-   * sha-256 of the bytes, written by the unified zip importer (D12 / §4.4).
-   *
-   * **Non-indexed property — needs no Dexie version bump.** Only new writes carry it;
-   * rows without it fall through to `uniqueAudioName` exactly as before, and existing
-   * tracks are never rewritten. Absent whenever `crypto.subtle` was unavailable
-   * (insecure context), in which case dedupe is skipped rather than approximated.
-   */
-  hash?: string;
-  /**
-   * Attribution carried by an import pack's `manifest.json` (D10 / §5.2), and the
-   * only place it can survive — a filename cannot express it.
-   *
-   * **Non-indexed properties — no Dexie version bump**, same as `hash` above: only new
-   * writes carry them, rows without them behave exactly as before, and existing tracks
-   * are never rewritten. Absent when the pack shipped no manifest entry for the file.
-   *
-   * The built-in library already models this per track in `public/audio/manifest.json`
-   * (`credit: "Aoo"` / `license: "PLACEHOLDER-PENDING-REVIEW"`); before these columns
-   * existed those values reached no Dexie row at all, so attribution died at the
-   * loader. Retrofitting it onto a shipped library is materially harder than carrying
-   * it from the start (§12).
-   */
-  credit?: string;
-  license?: string;
-  createdAt: number;
-  updatedAt: number;
-}
-
-/** Audio bytes, stored apart from metadata and read only at play time */
-export interface AudioBlobRecord {
-  id: string; // === AudioTrack.id
-  blob: Blob;
-}
-
-/**
- * Persisted File System Access handle for the user's music library folder.
- * Handles are structured-cloneable, so IndexedDB stores them directly —
- * they cannot go in localStorage; they are not JSON.
- */
-export interface AudioHandleRecord {
-  id: string; // 'library-root' — one row today
-  handle: FileSystemDirectoryHandle;
-  addedAt: number;
-}
-
-/** Playlists are a sequencer concept — music tracks only (§4.3) */
-export interface AudioPlaylist {
-  id: string;
-  name: string;
-  trackIds: string[]; // ordered; dangling ids pruned on track delete
-  createdAt: number;
-  updatedAt: number;
-}
-
-export type AudioRepeatMode = 'off' | 'all' | 'one';
-
-/**
- * Discrete playback state. Deliberately excludes position — that is a getter
- * sampled on demand, never broadcast (§6.3).
- */
-export interface AudioPlaybackState {
-  music: {
-    status: 'idle' | 'playing' | 'paused';
-    trackId: string | null;
-    playlistId: string | null;
-    index: number;
-    durationSec: number;
-    volume: number; // 0..1, channel gain
-    muted: boolean;
-    repeat: AudioRepeatMode;
-    shuffle: boolean;
-  };
-  sfx: {
-    volume: number;
-    muted: boolean;
-    liveVoices: number;
-  };
-  masterVolume: number;
-  masterMuted: boolean;
-  /** AudioContext resumed by a user gesture yet (§7) */
-  unlocked: boolean;
-}
-
-// ═══════════════════════════════════════════════════════════
 // Asset System — 素材子系统 (Dexie v13)
 // 设计: docs/planning/2026-07-29-asset-management-system-design.md §2 / §4.1
 // ═══════════════════════════════════════════════════════════
@@ -4293,8 +4304,7 @@ export interface AudioPlaybackState {
  *
  * 为什么住在 types.ts 而不是 field-enums.ts: field-enums.ts 只收 **AI 提名**
  * 的游戏数据枚举（每个都配一个 normalize*()，铁律5 治的是模型输出漂移）。
- * AssetType 由用户在 UI 控件里选，模型永不提名它 —— 与 AudioSourceKind /
- * AudioTrackKind 同级，照音频先例走。
+ * AssetType 由用户在 UI 控件里选，模型永不提名它。
  */
 export type AssetType = '头像' | '立绘' | '立绘bg';
 

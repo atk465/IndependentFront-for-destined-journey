@@ -19,7 +19,6 @@ const BUILTIN_IDS = [
   'monster_ecology',
   'industry',
   'organization',
-  'system_core',
   'variable',
   'quick_feature',
   'extra_setting',

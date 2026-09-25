@@ -8,7 +8,7 @@
  *
  * 现在所有表都从 `RARITY_LEVELS` / `TIER_CONFIGS` 派生 —— 加第八级不可能漏。
  */
-import { RARITY_LEVELS, normalizeRarity, type Rarity } from '@engine/field-enums';
+import { RARITY_LEVELS, CARD_TIERS, normalizeRarity, type Rarity } from '@engine/field-enums';
 import { TIER_CONFIGS } from '@engine/tier-constants';
 
 /** 调色板令牌后缀，顺序与 `RARITY_LEVELS` 一一对应 */
@@ -68,6 +68,21 @@ export function qualityVarFromRarity(code: string): string {
 /** 英文稀有度码 → 中文品质名（认不出时兜底「普通」），供徽章文案用 */
 export function qualityLabelFromRarity(code: string): Rarity {
   return normalizeRarity(code) ?? '普通';
+}
+
+/**
+ * 卡牌品质（铭刻纪元 5 级：白铁→星辉）→ 品质调色板。
+ *
+ * 卡牌品质独立于 7 级装备品质，但没有自己的调色板 —— 借同一条主题令牌
+ * （白铁=common … 星辉=legendary），照样跟随主题，不硬编码 hex。
+ */
+const CARD_TIER_TO_VAR: Record<string, string> = Object.fromEntries(
+  CARD_TIERS.map((t, i) => [t, QUALITY_VAR_POOL[i]]),
+);
+
+/** 卡牌品质 → CSS `var()`；未知档兜底 common 色 */
+export function cardTierVar(cardTier: string): string {
+  return `var(${CARD_TIER_TO_VAR[cardTier] ?? '--theme-quality-common'})`;
 }
 
 // ═══════════════════════════════════════════════════════════

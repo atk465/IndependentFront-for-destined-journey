@@ -6,11 +6,26 @@
  * both while streaming and after completion.
  */
 
-import { scanEventTriggers, stripPlayAudioMarkers } from './marker-protocol';
+import { scanEventTriggers } from './marker-protocol';
 
 export interface StoryProjection {
   content: string;
   options: string[];
+  /**
+   * 输出是否**未正常闭合**（2026-09-18 真机防护）。
+   *
+   * 判据：有 `<maintext>` 开标签但缺 `</maintext>` 闭合标签 —— 说明模型输出在正文
+   * 中途断了（模型/预设不兼容、服务端截断、流式中断等）。
+   *
+   * 🔴 为什么要这个标志：`extractMainText` 在缺闭合时**静默返回「开标签到末尾」的全部
+   *    内容** —— 于是被截断的半截正文会被当成完整正文展示，玩家看到一句莫名其妙断掉
+   *    的话，排查时无从判断是模型问题还是显示问题。真机案例：story 预设混入了
+   *    DeepSeek 的 `<｜User｜>`/`<｜begin▁of▁thinking｜>` 标记而模型是 MiniMax，
+   *    输出停在「然后——没有」。
+   *
+   * 裸文本兼容路径（无 maintext 信封）不算截断 —— 那种情况本来就没有闭合契约。
+   */
+  truncated: boolean;
 }
 
 const LEADING_FENCE = /^\s*```[^\n]*\n?/;
@@ -24,7 +39,7 @@ const STREAM_CONTROL_TAGS = ['maintext', 'play_audio', 'event_trigger', ...CONTR
 /**
  * 剥掉 `<event_trigger>` 触发回执（随机事件 v1 / 设计 §5.2）。
  *
- * 与 `play_audio` 同一类：**零渲染意义的回执标记**，漏出去就是玩家眼前的一行尖括号。
+ * 这是**零渲染意义的回执标记**，漏出去就是玩家眼前的一行尖括号。
  * 结算侧（orchestrator Stage 1 → `confirmRandomEventTrigger`）读的是**未投影的原始输出**，
  * 所以这里剥干净不会让事件漏结算 —— 两条路各看各的文本。
  *
@@ -32,6 +47,15 @@ const STREAM_CONTROL_TAGS = ['maintext', 'play_audio', 'event_trigger', ...CONTR
  *    而那三种写法（自闭合 / 成对 / 漏写闭合）的容忍度全在 marker-protocol 那一处定义。
  *    抄一条只认成对写法的正则，症状是「结算了、但标记还留在正文里」。
  */
+/** 音频/图像系统下线后残留的 <play_audio>/<scene_image> 标记照旧剥干净（旧存档的消息里可能有） */
+const LEGACY_MARKER_TAGS = ['play_audio', 'scene_image'] as const;
+const LEGACY_MARKER_RE = new RegExp(
+  LEGACY_MARKER_TAGS.map(
+    (tag) => `<${tag}[^>]*\/>|<${tag}[^>]*>[\s\S]*?<\/${tag}\s*>|<${tag}[^>]*>`,
+  ).join('|'),
+  'gi',
+);
+
 function stripEventTriggerMarkers(text: string): string {
   const markers = scanEventTriggers(text);
   let out = text;
@@ -129,7 +153,44 @@ function stripTrailingPartialControlTag(text: string): string {
   return isControlFragment || fragment === '<' || fragment === '</' ? text.slice(0, start) : text;
 }
 
+/**
+ * 输出是否未闭合（2026-09-18 真机防护）。
+ *
+ * 判据分两层，**不能只看 `</maintext>`**：
+ * 1. 有 `<maintext>` 开标签且缺闭合 → 疑似截断；
+ * 2. 但**写出了 `<option>`/`<sum>` 区块的，一律算完整** —— 那些是契约里排在正文
+ *    之后的必填块，能写到它们说明模型走完了整个输出契约。
+ *
+ * 🔴 第 2 层是 2026-09-18 真机补的：用户导入的第三方预设教模型用 `</正文>` 收尾
+ *    （而不是 `</maintext>`），于是内容完整（正文 + option + sum，6150 tokens）
+ *    却被判成截断 —— 假警报比没有警报更糟，它会让玩家以为模型坏了。
+ *
+ * 裸文本兼容路径（无 maintext 信封）不算截断 —— 那种情况本来就没有闭合契约。
+ */
+function detectTruncated(raw: string): boolean {
+  const text = stripCodeFences(raw);
+  const open = lastMatch(text, MAIN_TEXT_OPEN);
+  if (!open) return false;
+  if (MAIN_TEXT_CLOSE.test(text)) return false;
+  // 写出了正文之后的**完整**必填块 → 完整（无论正文用什么标记收尾）。
+  // 🔴 必须要求成对闭合：只有开标签的 `<options>` 自身也可能是被截断的残片
+  //    （既有用例 'unclosed options envelope' 钉住这条边界）。
+  if (/<option(s)?\b[^>]*>[\s\S]*?<\/\1\s*>/i.test(text)) return false;
+  if (/<sum\b[^>]*>[\s\S]*?<\/sum\s*>/i.test(text)) return false;
+  return true;
+}
+
+/**
+ * 剥掉第三方预设惯用的「正文」收尾标记（2026-09-18 真机）。
+ *
+ * 我们的输出契约用 `<maintext>`/`</maintext>`，但外部预设可能教模型输出 `</正文>`
+ * ——它是模型给自己画的句号，不该漏进玩家看到的正文。非契约标签，故只在清洗链里
+ * 顺带剥除，不进 CONTROL_TAGS（那张表是「控制区块」，语义不同）。
+ */
+const ALTERNATE_PROSE_CLOSE = /<\/?正文\s*>/g;
+
 function project(raw: string, partial: boolean): StoryProjection {
+  const truncated = !partial && detectTruncated(raw);
   const options = extractOptions(raw);
   let content = extractMainText(stripCodeFences(raw));
 
@@ -137,12 +198,14 @@ function project(raw: string, partial: boolean): StoryProjection {
 
   if (partial) content = stripTrailingPartialControlTag(content);
 
-  content = stripEventTriggerMarkers(stripPlayAudioMarkers(content))
+  content = stripEventTriggerMarkers(content)
+    .replace(LEGACY_MARKER_RE, '')
+    .replace(ALTERNATE_PROSE_CLOSE, '')
     .replace(/<\/?maintext\b[^>]*>/gi, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 
-  return { content, options };
+  return { content, options, truncated };
 }
 
 /** Normalize a completed story response for persistence and rendering. */

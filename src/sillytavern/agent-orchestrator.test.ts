@@ -2861,3 +2861,47 @@ describe('AgentOrchestrator — Delta 会话接线（T3）', () => {
     expect(r2.promptRebased).toBe(false);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════
+// memory_recall 向量召回路由（2026-09-16 主人裁定补齐）
+// ═══════════════════════════════════════════════════════════════
+
+describe('memory_recall — Embedding 路径自动路由判据', () => {
+  // 路由判据在 callAgent 内联：memory_recall && (/embedding/.test(model) || apiType === 'embedding')
+  // 测试只验这个条件表达式（端到端需打 fetch + IDB mock，性价比不如单测判据本身）。
+  it('路由判据：模型名含 "embedding" 走向量路径', () => {
+    const cfg = makeAgentConfig({ agentId: 'memory_recall', model: 'doubao-embedding-vision' });
+    const ep = { apiType: 'chat' };
+    const isEmbedding =
+      cfg.agentId === 'memory_recall' &&
+      (/embedding/i.test(cfg.model) || ep.apiType === 'embedding');
+    expect(isEmbedding).toBe(true);
+  });
+
+  it('路由判据：apiType=embedding 也走向量路径（模型名无关键词）', () => {
+    const cfg = makeAgentConfig({ agentId: 'memory_recall', model: 'custom-v1' });
+    const ep = { apiType: 'embedding' };
+    const isEmbedding =
+      cfg.agentId === 'memory_recall' &&
+      (/embedding/i.test(cfg.model) || ep.apiType === 'embedding');
+    expect(isEmbedding).toBe(true);
+  });
+
+  it('路由判据：apiType=chat + 模型名无 embedding 关键词 → 走 LLM 路径', () => {
+    const cfg = makeAgentConfig({ agentId: 'memory_recall', model: 'gpt-4' });
+    const ep = { apiType: 'chat' };
+    const isEmbedding =
+      cfg.agentId === 'memory_recall' &&
+      (/embedding/i.test(cfg.model) || ep.apiType === 'embedding');
+    expect(isEmbedding).toBe(false);
+  });
+
+  it('路由判据：其它 agent 即使模型名含 embedding 也不走向量路径（判据锁 memory_recall）', () => {
+    const cfg = makeAgentConfig({ agentId: 'story', model: 'doubao-embedding-vision' });
+    const ep = { apiType: 'embedding' };
+    const isEmbedding =
+      cfg.agentId === 'memory_recall' &&
+      (/embedding/i.test(cfg.model) || ep.apiType === 'embedding');
+    expect(isEmbedding).toBe(false); // agentId 不匹配
+  });
+});

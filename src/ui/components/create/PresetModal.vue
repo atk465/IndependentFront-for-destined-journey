@@ -134,7 +134,7 @@ function handleExport(preset: CreatePresetRecord) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `destiny_${preset.name}.preset.json`;
+  a.download = `narrative_${preset.name}.preset.json`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -149,7 +149,7 @@ function handleExportAll() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `destiny_all_${new Date().toISOString().slice(0, 10)}.presets.json`;
+  a.download = `narrative_all_${new Date().toISOString().slice(0, 10)}.presets.json`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -327,16 +327,8 @@ const busy = ref(false);
                 <span class="detail-label">身世</span><span>{{ p.data.backstory || '-' }}</span>
               </div>
               <div class="detail-row">
-                <span class="detail-label">装备</span
-                ><span>{{ p.data.equipments?.length || 0 }} 件</span>
-              </div>
-              <div class="detail-row">
-                <span class="detail-label">技能</span
-                ><span>{{ p.data.skills?.length || 0 }} 个</span>
-              </div>
-              <div class="detail-row">
-                <span class="detail-label">道具</span
-                ><span>{{ p.data.items?.length || 0 }} 个</span>
+                <span class="detail-label">铭卡</span
+                ><span>{{ p.data.cards?.length || 0 }} 张</span>
               </div>
               <div class="detail-row">
                 <span class="detail-label">剧情大纲</span

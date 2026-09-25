@@ -13,12 +13,11 @@
     "organization": "79390fa24f061459",
     "quick_feature": "3de7c4fc33475e71",
     "race": "bf5f3c6ca071080a",
-    "system_core": "5cc2220e9efd6368",
     "variable": "d6b62bdc5671797d",
     "world_setting": "af78d2c6bb272d5d"
   },
   "byPreset": {
-    "placeholder-story-v1": "1f3a6d80d45839df"
+    "placeholder-story-v1": "c47f10182c83fa7a"
   },
   "byBeautifierRule": {
     "placeholder-aside": "ff03fa46267cb2b3",
@@ -28,19 +27,19 @@
     "placeholder-strip-ooc": "ffc6dd986e8d6d6d"
   },
   "bySection": {
-    "content/bloodlines": "67c8aac6000fc8de",
+    "content/bloodlines": "11cb37f0c5f7e981",
     "content/branding": "0151ddec23899b30",
-    "content/catalog": "4446cad8324e9b60",
-    "content/image-dialects": "5507786297ecde48",
+    "content/catalog": "290997293a303841",
+    "content/commissions": "c3eb479e30685adb",
     "content/locations": "319a3dc5cef8e61f",
-    "content/map-pack": "ab70d9905886458b",
+    "content/map-pack": "91db60a489f7ad4c",
     "content/name-pools": "3e3e93642df2e4ef",
     "content/random-events": "bb263e1d9f733963",
     "content/remote-assets": "741638a580c5630d",
-    "defaults/agent-config": "9d7c862057f91bb3",
+    "defaults/agent-config": "036f4940619b74b7",
     "defaults/audio-manifest": "741638a580c5630d",
     "defaults/beautifier-rules": "109fb75675ff60ed",
     "defaults/map-marker-presets": "741638a580c5630d",
-    "defaults/story-preset": "6bf1e6a4c0ac488c"
+    "defaults/story-preset": "fa797f46919e240f"
   }
 }

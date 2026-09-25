@@ -1,6 +1,6 @@
 export const BEAUTIFIER_FRAME_SANDBOX = 'allow-scripts';
 
-export const BEAUTIFIER_FRAME_MESSAGE_SOURCE = 'fated-poem-beautifier';
+export const BEAUTIFIER_FRAME_MESSAGE_SOURCE = 'narrative-beautifier';
 
 export const BEAUTIFIER_STORAGE_QUOTA_BYTES = 5 * 1024 * 1024;
 export const BEAUTIFIER_STORAGE_MAX_KEYS = 1024;

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
 import { useGameStore } from '../../stores/game-store';
+import { useSettingsStore } from '../../stores/settings-store';
+import { BUILTIN_OPTION_SCHEMES, type OptionScheme } from '@engine/option-policy';
 
 const emit = defineEmits<{
   send: [content: string];
@@ -10,12 +12,39 @@ const emit = defineEmits<{
 const props = defineProps<{ disabled?: boolean; stopping?: boolean }>();
 
 const game = useGameStore();
+const settings = useSettingsStore();
 const input = ref('');
 const showOptions = ref(false);
 const textareaRef = ref<HTMLTextAreaElement | null>(null);
 
 /** vars_update 解析出的动态行动选项 */
 const dynamicOptions = computed(() => game.pendingOptions);
+
+// ── 行动选项方案（2026-09-23 共识稿）──
+/** 全部可选方案 = 四内置 + 全局自定义库（settings.optionSchemes） */
+const allSchemes = computed<OptionScheme[]>(() => [
+  ...BUILTIN_OPTION_SCHEMES,
+  ...settings.settings.optionSchemes,
+]);
+const currentSchemeId = computed(() => game.optionSchemeId);
+const currentScheme = computed(
+  () => allSchemes.value.find((s) => s.id === currentSchemeId.value) ?? allSchemes.value[1],
+);
+
+async function switchScheme(id: string) {
+  if (id === currentSchemeId.value) return;
+  await game.setOptionScheme(id);
+}
+
+/**
+ * 选项文本 → { text, color }：解析 AI 按方案要求输出的 <font color="#xxx">包裹
+ * （共识稿「解析染 CSS」——只取 color 属性，标签本身不显示；其余 HTML 按字面量）。
+ */
+function parseOptionDisplay(opt: string): { text: string; color: string | null } {
+  const m = opt.match(/^\s*<font\s+color\s*=\s*["']?([^"'\s>]+)["']?\s*>([\s\S]*?)<\/font>\s*$/i);
+  if (m) return { text: m[2].trim(), color: m[1] };
+  return { text: opt, color: null };
+}
 
 // 监听 ChatFlow 选项点击 → 填入输入框
 watch(
@@ -69,15 +98,26 @@ function handleStop() {
 <template>
   <div class="input-bar">
     <div v-if="showOptions" class="options-popup" role="listbox">
-      <div class="options-title">可选行动</div>
+      <div class="options-title">
+        可选行动
+        <select
+          class="option-scheme-select"
+          :value="currentScheme?.id"
+          title="行动选项方案（下一轮生效）"
+          @change="switchScheme(($event.target as HTMLSelectElement).value)"
+        >
+          <option v-for="s in allSchemes" :key="s.id" :value="s.id">{{ s.name }}</option>
+        </select>
+      </div>
       <button
         v-for="(opt, i) in dynamicOptions"
         :key="i"
         class="option-item"
         role="option"
-        @click="selectOption(opt)"
+        :style="parseOptionDisplay(opt).color ? { color: parseOptionDisplay(opt).color! } : undefined"
+        @click="selectOption(parseOptionDisplay(opt).text)"
       >
-        {{ opt }}
+        {{ parseOptionDisplay(opt).text }}
       </button>
       <button class="option-custom" @click="showOptions = false">自定义输入...</button>
     </div>
@@ -216,6 +256,19 @@ function handleStop() {
   color: var(--theme-text-secondary);
   padding: 4px 8px;
   margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.option-scheme-select {
+  font-size: 0.75rem;
+  color: var(--theme-text-primary);
+  background: var(--theme-bg-elevated, transparent);
+  border: 1px solid var(--theme-border, rgba(128, 128, 128, 0.3));
+  border-radius: 4px;
+  padding: 1px 4px;
+  max-width: 9em;
 }
 .option-item {
   display: block;

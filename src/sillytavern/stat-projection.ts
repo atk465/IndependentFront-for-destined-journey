@@ -23,6 +23,7 @@
  */
 
 import type { CharacterState } from './types';
+import { rankForReputation } from './card-workshop/adventurer-rank';
 import { formatGameTime, getTimeOfDay, type GameTime } from './time-system';
 
 /** buildStatData 的入参 */
@@ -33,6 +34,8 @@ export interface StatProjectionInput {
   gameTime?: GameTime;
   /** 存档级命运点数（SaveProfile.fp）；缺失时结果不含 `命运点数` 键 */
   fp?: number;
+  /** 存档级声望（SaveProfile.reputation）；冒险者等级 = rankForReputation(声望) 纯派生 */
+  reputation?: number;
   /** 回合号（= 历史长度）；缺失时不含 `世界.回合` */
   turn?: number;
   /** 当前天气；缺失时不含 `世界.天气` */
@@ -103,19 +106,6 @@ function projectStatusEffects(effects: CharacterState['statusEffects'] | undefin
   }));
 }
 
-/** 登神长阶（Lv.13+）；未开启时返回一个「已开启: false」的空壳，免得创作者到处判 undefined */
-function projectAscension(asc: CharacterState['ascension'] | undefined): Record<string, any> {
-  if (!asc) return { 已开启: false, 要素: [], 权能: [], 法则: [], 神位: '', 神国: '' };
-  return {
-    已开启: asc.enabled === true,
-    要素: (asc.elements ?? []).map((x: any) => x?.name ?? String(x ?? '')),
-    权能: (asc.authority ?? []).map((x: any) => x?.name ?? String(x ?? '')),
-    法则: (asc.law ?? []).map((x: any) => x?.name ?? String(x ?? '')),
-    神位: asc.deityPosition ?? '',
-    神国: asc.divineKingdom?.name ?? '',
-  };
-}
-
 /**
  * 构建 `stats` 只读面快照。
  *
@@ -142,6 +132,10 @@ export function buildStatData(input: StatProjectionInput): Record<string, any> {
       生命层级: player.tierName,
       累计经验值: player.totalExp,
       升级所需经验: player.expToNext,
+      // 冒险者等级 = 声望派生（card-workshop/adventurer-rank，不落库）
+      ...(input.reputation !== undefined
+        ? { 冒险者等级: rankForReputation(input.reputation) }
+        : {}),
       // 五维 + 未分配点
       属性: {
         力量: attrs?.str ?? 0,
@@ -159,7 +153,6 @@ export function buildStatData(input: StatProjectionInput): Record<string, any> {
       装备: projectEquipment(player.inventory),
       技能: projectSkills(player.skills),
       状态效果: projectStatusEffects(player.statusEffects),
-      登神长阶: projectAscension(player.ascension),
     };
   }
 

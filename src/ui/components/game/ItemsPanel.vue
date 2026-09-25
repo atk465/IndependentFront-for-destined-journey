@@ -9,28 +9,76 @@ import { inferQualityFromStats as inferQuality } from '@engine/quality-inference
 import { describeModifiers } from '@engine/describe-modifier';
 import { describeAutomata } from '@engine/describe-automaton';
 import { normalizeEffects } from '../../lib/item-effects';
-import type { InventoryItem, QualityLevel, Skill } from '@engine/types';
+import type { CardItem, InventoryItem, QualityLevel, Skill } from '@engine/types';
 import { QUALITY_RANK } from '@engine/types';
+import { cardTierVar } from '../../lib/quality-colors';
+import { cardKindOf, isPlayableCard } from '@engine/card-workshop/card-kind';
+import { TIER_POWER } from '@engine/card-workshop/deck-power';
 // 🆕 重铸（2026-08-24）：单条目重铸 —— 把当前条目的完整数据喂给 item_gen 重写
 import type { RewriteTarget } from '@engine/item-gen-chain';
 
 const game = useGameStore();
 const ui = useUIStore();
 
-type Category = 'inventory' | 'equipment' | 'skills';
-const activeCategory = ref<Category>('inventory');
+/**
+ * 三栏（2026-09-18 裁决）：背包页即卡牌分类页。
+ * - 战斗卡：可出战的卡（装备/技能/领域/召唤/军团/场景）+ 传统装备物品 + 技能
+ * - 道具卡：物资卡（不可出战，走此处的「使用」通道）+ 传统消耗品
+ * - 素材：制卡原料（材料类物品）+ 素材卡
+ * 旧的「背包 / 装备 / 技能」三栏已删除——卡牌化后装备/技能栏结构性空转。
+ */
+type Category = 'battle' | 'supply' | 'material';
+const activeCategory = ref<Category>('battle');
 const activeFilter = ref('全部');
 const selectedIdx = ref(0);
 
 const player = computed(() => game.player);
 
 // ═══ 数据 ═══
-// M6 完整重构: 装备 = inventory 中 equippedSlot 非空的物品（规范 §3），最小适配 filter 惯用式
-const inventoryItems = computed(() => player.value?.inventory || []);
-const equipmentItems = computed(() =>
-  (player.value?.inventory ?? []).filter((i) => i.equippedSlot),
-);
+const allInventory = computed<InventoryItem[]>(() => player.value?.inventory || []);
 const skillItems = computed(() => player.value?.skills || []);
+
+/** 卡牌实物（inventory 里的 type='卡牌'） */
+function isCardItem(i: InventoryItem): i is CardItem {
+  return i.type === '卡牌';
+}
+
+const battleEntries = computed<PanelEntry[]>(() => {
+  const entries: PanelEntry[] = [];
+  for (const row of allInventory.value) {
+    if (isCardItem(row)) {
+      if (isPlayableCard(row)) entries.push({ kind: 'card', row });
+    } else if (row.type === '装备') {
+      entries.push({ kind: 'item', row });
+    }
+  }
+  for (const row of skillItems.value) entries.push({ kind: 'skill', row });
+  return entries;
+});
+
+const supplyEntries = computed<PanelEntry[]>(() => {
+  const entries: PanelEntry[] = [];
+  for (const row of allInventory.value) {
+    if (isCardItem(row)) {
+      if (cardKindOf(row.词条) === '物资') entries.push({ kind: 'card', row });
+    } else if (row.type === '消耗品') {
+      entries.push({ kind: 'item', row });
+    }
+  }
+  return entries;
+});
+
+const materialEntries = computed<PanelEntry[]>(() => {
+  const entries: PanelEntry[] = [];
+  for (const row of allInventory.value) {
+    if (isCardItem(row)) {
+      if (cardKindOf(row.词条) === '素材') entries.push({ kind: 'card', row });
+    } else if (row.type === '材料') {
+      entries.push({ kind: 'item', row });
+    }
+  }
+  return entries;
+});
 
 /**
  * 面板里的一行 —— 判别联合（Q-11）。
@@ -42,21 +90,29 @@ const skillItems = computed(() => player.value?.skills || []);
  * 物品与技能是两种真实不同的形状（quantity/equippedSlot/rarity/stats vs
  * cost/level/type:'active'|'passive'），所以不是「取交集」而是判别联合。
  */
-type PanelEntry = { kind: 'item'; row: InventoryItem } | { kind: 'skill'; row: Skill };
+type PanelEntry =
+  | { kind: 'item'; row: InventoryItem }
+  | { kind: 'card'; row: CardItem }
+  | { kind: 'skill'; row: Skill };
 
 const currentItems = computed<PanelEntry[]>(() => {
-  const inv = Array.isArray(player.value?.inventory) ? player.value.inventory : [];
-  const skills = Array.isArray(player.value?.skills) ? player.value.skills : [];
   switch (activeCategory.value) {
-    case 'inventory':
-      return inv.map((row) => ({ kind: 'item' as const, row }));
-    case 'equipment':
-      return inv.filter((i) => i.equippedSlot).map((row) => ({ kind: 'item' as const, row }));
-    case 'skills':
-      return skills.map((row) => ({ kind: 'skill' as const, row }));
+    case 'battle':
+      return battleEntries.value;
+    case 'supply':
+      return supplyEntries.value;
+    case 'material':
+      return materialEntries.value;
   }
   return []; // ← 防御
 });
+
+/** 各栏计数（模板页签 badge 用） */
+const categoryCounts = computed(() => ({
+  battle: battleEntries.value.length,
+  supply: supplyEntries.value.length,
+  material: materialEntries.value.length,
+}));
 
 /**
  * 这一行归到哪个子分类 —— 筛选选项与筛选判据**共用同一份**（Q-11）。
@@ -65,9 +121,7 @@ const currentItems = computed<PanelEntry[]>(() => {
  * 回退「装备」「物品」，是详情头的展示文案，合并会改掉界面上的字。
  */
 function facetOf(entry: PanelEntry): string | undefined {
-  if (activeCategory.value === 'equipment') {
-    return entry.kind === 'item' ? (entry.row.equippedSlot ?? undefined) : undefined;
-  }
+  if (entry.kind === 'card') return cardKindOf(entry.row.词条); // 形态词（装备/技能/领域…）
   if (entry.kind === 'skill') return entry.row.type === 'active' ? '主动' : '被动';
   return entry.row.type;
 }
@@ -80,16 +134,29 @@ function facetOf(entry: PanelEntry): string | undefined {
  * 开局初始技能照 dispatcher 请求里的品质原样填），有就显示、没有回落中性「普通」，不再编造。
  */
 function qualityOf(entry: PanelEntry): string {
+  // 卡牌品质是五级（白铁→星辉），与七级物品品质是两套编码 —— 显示各走各的
+  if (entry.kind === 'card') return entry.row.cardTier;
   if (entry.kind === 'skill') return entry.row.rarity || '普通';
   return entry.row.rarity || inferQuality(entry.row.stats);
+}
+
+/** 排序权重：卡牌走五级 tier 序号，物品/技能走七级品质 rank（两套编码不混算） */
+function qualityRankOf(entry: PanelEntry): number {
+  if (entry.kind === 'card') return TIER_POWER[entry.row.cardTier] ?? 0;
+  return QUALITY_RANK[qualityOf(entry) as QualityLevel] ?? -1;
+}
+
+/** 行的品质色：卡牌走五级 tier 调色板，物品/技能走七级品质调色板 */
+function entryColor(entry: PanelEntry): string {
+  if (entry.kind === 'card') return cardTierVar(entry.row.cardTier);
+  return qualityVar(qualityOf(entry));
 }
 
 /** 列表行尾部的那点补充信息 */
 function listExtra(entry: PanelEntry): string {
   if (entry.kind === 'skill') return `Lv.${entry.row.level ?? 1}`;
-  return activeCategory.value === 'equipment'
-    ? `[${entry.row.equippedSlot}]`
-    : `×${entry.row.quantity}`;
+  if (entry.kind === 'card') return entry.row.quantity > 1 ? `×${entry.row.quantity}` : '';
+  return `×${entry.row.quantity}`;
 }
 
 const filterOptions = computed(() => {
@@ -110,9 +177,7 @@ const sortedItems = computed(() => {
   // 品质序号走引擎的唯一真源（Q-11：此前这里内联了一张 1 起、字面倒序的第二张 rank 表，
   // 与 types.ts 的 QUALITY_RANK（0 起）并存）
   return [...filteredItems.value].sort((a, b) => {
-    const qb = QUALITY_RANK[qualityOf(b) as QualityLevel] ?? -1;
-    const qa = QUALITY_RANK[qualityOf(a) as QualityLevel] ?? -1;
-    return qb - qa || a.row.name.localeCompare(b.row.name);
+    return qualityRankOf(b) - qualityRankOf(a) || a.row.name.localeCompare(b.row.name);
   });
 });
 
@@ -121,11 +186,19 @@ watch([activeCategory, activeFilter], () => {
   showRaw.value = false;
 });
 
+/** 🔴 2026-09-18 修 bug：切换页签时 activeFilter **必须重置**。
+ *  此前 filter 跨页签残留（在战斗卡选了「装备」再切道具卡，筛选条件还是「装备」
+ *  → 列表空白但页签角标有数字，看起来像面板坏了）。 */
+watch(activeCategory, () => {
+  activeFilter.value = '全部';
+});
+
 // ═══ 外部聚焦 — StatusOverview 点击持有物 → 切类目并选中该物品 ═══
 function applyItemFocus() {
   const focus = game.pendingItemFocus;
   if (!focus) return;
-  activeCategory.value = focus.category;
+  // 旧三栏（背包/装备/技能）都是战斗用品 —— 一律落到新三栏的战斗卡
+  activeCategory.value = 'battle';
   activeFilter.value = '全部';
   nextTick(() => {
     const idx = sortedItems.value.findIndex((e) => e.row.name === focus.itemName);
@@ -149,8 +222,7 @@ const selTypeLabel = computed(() => {
   const entry = selected.value;
   if (!entry) return '';
   if (entry.kind === 'skill') return entry.row.type === 'active' ? '主动技能' : '被动技能';
-  // M6 完整重构: equippedSlot 已是中文槽位枚举，直接展示
-  if (activeCategory.value === 'equipment') return entry.row.equippedSlot || '装备';
+  if (entry.kind === 'card') return `${cardKindOf(entry.row.词条)}卡`;
   return entry.row.type || '物品';
 });
 
@@ -161,9 +233,7 @@ const selExtra = computed(() => {
     const cost = entry.row.cost;
     return `Lv.${entry.row.level || 1}${cost ? ` · ${cost.amount}${cost.type}` : ''}`;
   }
-  if (activeCategory.value === 'equipment') {
-    return `${entry.row.durability || '?'}/${entry.row.maxDurability || '?'} 耐久`;
-  }
+  if (entry.kind === 'card') return entry.row.cardTier;
   return `×${entry.row.quantity || 1}`;
 });
 
@@ -200,10 +270,15 @@ const removing = ref(false);
 /** 丢弃背包物品（含装备）：整叠丢弃，确认后走 remove_item op。 */
 async function discardSelectedItem() {
   const entry = selected.value;
-  if (!entry || entry.kind !== 'item') return;
+  if (!entry || entry.kind === 'skill') return;
   const row = entry.row;
   const name = row.name;
-  const label = row.equippedSlot ? `装备「${name}」` : `物品「${name}」`;
+  const label =
+    entry.kind === 'card'
+      ? `卡牌「${name}」`
+      : row.equippedSlot
+        ? `装备「${name}」`
+        : `物品「${name}」`;
   const ok = window.confirm(`丢弃${label}？丢弃后不可恢复。`);
   if (!ok) return;
   removing.value = true;
@@ -213,6 +288,28 @@ async function discardSelectedItem() {
     ui.toast(`已丢弃「${name}」`, 'info');
   } else {
     ui.toast(result.error || '丢弃失败', 'error');
+  }
+}
+
+/**
+ * 使用物资卡（2026-09-18 裁决）：物资卡是纯道具卡，使用 = 消耗卡自身 + 按卡面
+ * yield 产出（Code 定值）。这是它唯一的出路——物资卡不可编组、不可在交锋打出。
+ */
+const usingSupply = ref(false);
+
+async function useSupplyCard() {
+  const entry = selected.value;
+  if (!entry || entry.kind !== 'card') return;
+  const name = entry.row.name;
+  const ok = window.confirm(`使用「${name}」？卡会消耗掉，产出按卡面定义。`);
+  if (!ok) return;
+  usingSupply.value = true;
+  const r = await game.useSupplyCard(name);
+  usingSupply.value = false;
+  if (r.ok) {
+    ui.toast(r.summary ?? `已使用「${name}」`, 'success');
+  } else {
+    ui.toast(r.reason ?? '使用失败', 'error');
   }
 }
 
@@ -340,20 +437,17 @@ async function doRewrite() {
 
     <!-- 类别切换 -->
     <div class="cat-tabs">
-      <button
-        :class="{ active: activeCategory === 'inventory' }"
-        @click="activeCategory = 'inventory'"
-      >
-        背包 <span class="badge">{{ inventoryItems.length }}</span>
+      <button :class="{ active: activeCategory === 'battle' }" @click="activeCategory = 'battle'">
+        战斗卡 <span class="badge">{{ categoryCounts.battle }}</span>
+      </button>
+      <button :class="{ active: activeCategory === 'supply' }" @click="activeCategory = 'supply'">
+        道具卡 <span class="badge">{{ categoryCounts.supply }}</span>
       </button>
       <button
-        :class="{ active: activeCategory === 'equipment' }"
-        @click="activeCategory = 'equipment'"
+        :class="{ active: activeCategory === 'material' }"
+        @click="activeCategory = 'material'"
       >
-        装备 <span class="badge">{{ equipmentItems.length }}</span>
-      </button>
-      <button :class="{ active: activeCategory === 'skills' }" @click="activeCategory = 'skills'">
-        技能 <span class="badge">{{ skillItems.length }}</span>
+        素材 <span class="badge">{{ categoryCounts.material }}</span>
       </button>
     </div>
 
@@ -381,10 +475,8 @@ async function doRewrite() {
           :class="{ selected: i === selectedIdx }"
           @click="selectedIdx = i"
         >
-          <span class="dot" :style="{ background: qualityVar(qualityOf(entry)) }" />
-          <span class="i-name" :style="{ color: qualityVar(qualityOf(entry)) }">{{
-            entry.row.name
-          }}</span>
+          <span class="dot" :style="{ background: entryColor(entry) }" />
+          <span class="i-name" :style="{ color: entryColor(entry) }">{{ entry.row.name }}</span>
           <span class="i-tag">{{ facetOf(entry) }}</span>
           <span class="i-extra">{{ listExtra(entry) }}</span>
         </div>
@@ -463,6 +555,17 @@ async function doRewrite() {
           </div>
         </div>
 
+        <!-- 使用（物资卡专属：2026-09-18 纯道具卡定位） -->
+        <div
+          v-if="selected.kind === 'card' && cardKindOf(selected.row.词条) === '物资'"
+          class="detail-use"
+        >
+          <button class="use-btn" :disabled="usingSupply" @click="useSupplyCard">
+            {{ usingSupply ? '使用中…' : '使用这张卡' }}
+          </button>
+          <span class="use-hint">消耗卡自身，产出按卡面定义（Code 结算，不依赖 AI）</span>
+        </div>
+
         <!-- 删除/丢弃 -->
         <div class="detail-remove">
           <button
@@ -472,6 +575,14 @@ async function doRewrite() {
             @click="discardSelectedItem"
           >
             丢弃{{ selected.row.equippedSlot ? '装备' : '' }}
+          </button>
+          <button
+            v-else-if="selected.kind === 'card'"
+            class="remove-btn"
+            :disabled="removing"
+            @click="discardSelectedItem"
+          >
+            丢弃卡牌
           </button>
           <button
             v-else-if="selected.kind === 'skill'"
@@ -1020,3 +1131,11 @@ async function doRewrite() {
   font-style: italic;
 }
 </style>
+/* 使用物资卡（2026-09-18） */ .detail-use { display: flex; flex-direction: column; gap: 4px;
+margin-top: var(--theme-spacing-md); } .use-btn { padding: 8px 16px; border: 1px solid
+var(--theme-color-primary, #c48c4b); border-radius: var(--theme-radius-md); background: color-mix(in
+srgb, var(--theme-color-primary) 12%, transparent); color: var(--theme-color-primary, #c48c4b);
+font-weight: 700; font-size: 0.85rem; cursor: pointer; transition: all var(--theme-transition-fast);
+} .use-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--theme-color-primary) 20%,
+transparent); } .use-btn:disabled { opacity: 0.5; cursor: not-allowed; } .use-hint { font-size:
+0.7rem; color: var(--theme-text-muted); }

@@ -14,7 +14,7 @@ export async function createJourney(input: {
   save: SaveSlot;
   era: string;
   experienceMode: 'normal' | 'easy';
-  destinyPoints: number;
+  startingPoints: number;
   outline?: PlotOutline;
   events: PlotEvent[];
 }): Promise<string> {
@@ -27,8 +27,8 @@ export async function createJourney(input: {
       await saveSaveSlot(input.save);
       const profile = await getProfile(input.save.id, input.era);
       profile.experienceMode = input.experienceMode;
-      if (input.destinyPoints > 0) {
-        await addFP(profile, input.destinyPoints, '开局兑换的命运点', 'other');
+      if (input.startingPoints > 0) {
+        await addFP(profile, input.startingPoints, '开局兑换的命运点', 'other');
       } else {
         await updateProfile(profile);
       }

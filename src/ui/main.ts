@@ -3,7 +3,6 @@ import { createPinia } from 'pinia';
 import App from './App.vue';
 import { useThemeStore } from './stores/theme-store';
 import { useUIStore } from './stores/ui-store';
-import { installUnlockListener } from './lib/audio-singleton';
 import { installProductionEjsBackend } from '@engine/ejs-backend';
 import { installProductionScriptBackend } from '@engine/script-backend';
 import { setEngineSettingsProvider } from '@engine/engine-settings';
@@ -88,6 +87,7 @@ setEngineSettingsProvider(() => {
     //    把值提到 provider 外面存一份快照，等于把开关永久钉在启动那一刻。
     randomEventsEnabled: s.randomEventsEnabled,
     randomEventsFrequency: s.randomEventsFrequency,
+    optionSchemes: s.optionSchemes,
   };
 });
 
@@ -99,7 +99,6 @@ setEngineSettingsProvider(() => {
 //
 // 装监听本身不构造 AudioContext（getAudioManager() 只在手势回调里调），
 // 所以从不碰音频的会话也不会平白多出一个 AudioContext。
-installUnlockListener();
 
 // 世界书 EJS 隔离后端（能力面 §0.1 / 切片 T8 / §11.2 ①）。
 //

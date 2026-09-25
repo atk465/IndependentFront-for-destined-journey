@@ -19,7 +19,7 @@
  *    行为兜底不变（失败不阻塞启动）；现在失败进 `contentStatus='error'` 而不是静默。
  *
  * 3. **内容注册表**（D16）。八面（catalog/locations/bloodlines/namePools/markers/branding/
- *    imageDialects/mapPack）的同步读取入口，约定 URL `/data/content/<name>.json`
+ *    mapPack）的同步读取入口，约定 URL `/data/content/<name>.json`
  *    （markers 例外，见 `CONTENT_REGISTRY_SOURCES`）。消费方（agent-tools 同步路径 /
  *    random-tables / bloodlines / $location）**同步**读它，所以注册表必须在任何 agent 执行前灌注完成——
  *    两段保证：模块顶层同步 `seedPlaceholderRegistry()`（保证非 null 骨架），
@@ -42,9 +42,11 @@ import { defineStore, getActivePinia } from 'pinia';
 import { ref } from 'vue';
 import { detach } from './db-write';
 import type { ContentStatus } from '@engine/types-content';
+import { LEGACY_PACK_ID_MAP } from '@engine/types-content';
 // 占位基线清单：随引擎打包的静态资源（设计 §6），**不是**内容树的一部分。
 import placeholderHashesRaw from '@engine/placeholder-hashes.json';
-import type { ChatPreset, SaveSlot, WorkshopNote, WorldBook } from '@engine/types';
+import type { ChatPreset, SaveSlot, WorldBook } from '@engine/types';
+import type { WorkshopNote } from '@engine/types-content';
 import type {
   ContentPack,
   PackBaseline,
@@ -70,6 +72,8 @@ import { installMapPack } from '@engine/map-runtime';
 // 第 13 面 randomEvents 的收窄口（永不抛）+ 引擎侧随机事件缝（见 `setContentRegistry`）
 import { coerceRandomEventPack } from '@engine/random-event-pack';
 import { installRandomEventPack } from '@engine/random-event-runtime';
+import { installCommissionPack } from '@engine/commission-runtime';
+import { coerceCommissions } from '@engine/card-workshop/commission';
 // 注册表本体的引擎侧注入缝（见 `setContentRegistry` / `getContentRegistry`）
 import {
   createEmptyContentRegistry,
@@ -307,7 +311,7 @@ export async function loadAllDefaultBooks(): Promise<WorldBook[]> {
 // ═══════════════════════════════════════════════════════════
 
 /**
- * 内容注册表的各面（D16 / §5.1；第 7 面 imageDialects 由图像 v2 追加，
+ * 内容注册表的各面（D16 / §5.1；
  * 第 8 面 mapPack 由地图系统 v1 追加，`randomEvents` 由随机事件系统 v1 追加、
  * `remoteAssets` 由远程素材 v1 追加 —— 后两者在 `ContentPack` 里分别是**第 13 / 第 14
  * 分节**，两套编号各数各的，别混着读）。
@@ -363,6 +367,11 @@ export function setContentRegistry(next: ContentRegistry): void {
   //    「当前装着哪一份事件包」那一个模块级事实，不是本注册表。漏掉这一行的症状同样不是
   //    报错，而是**沿着上一份事件包掷骰**（换包后旧事件继续入池、新事件永不出现）。
   installRandomEventPack(coerceRandomEventPack(next.randomEvents));
+  // 🔴 第 15 面同理（委托板接线）：引擎侧读的是 `commission-runtime` 里「当前装着
+  //    哪一份委托清单」，漏装的症状是委托板空转 / 沿上一份清单出委托。
+  installCommissionPack(
+    coerceCommissions((next.commissions as { defs?: unknown } | undefined)?.defs),
+  );
 }
 
 /**
@@ -404,9 +413,9 @@ export const CONTENT_REGISTRY_SOURCES: ReadonlyArray<{
   { face: 'bloodlines', url: '/data/content/bloodlines.json' },
   { face: 'namePools', url: '/data/content/name-pools.json' },
   { face: 'branding', url: '/data/content/branding.json' },
-  { face: 'imageDialects', url: '/data/content/image-dialects.json' },
   { face: 'mapPack', url: '/data/content/map-pack.json' },
   { face: 'randomEvents', url: '/data/content/random-events.json' },
+  { face: 'commissions', url: '/data/content/commissions.json' },
   { face: 'remoteAssets', url: '/data/content/remote-assets.json' },
   { face: 'markers', url: '/data/defaults/map-marker-presets.json' },
 ];
@@ -498,9 +507,10 @@ async function fetchRegistryFace(
  * 已装 pack 各面的取值（D20 三态的 pack 半边）。
  *
  * 取法与装包执行器一致：`catalog` / `namePools` 取 `.data` 子字段，
- * `locations` / `mapMarkers` / `branding` / `bloodlines` / `imageDialects` / `mapPack` 是整节
- * （方言分节按整节走，因为它落盘就是 `{ dialects: [...] }` —— 与 `bloodlines` 同形；
- * 地图包同理，它落盘就是 `MapPack` 本身，再包一层 `data` 只是多一层壳）。
+ * `locations` / `mapMarkers` / `branding` / `mapPack` 是整节（裸形状）。
+ * 🔴 **`bloodlines` 是例外：它带壳**（`PackBloodlinesSection = { bloodlines: {...} }`），
+ *    必须在供注册表前剥到内层 —— 注册表消费方要的是裸的 raceKey→血脉 映射。
+ *    地图包落盘就是 `MapPack` 本身，再包一层 `data` 只是多一层壳。
  * 键**只在该面有值时才出现**——于是下游一律 `resolveSection(packFace, placeholder)`，
  * 不必在两处各写一遍三元。
  *
@@ -514,11 +524,20 @@ function packRegistryFaces(
   const out: Partial<Record<keyof ContentRegistry, unknown>> = {};
   if (pack.catalog?.data !== undefined) out.catalog = pack.catalog.data;
   if (pack.locations !== undefined) out.locations = pack.locations;
-  if (pack.bloodlines !== undefined) out.bloodlines = pack.bloodlines;
+  if (pack.bloodlines !== undefined) {
+    // 🔴 2026-09-18 真机修：`PackBloodlinesSection` 是**带壳的**（`{ bloodlines: {...} }`），
+    //    而注册表这一面的消费方 `getBloodlineSet()` 直接遍历顶层键、要求每行含
+    //    `name` + `description`。此前直接整节赋值 → 遍历遇到外壳那一层就全跳过 →
+    //    血脉集恒空 → 捏人页种族下拉只剩「自定义」。
+    //    （占位侧走 HTTP 直取 bloodlines.json 是裸对象，所以不装包时看不出来；
+    //     旧内容包没有 bloodlines 分节，所以这个问题最近才暴露。）
+    //    剥壳；兼容构建器将来若改成裸对象（内层不存在时原样用）。
+    const inner = (pack.bloodlines as { bloodlines?: unknown }).bloodlines;
+    out.bloodlines = inner !== undefined ? inner : pack.bloodlines;
+  }
   if (pack.namePools?.data !== undefined) out.namePools = pack.namePools.data;
   if (pack.mapMarkers !== undefined) out.markers = pack.mapMarkers;
   if (pack.branding !== undefined) out.branding = pack.branding;
-  if (pack.imageDialects !== undefined) out.imageDialects = pack.imageDialects;
   if (pack.mapPack !== undefined) out.mapPack = pack.mapPack;
   if (pack.randomEvents !== undefined) out.randomEvents = pack.randomEvents;
   // 远程素材分节是**裸数组**（没有 `.data` / `{ dialects }` 那层壳），故整节走
@@ -645,6 +664,27 @@ function writePackSelectionMetadata(
   if (patch.enabledWorldBookEntries) out.enabledWorldBookEntries = patch.enabledWorldBookEntries;
   if (needsSelection) out.needsPackWorldBookSelection = true;
   return out as SaveSlot['metadata'];
+}
+
+/**
+ * 旧官方包 packId 记录迁移（2026-09-20 去 fated-poem 化）：记录键与载荷同步改名，
+ * 保持 `packId === payload.packId` 不变式。幂等读路径自愈——迁过一次后是空转扫描；
+ * 官方包出新版（新 id 同版本线）时升级判定照常工作。
+ */
+async function migrateLegacyPackIdRecords(): Promise<void> {
+  const records = await getDatabase().contentPacks.toArray();
+  for (let i = 0; i < records.length; i++) {
+    const record = records[i];
+    const newId = record ? LEGACY_PACK_ID_MAP[record.packId] : undefined;
+    if (!record || !newId) continue;
+    const migrated = {
+      ...record,
+      packId: newId,
+      ...(record.payload ? { payload: { ...record.payload, packId: newId } } : {}),
+    };
+    await getDatabase().contentPacks.delete(record.packId);
+    await getDatabase().contentPacks.put(migrated);
+  }
 }
 
 export const useContentStore = defineStore('content', () => {
@@ -795,6 +835,14 @@ export const useContentStore = defineStore('content', () => {
     if (hydratePromise) return hydratePromise;
     hydratePromise = (async () => {
       try {
+        // 旧官方包 packId 迁移（2026-09-20 改名）：记录键与载荷同步改名，
+        // 保持 `packId === payload.packId` 不变式；幂等，迁过一次后是空转扫描。
+        // 🔴 **必须放在幂等闸之内的 IIFE 里**（每 boot 一次），不能每次调用都跑：
+        //    每条 `ensureContentRegistryLoaded` 链都经 `hydratePackStateIfPossible`，
+        //    闸前多出的一拍 DB 等待会让跨用例泄漏的 settings-store 启动任务
+        //    （setTimeout(0) → loadProjectDefaults）恰好在计数型测试装好 mock 的
+        //    窗口里插进一整轮注册表 fetch（content-store-registry 的 fetch 计数闸）。
+        await migrateLegacyPackIdRecords();
         const records = await getDatabase().contentPacks.toArray();
         const active = records.find((r) => r.packId === r.payload?.packId && r.packId) ?? null;
         // 💡 单 pack 场景：取最后一条（主 pack）。多 pack 共存留待后续波次扩展。
@@ -820,8 +868,10 @@ export const useContentStore = defineStore('content', () => {
           // beautifier-store 侧另有 watch contentStatus 收敛保险（2026-08-08）。
           console.warn('[content-store] hydratePackState 重算 presetRules 失败:', err);
         }
-      } catch {
-        // Dexie 不可用 → 缓存保持现状，不阻断（boot 兜底）
+      } catch (err) {
+        // Dexie 不可用 → 缓存保持现状，不阻断（boot 兜底）。但必须留痕：
+        // 静默吞掉会让 packId 迁移这类一次性写路径失败得无影无踪。
+        console.warn('[content-store] hydratePackState 载入失败:', err);
       }
     })();
     return hydratePromise;
@@ -964,9 +1014,9 @@ export const useContentStore = defineStore('content', () => {
       namePools: resolveSection(packFaces.namePools, reg.namePools),
       markers: resolveSection(packFaces.markers, reg.markers),
       branding: resolveSection(packFaces.branding, reg.branding),
-      imageDialects: resolveSection(packFaces.imageDialects, reg.imageDialects),
       mapPack: resolveSection(packFaces.mapPack, reg.mapPack),
       randomEvents: resolveSection(packFaces.randomEvents, reg.randomEvents),
+      commissions: resolveSection(packFaces.commissions, reg.commissions),
       remoteAssets: resolveSection(packFaces.remoteAssets, reg.remoteAssets),
     });
 

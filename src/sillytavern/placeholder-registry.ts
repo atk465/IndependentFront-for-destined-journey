@@ -21,6 +21,13 @@
  *   角色状态实际由 CHARACTER_STATE / INVENTORY / SKILL_STATE 各自的内联实现产出）
  */
 
+import type { CommissionDef } from './card-workshop/commission';
+import {
+  TALENT_ENTRY_POOL,
+  getCustomTalents,
+  type TalentEntry,
+} from './card-workshop/talent-entry';
+import { renderOptionPolicy, resolveOptionScheme } from './option-policy';
 import type {
   AgentContext,
   AgentConfig,
@@ -600,6 +607,186 @@ function renderMapContextBlock(snapshot: MapSnapshot, gameTime: GameTime | undef
 }
 
 // ═══════════════════════════════════════════════════════════
+// COMMISSIONS 渲染（卡牌工坊 委托板 —— 与 RANDOM_EVENTS 同款分工）
+// ═══════════════════════════════════════════════════════════
+
+/** 单条委托的行内摘要：折叠空白（一条委托恒占一行，照 flattenOfferText 同款纪律） */
+function flattenCommissionText(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+/** 需求摘要（卡/素材/到访/终点四选一，只摘有值的） */
+function renderCommissionRequirement(def: CommissionDef): string {
+  const req = def.requireCard;
+  const cardParts: string[] = [];
+  if (req?.exactName) cardParts.push(`指定卡「${req.exactName}」`);
+  if (req?.minTier) cardParts.push(`品质不低于${req.minTier}`);
+  if (req?.formEntry) cardParts.push(`${req.formEntry}类`);
+  if (req?.elements && req.elements.length > 0) cardParts.push(`含${req.elements.join('、')}元素`);
+  if (cardParts.length > 0) return `收卡（${cardParts.join('，')}）`;
+  if (def.requireMaterial)
+    return `缴纳「${def.requireMaterial.name}」×${def.requireMaterial.count}`;
+  if (def.requireVisit) {
+    return `接取后亲赴中层「${def.requireVisit.midTier}」${def.requireVisit.count} 次`;
+  }
+  if (def.finale) {
+    if (def.finale.type === '谜题')
+      return `解开「${def.finale.target ?? def.destMidTier ?? '目的地'}」深处的谜题`;
+    if (def.finale.type === '强敌')
+      return `在「${def.destMidTier ?? '目的地'}」击败${def.finale.target ?? '守卫之敌'}`;
+    return `在「${def.destMidTier ?? '目的地'}」现场制出「${def.finale.target ?? '禁忌之卡'}」`;
+  }
+  return '不限';
+}
+
+/** 委托的路程注脚（目的地/发布地/时限，只摘有值的） */
+function renderCommissionRoute(def: CommissionDef): string {
+  const parts: string[] = [];
+  if (def.grade) parts.push(`${def.grade}级`);
+  if (def.destMidTier) parts.push(`目的地：${def.destMidTier}`);
+  if (def.issuerMidTier) parts.push(`交差地：${def.issuerMidTier}`);
+  if (def.chainId) parts.push(`任务链「${def.chainId}」第${def.chainOrder ?? '?'}节`);
+  return parts.length > 0 ? ` ｜ ${parts.join('，')}` : '';
+}
+
+/** 奖励摘要（gc / reputation / materials / card 只摘有值的） */
+function renderCommissionRewards(req: CommissionDef['rewards']): string {
+  const parts: string[] = [];
+  if (req.gc) parts.push(`赏金 ${req.gc}G`);
+  if (req.reputation) parts.push(`声望 +${req.reputation}`);
+  if (req.materials && req.materials.length > 0) {
+    parts.push(`素材 ${req.materials.map((m) => `${m.name}×${m.quantity}`).join('、')}`);
+  }
+  if (req.card) parts.push(`独家卡「${req.card.name}」`);
+  return parts.length > 0 ? parts.join('，') : '面议';
+}
+
+/** 委托清单 → `<commissions>` 块（一条一行：名称｜描述｜要求｜报酬｜路程） */
+function renderCommissionsBlock(defs: readonly CommissionDef[]): string {
+  const lines = defs.map((d) => {
+    const desc = d.description ? `：${flattenCommissionText(d.description)}` : '';
+    const line = `「${d.name}」${desc} ｜ 要求：${renderCommissionRequirement(d)} ｜ 报酬：${renderCommissionRewards(d.rewards)}${renderCommissionRoute(d)}`;
+    return flattenCommissionText(line);
+  });
+  return [
+    '<commissions>',
+    '以下是冒险者公会当前的委托板。玩家询问委托或想接活时，从下列条目中向其介绍；',
+    '玩家明确接取某条委托时，用既有 quest 机制立一个与委托**同名**的任务（模板名逐字一致，不得改写）；',
+    '玩家交卡时只做叙事确认，验收与发奖由引擎结算——你不得自行宣布委托完成或发放奖励。',
+    '---',
+    ...lines,
+    '</commissions>',
+  ].join('\n');
+}
+
+// ═══════════════════════════════════════════════════════════
+// TALENT 渲染（卡牌工坊 天赋系统 —— 与 COMMISSIONS 同款分工）
+// ═══════════════════════════════════════════════════════════
+
+/** 单条骨架条目的行内摘要（kind + 关键参数） */
+function renderTalentEntryLine(e: TalentEntry): string {
+  const p = e.params;
+  switch (e.kind) {
+    case '材料限定':
+      return `材料限定（${p.materialClass ?? '不限'}）：成功率+30%`;
+    case '成品限定':
+      return `成品限定（${p.productClass ?? '不限'}）`;
+    case '成功率加成':
+      return `成功率+${p.bonus ?? 0}%`;
+    case '品质锁定':
+      return `品质${p.direction ?? ''}：${p.tier ?? '普通'}`;
+    case '品质突破':
+      return `品质越一级（域：${p.productClass ?? p.materialClass ?? '不限'}）`;
+    case '启封加值':
+      return `启封判定+${p.amount ?? 0}`;
+    case '行动值加成':
+      return `行动值+${p.amount ?? 0}`;
+    case '防御加值':
+      return `防御+${p.amount ?? 0}`;
+    case '配方解锁':
+      return `已解锁配方（${p.recipe ?? '未具名'}）`;
+    default:
+      return e.kind;
+  }
+}
+
+/** 独占渠道的中文名 */
+const TALENT_CHANNEL_LABEL: Record<string, string> = {
+  creation: '出身独占',
+  story: '剧情独占',
+  exchange: '兑换独占',
+  fusion: '融合独占',
+  universal: '通用',
+};
+
+/**
+ * 玩家天赋快照 + 条目池 → `<talents>` 块：
+ * 第一段 = 玩家现有天赋（名字/描述/条目/来源）；第二段 = 可授予条目池；
+ * 第三段 = 授予与融合纪律。
+ */
+function renderTalentsBlock(
+  talents: NonNullable<import('./types').CharacterState['talents']>,
+  insightMod?: number,
+): string {
+  const lines: string[] = ['<talents>'];
+  lines.push(
+    `玩家现有天赋（${talents.list.length}/${talents.capacity}）：`,
+    ...talents.list.map((t) => {
+      const entries = t.entries.map(renderTalentEntryLine).join('，');
+      const desc = t.description ? `——${t.description.replace(/\s+/g, ' ')}` : '';
+      return `·【${t.name}】${desc}（${entries}）`;
+    }),
+    '',
+    '可授予的骨架条目池（授予时按此组合，数值不得自创）：',
+    ...TALENT_ENTRY_POOL.map((e) => {
+      const exclusive =
+        e.channel === 'universal' ? '' : `（${TALENT_CHANNEL_LABEL[e.channel] ?? e.channel}）`;
+      return `· ${e.kind}${exclusive}：${renderTalentEntryLine(e)}`;
+    }),
+    '· 融合独占产物示例：【垃圾摩托】【封印斗士】——只能由融合产生。',
+  );
+  lines.push(
+    talents.list.length >= talents.capacity
+      ? '⚠ 玩家天赋已满员——如需授予新天赋，请先在叙事中引导玩家遗忘或融合（见天赋面板）。'
+      : '玩家有空的天赋位——遇到重大里程碑（突破/大事件/完成高难委托）可在叙事中授予一个新天赋。',
+  );
+  lines.push(
+    `玩家理解修正：${insightMod !== undefined ? (insightMod > 0 ? '+' : '') + insightMod : '+0'}`,
+    '（智力衍生，2026-09-25 共识。鉴定/眼力/读铭/识破仿卡等场景按它演绎眼力高低；它不是战斗数值，不要在正文里报数字。）',
+  );
+  lines.push(
+    '授予纪律：天赋名与描述由你创作（贴合故事风味），骨架条目必须从上面的条目池逐字组合；',
+    '写路径为 update_character 的 talents 字段（整列表替换，含玩家已有天赋）。',
+    '</talents>',
+  );
+  return lines.join('\n');
+}
+
+/**
+ * 自定义天赋词表（2026-09-23，天赋制作器 × 天赋词条目组）。
+ *
+ * 天赋制作器（开发者模式）登记的天赋是**运行时数据**，进不了静态世界书——
+ * 而正文 AI 在叙事里撞上这些名字时同样需要口径。这里逐条渲染
+ * 「名字（品级）——描述（条目摘要）」，无自定义时返回空串（零 token）。
+ * 与 {{TALENT}} 主块同门出入：战斗静默、随块注入。
+ */
+function renderCustomTalentWords(): string {
+  const customs = getCustomTalents();
+  if (customs.length === 0) return '';
+  const lines: string[] = [
+    '<天赋词·自定义>',
+    '天赋制作器登记的自定义天赋（叙事中出现这些名字时，按下述口径演绎；它们也可能出现在抽卡或授予中）：',
+  ];
+  for (const t of customs) {
+    const entries = t.entries.map(renderTalentEntryLine).join('，');
+    const desc = t.description ? `——${t.description.replace(/\s+/g, ' ')}` : '';
+    lines.push(`·【${t.name}】（${t.grade}）${desc}${entries ? `（${entries}）` : ''}`);
+  }
+  lines.push('</天赋词·自定义>');
+  return lines.join('\n');
+}
+
+// ═══════════════════════════════════════════════════════════
 // RANDOM_EVENTS 渲染（随机事件 v1 §5.1 —— 与 MAP_CONTEXT 同款分工）
 // ═══════════════════════════════════════════════════════════
 
@@ -886,6 +1073,81 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
     const offer = ctx.randomEventOffer ?? [];
     if (offer.length === 0) return '';
     return renderRandomEventsBlock(offer, (ctx.plotSettings?.mode ?? 'off') !== 'off');
+  },
+
+  /**
+   * {{COMMISSIONS}} — 冒险者公会当前的委托板（卡牌工坊 委托接线）。
+   *
+   * 数据来自 `ctx.commissionDefs`（内容注册表第 15 面经 `commission-runtime` 缝、
+   * game-pipeline `buildContext` 供值——与 randomEventOffer 同一条铁律）。
+   *
+   * 🔴 **两条空串出口**：① 没装内容包或清单为空（引擎仓零内置委托，常态）；
+   *    ② **战斗会话活跃**（combatActive，照随机事件 §13-2 同款静默）。
+   *    块自带 XML 外壳，模板里不要再包一层中文标签。
+   * 🔴 只给名字/描述/收卡要求/报酬：验收过滤器和奖励发放是引擎的活
+   *    （`matchesCommission` / `buildDeliveryPatches`），讲给 AI 只会诱导它自行宣判交付。
+   */
+  COMMISSIONS: (ctx, _config, _params) => {
+    if (ctx.combatActive === true) return '';
+    const defs = ctx.commissionDefs ?? [];
+    if (defs.length === 0) return '';
+    return renderCommissionsBlock(defs);
+  },
+
+  /**
+   * {{TALENT}} — 玩家天赋快照与授予纪律（卡牌工坊 天赋系统，访谈共识 T1~T8）。
+   *
+   * 数据来自 `ctx.talents`（game-pipeline buildContext 供玩家 CharacterState.talents）。
+   * 出口：① 玩家无任何天赋或未建档 → 空串（零 token；出身天赋为必选，建档即有）；
+   * ② 战斗会话活跃 → 空串（§13-2 同款静默）。
+   * 块内容 = 现有天赋 + 容量 + 可授予条目池 + 授予/融合纪律——AI 授予走
+   * update_character talents（写入门禁在 state-manager：AI 零编数）。
+   */
+  TALENT: (ctx, _config, _params) => {
+    if (ctx.combatActive === true) return '';
+    const talents = ctx.talents;
+    const words = renderCustomTalentWords();
+    const hasList = talents && Array.isArray(talents.list) && talents.list.length > 0;
+    if (!hasList) return words;
+    return renderTalentsBlock(talents, ctx.insightMod) + (words ? `\n${words}` : '');
+  },
+
+  /**
+   * {{OPTION_POLICY}} — 行动选项生成方案（2026-09-23 共识稿）。
+   *
+   * 数据：`ctx.optionSchemeId`（存档级选择，worldFlags）+ `ctx.customOptionSchemes`
+   * （全局自定义方案库，settings）。id 缺席/未知回落「标准三选」——升级兼容：
+   * 旧存档行为与改造前完全一致。玩家名从 ctx.characters 找 player 角色拿，
+   * 供方案文本的 {{user}} 替换。战斗中照常注入（选项在战斗收尾拍照样有用）。
+   */
+  OPTION_POLICY: (ctx, _config, _params) => {
+    const scheme = resolveOptionScheme(ctx.optionSchemeId, ctx.customOptionSchemes);
+    const playerName =
+      (ctx.characters ?? []).find((c) => c.type === 'player')?.name ?? '';
+    return renderOptionPolicy(scheme, playerName);
+  },
+
+  /**
+   * {{NARRATIVE_INTENTS}} — 玩家声明的「只记不向」叙事意图（2026-09-17）。
+   *
+   * 数据来自 `ctx.narrativeIntents`（buildContext 只供**未消费**条目）。
+   * 出口：无意图 / 战斗会话活跃 → 空串（零 token，照 TALENT 口径）。
+   *
+   * 🔴 **纯叙事通道**：这些意图对 AI 是**剧作指令**（世界规则怎么变、这张卡代表什么、
+   *    炼金要用什么当素材），引擎**不做任何数值反哺** —— 不生成卡、不改属性、不加词条。
+   *    AI 只把意图化进叙事，落到正文里即可。
+   */
+  NARRATIVE_INTENTS: (ctx, _config, _params) => {
+    if (ctx.combatActive === true) return '';
+    const intents = ctx.narrativeIntents;
+    if (!intents || intents.length === 0) return '';
+    const lines = intents.map((i) => `- 【${i.talent}】${String(i.text ?? '').trim()}`);
+    return [
+      '<叙事意图>',
+      '玩家以下列意图干预叙事（仅作剧作指令，引擎不作数值结算——不因此生成卡牌/改变属性）：',
+      ...lines,
+      '</叙事意图>',
+    ].join('\n');
   },
 
   /**

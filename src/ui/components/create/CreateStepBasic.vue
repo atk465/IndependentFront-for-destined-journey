@@ -1,17 +1,41 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { useCreateStore } from '../../stores/create-store';
 import { ATTRIBUTE_NAMES } from '@engine/start-catalog';
+import type { BackgroundTemplate } from '@engine/start-catalog';
 import FormInput from '../shared/form/FormInput.vue';
 import FormSelect from '../shared/form/FormSelect.vue';
 import FormStepper from '../shared/form/FormStepper.vue';
 import ResourceBar from '../shared/ResourceBar.vue';
 import AttributeEditor from './AttributeEditor.vue';
+import CategoryTabs from './CategoryTabs.vue';
+import BackgroundList from './BackgroundList.vue';
 
 const store = useCreateStore();
 
+/** 当前选中起始地点的简短介绍（叶子 desc；自定义地点无介绍） */
+const selectedLocationDesc = computed(
+  () => store.flatLocationOptions.find((o) => o.value === store.startLocation)?.desc ?? '',
+);
+
 /** 三条资源条的最大值，用于统一比例尺 */
 const peakMax = computed(() => Math.max(store.hpPreview, store.mpPreview, store.spPreview, 1));
+
+// ===== 背景预设旁挂（2026-09-16 精简：独立背景步并入此处） =====
+const showBgPicker = ref(false);
+/** BackgroundList 的受选状态（仅面板内高亮用，选中即写入身世并收起） */
+const pickedBg = ref<BackgroundTemplate | null>(null);
+
+const bgCategories = computed(() =>
+  store.backgroundCategories.map((c) => ({ key: c.key, label: c.label, count: c.count })),
+);
+
+/** 点选预设 → 成品文案写入身世（<user> 占位留待 buildOpeningPrompt 统一替换） */
+function applyBackground(bg: BackgroundTemplate | null) {
+  pickedBg.value = bg;
+  if (bg?.fullText) store.backstory = bg.fullText;
+  showBgPicker.value = false;
+}
 </script>
 
 <template>
@@ -22,11 +46,8 @@ const peakMax = computed(() => Math.max(store.hpPreview, store.mpPreview, store.
       <div class="form-left">
         <h3 class="section-label">角色信息</h3>
         <FormInput v-model="store.name" label="角色名" placeholder="输入角色名称" />
-        <FormSelect
-          v-model="store.gender"
-          label="性别"
-          :options="store.GENDER_OPTIONS.map((g) => ({ label: g, value: g }))"
-        />
+        <!-- 性别固定为男（2026-09-19 主人裁决：玩家只能是男性，不再提供选择） -->
+        <FormInput model-value="男" label="性别" disabled />
         <FormStepper v-model="store.age" label="年龄" :min="1" :max="999" />
         <FormSelect v-model="store.race" label="种族" :options="store.raceOptions" />
         <FormInput
@@ -54,6 +75,7 @@ const peakMax = computed(() => Math.max(store.hpPreview, store.mpPreview, store.
           :options="store.flatLocationOptions"
           placeholder="选择起始地点"
         />
+        <p v-if="selectedLocationDesc" class="form-hint">{{ selectedLocationDesc }}</p>
         <FormInput
           v-if="store.startLocation === '自定义'"
           v-model="store.customStartLocation"
@@ -91,6 +113,35 @@ const peakMax = computed(() => Math.max(store.hpPreview, store.mpPreview, store.
           placeholder="简述角色的身世来历"
           type="textarea"
         />
+        <!-- 背景预设旁挂（精简：原独立背景步并入）；内容包不带预设时整块隐藏 -->
+        <div v-if="store.backgrounds.length > 0" class="bg-picker">
+          <button
+            type="button"
+            class="bg-picker-toggle"
+            :aria-expanded="showBgPicker"
+            @click="showBgPicker = !showBgPicker"
+          >
+            {{ showBgPicker ? '▲ 收起背景预设' : '▼ 从预设背景选择' }}
+          </button>
+          <div v-if="showBgPicker" class="bg-picker-panel">
+            <CategoryTabs
+              :categories="bgCategories"
+              :model-value="store.activeBackgroundCategory"
+              @update:model-value="
+                store.activeBackgroundCategory = $event as
+                  'race' | 'identity' | 'location' | 'universal'
+              "
+            />
+            <BackgroundList
+              :model-value="pickedBg"
+              :backgrounds="store.filteredBackgrounds"
+              :character-race="store.race"
+              :character-identity="store.identity"
+              :character-location="store.startLocation"
+              @update:model-value="applyBackground"
+            />
+          </div>
+        </div>
         <FormInput
           v-model="store.extra"
           label="补充"
@@ -197,6 +248,37 @@ const peakMax = computed(() => Math.max(store.hpPreview, store.mpPreview, store.
           </div>
         </div>
 
+        <!-- 属性购买（转生点消费通道） -->
+        <div class="purchase-section">
+          <div class="purchase-header">
+            <span class="purchase-title">
+              属性突破
+              <span class="purchase-cost">100 点/次 · 每维最多 +4</span>
+            </span>
+            <span class="purchase-total">
+              已购 {{ store.purchasedTotal }}/{{ store.ATTR_PURCHASE_TOTAL_MAX }}
+            </span>
+          </div>
+          <div class="purchase-attrs">
+            <div v-for="attr in ['力量', '敏捷', '体质', '智力', '精神']" :key="attr" class="purchase-attr">
+              <span class="pa-name">{{ attr }}</span>
+              <button
+                type="button"
+                class="pa-btn"
+                :disabled="store.remainingPoints < 100 || store.purchasedPerAttr(attr) >= 4"
+                @click="store.buyPurchasedPoint(attr)"
+              >+</button>
+              <span class="pa-count">{{ store.purchasedPerAttr(attr) }}</span>
+              <button
+                type="button"
+                class="pa-btn"
+                :disabled="store.purchasedPerAttr(attr) <= 0"
+                @click="store.refundPurchasedPoint(attr)"
+              >−</button>
+            </div>
+          </div>
+        </div>
+
         <!-- ResourceBar 预览 (统一比例尺: 以三项中最大值为 100%) -->
         <div class="preview-section">
           <h3 class="section-label">资源预览</h3>
@@ -256,7 +338,7 @@ const peakMax = computed(() => Math.max(store.hpPreview, store.mpPreview, store.
             </div>
             <div class="money-item">
               <FormStepper
-                v-model="store.destinyPoints"
+                v-model="store.startingPoints"
                 label="命运点数 (FP)"
                 :min="0"
                 :max="9999"
@@ -270,10 +352,7 @@ const peakMax = computed(() => Math.max(store.hpPreview, store.mpPreview, store.
         <div class="cost-summary">
           <span>种族「{{ store.race }}」{{ store.raceCost }}点</span>
           <span>身份「{{ store.identity }}」{{ store.identityCost }}点</span>
-          <span
-            >装备 {{ store.equipmentCost }} | 道具 {{ store.itemCost }} | 技能
-            {{ store.skillCost }}</span
-          >
+          <span>开局购卡 {{ store.cardCost }}点</span>
         </div>
       </div>
     </div>
@@ -333,6 +412,38 @@ const peakMax = computed(() => Math.max(store.hpPreview, store.mpPreview, store.
   font-size: 0.75rem;
   line-height: 1.6;
   color: var(--theme-text-muted);
+}
+
+/* ===== 背景预设旁挂 ===== */
+.bg-picker {
+  margin-top: -6px;
+}
+.bg-picker-toggle {
+  padding: 2px 10px;
+  border: 1px dashed var(--theme-card-border);
+  border-radius: var(--theme-radius-sm);
+  background: transparent;
+  color: var(--theme-text-secondary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--theme-transition-fast);
+}
+.bg-picker-toggle:hover {
+  border-color: var(--theme-color-primary);
+  color: var(--theme-color-primary);
+}
+.bg-picker-panel {
+  margin-top: var(--theme-spacing-xs);
+  padding: var(--theme-spacing-sm);
+  border: 1px solid var(--theme-card-border);
+  border-radius: var(--theme-radius-md);
+  background: var(--theme-card-bg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--theme-spacing-sm);
+  max-height: 24rem;
+  overflow-y: auto;
 }
 
 /* ===== 右侧 ===== */
@@ -535,5 +646,77 @@ const peakMax = computed(() => Math.max(store.hpPreview, store.mpPreview, store.
   color: var(--theme-text-secondary);
   border: 1px solid var(--theme-card-border);
   line-height: 1.6;
+}
+
+.purchase-section {
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px dashed var(--theme-card-border, #72502d);
+  border-radius: var(--theme-radius-md, 6px);
+}
+.purchase-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.purchase-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--theme-text-primary, #eadcc5);
+}
+.purchase-cost {
+  font-size: 0.7rem;
+  color: var(--theme-text-muted, #967756);
+  margin-left: 4px;
+}
+.purchase-total {
+  font-size: 0.7rem;
+  color: var(--theme-accent, #d2a25f);
+}
+.purchase-attrs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.purchase-attr {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.pa-name {
+  font-size: 0.7rem;
+  color: var(--theme-text-secondary, #c7a77e);
+  min-width: 28px;
+}
+.pa-btn {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--theme-card-border, #72502d);
+  border-radius: 3px;
+  background: var(--theme-card-bg, #211810);
+  color: var(--theme-text-primary, #eadcc5);
+  cursor: pointer;
+  font-size: 0.8rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.pa-btn:hover:not(:disabled) {
+  border-color: var(--theme-primary, #c48c4b);
+  background: var(--theme-primary-bg, rgba(196, 140, 75, 0.15));
+}
+.pa-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+.pa-count {
+  min-width: 14px;
+  text-align: center;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--theme-accent, #d2a25f);
 }
 </style>

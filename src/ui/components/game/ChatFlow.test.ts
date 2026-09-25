@@ -15,7 +15,6 @@ import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import type { AgentActivityRun, ChatMessage } from '@engine/types';
 import ChatFlow from './ChatFlow.vue';
-import { useSettingsStore } from '../../stores/settings-store';
 import type { TimelineRestoreResult } from '../../stores/game-store';
 
 enableAutoUnmount(afterEach);
@@ -36,15 +35,6 @@ const ui = vi.hoisted(() => ({ toast: vi.fn(), navigate: vi.fn() }));
 
 vi.mock('../../stores/game-store', () => ({ useGameStore: () => game }));
 vi.mock('../../stores/ui-store', () => ({ useUIStore: () => ui }));
-vi.mock('../../stores/scene-image-store', () => ({
-  useSceneImageStore: () => ({
-    activeSaveId: 'save_1',
-    generate: vi.fn(async () => ({ ok: true as const, id: 'simg_new' })),
-  }),
-}));
-vi.mock('../../stores/image-preset-store', () => ({
-  useImagePresetStore: () => ({ loading: false, init: vi.fn(), find: vi.fn(() => undefined) }),
-}));
 
 function userMsg(id: string, content: string): ChatMessage {
   return { id, role: 'user', content, timestamp: 0 };
@@ -56,8 +46,6 @@ describe('ChatFlow 右键菜单 — user 消息', () => {
     vi.clearAllMocks();
     game.agentActivityRuns = [];
     game.rollbackOneTurn.mockResolvedValue({ status: 'restored', continuation: 'same-save' });
-    // 配图档关掉 → user 消息菜单只剩回退/复制两项（配图是给正文的）
-    useSettingsStore().settings.imageGenMode = 'off';
     Object.assign(navigator, { clipboard: { writeText: vi.fn(async () => {}) } });
   });
 
@@ -199,47 +187,6 @@ describe('ChatFlow 右键菜单 — user 消息', () => {
   });
 });
 
-describe('ChatFlow 回合活动重试', () => {
-  beforeEach(() => {
-    setActivePinia(createPinia());
-    game.agentActivityRuns = [];
-  });
-
-  it('同一输入多次失败时只允许重试最后一次运行', async () => {
-    game.agentActivityRuns = ['attempt-1', 'attempt-2'].map((id, index) => ({
-      id,
-      sourceMessageId: 'u1',
-      status: 'failed' as const,
-      startedAt: index,
-      completedAt: index + 1,
-      message: '世界的回应在此中断，可以再次尝试。',
-      standalone: false,
-      steps: [],
-    }));
-
-    const wrapper = mount(ChatFlow, {
-      global: {
-        stubs: {
-          teleport: true,
-          TurnActivityLedger: {
-            props: ['run', 'canRetry'],
-            emits: ['retry'],
-            template:
-              '<button v-if="canRetry" class="retry-probe" @click="$emit(\'retry\')">{{ run.id }}</button>',
-          },
-        },
-      },
-      props: { messages: [userMsg('u1', '再试一次')], isGenerating: false },
-    });
-
-    const retry = wrapper.findAll('.retry-probe');
-    expect(retry).toHaveLength(1);
-    expect(retry[0].text()).toBe('attempt-2');
-    await retry[0].trigger('click');
-    expect(wrapper.emitted('retry-turn')).toEqual([['u1']]);
-  });
-});
-
 // 🆕 思考中指示（2026-08-12）：生成态、正文未出时显示当前 Agent 活动
 describe('ChatFlow 思考中指示', () => {
   it('isGenerating 且无 streamingText → 显示思考中（含当前 Agent 活动文案）', async () => {
@@ -264,7 +211,7 @@ describe('ChatFlow 思考中指示', () => {
     };
     const wrapper = mount(ChatFlow, {
       global: {
-        stubs: { teleport: true, TurnActivityLedger: true },
+        stubs: { teleport: true },
       },
       props: { messages: [userMsg('u1', '继续')], isGenerating: true, streamingText: '' },
     });
@@ -278,7 +225,7 @@ describe('ChatFlow 思考中指示', () => {
   it('生成中但已有流式正文 → 不显示思考中（正文已在输出）', async () => {
     game.currentAgentActivityRun = null;
     const wrapper = mount(ChatFlow, {
-      global: { stubs: { teleport: true, TurnActivityLedger: true } },
+      global: { stubs: { teleport: true } },
       props: {
         messages: [userMsg('u1', '继续')],
         isGenerating: true,
@@ -291,7 +238,7 @@ describe('ChatFlow 思考中指示', () => {
   it('非生成态 → 不显示思考中', async () => {
     game.currentAgentActivityRun = null;
     const wrapper = mount(ChatFlow, {
-      global: { stubs: { teleport: true, TurnActivityLedger: true } },
+      global: { stubs: { teleport: true } },
       props: { messages: [userMsg('u1', '继续')], isGenerating: false },
     });
     expect(wrapper.find('.thinking-indicator').exists()).toBe(false);

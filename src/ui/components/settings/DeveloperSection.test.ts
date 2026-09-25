@@ -42,7 +42,7 @@ describe('DeveloperSection', () => {
   it('设置页导航把开发者模式接到独立分区', () => {
     expect(settingsPageSource).toContain("{ key: 'developer', label: '开发者模式'");
     expect(settingsPageSource).toContain(
-      '<DeveloperSection v-if="activeSection === \'developer\'" />',
+      '<DeveloperSection v-if="activeSection === \'developer\'" :dev-mode="isDev" />',
     );
   });
 });

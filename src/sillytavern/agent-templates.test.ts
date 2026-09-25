@@ -268,21 +268,12 @@ describe('buildAgentMessages', () => {
           maxMp: 50,
           sp: 30,
           maxSp: 50,
-          ascension: {
-            enabled: false,
-            elements: [],
-            authority: [],
-            law: [],
-            deityPosition: '',
-            divineKingdom: { name: '', description: '' },
-          },
           skills: [],
           inventory: [],
           statusEffects: [],
           money: 100,
           location: '白曜城',
           present: true,
-          adventurerRank: 'D',
           currentAction: '探索中',
           customFields: {},
         },
@@ -1043,7 +1034,7 @@ describe('buildAgentMessages × 能力面接线', () => {
   it('engine：拿得到引擎标识与能力探测', () => {
     const ctx = makeContext();
     const out = render('<%= engine.name %>|<%= engine.has("lore.get") %>', ctx);
-    expect(out).toContain('poem-of-destiny|true');
+    expect(out).toContain('narrative-engine|true');
   });
 
   it('别名层同样接线（存量条目走的是这条）', () => {

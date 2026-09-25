@@ -8,8 +8,30 @@ import AppCard from '../shared/AppCard.vue';
 import AppButton from '../shared/AppButton.vue';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useBranding } from '../../branding-defaults';
+import { BUILTIN_OPTION_SCHEMES, type OptionScheme } from '@engine/option-policy';
 
 const s = useSettingsStore().settings;
+
+// ── 行动选项方案库（内置只读展示 + 自定义增删改；持久化走 settings 深度回写）──
+const builtinSchemes = BUILTIN_OPTION_SCHEMES;
+
+function persistSchemes(): void {
+  // settings-store 对 UiSettings 做深度 watch 回写 localStorage，v-model 改完即持久；
+  // persistSchemes 留作显式语义位（未来切 Dexie 时只改这里）。
+}
+
+function addScheme(): void {
+  s.optionSchemes.push({
+    id: `custom-${Date.now().toString(36)}`,
+    name: '新方案',
+    instruction: '',
+    builtin: false,
+  } satisfies OptionScheme);
+}
+
+function removeScheme(id: string): void {
+  s.optionSchemes = s.optionSchemes.filter((scheme) => scheme.id !== id);
+}
 
 // 大纲示例是**内容**不是引擎（D26）：随内容包走，未装包时为空 → 整张预览卡不渲染
 const { branding } = useBranding();
@@ -234,6 +256,41 @@ const plotDifficultyOptions = [
         </div>
       </template>
     </AppCard>
+    <!-- 行动选项方案（2026-09-23 共识稿）：每轮行动选项的生成风格，存档级切换、全局方案库 -->
+    <AppCard padding="md" class="detail-card">
+      <h4>行动选项</h4>
+      <p class="card-desc">
+        每轮正文后的可选行动怎么生成：内置「不生成 / 标准三选 / 情绪流 /
+        成人向」四方案，也可自建方案（一段自然语言指令，AI 直读；支持
+        &#123;&#123;user&#125;&#125; 代表玩家名）。方案库为<strong>全局设置</strong>；
+        选哪个方案是<strong>存档级</strong>的——在游戏页选项条标题栏的下拉里切换，下一轮生效。
+      </p>
+      <div class="option-scheme-list">
+        <div v-for="scheme in builtinSchemes" :key="scheme.id" class="option-scheme-row builtin">
+          <span class="option-scheme-name">{{ scheme.name }}</span>
+          <span class="option-scheme-tag">内置</span>
+        </div>
+        <div v-for="scheme in s.optionSchemes" :key="scheme.id" class="option-scheme-row custom">
+          <div class="option-scheme-head">
+            <input
+              v-model="scheme.name"
+              class="option-scheme-name-input"
+              placeholder="方案名"
+              @change="persistSchemes"
+            />
+            <AppButton variant="ghost" size="sm" @click="removeScheme(scheme.id)">删除</AppButton>
+          </div>
+          <textarea
+            v-model="scheme.instruction"
+            class="option-scheme-instruction"
+            rows="4"
+            placeholder="行动选项的生成指令（自然语言，AI 直读）"
+            @change="persistSchemes"
+          />
+        </div>
+        <AppButton variant="secondary" size="sm" @click="addScheme">＋ 新建自定义方案</AppButton>
+      </div>
+    </AppCard>
     <!-- 大纲预览（示例来自内容包；没有示例就不出这张卡） -->
     <AppCard
       v-if="branding.plotTemplate.length > 0"
@@ -403,5 +460,56 @@ const plotDifficultyOptions = [
   font-size: 0.78rem;
   line-height: 1.5;
   color: var(--theme-text-muted);
+}
+
+.option-scheme-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.option-scheme-row.builtin {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  border: 1px dashed var(--theme-border, rgba(128, 128, 128, 0.3));
+  border-radius: 6px;
+}
+.option-scheme-tag {
+  font-size: 0.75rem;
+  color: var(--theme-text-secondary);
+}
+.option-scheme-row.custom {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--theme-border, rgba(128, 128, 128, 0.3));
+  border-radius: 6px;
+}
+.option-scheme-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.option-scheme-name-input {
+  flex: 1;
+  font-size: 0.85rem;
+  color: var(--theme-text-primary);
+  background: var(--theme-bg-elevated, transparent);
+  border: 1px solid var(--theme-border, rgba(128, 128, 128, 0.3));
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+.option-scheme-instruction {
+  width: 100%;
+  font-size: 0.8rem;
+  color: var(--theme-text-primary);
+  background: var(--theme-bg-elevated, transparent);
+  border: 1px solid var(--theme-border, rgba(128, 128, 128, 0.3));
+  border-radius: 4px;
+  padding: 4px 6px;
+  resize: vertical;
 }
 </style>

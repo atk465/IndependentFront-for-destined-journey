@@ -9,6 +9,7 @@ import {
   setPlaceholderGlobals,
   resetPlaceholderGlobals,
 } from './placeholder-registry';
+import { registerCustomTalent, clearCustomTalents } from './card-workshop/talent-entry';
 import { resolveTemplate } from './template-resolver';
 import type {
   AgentContext,
@@ -82,21 +83,12 @@ function makeChar(overrides?: Partial<CharacterState>): CharacterState {
     maxMp: 50,
     sp: 30,
     maxSp: 50,
-    ascension: {
-      enabled: false,
-      elements: [],
-      authority: [],
-      law: [],
-      deityPosition: '',
-      divineKingdom: { name: '', description: '' },
-    },
     skills: [],
     inventory: [],
     statusEffects: [],
     money: 50,
     location: '白曜城',
     present: true,
-    adventurerRank: '未评级',
     currentAction: '待机中',
     customFields: {},
     ...overrides,
@@ -1725,5 +1717,102 @@ describe('SKILL_STATE', () => {
     expect(out).toContain('灼热射线'); // 落库
     expect(out).toContain('火球术'); // 初始声明
     expect(out).toContain('开局初始技能声明');
+  });
+});
+
+describe('NARRATIVE_INTENTS —— 纯叙事通道（2026-09-17）', () => {
+  it('无意图 → 空串（零 token，照 TALENT/RECENT_COMBAT 口径）', () => {
+    expect(PLACEHOLDER_REGISTRY['NARRATIVE_INTENTS'](mockCtx(), mockConfig())).toBe('');
+  });
+
+  it('有意图 → <叙事意图> 块，含天赋名与原文，并声明不做数值结算', () => {
+    const ctx = mockCtx({
+      narrativeIntents: [
+        { atMinutes: 100, from: 'player', talent: '世界规则干预', text: '本局雷之铭失效' },
+      ],
+    });
+    const out = PLACEHOLDER_REGISTRY['NARRATIVE_INTENTS'](ctx, mockConfig());
+    expect(out).toContain('<叙事意图>');
+    expect(out).toContain('世界规则干预');
+    expect(out).toContain('本局雷之铭失效');
+    expect(out).toContain('不作数值结算');
+  });
+
+  it('战斗会话活跃 → 静默（照 TALENT 口径）', () => {
+    const ctx = mockCtx({
+      combatActive: true,
+      narrativeIntents: [{ atMinutes: 1, from: 'player', talent: '作者', text: 'x' }],
+    });
+    expect(PLACEHOLDER_REGISTRY['NARRATIVE_INTENTS'](ctx, mockConfig())).toBe('');
+  });
+});
+
+// ========== {{TALENT}} 自定义天赋词表段（2026-09-23 天赋制作器 × 天赋词条目组） ==========
+
+describe('{{TALENT}} 自定义天赋词表段', () => {
+  const cfg = { agentId: 'story' } as AgentConfig;
+
+  beforeEach(() => {
+    // 清空运行时注册表，测试间互不污染
+    clearCustomTalents();
+  });
+
+  it('无自定义天赋：有玩家天赋 → 只有主块，无词表段', () => {
+    const ctx = mockCtx({
+      talents: {
+        capacity: 3,
+        list: [{ name: '铜筋铁骨', description: '硬挨一下', source: 'creation', entries: [] }],
+      },
+    });
+    const out = PLACEHOLDER_REGISTRY['TALENT'](ctx, cfg);
+    expect(out).toContain('<talents>');
+    expect(out).not.toContain('<天赋词·自定义>');
+  });
+
+  it('无玩家天赋但有自定义 → 只渲染词表段（正文 AI 仍能认识制作器天赋）', () => {
+    registerCustomTalent({
+      name: '测试词表天赋',
+      grade: 'SS',
+      source: 'universal',
+      description: '测试用自定义天赋的口径说明',
+      entries: [{ kind: '配方解锁', channel: 'universal', params: { recipe: '测试配方' } }],
+    });
+    const out = PLACEHOLDER_REGISTRY['TALENT'](mockCtx(), cfg);
+    expect(out).toContain('<天赋词·自定义>');
+    expect(out).toContain('测试词表天赋');
+    expect(out).toContain('测试用自定义天赋的口径说明');
+    expect(out).toContain('已解锁配方（测试配方）');
+    expect(out).not.toContain('<talents>');
+  });
+
+  it('两者都有 → 主块在前词表段在后', () => {
+    registerCustomTalent({
+      name: '测试词表天赋',
+      grade: 'SSS',
+      source: 'universal',
+      description: '口径',
+      entries: [],
+    });
+    const ctx = mockCtx({
+      talents: {
+        capacity: 3,
+        list: [{ name: '铜筋铁骨', description: '硬挨一下', source: 'creation', entries: [] }],
+      },
+    });
+    const out = PLACEHOLDER_REGISTRY['TALENT'](ctx, cfg);
+    expect(out.indexOf('<talents>')).toBeLessThan(out.indexOf('<天赋词·自定义>'));
+    expect(out).toContain('测试词表天赋');
+  });
+
+  it('战斗会话活跃 → 全静默（含词表段）', () => {
+    registerCustomTalent({
+      name: '测试词表天赋',
+      grade: 'SS',
+      source: 'universal',
+      description: '口径',
+      entries: [],
+    });
+    const ctx = mockCtx({ combatActive: true });
+    expect(PLACEHOLDER_REGISTRY['TALENT'](ctx, cfg)).toBe('');
   });
 });

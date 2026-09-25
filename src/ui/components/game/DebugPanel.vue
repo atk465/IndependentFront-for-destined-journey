@@ -279,7 +279,7 @@ async function downloadJson() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `fated-poem-debug-${game.activeSaveId?.slice(0, 8)}-${Date.now()}.json`;
+  a.download = `narrative-debug-${game.activeSaveId?.slice(0, 8)}-${Date.now()}.json`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

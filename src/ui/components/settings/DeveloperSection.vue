@@ -1,9 +1,34 @@
 <script setup lang="ts">
 /** 开发者模式分区 —— 单一开关 + 清晰的诊断边界。 */
+import { ref } from 'vue';
 import AppCard from '../shared/AppCard.vue';
 import { useSettingsStore } from '../../stores/settings-store';
+import { useGameStore } from '../../stores/game-store';
+import ContentEditor from './ContentEditor.vue';
 
 const s = useSettingsStore().settings;
+const game = useGameStore();
+const devSeeding = ref(false);
+const devFeedback = ref<{ kind: 'ok' | 'err'; msg: string } | null>(null);
+
+defineProps<{ devMode?: boolean }>();
+
+async function seedDemo() {
+  devSeeding.value = true;
+  const r = await game.seedDemoCards();
+  devSeeding.value = false;
+  devFeedback.value = r.ok
+    ? { kind: 'ok', msg: '演示卡已注入背包并编入卡组，可进战斗验证玩卡链路' }
+    : { kind: 'err', msg: r.reason ?? '注入失败' };
+}
+
+/** 交锋拍试打：直接发起遭遇战——结果明示到本页反馈行，绝不静默 */
+async function onSkirmishTrial() {
+  const r = await game.startSkirmish();
+  devFeedback.value = r.ok
+    ? { kind: 'ok', msg: '遭遇战已发起——回游戏页看战报与「战斗模式 · 交锋拍」面板' }
+    : { kind: 'err', msg: r.reason ?? '发起失败' };
+}
 </script>
 
 <template>
@@ -66,6 +91,60 @@ const s = useSettingsStore().settings;
         <i class="fa-solid fa-shield-halved" aria-hidden="true"></i>
         诊断内容可能包含对话正文、提示词与模型原始输出。分享导出文件前请先检查内容。
       </p>
+    </AppCard>
+
+    <!-- 演示卡注入（仅 dev 模式可见）——真机走查玩卡链路用，生产构建自动消除 -->
+    <AppCard v-if="devMode" padding="md">
+      <h4>演示卡注入（dev）</h4>
+      <p class="card-desc">
+        一键给玩家背包塞 4 张覆盖八类的演示卡（灼热盆地白银/远古巨兽·岩爪鎏金/
+        燃魂打击青铜/苍穹之翼白银）+ 3 份常用素材，并自动编入卡组。进战斗后即可在
+        「战斗卡组条」看到四态显示、单击出牌——专用于不依赖 LLM 也能验证玩卡链路。
+      </p>
+      <div class="developer-toggle-row">
+        <button
+          type="button"
+          class="app-btn btn-primary btn-md"
+          :disabled="devSeeding || !s.developerMode"
+          @click="seedDemo"
+        >
+          {{ devSeeding ? '注入中…' : '注入演示卡' }}
+        </button>
+        <p
+          v-if="devFeedback"
+          class="card-desc"
+          :class="devFeedback.kind === 'err' ? 'developer-feedback-err' : 'developer-feedback-ok'"
+        >
+          {{ devFeedback.msg }}
+        </p>
+      </div>
+    </AppCard>
+
+    <!-- 交锋拍试打（仅 dev 模式可见）——不依赖 dispatcher 触发，直接开一场遭遇战 -->
+    <AppCard v-if="devMode" padding="md">
+      <h4>交锋拍试打（dev）</h4>
+      <p class="card-desc">
+        跳过 combat_trigger，直接发起一场遭遇战（敌情评估一次 AI 调用 → 交锋拍 → 终局结算落库 →
+        终局演绎一次 AI 调用）。战报审计行走正文流，状态栏与反制 按钮在游戏页的「战斗模式 ·
+        交锋拍」面板。需要 skirmish_eval / skirmish_epilogue 两个 Agent 可解析到 API 池。
+      </p>
+      <div class="developer-toggle-row">
+        <button
+          type="button"
+          class="app-btn btn-primary btn-md"
+          :disabled="devSeeding || !s.developerMode || game.skirmishBusy"
+          @click="onSkirmishTrial"
+        >
+          {{ game.skirmishBusy ? '交锋进行中…' : '发起遭遇战' }}
+        </button>
+      </div>
+    </AppCard>
+
+    <!-- 自定义内容编辑器（天赋 + 购卡池） -->
+    <AppCard v-if="devMode" padding="md">
+      <h4>自定义内容编辑器</h4>
+      <p class="card-desc">可视化创建自定义天赋和购卡池卡牌（存档级持久化）。</p>
+      <ContentEditor />
     </AppCard>
   </section>
 </template>

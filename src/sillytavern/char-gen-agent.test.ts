@@ -88,16 +88,6 @@ function makeCharGenOutput(overrides: Partial<CharGenOutput> = {}): CharGenOutpu
     skills: [],
     equipment: [],
     inventory: [],
-    ascension: {
-      enabled: false,
-      path: '',
-      description: '',
-      elements: [],
-      authorities: [],
-      laws: [],
-      deityPosition: '',
-      divineKingdom: { name: '', description: '' },
-    },
     ...overrides,
   };
 }
@@ -406,26 +396,6 @@ describe('assembleCharacterState', () => {
     expect(result.customFields.background).toBeUndefined();
     expect(result.customFields.appearance).toBeUndefined();
     expect(result.customFields.personality).toBeUndefined();
-  });
-
-  it('应处理登神长阶', () => {
-    const charData = makeCharGenOutput({
-      tier: 5,
-      level: 15,
-      ascension: {
-        enabled: true,
-        path: '火焰之道',
-        description: '掌控火之要素',
-        elements: [],
-        authorities: [],
-        laws: [],
-        deityPosition: '',
-        divineKingdom: { name: '', description: '' },
-      },
-    });
-    const result = assembleCharacterState(charData, { skills: [], equipment: [], inventory: [] });
-    expect(result.ascension.enabled).toBe(true);
-    expect(result.customFields.ascensionPath).toBe('火焰之道');
   });
 
   it('应支持 overrides 参数', () => {
@@ -1784,16 +1754,6 @@ describe('assembleCharacterState — modifiers/buffs/divinity 透传到 Inventor
       personality: '',
       likes: '',
       thoughts: '',
-      ascension: {
-        enabled: false,
-        path: '',
-        description: '',
-        elements: [],
-        authorities: [],
-        laws: [],
-        deityPosition: '',
-        divineKingdom: { name: '', description: '' },
-      },
       skills: [],
       equipment: [],
       inventory: [],

@@ -23,6 +23,7 @@ import type {
   StatusEffect,
   Skill,
   InventoryItem,
+  CardItem,
   Snapshot,
 } from './types';
 import {
@@ -49,16 +50,9 @@ import {
 } from './database';
 import { getVar, setVar, delVar, insertVar, applyPathOps } from './var-resolver';
 import { getTierConfig } from './tier-constants';
-// 经验系统改造 v1（2026-08-24）：升级/登神判定归 Code（ADR-11）。resolveAscensionFlyup
-// 负责「持物即飞升」，resolveLevelUps 负责 totalExp 驱动的升级循环。
-import {
-  resolveAscensionFlyup,
-  resolveLevelUps,
-  xpToNextNumber,
-  tierNameForTier,
-  MILESTONE_LEVELS,
-  applyExpFloor,
-} from './exp-table';
+// 经验系统改造 v1（2026-08-24）：升级判定归 Code（ADR-11）。resolveLevelUps 负责
+// totalExp 驱动的升级循环。
+import { resolveLevelUps, applyExpFloor } from './exp-table';
 import { getEngineSettings } from './engine-settings';
 // 并行化改造（docs/planning/2026-08-16-pipeline-parallelism.md）：一切 Dexie 写入
 // 经 per-saveId FIFO 队列串行 —— 锁粒度 = 读-改-写区段，锁内禁止再入队列（铁律②）。
@@ -70,6 +64,7 @@ import { withSaveWriteLock } from './state-write-queue';
 import {
   getProfile,
   addFP,
+  addReputation,
   spendFP,
   updateProfile,
   setQuestInPlace,
@@ -84,17 +79,30 @@ import {
   getRandomEventFlags,
   updateRandomEventFlags,
   setRandomEventFlagsInPlace,
+  getCommissionsFlags,
+  updateCommissionsFlags,
 } from './save-profile';
 import { clampAffection } from './affection-system';
-import { advanceTime, getSeason, toEpochMinutes } from './time-system';
+import { advanceTime, getSeason, toEpochMinutes, MINUTES_PER_GAME_DAY } from './time-system';
 // 地图 v1 接线（设计 §5 接线表）：落位 / 天气断言 / 在途旗三条钩子的依赖。
 // 全是纯函数叶 + 一条注入缝（`map-runtime`），没有一个会读注册表或碰 Dexie ——
 // 静态 import 因此不成环（map-* 一律不 import 本模块）。
 import { getMapIndex, getMapPack } from './map-runtime';
 import { isEmptyMapPack } from './map-pack';
-import { findTileByName, resolveTileByLocation, type MapIndex } from './map-index';
+import { findTileByName, midTierOfTile, resolveTileByLocation, type MapIndex } from './map-index';
 import { findPath } from './map-path';
 import { weatherAt, weatherZoneOfTile } from './map-weather';
+// 委托×地图闭环（2026-09-19）：抵达对账（补足/到访/抵达判定）与探索事件掷骰的接线。
+// 依赖形状同地图那组：commission-flags / daily-ledger / random-event-scheduler 全是
+// 纯函数叶（零 I/O / 零时钟 / 零随机——骰值由本层注入），静态 import 不成环。
+import {
+  coerceCommissionsFlags,
+  planArrivalSync,
+  EXPLORATION_ROLL_COUNTER_KEY,
+  type ArrivalSyncOutcome,
+} from './card-workshop/commission-flags';
+import { addCounter, coerceCounters, counterOf } from './card-workshop/daily-ledger';
+import { rollExplorationEvent } from './random-event-scheduler';
 // 地图 v1.2 接线（ADR-33 §2 六个 op / §4 结算钩子 / §F5 首访记档）。同上一组的依赖形状：
 // `map-dynamics` 是纯函数叶（零 I/O、零时钟、零随机），中文措辞与钱的账全在本接线层。
 import {
@@ -135,8 +143,14 @@ import {
   rollRandomEvents,
   settleRandomEventTrigger,
 } from './random-event-scheduler';
+import { buildEventCommission, pruneEventCommissions } from './card-workshop/event-commission';
 // 地点键与上下文快照的**唯一**实现（写侧与读侧共用，见该模块文件头）
 import { buildRandomEventRollContext } from './random-event-snapshot';
+import {
+  normalizeTalentEntry,
+  validateTalentEntries,
+  type TalentEntry,
+} from './card-workshop/talent-entry';
 import type { RandomEventRollContext } from './types-random-events';
 import type { EjsVarsDiff } from './ejs-vars-diff';
 import {
@@ -266,13 +280,10 @@ const UPDATE_CHAR_WHITELIST = new Set<string>([
   'maxMp',
   'sp',
   'maxSp',
-  // 登神长阶
-  'ascension',
-  // 经济 / 位置 / 冒险者等级 / 当前行为
+  // 经济 / 位置 / 当前行为
   'money',
   'location',
   'present',
-  'adventurerRank',
   'currentAction',
   // 血脉 / 集群数量 / 叙事字段
   'bloodlineIds',
@@ -285,6 +296,12 @@ const UPDATE_CHAR_WHITELIST = new Set<string>([
   'thoughts',
   // 扩展字段
   'customFields',
+  // 卡册（卡牌工坊 MVP）：整份 CardAlbumState 替换；读写规则唯一集中在 card-workshop/album.ts
+  'cardAlbum',
+  // 天赋（卡牌工坊 §4-天赋，访谈共识 T1~T8）：整对象替换；AI 可起名写文案，但骨架
+  // 条目必须逐字命中 talent-entry 池（写入门禁见 applyUpdateCharacter 的 talents
+  // 特判——AI 零编数）。只有玩家主角有天赋为既定语义。
+  'talents',
 ]);
 
 /** 禁止的数组实体字段 → 必须走各自专用 op（杀 #21 假字段污染） */
@@ -409,6 +426,25 @@ export class StateManager {
           try {
             const events: GameEvent[] = [];
             for (const patch of patches) {
+              // 声望（卡牌工坊）：**AI 零写路径**——只认引擎两条结算通道的 metadata 来源
+              // （委托交付 'commission' / 天赋兑换 'talent-exchange'）；
+              // AI vars_update 直接 delta profile.reputation 一律拒绝。
+              if (patch.op === 'delta_variable' && patch.target === 'profile.reputation') {
+                const src = patch.metadata?.source;
+                if (src !== 'commission' && src !== 'talent-exchange') {
+                  throw new Error(
+                    '声望只能由委托交付或天赋兑换变更（profile.reputation 无 AI 写路径）',
+                  );
+                }
+                this.validatePatch(patch);
+                const amount = patch.amount!;
+                if (!Number.isFinite(amount)) throw new Error('声望变化必须为有限数');
+                const profile = await this.readProfile();
+                addReputation(profile, amount);
+                await this.persistProfile(profile);
+                events.push(this.createEvent('variable_change', patch));
+                continue;
+              }
               if (patch.op === 'delta_variable' && patch.target === 'profile.fp') {
                 this.validatePatch(patch);
                 const amount = patch.amount!;
@@ -851,7 +887,78 @@ export class StateManager {
 
   // ========== Patch Handlers ==========
 
+  /**
+   * 🔴 worldFlags 前缀路由（2026-09-19 双袋修复）：`set_variable worldFlags.x` 此前落进
+   * `variables.sys.worldFlags`——一个**零读者的死袋**（读侧全部走 `profile.worldFlags`），
+   * 宿敌/败犬烙印/每日账本/排查足迹等全部写路径从未真正生效。路由后写 `profile.worldFlags`
+   * 子树（提交作用域内改内存打脏标记，与 `applySetLocation` 同款）。
+   * @returns true = 已按 worldFlags 路由处理，调用方不再走 variables 通道
+   */
+  private async applyWorldFlagsVariable(
+    op: 'set' | 'delta' | 'remove' | 'move' | 'insert',
+    patch: StatePatch,
+  ): Promise<GameEvent | null> {
+    const target = patch.target;
+    if (!target.startsWith('worldFlags.') || target.startsWith('worldFlags..')) return null;
+    const subPath = target.slice('worldFlags.'.length);
+    if (!subPath) return null;
+    const profile = await this.readProfile();
+    if (profile.worldFlags === undefined || profile.worldFlags === null) profile.worldFlags = {};
+    const bag = profile.worldFlags as Record<string, unknown>;
+    // 🔴 不能用 var-resolver 的 setVar：它是命名空间化纯函数（默认 sys 前缀 + 深拷贝
+    //    返回新树），对 worldFlags 子树写入会静默落空。这里自己写点路径（bag 是引擎
+    //    自治袋，不含命名空间语义）。
+    const parts = subPath.split('.');
+    const writeLeaf = (value: unknown) => {
+      let cur: Record<string, unknown> = bag;
+      for (let i = 0; i < parts.length - 1; i++) {
+        const k = parts[i];
+        if (typeof cur[k] !== 'object' || cur[k] === null) cur[k] = {};
+        cur = cur[k] as Record<string, unknown>;
+      }
+      cur[parts[parts.length - 1]] = value;
+    };
+    const readLeaf = (): unknown => {
+      let cur: unknown = bag;
+      for (const k of parts) {
+        if (typeof cur !== 'object' || cur === null) return undefined;
+        cur = (cur as Record<string, unknown>)[k];
+      }
+      return cur;
+    };
+    if (op === 'set' || op === 'insert') {
+      writeLeaf(patch.value);
+    } else if (op === 'delta') {
+      const current = readLeaf();
+      writeLeaf((typeof current === 'number' ? current : 0) + (patch.amount ?? 0));
+    } else if (op === 'remove') {
+      writeLeaf(undefined);
+    } else {
+      // move：from 在 worldFlags 内——读旧值并删除，随后按 toPath 写回（toPath 同样
+      // 以 worldFlags. 开头时落在 bag 内；跨袋 move 现实无用例，按不支持处理）
+      const value = readLeaf();
+      writeLeaf(undefined);
+      const toPath = (patch.metadata?.toPath as string) ?? '';
+      if (toPath.startsWith('worldFlags.')) {
+        const toParts = toPath.slice('worldFlags.'.length).split('.');
+        let cur: Record<string, unknown> = bag;
+        for (let i = 0; i < toParts.length - 1; i++) {
+          const k = toParts[i];
+          if (typeof cur[k] !== 'object' || cur[k] === null) cur[k] = {};
+          cur = cur[k] as Record<string, unknown>;
+        }
+        cur[toParts[toParts.length - 1]] = value;
+      } else {
+        writeLeaf(value);
+      }
+    }
+    await this.persistProfile(profile);
+    return this.createEvent('variable_change', patch);
+  }
+
   private async applySetVariable(patch: StatePatch): Promise<GameEvent> {
+    const routed = await this.applyWorldFlagsVariable('set', patch);
+    if (routed) return routed;
     // 读取当前 save 的 variables（真源: SaveProfile.variables，M5）
     const vars = await this.getCurrentVariables();
     const path = patch.target.startsWith('variables.')
@@ -863,6 +970,8 @@ export class StateManager {
   }
 
   private async applyDeltaVariable(patch: StatePatch): Promise<GameEvent> {
+    const routed = await this.applyWorldFlagsVariable('delta', patch);
+    if (routed) return routed;
     const vars = await this.getCurrentVariables();
     const path = patch.target.startsWith('variables.')
       ? patch.target.slice('variables.'.length)
@@ -875,6 +984,8 @@ export class StateManager {
   }
 
   private async applyRemoveVariable(patch: StatePatch): Promise<GameEvent> {
+    const routed = await this.applyWorldFlagsVariable('remove', patch);
+    if (routed) return routed;
     const vars = await this.getCurrentVariables();
     const path = patch.target.startsWith('variables.')
       ? patch.target.slice('variables.'.length)
@@ -885,6 +996,8 @@ export class StateManager {
   }
 
   private async applyMoveVariable(patch: StatePatch): Promise<GameEvent> {
+    const routed = await this.applyWorldFlagsVariable('move', patch);
+    if (routed) return routed;
     const vars = await this.getCurrentVariables();
     const fromPath = patch.target.startsWith('variables.')
       ? patch.target.slice('variables.'.length)
@@ -899,6 +1012,8 @@ export class StateManager {
   }
 
   private async applyInsertVariable(patch: StatePatch): Promise<GameEvent> {
+    const routed = await this.applyWorldFlagsVariable('insert', patch);
+    if (routed) return routed;
     const vars = await this.getCurrentVariables();
     const path = patch.target.startsWith('variables.')
       ? patch.target.slice('variables.'.length)
@@ -923,6 +1038,67 @@ export class StateManager {
     const profile = await this.readProfile();
     profile.variables = variables;
     await this.persistProfile(profile);
+  }
+
+  /**
+   * 天赋写入门禁（applyUpdateCharacter 的 talents 特判，访谈共识 T1~T8）：
+   *  ① 形状合法（capacity 数值 / list 数组）；② 容量不超；③ 同名唯一；
+   *  ④ 互斥组不可共存；⑤ 🔴 AI 零编数——entries 逐字命中 talent-entry 池，
+   *  并回填池内规范对象（AI 伪造的 channel/参数就地纠正或拒绝）。原地规范化 value。
+   */
+  private normalizeTalentsValue(value: { talents?: unknown }, talentSource: string): void {
+    const t = value.talents as { capacity?: unknown; list?: unknown } | undefined;
+    if (!t || typeof t !== 'object' || !Array.isArray(t.list)) {
+      throw new Error('talents 形状非法（需要 { capacity, list }）');
+    }
+    const capacity =
+      typeof t.capacity === 'number' && Number.isFinite(t.capacity) && t.capacity > 0
+        ? Math.round(t.capacity)
+        : 3;
+    if (t.list.length > capacity) {
+      throw new Error(`天赋容量已满（${t.list.length}/${capacity}）——请先遗忘或融合`);
+    }
+    const names = new Set<string>();
+    const exclGroups = new Set<string>();
+    for (const talent of t.list as Array<Record<string, unknown>>) {
+      const name = typeof talent.name === 'string' ? talent.name.trim() : '';
+      if (!name) throw new Error('天赋缺少名字');
+      if (names.has(name)) throw new Error(`同名天赋不可重复习得：${name}`);
+      names.add(name);
+      const rawEntries = Array.isArray(talent.entries) ? (talent.entries as TalentEntry[]) : [];
+      // 融合产物特例：品质突破条目由 Code 化学反应算出（metadata source='talent-fusion'
+      // 时放行，只做结构校验），不算 AI 编数；其余条目仍逐字命中条目池
+      const breakthroughs = rawEntries.filter((e) => e.kind === '品质突破');
+      if (breakthroughs.length > 0 && talentSource !== 'talent-fusion') {
+        throw new Error(`天赋「${name}」含融合产物条目——必须经融合工作台获得`);
+      }
+      if (breakthroughs.length > 1) throw new Error(`天赋「${name}」品质突破条目至多一条`);
+      for (const b of breakthroughs) {
+        const mc = b.params.materialClass;
+        const pc = b.params.productClass;
+        if (
+          (mc !== undefined && typeof mc !== 'string') ||
+          (pc !== undefined && typeof pc !== 'string')
+        ) {
+          throw new Error(`天赋「${name}」品质突破参数非法`);
+        }
+      }
+      const v = validateTalentEntries(rawEntries.filter((e) => e.kind !== '品质突破'));
+      if (!v.ok) throw new Error(`天赋「${name}」${v.reason}`);
+      talent.entries = [
+        ...v.normalized,
+        ...breakthroughs.map((b) => normalizeTalentEntry(b) ?? b), // 命中池则回填规范对象
+      ];
+      for (const entry of v.normalized) {
+        const group = entry.params.excl;
+        if (!group) continue;
+        if (exclGroups.has(group)) {
+          throw new Error(`互斥天赋不可共存（组：${group}）——请先遗忘或融合`);
+        }
+        exclGroups.add(group);
+      }
+    }
+    t.capacity = capacity;
   }
 
   private async applyUpdateCharacter(patch: StatePatch): Promise<GameEvent> {
@@ -974,6 +1150,11 @@ export class StateManager {
         }
       }
 
+      // ===== 天赋写入门禁（访谈共识 T1~T8：AI 零编数 + 同名唯一 + 容量 + 互斥组）=====
+      if (keys.includes('talents')) {
+        this.normalizeTalentsValue(value, String(patch.metadata?.source ?? ''));
+      }
+
       // ===== 全部合法 → 落地 =====
       if (isDelta) {
         // #20: delta 真加法（缺省/脏数据从 0 起加），不再退化为替换
@@ -1021,10 +1202,10 @@ export class StateManager {
       // 只认主角：NPC/怪物/召唤物的等级由生成器一次性给定，没有「攒点数分配」这回事。
       //
       // 🔴 两条路径互斥（防双发放，经验系统改造 v1 2026-08-24）：
-      //  · 本次 patch 触及 totalExp 或 ascension → 走下面的 applyPlayerProgression ——
-      //    升级/登神全部由 exp-table 的纯函数判定，属性点/里程碑统一发放；
+      //  · 本次 patch 触及 totalExp → 走下面的 applyPlayerProgression ——
+      //    升级全部由 exp-table 的纯函数判定，属性点/里程碑统一发放；
       //  · 否则 → 保留下面的旧兜底逻辑（兼容 AI 直接写 level/tier 的存量行为）。
-      if (char.type === 'player' && !keys.includes('totalExp') && !keys.includes('ascension')) {
+      if (char.type === 'player' && !keys.includes('totalExp')) {
         // ① 升级：每升 1 级 +1 自由属性点
         //    双重发放 guard —— patch 自己写了 freeAttrPoints 时不再叠加，
         //    否则 AI 一边发点数一边升级，玩家会白拿一倍。
@@ -1065,19 +1246,16 @@ export class StateManager {
       }
     }
 
-    // ===== 经验系统改造 v1：totalExp / ascension 驱动的主角推进（升级循环 + 登神飞升）=====
-    // 战斗（combat_v3）与制作（craft_gen）的经验都经 update_character delta 累加 totalExp；
-    // 登神物（ascension 字段）由 AI 写入。这两条变化一落地，升级/登神就由 Code 统一接管。
-    // 放在旧自动加点块之外、且在 value 落地之后 —— resolveLevelUps 读的是「落地后」的新状态。
+    // ===== 经验系统改造 v1：totalExp 驱动的主角推进（升级循环）=====
+    // 战斗（combat_v3）与制作（craft_gen）的经验都经 update_character delta 累加 totalExp。
+    // 变化一落地，升级就由 Code 统一接管。放在旧自动加点块之外、且在 value 落地之后 ——
+    // resolveLevelUps 读的是「落地后」的新状态。
     // 🔴 keys 是上面 `if (patch.value ...)` 块内的局部变量，这里在块外要用得重取一份。
     const touchedKeys =
       patch.value && typeof patch.value === 'object'
         ? Object.keys(patch.value as Record<string, any>)
         : [];
-    if (
-      char.type === 'player' &&
-      (touchedKeys.includes('totalExp') || touchedKeys.includes('ascension'))
-    ) {
+    if (char.type === 'player' && touchedKeys.includes('totalExp')) {
       this.applyPlayerProgression(char);
     }
     // metadata.action 保留原行为: 有则覆盖 currentAction（可与 value.currentAction 并存，metadata 优先）
@@ -1088,44 +1266,18 @@ export class StateManager {
   }
 
   /**
-   * 主角经验/登神推进（经验系统改造 v1，2026-08-24）。
+   * 主角经验推进（经验系统改造 v1，2026-08-24）。
    *
-   * 由 `applyUpdateCharacter` 在本次 patch 触及主角 `totalExp` 或 `ascension` 时调用。
-   * 两段式（ADR-11：确定性数值规则归 Code，不交给 AI 算）：
-   *  ① 登神飞升（`resolveAscensionFlyup`，主人裁定放宽版）：持物即飞升 + 层级-1 硬性限制 ——
-   *     等级跳到目标层起点（13/17/21/25）、tier 同步，**顺便升级**（每级 +1 属性点 + 里程碑全属性+1）；
-   *  ② 升级循环（`resolveLevelUps`）：totalExp 攒够就逐级升，里程碑全属性+1 且 tier 提升，
-   *     关键等级（12/16/20/24）登神条件不满足时 totalExp 截断到当前级门槛。
+   * 由 `applyUpdateCharacter` 在本次 patch 触及主角 `totalExp` 时调用。
+   * 升级循环（`resolveLevelUps`，ADR-11：确定性数值规则归 Code，不交给 AI 算）：
+   * totalExp 攒够就逐级升，每级 +1 属性点、里程碑全属性+1 且 tier 提升。
    */
   private applyPlayerProgression(char: CharacterState): void {
     // 旧档经验保底归一化（幂等兜底，方案 A）：totalExp 抬到「升当前等级门槛」、expToNext 重算。
-    // 加载时（game-store）已做过一次，这里再兜一道——任何 totalExp/ascension 提交路径都自愈。
+    // 加载时（game-store）已做过一次，这里再兜一道——任何 totalExp 提交路径都自愈。
     applyExpFloor(char);
-    // ① 登神飞升（放宽版）
-    const fly = resolveAscensionFlyup({ level: char.level, ascension: char.ascension });
-    if (fly.flyup && fly.nextLevel !== undefined && fly.nextTier !== undefined) {
-      const oldLevel = char.level;
-      char.level = fly.nextLevel;
-      char.tier = fly.nextTier;
-      char.tierName = tierNameForTier(fly.nextTier);
-      char.expToNext = xpToNextNumber(fly.nextLevel);
-      // 顺便升级：每级 +1 自由属性点 + 里程碑全属性+1
-      char.freeAttrPoints = (char.freeAttrPoints ?? 0) + (fly.nextLevel - oldLevel);
-      for (let lv = oldLevel + 1; lv <= fly.nextLevel; lv++) {
-        const milestone = MILESTONE_LEVELS[lv];
-        if (milestone) {
-          const base = (char.attributes ?? {}) as Record<string, number>;
-          const next: Record<string, number> = { ...base };
-          for (const attr of ATTRIBUTE_KEYS) {
-            next[attr] =
-              (typeof base[attr] === 'number' ? base[attr] : 0) + milestone.attributeBonus;
-          }
-          char.attributes = next as CharacterState['attributes'];
-        }
-      }
-    }
 
-    // ② 升级循环（totalExp 驱动）
+    // 升级循环（totalExp 驱动）
     const res = resolveLevelUps({
       level: char.level,
       totalExp: char.totalExp,
@@ -1134,7 +1286,6 @@ export class StateManager {
       attributes: char.attributes,
       tier: char.tier,
       tierName: char.tierName,
-      ascension: char.ascension,
     });
     char.level = res.level;
     char.totalExp = res.totalExp;
@@ -1143,11 +1294,6 @@ export class StateManager {
     char.attributes = res.attributes;
     char.tier = res.tier;
     char.tierName = res.tierName;
-    if (res.ascensionBlocked) {
-      console.info(
-        `[StateManager] 登神长阶未开启，${char.name} 经验已封顶于 Lv.${res.level}（需持有对应登神物突破）`,
-      );
-    }
   }
 
   private async applySetResource(patch: StatePatch): Promise<GameEvent> {
@@ -1301,6 +1447,7 @@ export class StateManager {
       existing.quantity += quantity;
     } else {
       // 新物品: 不写 id（铁律1，id @deprecated），枚举字段归一
+      const cardValue = value as Partial<CardItem>;
       char.inventory.push({
         name: value.name,
         quantity,
@@ -1323,6 +1470,18 @@ export class StateManager {
         divinity: value.divinity,
         // 🆕 战斗 v3 (S3 2026-08-01): <automaton> DSL 自由效果落库保留（compileEffectProgram 编译进 activeEffects）
         automata: value.automata,
+        // 🆕 卡牌顶层字段直通（委托×地图闭环 2026-09-19）：此前的白名单只有 InventoryItem
+        //     字段，CardItem 的档位/词条/配方落库即丢——制卡主路、购卡、委托发卡三条路
+        //     全走 add_item，掉的是所有新卡的 cardTier 与词条。给值才写，非卡物品零影响。
+        ...(cardValue.cardTier !== undefined ? { cardTier: cardValue.cardTier } : {}),
+        ...(cardValue.词条 !== undefined ? { 词条: [...cardValue.词条] } : {}),
+        ...(cardValue.recipe !== undefined ? { recipe: cardValue.recipe } : {}),
+        ...(cardValue.sealed !== undefined ? { sealed: cardValue.sealed } : {}),
+        ...(cardValue.cardExp !== undefined ? { cardExp: cardValue.cardExp } : {}),
+        ...(cardValue.cardPowerBonus !== undefined
+          ? { cardPowerBonus: cardValue.cardPowerBonus }
+          : {}),
+        ...(cardValue.战技 !== undefined ? { 战技: cardValue.战技 } : {}),
       });
     }
     await this.persistCharacter(char);
@@ -1473,9 +1632,14 @@ export class StateManager {
     }
 
     // 同槽顶替: 仅清旧穿戴者的 equippedSlot，物品留在背包字段无损（杀 #10 有损穿脱）
-    for (const other of char.inventory) {
-      if (other !== item && other.equippedSlot === slot) {
-        other.equippedSlot = null;
+    // 无槽限（S「无限军火库」/A「成龙」）：跳过同槽顶替——同槽可穿多件
+    const hasNoSlotLimit =
+      char.talents?.list?.some((t) => t.entries?.some((e) => e.kind === '无槽限')) ?? false;
+    if (!hasNoSlotLimit) {
+      for (const other of char.inventory) {
+        if (other !== item && other.equippedSlot === slot) {
+          other.equippedSlot = null;
+        }
       }
     }
 
@@ -2612,6 +2776,153 @@ export class StateManager {
   }
 
   // ═══════════════════════════════════════════════════════════
+  // 🗺 委托×地图闭环接线（2026-09-19 共识稿 决议 #4/#5/#8/#10）
+  // ═══════════════════════════════════════════════════════════
+  //
+  // 两条公共钩子（落位对账 / 探索掷骰），形状照 `syncMapJourney`：
+  //   · 由**调用方**（UI 落位动作 / 采集动作 / orchestrator 旅程胶水）在提交后调用
+  //   · 锁内一段连续 RMW（读 profile → 纯函数算 → 命名写入口落库）
+  //   · 整段 try/catch：这是旁路账本，失败绝不能让正文状态提交失败
+  //
+  // 🔴 为什么不挂在 `applySetLocation` 尾部：补足要调时间推进、时间推进自己的锁段与
+  //    提交作用域互斥（铁律②，锁内嵌套 = 自死锁），所以对账必须发生在提交**之后**的
+  //    独立锁段里 —— 与 `applyTimeAdvance` 尾部自提交刻意留在锁外是同一条理由。
+
+  /**
+   * 落位对账（共识稿 #4/#5/#8）：到访计数 + 旅程补足 + 抵达判定，一次跑完。
+   *
+   * 由 `setPlayerLocation`（UI）与 orchestrator 的旅程胶水（AI 落位）在提交后调用；
+   * 也可以在任何时间推进之后补跑（幂等：没移动就只刷新记账格）。
+   */
+  async syncCommissionArrival(): Promise<ArrivalSyncOutcome | null> {
+    const pack = getMapPack();
+    if (isEmptyMapPack(pack)) return null;
+
+    try {
+      return await withSaveWriteLock(this.saveId, async () => {
+        const profile = await getProfile(this.saveId);
+        const { flags: mapFlags } = await this.ensureMapFlags(profile, pack);
+        const lastTileId = mapFlags.lastTileId ?? null;
+        if (lastTileId === null) return null;
+
+        const index = getMapIndex();
+        const midTier = midTierOfTile(index, lastTileId);
+        const midTierSnapshot = midTier
+          ? {
+              id: midTier.id,
+              name: midTier.name,
+              ...(midTier.gathering?.specialty ? { specialty: midTier.gathering.specialty } : {}),
+              ...(midTier.gathering?.danger !== undefined
+                ? { danger: midTier.gathering.danger }
+                : {}),
+              ...(midTier.gathering?.materialTable
+                ? { materialTable: midTier.gathering.materialTable }
+                : {}),
+            }
+          : null;
+
+        const current = coerceCommissionsFlags(getCommissionsFlags(profile));
+        const prevTile = current.lastTileIdSeen;
+        const route =
+          prevTile !== undefined && prevTile !== lastTileId
+            ? findPath(pack, prevTile, lastTileId)
+            : null;
+
+        const d20 = 1 + Math.floor(Math.random() * 20);
+        // 体力账（2026-09-25）：玩家当前 SP 供旅途扣减与抵达劣势判定
+        const playerChar = (await this.readCharacters()).find((c) => c.type === 'player');
+        const outcome = planArrivalSync({
+          flags: current,
+          lastTileId,
+          today: this.gameDayOf(profile),
+          routeDays: route?.days ?? null,
+          midTier: midTierSnapshot,
+          d20,
+          ...(playerChar ? { playerSp: playerChar.sp } : {}),
+        });
+
+        // 到访计数（counters 段，永不过期——到过就是到过）
+        if (outcome.visitCounterKey) {
+          const counters = coerceCounters(
+            (profile.worldFlags as Record<string, unknown> | undefined)?.['counters'],
+          );
+          const nextCounters = addCounter(counters, outcome.visitCounterKey, 1);
+          if (profile.worldFlags === undefined || profile.worldFlags === null) {
+            profile.worldFlags = {};
+          }
+          (profile.worldFlags as Record<string, unknown>)['counters'] = nextCounters;
+        }
+
+        // 补足制：差额天数直接落进 gameTime（锁内同段持久），然后按 applyTimeAdvance
+        // 的同款顺序补天气断言与随机事件掷骰 —— 旅途跨过的天，天气与事件一样作数
+        if (outcome.topUpMinutes > 0) {
+          profile.gameTime = advanceTime(profile.gameTime, outcome.topUpMinutes);
+          await this.syncMapWeather(profile);
+          await this.syncRandomEvents(profile);
+        }
+
+        await updateCommissionsFlags(profile, outcome.flags);
+        // 旅途 SP 落库（补足天数的体力消耗；锁外提交——角色行不在 profile 里）
+        if (outcome.travelSpCost > 0 && playerChar) {
+          const spm = createStateManager(this.saveId);
+          await spm.commitChatState([
+            {
+              op: 'update_character',
+              target: `characters.${playerChar.name}`,
+              value: { sp: -outcome.travelSpCost },
+            } as StatePatch,
+          ]);
+        }
+        return outcome;
+      });
+    } catch (err) {
+      console.warn('[StateManager] 委托抵达对账失败（不影响正文状态）:', err);
+      return null;
+    }
+  }
+
+  /**
+   * 探索事件掷骰（共识稿 #10）：一轮探索动作（采集/垂钓）结算后调用，至多入池一条。
+   *
+   * `surface` 由调用方给（中层 id / 中层名 / 地块名 / 位置路径段），`rollSalt` 用
+   * `worldFlags.counters['探索掷骰']` 的累计值 —— 同一动作重放稳定，不同动作独立。
+   */
+  async syncExplorationRoll(surface: string[]): Promise<boolean> {
+    const settings = getEngineSettings();
+    const pack = getRandomEventPack();
+    if (isEmptyRandomEventPack(pack)) return false;
+    if (!settings.randomEventsEnabled) return false;
+    if (surface.length === 0) return false;
+
+    try {
+      return await withSaveWriteLock(this.saveId, async () => {
+        const profile = await getProfile(this.saveId);
+        const ctx = await this.buildRandomEventContext(profile);
+        const currentDay = this.gameDayOf(profile);
+        const current = getRandomEventFlags(profile);
+        const counters = coerceCounters(
+          (profile.worldFlags as Record<string, unknown> | undefined)?.['counters'],
+        );
+        const rollSalt = counterOf(counters, EXPLORATION_ROLL_COUNTER_KEY);
+
+        const rolled = rollExplorationEvent(pack.defs, pack.config, current, ctx, {
+          saveSeed: this.saveId,
+          currentDay,
+          rollSalt,
+          surface,
+          frequency: settings.randomEventsFrequency,
+        });
+        if (rolled === null) return false;
+        await updateRandomEventFlags(profile, rolled);
+        return true;
+      });
+    } catch (err) {
+      console.warn('[StateManager] 探索事件掷骰失败（不影响正文状态）:', err);
+      return false;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
   // 🎲 随机事件接线（随机事件系统 v1 / 设计 §4·§5.2）
   // ═══════════════════════════════════════════════════════════
   //
@@ -2823,6 +3134,22 @@ export class StateManager {
           console.warn(`[StateManager] 随机事件不在候选池中，忽略触发回执: ${name}`);
           return null;
         }
+
+        // ── 事件委托（随机事件 × 委托板融合）：事件定义带 commission 模板时，
+        //    结算即实例化一条动态委托进 flags（过期由 prune 统一清理）。
+        //    同名事件委托已存在 → 刷新有效期（重新触发 = 委托重新来过）。
+        const def = getRandomEventPack().defs.find((d) => d?.name === name);
+        const tpl = def?.commission;
+        if (tpl) {
+          const fresh = buildEventCommission(tpl, name, currentDay);
+          if (fresh) {
+            const kept = pruneEventCommissions(settled.flags.eventCommissions, currentDay).filter(
+              (ec) => ec.def.name !== tpl.name || ec.sourceEvent !== name,
+            );
+            settled.flags.eventCommissions = [...kept, fresh];
+          }
+        }
+
         await updateRandomEventFlags(profile, settled.flags);
         return { settled, currentDay };
       });
@@ -3153,7 +3480,6 @@ export function findByName<T extends { name: string }>(list: T[], name: string):
 // ═══════════════════════════════════════════════════════════
 
 /** 一游戏日 = 1440 分钟（`time-system` 的同一个常量，那边没导出） */
-const MINUTES_PER_GAME_DAY = 1440;
 
 /** 引擎断言的天气标签落在这条变量路径（§7：**只写标签串**，不写结构体） */
 const WEATHER_VAR_PATH = 'sys.天气';

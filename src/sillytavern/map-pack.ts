@@ -30,6 +30,7 @@ import type {
   MapAdjacencyEdge,
   MapCountry,
   MapMidTier,
+  MidTierGathering,
   MapPack,
   MapStrait,
   MapTile,
@@ -487,9 +488,41 @@ function coerceMidTiers(raw: unknown): MapMidTier[] {
       countryId: readText(item.countryId),
       climateId: readText(item.climateId),
       anchorTileId: readNumber(item.anchorTileId),
+      ...(coerceMidTierGathering(item.gathering)
+        ? { gathering: coerceMidTierGathering(item.gathering) as MidTierGathering }
+        : {}),
     });
   }
   return out;
+}
+
+/**
+ * 中层采集覆写的容错解析（逐键独立：坏子项丢那一键，整段认不出 = 无覆写）。
+ * `materialTable` 的键必须是 0..4 的整数档位，值是串数组；坏行逐行丢。
+ */
+function coerceMidTierGathering(raw: unknown): MidTierGathering | undefined {
+  if (!isRecord(raw)) return undefined;
+  const specialty = readNonEmpty(raw.specialty, '');
+  const dangerRaw = readNumber(raw.danger);
+  let materialTable: Record<number, string[]> | undefined;
+  if (isRecord(raw.materialTable)) {
+    const table: Record<number, string[]> = {};
+    for (const [key, value] of Object.entries(raw.materialTable)) {
+      const rank = Number(key);
+      if (!Number.isInteger(rank) || rank < 0 || rank > 4) continue;
+      if (!Array.isArray(value)) continue;
+      const names = value.filter((n): n is string => typeof n === 'string' && n.length > 0);
+      if (names.length === 0) continue;
+      table[rank] = names;
+    }
+    if (Object.keys(table).length > 0) materialTable = table;
+  }
+  if (specialty.length === 0 && dangerRaw === null && !materialTable) return undefined;
+  return {
+    ...(specialty.length > 0 ? { specialty } : {}),
+    ...(dangerRaw !== null ? { danger: Math.max(0, dangerRaw) } : {}),
+    ...(materialTable ? { materialTable } : {}),
+  };
 }
 
 /**

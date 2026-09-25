@@ -12,15 +12,7 @@ import { clampAffection, getAffectionLabel } from '@engine/affection-system';
 import { inferQualityFromStats } from '@engine/quality-inference';
 import { getTierConfig } from '@engine/tier-constants';
 import { ASSET_TYPES } from '@engine/types';
-import type {
-  AssetMetaRecord,
-  AssetType,
-  AuthorityDetail,
-  CharacterState,
-  ElementDetail,
-  InventoryItem,
-  LawDetail,
-} from '@engine/types';
+import type { AssetMetaRecord, AssetType, CharacterState, InventoryItem } from '@engine/types';
 
 // ═══════════════════════════════════════════════════════════
 // 头部
@@ -132,93 +124,6 @@ export function buildProfileFields(char: CharacterState): ProfileField[] {
     { label: '着装', text: textLoose(char.outfit) },
   ];
   return raw.map((f) => ({ label: f.label, text: f.text.trim() })).filter((f) => f.text !== '');
-}
-
-// ═══════════════════════════════════════════════════════════
-// 登神长阶
-// ═══════════════════════════════════════════════════════════
-
-/** 一条登神条目。**刻意不导出** —— 它只经 {@link AscensionTrack} 露出去，没有第二个调用面 */
-interface AscensionEntry {
-  name: string;
-  description: string;
-  effects: string[];
-  /** 权能 / 法则 才有的消耗描述；要素没有这一项 */
-  cost: string;
-}
-
-export interface AscensionTrack {
-  key: 'elements' | 'authority' | 'law';
-  label: string;
-  /** 上限；`0` = 没有明确上限，只报个数 */
-  cap: number;
-  /** 这一档从哪一级开始拿得到（空态说明用） */
-  unlockLevel: string;
-  entries: AscensionEntry[];
-}
-
-/**
- * 三档的上限与解锁级别。
- *
- * 数字来自 `types.ts` 的 `CharGenResult.ascension`（要素 1-3 / 权能 1 / 法则 1-2）
- * 与三个 Detail 类型的注释（要素 Lv.13-16 / 权能 Lv.17-20 / 法则 Lv.21-24）。
- * 抄在这里是**展示口径**，不是规则真源: 引擎侧唯一会拿它做判断的地方是
- * `canBreakthrough`（只看要素个数），它不读本表。
- */
-const ASCENSION_META = [
-  { key: 'elements' as const, label: '要素', cap: 3, unlockLevel: 'Lv.13' },
-  { key: 'authority' as const, label: '权能', cap: 1, unlockLevel: 'Lv.17' },
-  { key: 'law' as const, label: '法则', cap: 2, unlockLevel: 'Lv.21' },
-];
-
-function toEntry(d: ElementDetail | AuthorityDetail | LawDetail): AscensionEntry {
-  return {
-    name: textLoose(d.name),
-    description: textLoose(d.description),
-    effects: Array.isArray(d.effects) ? d.effects.filter((e) => typeof e === 'string') : [],
-    cost: 'costDescription' in d ? textLoose(d.costDescription) : '',
-  };
-}
-
-/**
- * 三条轨道，**恒返回三条**（没开登神也一样）—— 空轨道由界面画成占位格。
- *
- * 🔴 三个字段自 Phase 9 起是**数组**（此前是 Record）。存量存档里可能还躺着旧形状，
- * 而 `Object.values` 对两者都成立、`.map` 只对数组成立 —— 所以这里统一先摊平。
- * 不做这一步的症状不是空白，是 `.map is not a function` 把整个弹窗打成白屏。
- *
- * 🔴 **裸字符串条目要收下，不能丢**（审查逮到）: `ascension` 同样在
- * `update_character` 白名单里、零校验落库，AI 完全写得出 `elements: ['空间','时间']`。
- * 按「只要对象」过滤的话，一个真有两个要素的角色会显示成 `0/3` +「尚未踏上长阶」——
- * 静默丢数据比显示得不完整糟得多，所以字符串按「只有名字的条目」收。
- */
-export function buildAscensionTracks(char: CharacterState): AscensionTrack[] {
-  const asc = char.ascension;
-  return ASCENSION_META.map((meta) => {
-    const bag = asc?.[meta.key] as unknown;
-    const list: unknown[] = Array.isArray(bag)
-      ? bag
-      : bag && typeof bag === 'object'
-        ? Object.values(bag as Record<string, unknown>)
-        : [];
-    return {
-      ...meta,
-      entries: list
-        .map((d) =>
-          typeof d === 'string'
-            ? { name: d.trim(), description: '', effects: [], cost: '' }
-            : d && typeof d === 'object'
-              ? toEntry(d as ElementDetail)
-              : null,
-        )
-        .filter((e): e is AscensionEntry => e !== null && e.name !== ''),
-    };
-  });
-}
-
-/** 有没有任何一档拿到了东西 —— 决定「登神长阶」这一节画不画（空态口径） */
-export function hasAnyAscension(tracks: readonly AscensionTrack[]): boolean {
-  return tracks.some((t) => t.entries.length > 0);
 }
 
 // ═══════════════════════════════════════════════════════════

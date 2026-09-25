@@ -19,33 +19,172 @@ import type {
   ApiEndpoint,
   AgentResult,
   AgentPreset,
+  CardItem,
   CombatTriggerMarker,
   CombatSummaryResult,
   RecentCombatInfo,
   WorldBook,
   CraftGenRequestMarker,
   CharGenRequestMarker,
-  PlayAudioMarker,
   MemoryRecord,
-  WorkshopProject,
-  CharacterState,
   ChatMessage,
   SystemEvent,
   DebugAgentEntry,
   PlotEvent,
 } from '@engine/types';
-import type {
-  ImageGenFailure,
-  ImagePromptOutput,
-  ImagePromptRequest,
-  SceneImageMarker,
-} from '@engine/types-image';
-import { splitSceneImageSegments } from '@engine/image-segments';
-import { stripMarkers } from '@engine/marker-protocol';
+import {
+  judgeCrush,
+  type SkirmishAction,
+  type SkirmishChoice,
+} from '@engine/card-workshop/skirmish';
+import {
+  cardPlayPlan,
+  planEffects,
+  sealedCardPlay,
+  type ActivateInput,
+} from '@engine/card-workshop/entry-combat';
+import { applyBond, bondForCard, type BondInfo } from '@engine/card-workshop/affection-bond';
+import { cardKindOf } from '@engine/card-workshop/card-kind';
+import { willModifierOf } from '@engine/card-workshop/unsealing';
+import { mpCostOf } from '@engine/card-workshop/entry-combat';
+import { insightModOf } from '@engine/card-workshop/derived-stats';
+import { getCommissionDefs } from '@engine/commission-runtime';
+import { coerceCommissionsFlags } from '@engine/card-workshop/commission-flags';
+/** 蜡痕计数键（白蜡城代价；worldFlags.counters 段） */
+const WAX_MARKS_KEY = '蜡痕';
+import { buildCraftBiasLines } from '@engine/card-workshop/talent-entry';
+import { runTalentFusionNaming } from '@engine/card-workshop/talent-naming';
+import {
+  applyStatMultiplier,
+  basicCounterAction,
+  deriveBaseCombatStats,
+  deriveCombatStats,
+} from '@engine/card-workshop/derived-stats';
+import {
+  crushFinish,
+  fleeSkirmish,
+  playBeat,
+  settleSkirmish,
+  startSkirmish,
+  type SkirmishSession,
+} from '@engine/card-workshop/skirmish-session';
+import { buildSkirmishSettlementPatches } from '@engine/card-workshop/skirmish-settlement';
+import type { SkirmishContract } from '@engine/card-workshop/skirmish-session';
+import {
+  collectRuleHooks,
+  DAILY_NUKE_WEAKNESS,
+  dailyNukePercentOf,
+  defeatExpMultiplierOf,
+  expMultiplierOf,
+  hasDefeatReward,
+  hasOncePerBattleNuke,
+  hasVictoryMaterial,
+  hpMultiplierOf,
+  nukePercentOf,
+  statMultiplierOf,
+} from '@engine/card-workshop/talent-hooks';
+import {
+  entryStrength,
+  envBonusesOf,
+  hasBetterRoll,
+  hasTitanPhysique,
+  totalIntimidation,
+} from '@engine/card-workshop/talent-rule-modifiers';
+import {
+  initialSelfEffects,
+  selfStatusesOf,
+  totalSelfStatus,
+} from '@engine/card-workshop/self-status';
+import {
+  bodyScaleCrushBonus,
+  coerceBodyScale,
+  coerceEnemyCount,
+  isOnCooldown,
+  playerBodyScale,
+  resolveCrit,
+  startCooldown,
+  tickCooldowns,
+} from '@engine/card-workshop/battle-dimensions';
+import { totalCondBonus } from '@engine/card-workshop/conditional-bonus';
+import {
+  coerceTwinBonds,
+  duelBlocksCard,
+  isLazyCard,
+  isLoneCard,
+  isModularCard,
+  resolveHotSwap,
+  resolveLazyCard,
+  resolveTwinCombo,
+} from '@engine/card-workshop/battle-rules';
+import {
+  MISFORTUNE_KEY,
+  MISFORTUNE_PER_FAILURE,
+  isGreatFailure,
+} from '@engine/card-workshop/craft-flow-hooks';
+import {
+  FACE_SLAP_KEY,
+  coerceNemesis,
+  coerceTaunt,
+  isNemesisBattle,
+  nemesisExpMultiplier,
+  settleFaceSlap,
+  shouldMarkNemesis,
+} from '@engine/card-workshop/conditional-exp';
+import {
+  addBlueprint,
+  coerceBlueprints,
+  pickCopyTarget,
+} from '@engine/card-workshop/opponent-blueprints';
+import {
+  coerceTrueNames,
+  hasTrueName,
+  rememberTrueName,
+  trueNameShockPower,
+} from '@engine/card-workshop/true-name';
+import { coerceSpirits } from '@engine/card-workshop/behind-spirits';
+import {
+  buffActiveToday,
+  canUseToday,
+  coerceBuffs,
+  coerceCounters,
+  coerceLedger,
+  counterOf,
+  spendCounter,
+  tryUseToday,
+} from '@engine/card-workshop/daily-ledger';
+import { getRequiredXpForLevel, xpToNextNumber } from '@engine/exp-table';
+import {
+  coerceSealedTalents,
+  decrementSealedTalents,
+  filterSealedTalents,
+} from '@engine/card-workshop/sealed-talents';
+import { CARD_CRAFT_NARRATE_AGENT, runCardCraftNarration } from '@engine/card-craft-narrate';
+import {
+  COMMISSION_NARRATE_AGENT,
+  runCommissionNarration,
+} from '@engine/card-workshop/commission-narrate';
+import {
+  COMBAT_CRIT_MULTIPLIER,
+  DAILY_BUFF_COMBAT_CRIT,
+  DAILY_BUFF_CRAFT_LUCK,
+} from '@engine/card-workshop/fortune-dice';
+import type { TalentEntry } from '@engine/card-workshop/talent-entry';
+import type { CraftRating } from '@engine/types';
+import { planDefeatCompensation } from '@engine/card-workshop/defeat-compensation';
+import { planSelfEvolution } from '@engine/card-workshop/companion-growth';
+import { runSkirmishAssessment, runSkirmishChronicle } from '@engine/card-workshop/skirmish-agent';
 import { AgentClient } from '@engine/agent-client';
 import type { StreamCallbacks } from '@engine/agent-client';
 import { createStateManager } from '@engine/state-manager';
+// 卡池唯一口径：内容仓 cardPool + 运行时自定义卡（2026-09-18）
+import { getCardPool } from '@engine/card-workshop/card-pool';
+import { deckGuardBonus, deckPower } from '@engine/card-workshop/deck-power';
+import { matchFreeCardPlay } from '@engine/card-workshop/free-card-play';
+import { battleReadyCards } from '@engine/card-workshop/deck-power';
+import { cardCombatTags } from '@engine/card-workshop/entry-combat';
+import { runSkirmishIntentResolve } from '@engine/card-workshop/skirmish-agent';
 import { projectStoryOutput, projectStreamingStory } from '@engine/story-output';
+import { filterOptionsForScheme, resolveOptionScheme } from '@engine/option-policy';
 import { loadWorldBooksWithFallback } from '@engine/builtin-worldbooks';
 import { filterBooksByEnabledEntries } from '@engine/worldbook-loader';
 import { buildStatData } from '@engine/stat-projection';
@@ -60,7 +199,6 @@ import type { RandomEventOfferEntry } from '@engine/random-event-context';
 import { buildRandomEventRollContext } from '@engine/random-event-snapshot';
 import { getRandomEventPack } from '@engine/random-event-runtime';
 import { getEngineSettings } from '@engine/engine-settings';
-import { toEpochMinutes } from '@engine/time-system';
 // 🧵 主线细化层（2026-09-09 接线）：闸门/快照/投影响应都在 game-pipeline 供值（buildContext 铁律）
 import { getPlotThreadFlags, commitPlotThreadTurn } from '@engine/save-profile';
 import {
@@ -78,23 +216,22 @@ import type {
 import { countAcceptableTriggers } from '@engine/plot-engine';
 // 🆕 Delta 会话（T4）：存档切换/销毁时清理该存档的 prompt session（string 入参 = 清整个 saveId）
 import { invalidatePromptSession } from '@engine/prompt-session-assembler';
-import { resolveSceneWeather } from './scene-image-seams';
+import { resolveSceneWeather } from './scene-weather';
+import { eventCommissionDefs } from '@engine/card-workshop/event-commission';
+import { backfillMissingMemories, LAZY_BACKFILL_MAX_PER_RECALL } from '@engine/memory-store';
+import { toEpochMinutes, MINUTES_PER_GAME_DAY } from '@engine/time-system';
 // 🆕 重铸（2026-08-24）：单条目重铸的引擎侧类型（RewriteTarget = 要重写的技能/装备/物品三选一）
 import type { RewriteTarget } from '@engine/item-gen-chain';
-
-/** 一个游戏日的分钟数（口径同 `state-manager` 的 `MINUTES_PER_GAME_DAY`，那份未导出） */
-const MINUTES_PER_GAME_DAY = 1440;
+import { midTierRefHit } from '@engine/card-workshop/commission';
+import type { CommissionDef } from '@engine/card-workshop/commission';
 
 /** EJS `ui.log` 环形缓冲上限（能力面 §6.2） */
 import { diffVars, measureDiffSize, EJS_DIFF_SIZE_LIMIT } from '@engine/ejs-vars-diff';
 import type { EjsVarsDiff } from '@engine/ejs-vars-diff';
 import type { useGameStore } from '../stores/game-store';
 import type { useSettingsStore } from '../stores/settings-store';
-import { useAudioStore } from '../stores/audio-store';
 import { useWorldBookStore } from '../stores/worldbook-store';
 import { useUIStore } from '../stores/ui-store';
-import type { CombatCommand } from '@engine/combat-v3';
-import { rollDice } from '@engine/dice';
 import { getAgentSettings, hasExplicitAgentModel } from '../stores/agent-settings';
 import type { EmbeddingRequestTrace } from '@engine/memory-store';
 // 🆕 F10（2026-09-04）：Agent API 池绑定的 fail-closed 解析（pool id → ApiEndpoint 唯一纯实现）
@@ -148,13 +285,7 @@ export class EndpointBindingError extends Error {
  * 端点失效不能拖垮整轮叙事 —— 装配置时跳过（不装配端点），真被调用时由
  * `getEndpointForAgent` 再判一次并按既有 optional 策略跳过。
  */
-const SIDE_CHAIN_AGENT_IDS = new Set([
-  'craft_gen',
-  'char_gen',
-  'item_gen',
-  'image_prompt',
-  'combat_v3',
-]);
+const SIDE_CHAIN_AGENT_IDS = new Set(['craft_gen', 'char_gen', 'item_gen', 'combat_v3']);
 
 interface DebugEntryInput {
   invocationId: string;
@@ -210,35 +341,18 @@ function buildDebugEntry(input: DebugEntryInput): DebugAgentEntry {
 }
 
 /** 兼容旧调用名；正文、控制区块与 `<option(s)>` 统一由 story-output 投影。 */
-export function extractStoryOptions(raw: string): { content: string; options: string[] } {
+export function extractStoryOptions(raw: string): {
+  content: string;
+  options: string[];
+  truncated: boolean;
+} {
   return projectStoryOutput(raw);
 }
 
-/** Resolve selected workshop books that explicitly declare system-core semantics. */
-export function collectSelectedSystemCoreWorkshopBookIds(
-  worldBooks: WorldBook[],
-  projects: WorkshopProject[],
-): string[] {
-  const coreProjectIds = new Set(
-    projects
-      .filter((project) => project.tags?.some((tag) => tag.trim().toLowerCase() === 'system/core'))
-      .map((project) => project.id),
-  );
-  if (coreProjectIds.size === 0) return [];
-
-  return worldBooks
-    .filter(
-      (book) =>
-        book.partition === 'creative_workshop' &&
-        book.entries.some(
-          (entry) =>
-            entry.enabled &&
-            Boolean(entry.extra?.workshop?.projectId) &&
-            coreProjectIds.has(entry.extra!.workshop!.projectId),
-        ),
-    )
-    .map((book) => book.id);
-}
+/** 输出未闭合时给玩家的可见提示（2026-09-18 防护：把静默半截变成明确告知） */
+export const TRUNCATION_NOTICE =
+  '\n\n---\n⚠️ 本轮输出未正常结束（缺 `</maintext>` 闭合标记）——可能被模型截断或流式中断。' +
+  '若反复出现，请检查该 Agent 的**模型与预设是否匹配**（例如把 DeepSeek 专用预设用在非 DeepSeek 模型上）。';
 
 /** 各 Agent 的中文标签（供调试日志 / DebugPanel 显示） */
 const AGENT_LABELS: Record<string, string> = {
@@ -255,35 +369,6 @@ const AGENT_LABELS: Record<string, string> = {
   plot_outline: '剧情大纲',
 };
 
-/**
- * 把方言的 systemPrompt **合并**进 `image_prompt` 那条 config（图像 v2 / C3·C5）。
- *
- * 为什么是「合并」而不是「另造一条」: `buildAgentMessagesAsync` 只从 `configs` 里认
- * systemPrompt，而**同一条 config 还带着这个 agent 的全部 LLM 旋钮**（模型 / 温度 /
- * maxTokens / 世界书 —— `image-prompt-agent` 会把它们再查一遍）。新造一条顶掉原来的，
- * 用户在设置页调的模型与采样参数就全部静默回落成缺省 —— 不报错，只是这条侧链换了个
- * 模型在跑。所以这里克隆整条、只换那一格。
- *
- * @param override 空 / 只剩空白 / undefined → 原样返回（走 agent-config 或模板兜底，
- *   即图像 v1 行为）。🔴 **空白也要挡**：设置页今天不再写下只含空白的覆盖，但老档里
- *   可能躺着一份 —— 它会把这条侧链的整段 systemPrompt 换成一个空格，产出一串垃圾而
- *   没有任何一处报错。
- */
-export function withImagePromptSystem(
-  configs: readonly AgentConfig[],
-  override: string | undefined,
-): AgentConfig[] {
-  if (!override || override.trim() === '') return [...configs];
-  const index = configs.findIndex((c) => c.agentId === 'image_prompt');
-  if (index >= 0) {
-    return configs.map((c, i) => (i === index ? { ...c, systemPrompt: override } : c));
-  }
-  // 生产里到不了这里（`buildAgentConfigs` 的名单固定含 image_prompt）。真到了的话，
-  // 宁可补一条只带提示词的：没有它，方言的整段吃法会静默失效，而那是没有任何症状的。
-  console.warn('[GamePipeline] configs 里没有 image_prompt，合成一条只带 systemPrompt 的');
-  return [...configs, { agentId: 'image_prompt', systemPrompt: override } as AgentConfig];
-}
-
 const saveWork = new Map<
   string,
   { owner: GamePipeline; depth: number; idle: Promise<void>; resolve: () => void }
@@ -292,6 +377,13 @@ const saveWork = new Map<
 /** A remounted page must read its save only after the previous pipeline drains. */
 export async function waitForGameSaveIdle(saveId: string): Promise<void> {
   while (saveWork.has(saveId)) await saveWork.get(saveId)!.idle;
+}
+
+/** 玩家天赋条目摊平（规则层数值条目一律走条目种类判定，与 UI 同源） */
+function flatEntriesOf(
+  talents: readonly { entries?: readonly TalentEntry[] }[] | undefined,
+): readonly TalentEntry[] {
+  return (talents ?? []).flatMap((t) => t.entries ?? []);
 }
 
 export class GamePipeline {
@@ -345,12 +437,10 @@ export class GamePipeline {
    * 🎵 本轮待播的配乐标记。Stage 1 只暂存，等状态落库+回读之后才真正选曲 ——
    * 理由见 run() 末尾。一轮多个标记时后者覆盖前者（以 AI 最后的判断为准）。
    */
-  private pendingAudioMarker: PlayAudioMarker | null = null;
   /**
    * 上次据以选曲的地点。用来判断"地点变没变" —— 没变就不重选，
    * 同一地点里来回走动不该反复触发。空串表示还没选过。
    */
-  private lastAudioLocation = '';
   /**
    * 🖼 本轮 story 刚产出的那条消息（id / turn / 正文）。
    *
@@ -370,17 +460,9 @@ export class GamePipeline {
   /** Q-01: v3 战斗真实骰源（drawDice）的 outputId 计数器，区分每次续杯 */
   private _diceDrawSeq = 0;
   /**
-   * T16（设计 2026-08-09 §3.5）：最近一次 combat_trigger marker 的存档副本。
-   *
-   * coordinator 句柄的 `restart` 回调（重开战斗）拿它重新走 handleCombatTriggerV3
-   * —— store 层接触不到 pipeline，重触发必须由本实例完成（它持有 marker 与全部
-   * 引擎依赖）。整场战斗生命周期内有效；下次 combat_trigger 覆盖。
-   */
-  private _lastCombatMarker: CombatTriggerMarker | null = null;
-  /**
    * 最近一场**已结算**战斗（2026-08-13 真机 debug：dispatcher 战后轮重触发战斗）。
    *
-   * 战斗终局落库时记录（startCombatV3），`buildContext` 供给 `ctx.recentCombat` →
+   * 战斗终局落库时记录，`buildContext` 供给 `ctx.recentCombat` →
    * `{{RECENT_COMBAT}}` 渲染。内存级（与 `_lastCombatMarker` 同口径，不持久化）：
    * 战斗后的紧接着的下一轮是误触发高发窗口，覆盖它就够；跨会话场景里已有角色表
    * 自带 hp=0/死亡状态可判。放弃的战斗不记录（没发生过）。
@@ -416,6 +498,13 @@ export class GamePipeline {
     this.game = deps.gameStore;
     this.settings = deps.settingsStore;
     this.saveId = deps.saveId;
+    this.attachSkirmishController();
+    // 融合起名缝（AI 零编数：只起名写描述；mock store 无此方法则跳过）
+    this.game.setFuseNamingImpl?.(async (sourceA, sourceB, entryLines) => {
+      const r = await this.runTalentFusionNaming(sourceA, sourceB, entryLines);
+      if (!r.ok || !r.name) throw new Error(r.reason ?? 'AI 起名失败');
+      return { name: r.name, description: r.description ?? '' };
+    });
   }
 
   // 🪦 Q-06：`syncSnapshotSettings` 已删。它把 settings-store 的两个字段每轮抄进
@@ -484,6 +573,14 @@ export class GamePipeline {
     isUserMessage = true,
     sourceMessageId?: string,
   ): Promise<boolean> {
+    // 跨日恢复（2026-09-25 访谈共识）：日切时 MP/SP 回满、HP 回上限的 50%。
+    // 挂在每回合开头——gameDay 比对 worldFlags.lastRegenDay，幂等且不依赖显式日切事件；
+    // 隔了多天（旅途补足/快进）按天循环补（HP 每天最多回一半，睡够照样有痕）。
+    // 🔴 fire-and-forget：await 会把「isGenerating 置位」推迟一个微任务，
+    //    破坏 abort 时序（Stop 锁位测试实证）——恢复晚半拍无感，锁位早半拍致命。
+    void this.applyDayRolloverRegen().catch((err) =>
+      console.warn('[GamePipeline] 跨日恢复失败（不阻断回合）:', err),
+    );
     if (this.abortController || !this.ownsActiveSave) return false;
     console.log(
       '[GamePipeline] run() called — userInput length:',
@@ -526,7 +623,6 @@ export class GamePipeline {
       const endpoints = this.buildEndpoints();
       this.currentContext = context;
       this.pendingPlotTasks = [];
-      this.pendingAudioMarker = null;
       this.lastStoryMessage = null;
       await this.loadPlotData(context);
       // 🧵 主线细化层：pre 开始前先求本轮闸门（on 时供值；失败静默 over）
@@ -535,14 +631,9 @@ export class GamePipeline {
       // 2.5 加载预设和世界书（自 fetch agent-config.json，不依赖 store 异步初始化）
       const { presets, agentDefaults } = await this.loadPresets();
       const worldBooks = await this.loadActiveWorldBooks();
-      const systemCoreWorkshopBookIds = await this.loadSystemCoreWorkshopBookIds(worldBooks);
 
       // 2.6 构建 Agent 配置（用已加载的 agentDefaults 替代 projectAgentDefaults）
-      const agentConfigs = this.buildAgentConfigs(
-        agentDefaults,
-        onStoryChunk,
-        systemCoreWorkshopBookIds,
-      );
+      const agentConfigs = this.buildAgentConfigs(agentDefaults, onStoryChunk);
 
       // 真机修(2026-07-17): 侧链 (char/item/craft) 调用 buildAgentMessages 时需要
       // configs/worldBooks/presets 才能拿到完整 systemPrompt + 世界书上下文，
@@ -664,7 +755,6 @@ export class GamePipeline {
       // 还是上一轮的值 —— 它们要等 Stage 2 的 request_dispatcher / vars_update 落库、
       // 再经这里的 refreshFromDb 才更新。而**转场恰恰是唯一真正该换歌的时刻**：
       // 在 Stage 1 播，正文已经进了熔火裂谷，BGM 还在放上一座城的曲子。
-      if (this.ownsActiveSave) this.flushPendingAudio();
       if (activityRunId) {
         this.game.finishAgentActivityRun(activityRunId, activityOutcome, activityMessage);
         this.game.finishAgentLogTurn(activityRunId, activityOutcome);
@@ -685,83 +775,6 @@ export class GamePipeline {
         if (this.ownsActiveSave) this.game.isGenerating = false;
         this.abortController = null;
       }
-    }
-  }
-
-  /**
-   * 🎵 本轮配乐的唯一出口。两条来源，**AI 标记优先**:
-   *
-   * 1. story 写了 `<play_audio>` —— 它知道这一刻的戏剧意图（要打起来了 / 气氛转冷），
-   *    比"地点变了"这个纯事实更准；
-   * 2. 否则看地点有没有变 —— 这是场景配乐的主路径，绝大多数换歌都由它触发。
-   *
-   * 地点**没变就不动音乐**：同一个地点里来回走动、翻面板不该反复重选曲子。
-   * （即便重选出同一首，store 那层的"同曲不重播"也会挡住，这里只是不做无用功。）
-   *
-   * 不 await —— 配乐是旁路氛围，出问题不该影响这一轮。管线被 abort / 报错时同样
-   * 会走到这里：正文可能已经产出，该换的歌照换。
-   */
-  private flushPendingAudio(): void {
-    const marker = this.pendingAudioMarker;
-    this.pendingAudioMarker = null;
-
-    // 用户关掉了场景配乐 → 两条来源都不生效，音乐完全交回给用户
-    if (this.settings.settings.audioSceneAutoPlay === false) {
-      this.lastAudioLocation = this.game.player?.location ?? '';
-      return;
-    }
-
-    if (marker) {
-      this.lastAudioLocation = this.game.player?.location ?? '';
-      void this.handlePlayAudio(marker).catch((err) => {
-        console.warn('[GamePipeline] 场景配乐失败（不阻塞本轮）:', err);
-      });
-      return;
-    }
-
-    const location = this.game.player?.location ?? '';
-    if (!location || location === this.lastAudioLocation) return;
-    this.lastAudioLocation = location;
-    void this.playForLocation(location).catch((err) => {
-      console.warn('[GamePipeline] 场景配乐失败（不阻塞本轮）:', err);
-    });
-  }
-
-  /**
-   * 按当前地点选曲。在场角色一并带上 —— 有专属主题曲的角色在场时，
-   * 打分器会在"地点已经泛到势力一级"时让人物主题接管（见说明书第八节的权重表）。
-   */
-  private async playForLocation(location: string): Promise<void> {
-    const audio = useAudioStore();
-    await audio.playByScene({
-      location,
-      characters: this.presentCharacterNames(),
-    });
-  }
-
-  /** 在场 NPC 的名字（player 不算） */
-  private presentCharacterNames(): string[] {
-    return this.game.characters
-      .filter((c) => c.type !== 'player' && c.present === true)
-      .map((c) => c.name);
-  }
-
-  /**
-   * 🎵 进场配乐。装好存档、进入游戏页时调一次 —— 「进入某个地点就该响起它的曲子」
-   * 对读档回来的第一眼同样成立，不该非要等玩家先说一句话。
-   *
-   * 同时把 lastAudioLocation 定下来，于是紧接着的第一轮不会为同一个地点再选一次。
-   * 曲库装载（init）由调用方负责，这里只管选曲。
-   */
-  async primeSceneAudio(): Promise<void> {
-    if (this.settings.settings.audioSceneAutoPlay === false) return;
-    const location = this.game.player?.location ?? '';
-    if (!location || location === this.lastAudioLocation) return;
-    this.lastAudioLocation = location;
-    try {
-      await this.playForLocation(location);
-    } catch (err) {
-      console.warn('[GamePipeline] 进场配乐失败（不阻塞）:', err);
     }
   }
 
@@ -863,7 +876,6 @@ export class GamePipeline {
   private buildAgentConfigs(
     agentDefaults: Record<string, Record<string, unknown>>,
     onStoryChunk?: StoryChunkCallback,
-    systemCoreWorkshopBookIds: string[] = [],
   ): AgentConfig[] {
     const s = this.settings.settings;
 
@@ -879,9 +891,6 @@ export class GamePipeline {
       'craft_gen', // 侧链: 制作生成，需完整 systemPrompt (真机 fix 2026-07-18)
       'char_gen', // 侧链: 角色生成，需完整 systemPrompt
       'item_gen', // 侧链: 物品生成，需完整 systemPrompt + {{ITEM_REQUEST}} 占位符
-      // 侧链: 情景插画的中文 → danbooru 转换（图像生成 D28）。不进主 DAG、也不进设置页
-      // Agent 子导航（D53）—— 但它的 systemPrompt/世界书/采样参数照旧从这里装配。
-      'image_prompt',
       // 侧链: 战斗决策（combat-v3 Coordinator 在战斗会话中按 RequiredInput.PlayerCommand
       // 唤起，不走主 DAG）。systemPrompt/模型/温度/世界书照旧从这里装配 —— coordinator
       // 按 agentId === 'combat_v3' 从 ctx.configs 读（见 combat-v3/coordinator.ts 的
@@ -980,21 +989,10 @@ export class GamePipeline {
           ? s.activePresetId
           : (defaults.presetId as string | undefined) || undefined;
       const worldBookEnabled = agentCfg.worldBookEnabled;
-      const configuredWorldBookIds = worldBookEnabled ? agentCfg.worldBookIds : [];
-      const selectedSystemCore =
-        this.game.activeSave?.metadata?.enabledWorldBookEntries?.some((entry: string) =>
-          entry.startsWith('system_core:'),
-        ) ?? false;
-      // Selected core lore is authoritative save data. Story and char_gen both
-      // need the source entry; the other agents keep their configured partitions.
-      const isCoreLoreAgent = agentId === 'story' || agentId === 'char_gen';
-      const coreBookIds = isCoreLoreAgent
-        ? [...(selectedSystemCore ? ['system_core'] : []), ...systemCoreWorkshopBookIds]
-        : [];
-      const worldBookIds =
-        worldBookEnabled && coreBookIds.length > 0
-          ? [...new Set([...configuredWorldBookIds, ...coreBookIds])]
-          : configuredWorldBookIds;
+      const worldBookIds = worldBookEnabled ? agentCfg.worldBookIds : [];
+      // 命定核心轴已下线（2026-09-16 精简）：不再有 system_core 存档级单选，
+      // agent 世界书一律走配置的 worldBookIds；老档残余 system_core 条目仍由
+      // worldbook-loader 的存档级过滤自然兼容。
 
       // systemPrompt/template 统一读 agentCfg（已合覆写 ?? 默认）。空串 → undefined
       // （AgentConfig 里 undefined = 不发该字段，与原 `defaults.X || undefined` 行为一致）。
@@ -1096,6 +1094,12 @@ export class GamePipeline {
     const meta = this.game.activeSave?.metadata as Record<string, any> | undefined;
     const plotSettings = meta?.plotSettings ?? { mode: 'off', tabooContent: '' };
 
+    // 🆕 向量召回惰性回填（随机事件旁路，fire-and-forget）：旧记忆的 `embedding` 为
+    // undefined 会让它们永远归 fallback 排序（重要度 + 时间），永远进不了 compatible 段。
+    // 每轮上下文构建时扫一眼缺失条、重嵌一小批 → 下一轮起它们是真正的余弦匹配。
+    // 失败是常态（网络/端点临时不可用）→ 单条失败仅记日志、不影响本轮编排与并发方。
+    this.maybeBackfillMissingMemories();
+
     return {
       userInput,
       history,
@@ -1131,6 +1135,21 @@ export class GamePipeline {
       //    漏供任一格的症状都不是报错，是那个块静默消失或永远静默（blurByDefault 的教训），
       //    故 placeholder-registry.random-events.test.ts 有一条源码断言盯着这三行。
       randomEventOffer: this.buildRandomEventOffer(),
+      // 委托板（卡牌工坊）：静态（内容包第 15 面）+ 动态（事件委托：随机事件触发生成，
+      // 按 gameTime 折算 gameDay 过滤过期）。漏供的症状同样不是报错，是委托块静默消失。
+      commissionDefs: this.commissionDefsForAI(),
+      // 天赋（卡牌工坊）：玩家 CharacterState.talents 快照（{{TALENT}} 数据源；
+      // 玩家无天赋时为 undefined → 块静默，出身必选保证建档即有）。
+      talents: this.game.player?.talents,
+      // 行动选项方案（2026-09-23 共识稿）：存档级选择（worldFlags）+ 全局自定义库
+      // （settings）。{{OPTION_POLICY}} 数据源；id 缺席/未知由 resolveOptionScheme 回落标准。
+      insightMod: insightModOf(this.game.player?.attributes),
+      optionSchemeId: (this.game.saveProfile?.worldFlags as Record<string, unknown> | undefined)?.[
+        'optionSchemeId'
+      ] as string | undefined,
+      customOptionSchemes: getEngineSettings().optionSchemes,
+      // 叙事意图（纯记不向路线）：每天赋一条当前意图，持续注入（再声明即替换）。
+      narrativeIntents: this.game.saveProfile?.narrativeIntents ?? [],
       randomEventsEnabled: getEngineSettings().randomEventsEnabled,
       combatActive: this.game.isInCombat,
       // 🔴 2026-08-02 修: 初始技能走 item_gen 链路 —— request_dispatcher 的 {{SKILL_STATE}}
@@ -1143,6 +1162,7 @@ export class GamePipeline {
         characters: this.game.characters,
         gameTime: this.game.saveProfile?.gameTime,
         fp: this.game.saveProfile?.fp,
+        reputation: this.game.saveProfile?.reputation ?? 0,
         turn: history.length,
         // 🔴 漂移修复（地图 v1 §5 接线表）：`stat-projection` 一直会写 `stats.世界.天气`，
         //    只是**从来没人供值** —— 于是世界书里每一处 `stats.世界.天气` 都读不到那个键，
@@ -1312,21 +1332,6 @@ export class GamePipeline {
       const enabledEntries = this.game.activeSave?.metadata?.enabledWorldBookEntries ?? [];
       return filterBooksByEnabledEntries(all, enabledEntries);
     } catch {
-      return [];
-    }
-  }
-
-  /** Match selected workshop entries to project-level `system/core` tags. */
-  private async loadSystemCoreWorkshopBookIds(worldBooks: WorldBook[]): Promise<string[]> {
-    if (!worldBooks.some((book) => book.partition === 'creative_workshop' && book.entries.length)) {
-      return [];
-    }
-    try {
-      const { getDatabase } = await import('@engine/database');
-      const projects = await getDatabase().workshopProjects.toArray();
-      return collectSelectedSystemCoreWorkshopBookIds(worldBooks, projects);
-    } catch (err) {
-      console.warn('[GamePipeline] 工坊 system/core 标签读取失败（不阻塞本轮）:', err);
       return [];
     }
   }
@@ -1640,144 +1645,9 @@ export class GamePipeline {
       : undefined;
   }
 
-  /**
-   * 🎵 <play_audio> → 场景选曲。
-   *
-   * **地点与在场角色不从标记读，从游戏状态读** —— 它们已经是状态里的事实
-   * （`player.location` / `character.present`），让 AI 再写一遍只会多一处漂移源。
-   * 标记只提供 AI 独有的判断：此刻是什么情绪、什么情境。
-   *
-   * 整条路径不抛错：配乐是旁路氛围，音频出问题不该影响这一轮叙事。
-   */
-  private async handlePlayAudio(marker: PlayAudioMarker): Promise<void> {
-    const audio = useAudioStore();
-
-    if ((marker.action ?? '').trim().toLowerCase() === 'stop') {
-      audio.stop();
-      return;
-    }
-
-    // 逗号 / 顿号 / 空白分隔的自由词
-    const words = (raw?: string): string[] =>
-      (raw ?? '')
-        .split(/[,，、;；\s]+/)
-        .map((w) => w.trim())
-        .filter(Boolean);
-
-    // 正文里的自由词不知道属于哪一维，情绪与情境都试一遍（与"无类型标签"同理）
-    const body = words(marker.bodyText);
-    const situations = [...words(marker.situation), ...body];
-    const moods = [...words(marker.mood), ...body];
-
-    const characters = marker.character ? words(marker.character) : this.presentCharacterNames();
-
-    const variant = marker.variant?.trim().toUpperCase();
-
-    await audio.playByScene({
-      location: this.game.player?.location || undefined,
-      characters,
-      moods,
-      situations,
-      variant: variant === 'A' || variant === 'B' ? variant : undefined,
-    });
-  }
-
-  /**
-   * 🖼 `<scene_image>` → 三档分流（设计 §8）。
-   *
-   * ```
-   * 【auto】   逐个标记过 checkQuota → ok 就 generate；拒了什么都不做
-   * 【manual】 什么都不做。渲染层在「无记录」那一格画按钮，点了才花钱（D14）
-   * 【off】    什么都不做。标记照扫（否则会漏成一行尖括号），但不建记录、不发请求
-   * ```
-   *
-   * 🔴 **D15：自动档绝不追溯开火。** 本方法只被 `onSceneImage` 唤起，而那个回调只在
-   * 编排器**刚产出这条消息**时触发一次；历史消息重新渲染走的是 `scene-image-store`
-   * 的查询，根本不经过这里。**日后千万别为了「补全历史插画」加一条扫描全部消息的
-   * 路径** —— 那会把这条安全性一次性拆掉，表现为「把开关从手动拨到自动，追溯烧掉
-   * 几十张图的钱」。补画的入口在正文里，一张一张点。
-   *
-   * 🔴 **D21：限额拒绝绝不丢弃标记。** 拿到 `ok:false` 就什么都不做 —— 那一格落到
-   * 「无记录」，按 §10.2 的真值表渲染成手动按钮。玩家看到的是一个按钮和一句「已达
-   * 本小时上限」，而不是一张凭空消失的图。
-   *
-   * 🔴 **D32：限额在侧链之前。** 排序由 `scene-image-store.generate()` 保证（缝的调用
-   * 顺序写在那儿），本方法只负责把每个标记喂给它。
-   *
-   * 🔴 **D25：永不自动重试。** 失败的记录留在那儿等玩家点重试，这里不看结果。
-   */
-  private async handleSceneImages(markers: SceneImageMarker[]): Promise<void> {
-    // 【manual】/【off】都是「什么都不做」，差别只在渲染层画不画那个按钮
-    if (this.settings.settings.imageGenMode !== 'auto') return;
-
-    const message = this.lastStoryMessage;
-    if (!message || markers.length === 0) return;
-
-    const { useSceneImageStore } = await import('../stores/scene-image-store');
-    const store = useSceneImageStore();
-    // 缝没接上 / 这个存档的记录还没载入 → 不开火。宁可少画一张，也不在一个不在
-    // 屏幕上的存档上花钱（切存档途中尤其容易撞上）。
-    if (store.activeSaveId !== this.saveId) {
-      console.warn('[GamePipeline] 情景插画：插画库尚未载入本存档，本轮不自动生成');
-      return;
-    }
-
-    // 🔴 分段编号必须与渲染层同源: `splitSceneImageSegments` 只给**正文有内容**的标记
-    // 发号（空 body 的标记照剥但不占号）。自己数一遍 markers 会在有空标记时错位，
-    // 图就挂到隔壁那一格去了。
-    const segments = splitSceneImageSegments(message.content);
-    // 侧链要的是**剥掉全部标记**的正文（判断氛围/光线/时间）
-    const narrative = stripMarkers(message.content).trim();
-    const location = this.game.player?.location || undefined;
-    const maxRating = this.settings.settings.imageMaxRating;
-
-    for (const segment of segments) {
-      if (segment.kind !== 'image') continue;
-      const marker = segment.marker;
-      try {
-        const result = await store.generate({
-          saveId: this.saveId,
-          messageId: message.id,
-          turn: message.turn,
-          anchorKind: 'marker',
-          occurrence: segment.occurrence,
-          source: 'auto',
-          intent: marker.bodyText,
-          title: marker.title,
-          characters: marker.characters,
-          // 标记没写 rating 时取设置里那一档；写了也会在 composePrompt 里被钳到上限（D38）
-          rating: marker.rating ?? maxRating,
-          narrative,
-          ...(location ? { location } : {}),
-        });
-        if (!result.ok) {
-          // D21: 什么都不做 —— 这一格会渲染成手动按钮，玩家想要就自己点
-          console.log(
-            `[GamePipeline] 情景插画被限额拦下（${result.reason}），降级成手动按钮: ${result.message}`,
-          );
-        }
-      } catch (err) {
-        // 一个标记出问题不该让同一条消息里剩下的标记跟着没了
-        console.warn('[GamePipeline] 情景插画入队失败（跳过这一个）:', err);
-      }
-    }
-  }
-
   private buildEventHandlers(runActivityId?: string): OrchestratorEvents {
     const debugTurnId = runActivityId ?? this.activeRunId ?? 'detached';
     return {
-      // 🎵 配乐：只暂存，**不在 Stage 1 就播** —— 见 run() 末尾的说明
-      onPlayAudio: (marker) => {
-        this.pendingAudioMarker = marker;
-      },
-
-      // 🖼 情景插画：三档分流。不 await —— 出图 5–60 秒，不该进管线时序
-      onSceneImage: (markers) => {
-        void this.handleSceneImages(markers).catch((err) => {
-          console.warn('[GamePipeline] 情景插画分流失败（不阻塞本轮）:', err);
-        });
-      },
-
       // 🎲 随机事件回执（§5.2）：结算五步全在 StateManager 里（**唯一写入口**，ADR-21），
       //    这里只把名字送过去。系统关闭 / 名字不在候选池两条 warn-noop 也在结算侧，
       //    在这里再判一遍就是第二处口径。
@@ -1877,7 +1747,6 @@ export class GamePipeline {
 
       onStateCommitError: (source, errors) => {
         console.error(`[GamePipeline] ${source} 状态提交失败:`, errors);
-        this.emitMessage(`[系统] ${source} 部分状态未能写入: ${errors.join('；')}`, 'assistant');
       },
 
       // === Marker 回调 ===
@@ -1901,18 +1770,37 @@ export class GamePipeline {
     switch (result.agentId) {
       case 'story': {
         // rawResponse 直接就是 AI 返回的字符串正文（流式模式下也是完整文本）
-        const { content, options } = extractStoryOptions(result.rawResponse || '');
+        const { content, options, truncated } = extractStoryOptions(result.rawResponse || '');
         if (!content) throw new Error('story produced no player-visible narrative');
+        // 🔴 2026-09-18 真机防护：输出未闭合（缺 </maintext>）时给可见提示 —— 此前
+        //    解析器会静默把「开标签到末尾」当完整正文展示，玩家只看到一句断掉的话，
+        //    排查时无从判断是模型问题还是显示问题。
+        if (truncated) {
+          console.warn(
+            '[GamePipeline] story 输出未闭合（缺 </maintext>）——可能被截断。原始响应长度:',
+            (result.rawResponse || '').length,
+          );
+        }
         // 🖼 记下这条消息 —— 情景插画按 (saveId, messageId, occurrence) 反查挂回正文（D2）。
         // 从 messages 末尾去捞是个会被别的写入者破坏的假设，所以让 addMessage 交回来。
-        const message = this.emitMessage(content, 'assistant');
+        const message = this.emitMessage(
+          truncated ? content + TRUNCATION_NOTICE : content,
+          'assistant',
+        );
         // null = 存档已切走，这条正文没写进去（COR-02）。此时**不能**记
         // lastStoryMessage —— 它是情景插画反查锚点，指向一条不存在的消息只会
         // 让后续开火挂到空处。
         // 🔴 `setPendingOptions` 也必须留在闸门**之后**：孤儿回合的行动选项照样会铺进
-        // 新存档的输入区（2026-08-10 审查逮到，初版把它写在了闸门之前）。
+        //    新存档的输入区（2026-08-10 审查逮到，初版把它写在了闸门之前）。
         if (!message) break;
-        this.game.setPendingOptions(options);
+        // 行动选项方案（2026-09-23）：off 档解析兜底——模型按惯性输出 <option> 时整批丢弃
+        const optionScheme = resolveOptionScheme(
+          (this.game.saveProfile?.worldFlags as Record<string, unknown> | undefined)?.[
+            'optionSchemeId'
+          ] as string | undefined,
+          getEngineSettings().optionSchemes,
+        );
+        this.game.setPendingOptions([...filterOptionsForScheme(options, optionScheme)]);
         this.lastStoryMessage = {
           id: message.id,
           turn: message.turn ?? 0,
@@ -2335,380 +2223,1790 @@ export class GamePipeline {
     };
   }
 
-  /** 处理战斗触发 — 唤起 combo v3 Coordinator（v2 分支 M5 已退役 → 优雅提示） */
-  private async handleCombatTrigger(
-    marker: CombatTriggerMarker,
-    storyOutput: string,
-  ): Promise<CombatSummaryResult | null> {
-    // feature flag（架构 §十四 14.5）：分支点唯一。v3 走 coordinator；打回 'v2' 走优雅退役提示。
-    const engineVersion = this.settings?.settings?.combatEngineVersion ?? 'v3';
-    if (engineVersion === 'v3') {
-      return this.handleCombatTriggerV3(marker, storyOutput);
-    }
-    // ⚠️ v2 战斗运行时已于 M5 真正退役删除（combat-runner/pipeline/resolver/settlement）。
-    //    打回 'v2' 不再真实开局战斗——改为优雅退役提示，避免悬空 import 与编译错误。
-    const message =
-      '【系统】v2 战斗引擎已退役删除。若非显式切换，战斗请走 v3（当前 AppSettings.combatEngineVersion）' +
-      `。当前设置被显式打回 'v2'，本场战斗不执行。`;
-    console.warn('[GamePipeline] combat v2 分支已退役，返回优雅提示而非真实开局');
-    this.emitMessage(message, 'assistant');
-    return {
-      narrativeSummary: message,
-      patches: [],
-      totalExp: 0,
-      totalFp: 0,
-      loot: [],
-      rounds: 1,
-      outcome: 'draw',
-    };
+  /**
+   * {{COMMISSIONS}} 的数据源：静态内容包委托 + 动态事件委托（随机事件 × 委托板融合）。
+   * 动态部分按存档 gameTime 折算 gameDay 过滤过期（与委托板 UI / 交付同一公式）。
+   */
+  private commissionDefsForAI(): CommissionDef[] {
+    const staticDefs = getCommissionDefs();
+    const flags = (this.game.saveProfile?.worldFlags as Record<string, any> | undefined)?.[
+      'randomEvents'
+    ];
+    const list = Array.isArray(flags?.eventCommissions) ? flags.eventCommissions : [];
+    const gt = this.game.saveProfile?.gameTime;
+    const day = gt ? Math.floor(toEpochMinutes(gt) / MINUTES_PER_GAME_DAY) : 0;
+    const dynamicDefs = eventCommissionDefs(list, day);
+    const dynamicNames = new Set(dynamicDefs.map((d) => d.name));
+    return [...dynamicDefs, ...staticDefs.filter((d) => !dynamicNames.has(d.name))];
   }
 
   /**
-   * T2（2026-08-10）：战斗 Agent 模板系统上下文 —— 战斗 Agent 的模板只挂这三类分区书
-   * （世界观设定/种族特性/核心数值），与请求调度器的可见面同口径。过滤在 pipeline 侧
-   * 完成（coordinator 不碰原始列表，缺省时首轮模板的 {{LORE_BOOK_STATIC}} 渲染为空）。
+   * 惰性回填：扫存档里 embedding 缺失的记忆，按上限批次重嵌。
+   * fire-and-forget：不阻塞 buildContext 与后续编排；回填完成自然写入 db，下次召回它们
+   * 进 compatible 段；失败静默（一两条坏数据不该让 agent 链挂掉）。
    */
-  private static readonly COMBAT_WORLD_BOOK_PARTITIONS: ReadonlySet<string> = new Set([
-    'world_setting',
-    'race',
-    'system_core',
-  ]);
+  private maybeBackfillMissingMemories(): void {
+    const endpoint = this.buildEmbeddingEndpoint();
+    if (!endpoint) return; // 未配置 embedding 端点 —— 静默退避
+    void backfillMissingMemories(this.saveId, LAZY_BACKFILL_MAX_PER_RECALL, endpoint, (trace) =>
+      this.recordEmbeddingRequest(trace, endpoint, this.activeRunId ?? undefined),
+    ).catch((err) => {
+      // 顶部 catch 已涵盖单条失败；此 catch 兜整批非预期错误
+      console.warn('[GamePipeline] 向量召回惰性回填异常（不影响主链）:', err);
+    });
+  }
 
-  /** 🆕 M2 v3 分支：combat_trigger 检出 → **只弹就绪面板**（F2，2026-08-10）。
-   *  就绪内容 = marker 快照（参战方/战斗类型/环境/起因），由 v3_combat_ready 事件
-   *  投进 store（combatReady 置位 → isInCombat=true → CombatPanel 显示就绪分支）。
-   *  玩家点「开始战斗」→ store.startCombat → 占位句柄的 start → startCombatV3 真开打。
-   *  返回 null（orchestrator 不消费返回值；就绪期不 enterCombat / 不 runCombatV3）。 */
-  private async handleCombatTriggerV3(
+  /** 处理战斗触发 — 统一走交锋拍（v3 战斗页已随 combat-v3 下线删除） */
+  private async handleCombatTrigger(
     marker: CombatTriggerMarker,
-    storyOutput: string,
+    _storyOutput: string,
   ): Promise<CombatSummaryResult | null> {
-    const endpoint = this.getEndpointForAgent('combat_v3');
-    if (!endpoint) {
-      console.warn('[GamePipeline] combat_v3 跳过: 未配置 API endpoint');
-      return null;
-    }
-    // 存档 marker（startCombatV3 / 重开战斗 restart 回调复用）
-    this._lastCombatMarker = marker;
-
-    // marker 快照 → v3_combat_ready（名字名单拆成数组；空名单字段缺席）
-    const splitNames = (s: string | undefined): string[] | undefined => {
-      if (!s) return undefined;
-      const names = s
-        .split(/[,，]/)
-        .map((x) => x.trim())
-        .filter(Boolean);
-      return names.length > 0 ? names : undefined;
-    };
-    this.game.applyCombatEvent({
-      type: 'v3_combat_ready',
-      combatType: marker.combatType,
-      environment: marker.environment,
-      allies: splitNames(marker.allies),
-      enemies: splitNames(marker.enemies),
-      bodyText: marker.bodyText,
-      brief:
-        [marker.combatType ?? '', marker.environment ?? '', marker.bodyText ?? '']
-          .filter(Boolean)
-          .join('｜') || undefined,
-    });
-    // 就绪期占位句柄：只有 start（store.startCombat 点「开始」才触发真开打）。
-    // startCombatV3 里会 setCombatCoordinator 替换成完整句柄（submit/abandon/restart）。
-    this.game.setCombatCoordinator({
-      start: async () => {
-        await this.startCombatV3(storyOutput);
-      },
-    });
+    // 交锋拍内联结算 + 终局演绎，不经 CombatSummary 确认框
+    await this.handleCombatTriggerSkirmish(marker);
     return null;
   }
 
-  /** 🆕 M2 v3 分支（F2）：就绪面板点「开始」后的真开打 —— 原 handleCombatTriggerV3
-   *  主体（enterCombat → participants → pre-combat 快照 → setCombatCoordinator →
-   *  runCombatV3 → 摘要回注）。marker 取自已存档的 _lastCombatMarker。 */
-  private async startCombatV3(storyOutput: string): Promise<CombatSummaryResult | null> {
-    const marker = this._lastCombatMarker;
-    if (!marker) {
-      console.warn('[GamePipeline] startCombatV3 跳过: 无已存档 combat marker');
-      this.game.exitCombat();
-      return null;
+  /**
+   * 交锋拍分支：marker 里的敌情线索 → 敌情评估预提交 → 正文流交锋。
+   * 结算与演绎都在 runSkirmishEncounter/settleAndNarrate 内联完成（含落库），
+   * 这里只负责把 dispatcher 的战斗意图翻译成敌方线索。
+   */
+  private async handleCombatTriggerSkirmish(marker: CombatTriggerMarker): Promise<void> {
+    const enemies = (marker.enemies ?? '')
+      .split(/[,，、]/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const enemyHint =
+      [enemies.join('、'), marker.environment].filter(Boolean).join('｜') || undefined;
+    const result = await this.runSkirmishEncounter(enemyHint, marker.environment || undefined);
+    if (!result.ok) {
+      console.warn('[GamePipeline] 交锋拍开局失败:', result.reason);
     }
-    const endpoint = this.getEndpointForAgent('combat_v3');
+  }
+
+  // ══════ 交锋拍制战斗（设计共识 §8，问题 28~31）══════
+  // 编排在本层（store 接触不到 pipeline）：AI 评估/演绎 + Code 拍结算 + 同窗原子落库。
+  // UI 经 game-store 三入口（startSkirmish/submitSkirmishCounter/fleeSkirmish）进来，
+  // busy 守卫在 store 入口，本层不再自行判忙。
+
+  /**
+   * 制卡流程挂钩的落账（赌徒谬论 / 时间回溯）：
+   *  - 大失败 → 厄运 +1（累计计数，不随天失效）
+   *  - 本次用掉了几层厄运 → 清零
+   *  - 真的回溯过 → 扣精神力 + 清掉预付开关
+   */
+  private async settleCraftFlowHooks(
+    result: { misfortuneConsumed?: number; rewindUsed?: boolean; craftOutput: { rating: string } },
+    talentList: readonly { entries?: readonly TalentEntry[] }[] | undefined,
+    playerName: string | undefined,
+  ): Promise<void> {
+    if (!this.ownsActiveSave) return;
+    const flags = this.game.saveProfile?.worldFlags;
+    const counters = coerceCounters(flags?.counters);
+    const patches: StatePatch[] = [];
+
+    // 赌徒谬论：大失败叠厄运（持条目才有），上限走 `赌运{maxHold}`
+    const holdsGamble = flatEntriesOf(talentList).some((e) => e.kind === '赌运');
+    if (holdsGamble && isGreatFailure(result.craftOutput.rating as CraftRating)) {
+      const cap = entryStrength(talentList, '赌运', 'maxHold');
+      const before = counterOf(counters, MISFORTUNE_KEY);
+      const next = Math.min(cap > 0 ? cap : 5, before + MISFORTUNE_PER_FAILURE);
+      if (next > before) {
+        patches.push({
+          op: 'set_variable',
+          target: `worldFlags.counters.${MISFORTUNE_KEY}`,
+          value: next,
+        } as StatePatch);
+        this.emitMessage(
+          `▸ 【赌徒谬论】大失败——厄运 +1（${before} → ${next} 层）。下一次对冲融合会替你押上。`,
+          'assistant',
+        );
+      }
+    }
+    // 厄运用掉即清空（描述是「提高**下一次**」）
+    if ((result.misfortuneConsumed ?? 0) > 0) {
+      patches.push({
+        op: 'set_variable',
+        target: `worldFlags.counters.${MISFORTUNE_KEY}`,
+        value: 0,
+      } as StatePatch);
+    }
+    // 时间回溯：真的回溯了才扣精神力，并清掉预付开关
+    if (result.rewindUsed) {
+      const playerC = this.game.player;
+      const cost = Math.max(0, entryStrength(talentList, '回溯', 'mpCost'));
+      if (playerC && cost > 0) {
+        patches.push({
+          op: 'update_character',
+          target: `characters.${playerName}`,
+          value: { mp: Math.max(0, playerC.mp - cost) },
+        } as StatePatch);
+        this.emitMessage(`▸ 【时间回溯】精神力 −${cost}`, 'assistant');
+      }
+      patches.push({
+        op: 'set_variable',
+        target: 'worldFlags.pendingRewind',
+        value: false,
+      } as StatePatch);
+    }
+    if (patches.length === 0) return;
+    const sm = createStateManager(this.saveId);
+    const committed = await sm.commitChatState(patches);
+    if (!committed.success) {
+      console.warn('[GamePipeline] 制卡流程挂钩落账失败:', committed.errors);
+    }
+  }
+
+  /**
+   * 本次制卡的评级上浮档数，并在必要时**真正扣掉一枚败犬烙印**。
+   *
+   * 两个来源叠加：当日「制卡顺利」+1 档；玩家预付了烙印则再 +2 档（扣一枚、
+   * 清掉预付开关）。烙印不足时只退化成 +1，绝不吞掉玩家的预付意图而不做事。
+   */
+  private async consumeCraftLift(): Promise<number> {
+    const flags = this.game.saveProfile?.worldFlags;
+    const lucky = buffActiveToday(
+      coerceBuffs(flags?.dailyBuffs),
+      DAILY_BUFF_CRAFT_LUCK,
+      this.currentGameDay(),
+    )
+      ? 1
+      : 0;
+    if (flags?.pendingScar !== true || !this.ownsActiveSave) return lucky;
+
+    const spend = spendCounter(coerceCounters(flags?.counters), '败犬烙印', 1, '败犬烙印');
+    if (!spend.ok) return lucky;
+
+    const sm = createStateManager(this.saveId);
+    const result = await sm.commitChatState([
+      {
+        op: 'set_variable',
+        target: 'worldFlags.counters.败犬烙印',
+        value: spend.left,
+      } as StatePatch,
+      { op: 'set_variable', target: 'worldFlags.pendingScar', value: false } as StatePatch,
+    ]);
+    if (!result.success) {
+      console.warn('[GamePipeline] 烙印扣除失败:', result.errors);
+      return lucky;
+    }
+    this.emitMessage(
+      `▸ 【败犬烙印】烧掉一枚烙印（余 ${spend.left}）——这一次制卡受它庇佑。`,
+      'assistant',
+    );
+    return lucky + 2;
+  }
+
+  /**
+   * 制卡叙事（供 store 的注入缝调用）：**只命名 + 写过程，无工具**。
+   * endpoint 解析与侧链同源（本 agent 未配置时落默认池）。
+   */
+  async narrateCardCraft(req: {
+    saveId: string;
+    provisionalName: string;
+    tier: string;
+    entries: string[];
+    cost: number;
+    rating: string;
+    fusionKind: string;
+    materials: string[];
+    consumed: string[];
+    intent: string;
+    crafterName?: string;
+    talentNotes?: string[];
+  }): Promise<{ name?: string; narrative: string }> {
+    // 🔴 端点锚定正文（2026-09-25 真机）：card_craft_narrate 不在内容包默认层 12 agent
+    //    名单里、用户也没绑过 → getEndpointForAgent 落到「API 池第一个」——那未必是
+    //    正文正在用且可用的那个池（正文能跑、命名挂死的正是这个错位）。叙事链没有
+    //    自己的模型偏好可言，锚到 story 的解析结果；story 也没有再回落默认。
+    const endpoint =
+      this.getEndpointForAgent(CARD_CRAFT_NARRATE_AGENT) ?? this.getEndpointForAgent('story');
+    if (!endpoint) throw new Error('制卡叙事未解析到 API 池（正文端点也不可用）');
+    return runCardCraftNarration(
+      { ...req, endpoint },
+      { clientFactory: (agentId, ep, saveId) => this.getClientFactory()(agentId, ep, saveId) },
+    );
+  }
+
+  /** 委托终点叙事（获得瞬间；共识稿 #13 修订）。失败由 store 侧兜底模板文案。 */
+  async narrateCommissionFinale(req: {
+    saveId: string;
+    commissionName: string;
+    description: string;
+    finaleType: '谜题' | '强敌' | '场景制卡';
+    target: string;
+    cardName: string;
+    midTierName: string;
+  }): Promise<{ narrative: string }> {
+    // 端点锚定正文（同 narrateCardCraft：不在包默认层的叙事 agent 别赌「池第一个」）
+    const endpoint =
+      this.getEndpointForAgent(COMMISSION_NARRATE_AGENT) ?? this.getEndpointForAgent('story');
+    if (!endpoint) throw new Error('终点叙事未解析到 API 池（正文端点也不可用）');
+    return runCommissionNarration(
+      { ...req, endpoint },
+      { clientFactory: (agentId, ep, saveId) => this.getClientFactory()(agentId, ep, saveId) },
+    );
+  }
+
+  /** 每日账本：今天这个能力还能不能用（跨天自动恢复，见 daily-ledger.ts） */
+  private canUseDaily(key: string, perDay = 1): boolean {
+    const ledger = coerceLedger(this.game.saveProfile?.worldFlags?.dailyUses);
+    return canUseToday(ledger, key, this.currentGameDay(), perDay);
+  }
+
+  /** 记一次每日使用（落 worldFlags.dailyUses.<key>；失败只告警不打断战斗） */
+  private async markDailyUsed(key: string, perDay = 1): Promise<void> {
+    if (!this.ownsActiveSave) return;
+    const today = this.currentGameDay();
+    const gate = tryUseToday(
+      coerceLedger(this.game.saveProfile?.worldFlags?.dailyUses),
+      key,
+      today,
+      perDay,
+      key,
+    );
+    if (!gate.ok) return;
+    const sm = createStateManager(this.saveId);
+    const result = await sm.commitChatState([
+      {
+        op: 'set_variable',
+        target: `worldFlags.dailyUses.${key}`,
+        value: gate.next[key],
+      } as StatePatch,
+    ]);
+    if (!result.success) {
+      console.warn('[GamePipeline] 每日账本记账失败:', result.errors);
+    }
+  }
+
+  /** 当前 gameDay（与 store 的 currentGameDay 同一公式） */
+  private currentGameDay(): number {
+    const gt = this.game.saveProfile?.gameTime;
+    if (!gt) return 0;
+    return Math.floor(toEpochMinutes(gt) / MINUTES_PER_GAME_DAY);
+  }
+
+  /** d100 —— 懒惰摸鱼判定等百分位骰（同一条「骰值调用方供给」铁律） */
+  private rollD100(): number {
+    return 1 + Math.floor(Math.random() * 100);
+  }
+
+  /** d20 —— 骰值调用方供给（内核零随机）。MVP 用真随机；接 v3 骰带回放体系为后续工作 */
+  private rollD20(): number {
+    return 1 + Math.floor(Math.random() * 20);
+  }
+
+  /**
+   * 交锋用 d20：持「判定取优」条目者掷两次取高（天赋描述原文「判定取优」）。
+   * 非交锋的骰（如启封）不在此列——那条通道有自己的骰带口径。
+   */
+  private rollSkirmishD20(): number {
+    const first = this.rollD20();
+    if (!hasBetterRoll(flatEntriesOf(this.combatTalents()))) return first;
+    const second = this.rollD20();
+    const best = Math.max(first, second);
+    this.emitMessage(`▸ 判定取优：d20 ${first}/${second} → 取 ${best}`, 'assistant');
+    return best;
+  }
+
+  /** 构造时挂交锋编排句柄（UI 的三个入口经 store 委托到这里）。
+   *  可选调用：单测的精简 mock store 没有此方法，静默跳过；真实 store 必有。 */
+  attachSkirmishController(): void {
+    this.game.setSkirmishController?.({
+      start: (enemyHint, sceneHint) => this.runSkirmishEncounter(enemyHint, sceneHint),
+      counter: (choice) => this.submitSkirmishCounter(choice),
+      nuke: () => this.skirmishNuke(),
+      flee: (endReason) => this.fleeSkirmishEncounter(endReason),
+      duel: () => this.declareDuel(),
+      sacrifice: () => this.sacrificeSummon(),
+      trueName: () => this.speakTrueName(),
+      hotSwap: () => this.hotSwapModule(),
+      castForbidden: (cardName, wishTier) => this.castForbiddenCard(cardName, wishTier),
+    });
+  }
+
+  /**
+   * 热插拔（S「模块化天才」）：把一张已上场的模块化载具卡的在场效果**换一种形态**
+   * 再发动一次（buff ↔ dot）。每场次数由条目 `模块化{swaps}` 限。
+   */
+  private async hotSwapModule(): Promise<void> {
+    const session = this.game.skirmishSession;
+    const playerC = this.game.player;
+    const combatTalents = this.combatTalents();
+    if (!session || session.finished !== null || !playerC) return;
+    if (!(combatTalents ?? []).some((t) => (t.entries ?? []).some((e) => e.kind === '模块化'))) {
+      this.emitMessage('【模块化天才】需要持有对应天赋。', 'assistant');
+      return;
+    }
+    // 找一张本场已激活、且带模块化印记的卡
+    const hit = session.activeEffects.find((e) => {
+      const inv = playerC.inventory.find((i) => i.name === e.name);
+      return inv?.type === '卡牌' && isModularCard(inv as CardItem);
+    });
+    const card = hit ? (playerC.inventory.find((i) => i.name === hit.name) as CardItem) : undefined;
+    const swap = resolveHotSwap({
+      card: card ?? { name: hit?.name ?? '空', 词条: [] },
+      current: hit,
+      used: session.hotSwapsUsed ?? 0,
+      maxSwaps: entryStrength(combatTalents, '模块化', 'swaps'),
+    });
+    if (!swap.ok || !swap.switched) {
+      this.emitMessage(`【模块化天才】${swap.reason ?? '换不了'}`, 'assistant');
+      return;
+    }
+    const swapsUsed = (session.hotSwapsUsed ?? 0) + 1;
+    this.game.setSkirmishSession({
+      ...session,
+      activeEffects: session.activeEffects.map((e) => (e.name === hit!.name ? swap.switched! : e)),
+      hotSwapsUsed: swapsUsed,
+      log: [...session.log, `▸ ${swap.note}`],
+    });
+    this.emitMessage(`▸ ${swap.note}`, 'assistant');
+  }
+
+  /**
+   * 念出真名（S「真名看破系统」）：每场一次的精神冲击。
+   *
+   * 威力 = 基础 + 每级 × 玩家等级（**不走敌方 HP 百分比**——那是「倒也可斩」的口径，
+   * 两条大招因此有各自的适用面：这条打小怪过剩、打大怪不足）。
+   * 念过的名字会被记住，下次对上同一个名字加成——「洞悉真名」一旦发生就不会忘。
+   */
+  private async speakTrueName(): Promise<void> {
+    const session = this.game.skirmishSession;
+    const playerC = this.game.player;
+    const combatTalents = this.combatTalents();
+    if (!session || session.finished !== null || !playerC) return;
+    if (session.trueNameUsed === true) {
+      this.emitMessage('【真名看破】这一场已经念过了——一个名字一场只压得住一次。', 'assistant');
+      return;
+    }
+    const has = (combatTalents ?? []).some((t) => (t.entries ?? []).some((e) => e.kind === '真名'));
+    if (!has) {
+      this.emitMessage('【真名看破】需要持有对应天赋。', 'assistant');
+      return;
+    }
+    const known = coerceTrueNames(this.game.saveProfile?.worldFlags?.trueNames);
+    const alreadyKnown = hasTrueName(known, session.enemyName);
+    const shock = trueNameShockPower({
+      base: entryStrength(combatTalents, '真名', 'shockBase'),
+      perLevel: entryStrength(combatTalents, '真名', 'shockPerLevel'),
+      playerLevel: playerC.level,
+      alreadyKnown,
+    });
+    const next = playBeat(
+      session,
+      { label: `念出真名·${session.enemyName}`, power: shock.power, tags: [] },
+      this.rollSkirmishD20(),
+      { prepend: [`▸ 【真名看破】${shock.note}`], trueNameUsed: true },
+    );
+    this.game.setSkirmishSession(next);
+    this.emitMessage(next.log.slice(session.log.length).join(String.fromCharCode(10)), 'assistant');
+    if (this.ownsActiveSave) {
+      const names = rememberTrueName(known, session.enemyName);
+      const sm = createStateManager(this.saveId);
+      await sm.commitChatState([
+        { op: 'set_variable', target: 'worldFlags.trueNames', value: names } as StatePatch,
+      ]);
+    }
+    if (next.finished) await this.settleAndNarrate(next);
+  }
+
+  /**
+   * 宣战决斗（S「西部决斗礼仪」）：本场禁用伙伴卡，并隔离外部的持续伤害与治疗。
+   * 一次性动作——宣战后不可撤回（描述里就是「强制」）。
+   */
+  private async declareDuel(): Promise<void> {
+    const session = this.game.skirmishSession;
+    const playerC = this.game.player;
+    const combatTalents = this.combatTalents();
+    if (!session || session.finished !== null || !playerC) return;
+    if (session.duel) {
+      this.emitMessage('【决斗】已经在决斗中了。', 'assistant');
+      return;
+    }
+    const has = (combatTalents ?? []).some((t) => (t.entries ?? []).some((e) => e.kind === '决斗'));
+    if (!has) {
+      this.emitMessage('【决斗】需要持有对应天赋。', 'assistant');
+      return;
+    }
+    const noCompanion = entryStrength(combatTalents, '决斗', 'noCompanion') > 0;
+    this.game.setSkirmishSession({
+      ...session,
+      duel: { noCompanion },
+      log: [
+        ...session.log,
+        '▸ 【西部决斗礼仪】你摘下帽子，把战场划成一个圈——1v1，不容第三人插手' +
+          '（伙伴卡不上场；一切外部伤害与治疗被隔离）',
+      ],
+    });
+    this.emitMessage('▸ 【决斗】已宣战：伙伴卡不上场，外部的持续伤害与治疗被隔离。', 'assistant');
+  }
+
+  /**
+   * 献祭召唤（S「召唤媒介系统」）：献祭当前 HP 的一部分，召唤异世界存在助战数拍。
+   * 代价即时付出（HP），收益是数拍的行动值加成——「不受完全控制」由叙事承担。
+   */
+  private async sacrificeSummon(): Promise<void> {
+    const session = this.game.skirmishSession;
+    const playerC = this.game.player;
+    const combatTalents = this.combatTalents();
+    if (!session || session.finished !== null || !playerC) return;
+    const has = (combatTalents ?? []).some((t) => (t.entries ?? []).some((e) => e.kind === '献祭'));
+    if (!has) {
+      this.emitMessage('【献祭召唤】需要持有对应天赋。', 'assistant');
+      return;
+    }
+    const hpPct = entryStrength(combatTalents, '献祭', 'hpPct');
+    const beats = entryStrength(combatTalents, '献祭', 'beats');
+    const mult = entryStrength(combatTalents, '献祭', 'critMult');
+    const cost = Math.max(1, Math.round((session.playerHp * hpPct) / 100));
+    if (session.playerHp - cost <= 0) {
+      this.emitMessage('【献祭召唤】血不够——再献就死了。', 'assistant');
+      return;
+    }
+    const amount = Math.max(1, Math.round(cost * mult));
+    const next = playBeat(session, { label: '献祭召唤', power: 0, tags: [] }, 1, {
+      prepend: [
+        `▸ 【献祭召唤】割开掌心，献出 ${cost} HP——圈外传来回应（此后 ${beats} 拍行动值 +${amount}）`,
+      ],
+      recoil: cost,
+      activate: {
+        name: '异界召唤物',
+        type: 'buff',
+        amount,
+        beatsLeft: beats,
+      },
+    });
+    this.game.setSkirmishSession(next);
+    this.emitMessage(next.log.slice(session.log.length).join('\n'), 'assistant');
+    if (next.finished) await this.settleAndNarrate(next);
+  }
+
+  /**
+   * 交锋结算面读的天赋表：去掉被无名河封印中的天赋（代价面，2026-09-21 消费端）。
+   * 战斗动作/开战评估/拍结算/免死/大招/战后结算一律读这份；制卡流与叙事读原表不受封印影响。
+   */
+  private combatTalents() {
+    const ledger = coerceSealedTalents(this.game.saveProfile?.worldFlags?.sealedTalents);
+    return filterSealedTalents(this.game.player?.talents?.list, ledger);
+  }
+
+  /**
+   * 禁忌卡六正本打出（委托×地图 2026-09-19 七链）：每张每场限一次，代价在打出瞬间落账。
+   * 权能是规则改写（除名/岁除/天罚/兽潮/许愿/蜡封之夜），数值面在 playBeat 的
+   * forbidden 分支；代价的存档面（封印天赋/经验清空/maxHp 永久扣/蜡痕）在本方法落。
+   */
+  async castForbiddenCard(cardName: string, wishTier?: 'small' | 'mid' | 'grand'): Promise<void> {
+    const session = this.game.skirmishSession;
+    const playerC = this.game.player;
+    if (!session || session.finished !== null || !playerC) return;
+    if ((session.forbiddenUsed ?? []).includes(cardName)) {
+      this.emitMessage(
+        `【${cardName}】本场已听过它的声音——同一张禁忌卡，一场只应一次。`,
+        'assistant',
+      );
+      return;
+    }
+    // 持卡校验：背包里有这张禁忌正本（forbidden 标记的真源是卡定义，背包看名字）
+    if (!playerC.inventory.some((i) => i.name === cardName && i.type === '卡牌')) {
+      this.emitMessage(`【${cardName}】不在你手里——力量要放在身边才作数。`, 'assistant');
+      return;
+    }
+
+    const play = async (opts: {
+      forbiddenCard: string;
+      barrenName?: boolean;
+      ageEnd?: boolean;
+      heavenScourge?: boolean;
+      beastTideAmount?: number;
+      wish?: 'small' | 'mid' | 'grand';
+      waxNight?: boolean;
+    }): Promise<void> => {
+      const next = playBeat(
+        session,
+        { label: cardName, power: 0, tags: [] },
+        1 + Math.floor(Math.random() * 20),
+        opts,
+      );
+      this.game.setSkirmishSession(next);
+      this.emitMessage(next.log.slice(session.log.length).join('; '), 'assistant');
+      if (next.finished) await this.settleAndNarrate(next);
+    };
+
+    const costPatches: StatePatch[] = [];
+
+    if (cardName === '禁忌卡·无名河') {
+      await play({ forbiddenCard: cardName, barrenName: true });
+      // 代价：随机封印一个天赋三场（worldFlags.sealedTalents；交锋结算面禁用，
+      // 每场终局在 settleAndNarrate 递减一场、归零归还）。已封印中的不再重复入选。
+      const pool = filterSealedTalents(
+        playerC.talents?.list,
+        coerceSealedTalents(this.game.saveProfile?.worldFlags?.sealedTalents),
+      )
+        .map((t) => t.name)
+        .filter(Boolean);
+      if (pool.length > 0) {
+        const sealed = pool[Math.floor(Math.random() * pool.length)];
+        costPatches.push({
+          op: 'set_variable',
+          target: `worldFlags.sealedTalents.${sealed}`,
+          value: 3,
+        } as StatePatch);
+        this.emitMessage(
+          `▸ 【无名河】代价兑现——天赋【${sealed}】被河水卷走（三场之后归还）`,
+          'assistant',
+        );
+      }
+    } else if (cardName === '禁忌卡·失年历') {
+      await play({ forbiddenCard: cardName, ageEnd: true });
+      // 代价：本级经验清空回起点
+      const floor = playerC.level > 1 ? getRequiredXpForLevel(playerC.level - 1) : 0;
+      if (typeof floor === 'number' && playerC.totalExp > floor) {
+        costPatches.push({
+          op: 'update_character',
+          target: `characters.${playerC.name}`,
+          value: {
+            totalExp: floor,
+            expToNext: xpToNextNumber(playerC.level),
+          },
+        } as StatePatch);
+        this.emitMessage(
+          `▸ 【失年历】代价兑现——你交出了一段修炼的时日（经验回到本级起点）`,
+          'assistant',
+        );
+      }
+    } else if (cardName === '禁忌卡·焚天引') {
+      await play({ forbiddenCard: cardName, heavenScourge: true });
+      this.emitMessage(`▸ 【焚天引】代价兑现——HP 锁至 1，天上多了一道小疤`, 'assistant');
+    } else if (cardName === '禁忌卡·万兽园') {
+      const tide = 10 + playerC.level * 2;
+      await play({ forbiddenCard: cardName, beastTideAmount: tide });
+      this.emitMessage(`▸ 【万兽园】代价兑现——兽族与野兽记住了你（遭遇时首轮被先手）`, 'assistant');
+    } else if (cardName === '禁忌卡·称心秤') {
+      const tier = wishTier ?? 'small';
+      const pct = tier === 'grand' ? 50 : tier === 'mid' ? 30 : 10;
+      const newMax = Math.max(1, Math.round(playerC.maxHp * (1 - pct / 100)));
+      await play({ forbiddenCard: cardName, wish: tier });
+      costPatches.push({
+        op: 'update_character',
+        target: `characters.${playerC.name}`,
+        value: { maxHp: newMax, hp: Math.min(playerC.hp, newMax) },
+      } as StatePatch);
+      this.emitMessage(
+        `▸ 【称心秤】代价兑现——愿望的分量称走了你 ${playerC.maxHp - newMax} 点气血上限（永久）`,
+        'assistant',
+      );
+    } else if (cardName === '禁忌卡·白蜡城') {
+      await play({ forbiddenCard: cardName, waxNight: true });
+      const marks = counterOf(
+        coerceCounters(this.game.saveProfile?.worldFlags?.counters),
+        WAX_MARKS_KEY,
+      );
+      const nextMarks = marks + 1;
+      costPatches.push({
+        op: 'set_variable',
+        target: `worldFlags.counters.${WAX_MARKS_KEY}`,
+        value: nextMarks,
+      } as StatePatch);
+      this.emitMessage(
+        nextMarks >= 3
+          ? `▸ 【白蜡城】第三道蜡痕落定——你感到某座城在夜里翻了身（叙事钩已挂）`
+          : `▸ 【白蜡城】代价兑现——蜡痕 ${nextMarks}/3`,
+        'assistant',
+      );
+    } else {
+      this.emitMessage(`【${cardName}】不是七链的禁忌正本——打不出它的力量。`, 'assistant');
+      return;
+    }
+
+    if (costPatches.length > 0) {
+      const sm = createStateManager(this.game.activeSaveId!);
+      const result = await sm.commitChatState(costPatches);
+      if (!result.success) {
+        console.warn('[GamePipeline] 禁忌卡代价落账失败:', result.errors);
+      }
+      // 落库后立即回读：封印/扣上限等代价必须当场被交锋结算读到（否则读的是内存旧账）
+      await this.game.refreshFromDb(this.saveId);
+    }
+  }
+
+  /** 开战：敌情评估预提交整场意图 → 会话入账 → 战报开场注入正文流。
+   *  返回结果供调用方明示反馈（dev 按钮/触发方）——评估失败不开战，绝不静默。 */
+  private async runSkirmishEncounter(
+    enemyHint?: string,
+    sceneHint?: string,
+  ): Promise<{ ok: boolean; reason?: string }> {
+    const playerC = this.game.player;
+    const combatTalents = this.combatTalents();
+    if (!playerC) return { ok: false, reason: '没有玩家角色（存档未就绪）' };
+    const endpoint = this.getEndpointForAgent('skirmish_eval');
     if (!endpoint) {
-      console.warn('[GamePipeline] combat_v3 跳过: 未配置 API endpoint');
-      this.game.exitCombat();
-      return null;
+      this.emitMessage(
+        '【交锋】敌情评估不可用：请到设置 → Agent 配置为「skirmish_eval」选择 API 池。',
+        'assistant',
+      );
+      return { ok: false, reason: 'skirmish_eval 未解析到 API 池（设置 → Agent 配置）' };
+    }
+    // 规则钩子（名字表）：全属性倍率（女王领域 +50%）——此前 getter 写好了没人调
+    const startHooks = collectRuleHooks(combatTalents);
+    // 条件数值（A 级批次③：荒野镖客 / 战争之王 / 集群母狗）：条件成立才乘。
+    // 与「女王领域」的全属性倍率并进同一条乘法链——都是 statMultiplier 的语义。
+    const condBonus = totalCondBonus(combatTalents, playerC.cardAlbum?.deck, playerC.inventory);
+    const stats = applyStatMultiplier(
+      deriveBaseCombatStats({ attributes: playerC.attributes, level: playerC.level }),
+      statMultiplierOf(startHooks) * (1 + condBonus.percent / 100),
+    );
+    for (const note of condBonus.notes) {
+      this.emitMessage(`▸ ${note}`, 'assistant');
+    }
+    // deck 战斗化（2026-09-17）：卡组战力 → 开战防护加成 + 敌情评估参考
+    const deckNames = playerC.cardAlbum?.deck ?? [];
+    const deck = deckPower(deckNames, (n) => {
+      const found = playerC.inventory.find((i) => i.name === n);
+      return found?.type === '卡牌' ? (found as CardItem) : undefined;
+    });
+    // 身后灵（S「瓦尔哈拉的门票」）：每一枚永久守护按条目档位加防御
+    const spirits = coerceSpirits(this.game.saveProfile?.worldFlags?.behindSpirits);
+    const spiritGuard =
+      spirits.length > 0
+        ? spirits.length * entryStrength(combatTalents, '成灵', 'guardPerSpirit')
+        : 0;
+    if (spiritGuard > 0) {
+      this.emitMessage(
+        `▸ 【身后灵】${spirits.length} 位旧友在你身后——防御 +${spiritGuard}`,
+        'assistant',
+      );
+    }
+    const deckGuard = stats.guard + deckGuardBonus(deck) + spiritGuard;
+    if (deck > 0) {
+      this.emitMessage(`【卡组整备】战力 ${deck}，防护 +${deckGuardBonus(deck)}`, 'assistant');
     }
     try {
-      const context = this.currentContext ?? this.buildContext('');
-      this.game.enterCombat();
-      this.game.updateAgentStatus('combat_v3');
-
-      const { runCombatV3 } = await import('@engine/combat-v3');
-      const { characterToCombatParticipant } = await import('@engine/combat-v2-types');
-
-      // 组装 bundle：参战角色 → CombatParticipant。
-      // 🔴 2026-08-08 阵营修复：调度器在 combat_trigger 上声明 allies/enemies 名单，
-      //    按名分阵营——否则所有非 player 角色都被当 enemy（契约的妲丽安会被敌方
-      //    Agent 控制）。名单缺省时回退到旧行为（player=ally，其余=enemy）。
-      // 🔴 2026-08-10 名单收敛（真机 debug）：声明了名单时，**只把名单内的角色拉进
-      //    战斗**（外加 player 本体）。此前所有 hp>0 角色全拉 + sideOf 把名单外非
-      //    player 一律判 enemy——我方旁观 NPC（客栈掌柜奥斯瓦尔德，不在
-      //    allies/enemies 名单）会被当敌方拉进 participants，战斗面板出现多余单位
-      //    并让敌方 Agent 替它决策。名单缺省（无名单声明）时保持旧行为全拉。
-      const playerC = this.game.characters.find((c) => c.type === 'player');
-      const allyNames = new Set(
-        (marker.allies ?? '')
-          .split(/[,，]/)
-          .map((s) => s.trim())
-          .filter(Boolean),
-      );
-      const enemyNames = new Set(
-        (marker.enemies ?? '')
-          .split(/[,，]/)
-          .map((s) => s.trim())
-          .filter(Boolean),
-      );
-      const sideOf = (c: CharacterState): 'ally' | 'enemy' => {
-        if (allyNames.size > 0 || enemyNames.size > 0) {
-          // 调度器给了名单 → 名单内命中按阵营，未命中的：玩家归 ally，其余归 enemy
-          // （未命中的非玩家已被下方 filter 排除，此分支实际只兜 player）
-          if (allyNames.has(c.name)) return 'ally';
-          if (enemyNames.has(c.name)) return 'enemy';
-          return c.type === 'player' ? 'ally' : 'enemy';
-        }
-        // 无名单 → 旧行为
-        return c.type === 'player' ? 'ally' : 'enemy';
-      };
-      const hasListedSides = allyNames.size > 0 || enemyNames.size > 0;
-      // F3：名单声明时只拉名单内角色 + player 本体；名单外的旁观者（无论 npc 还是
-      // monster）不进战斗、不占行动序列。名单缺省 → 旧行为：所有存活角色全拉。
-      const inRoster = (c: CharacterState): boolean =>
-        c.type === 'player' || allyNames.has(c.name) || enemyNames.has(c.name);
-      const participants = this.game.characters
-        .filter((c) => {
-          if (c.hp <= 0) return false;
-          if (!hasListedSides) return true;
-          return inRoster(c);
-        })
-        .map((c) => characterToCombatParticipant(c, sideOf(c)));
-      const fpSnapshot = this.game.fp ?? 0;
-      const bundle = {
-        combatId: `v3-${Date.now()}-${this.saveId}`,
-        combatType: (marker.combatType ?? '标准') as '标准',
-        participants,
-        rulesetRevision: 'v3-2026-07-31',
-        resourceSnapshots: { FP: fpSnapshot },
-      };
-      if (participants.length === 0 || !playerC) {
-        this.game.exitCombat();
-        this.game.clearAgentStatus('combat_v3');
-        return null;
-      }
-
-      // T16 §3.5：_lastCombatMarker 已由就绪版 handleCombatTriggerV3 存档
-      //（重开战斗 restart 回调与二次开始都复用它），这里不再重复赋值。
-
-      // T2（2026-08-10）：模板系统上下文 —— 从 marker 组装战斗指令（战斗类型｜环境｜
-      // 正文），过滤出战斗 Agent 可见的世界书（world_setting + race + system_core）。
-      // 全部只进 coordinator 的 deps（可选字段），缺省时首轮模板渲染退化为空占位/现状。
-      const combatBrief =
-        [
-          `战斗类型: ${marker.combatType ?? '标准'}`,
-          `环境: ${marker.environment ?? ''}`,
-          marker.bodyText ?? '',
-        ].join('｜') || '（无战斗指令）';
-      // T4（2026-08-10）：参战方名单 —— 从 marker 的 allies/enemies 组装，注入模板 <参战方> 区。
-      // 只有声明了名单才给（调度器明确说了谁在场上，AI 才能确认敌我）；未声明时留空，
-      // coordinator 给「（无参战方名单）」占位说明（与 combatBrief 同口径）。
-      const combatRoster = hasListedSides
-        ? `我方: ${marker.allies ?? ''}；敌方: ${marker.enemies ?? ''}`
-        : '';
-      const combatWorldBooks = (this.chainData?.worldBooks ?? []).filter((book) =>
-        GamePipeline.COMBAT_WORLD_BOOK_PARTITIONS.has(book.partition),
-      );
-
-      // 前端 Command 桥：pending resolver，store.submitCombatCommand → coordinator.submit → resolve
-      let pendingResolve: ((c: CombatCommand) => void) | null = null;
-      const waitForCommand = () =>
-        new Promise<CombatCommand>((resolve) => (pendingResolve = resolve));
-
-      // 🎭 主持人/DM 模式（2026-08-12）：玩家**意图文本**桥。与 Command 桥并存——
-      //   coordinator 玩家分支优先走意图（waitForPlayerIntent → routePlayerIntent →
-      //   主持人会话解析），Command 桥留给测试/直捣兜底。两个 pending resolver
-      //   互斥使用：某轮要么等意图、要么等 Command，不会同时挂起。
-      let pendingIntentResolve: ((text: string) => void) | null = null;
-      const waitForPlayerIntent = () =>
-        new Promise<string>((resolve) => (pendingIntentResolve = resolve));
-
-      // ── 🔴 T16 时序修复（玩家首决策永久挂起的根因）────────────────────────────
-      // 此前 setCombatCoordinator 在 `await runCombatV3(...)` **之后**才执行，而
-      // coordinator 的 waitForCommand（玩家单位轮次）依赖 store 经
-      // combatCoordinator.submit 喂入 pendingResolve —— 战斗一开局玩家就永远等不到
-      // 自己的回合（pendingResolve 有值但没人能 resolve）。必须把句柄挂到 store 的
-      // **开战之前**：战斗进行中 submit/abandon 才可用。clearAgentStatus/exitCombat/
-      // 摘要回注仍保留在 runCombatV3 完成之后（闭包引用关系不变）。
-      // F2：就绪期占位句柄（只有 start）在这里被替换成完整句柄 —— submit/abandon/
-      // waitForCommand/restart 从此刻起可用；start 不再需要（就绪面板已关）。
-      // ────────────────────────────────────────────────────────────────────────────
-
-      // ② pre-combat 快照（设计 §3.5）：openCombat 之前留档开战前状态（角色/对话/变量），
-      //    供「重开战斗」restoreSnapshot 回到开战前。totalTurns 取当前回合数（照
-      //    advanceTurn 先例：save.metadata.totalTurns = 已完成回合数 = 当前回合）。
-      let preSnapshotId: string | null = null;
-      try {
-        const turn = this.game.activeSave?.metadata?.totalTurns ?? 0;
-        // 照 advanceTurn 的先例直接 createStateManager(...) 调（getStateManager 是窄化包装）
-        const snap = await createStateManager(this.saveId).createSnapshot('pre-combat', turn);
-        preSnapshotId = snap.id;
-      } catch (err) {
-        console.warn('[GamePipeline] pre-combat 快照失败（重开战斗不可用，不阻塞开战）:', err);
-      }
-
-      // 暴露 coordinator 句柄给 store（前端提交/放弃/重开）。🔴 必须在 runCombatV3 之前。
-      this.game.setCombatCoordinator({
-        submit: async (cmd: CombatCommand) => {
-          if (pendingResolve) {
-            const r = pendingResolve;
-            pendingResolve = null;
-            r(cmd);
-          }
-        },
-        // 🎭 主持人/DM 模式（2026-08-12）：玩家提交**意图文本** → resolve 意图等待。
-        //   coordinator 收到后走 routePlayerIntent（主持人会话解析玩家意图 → Command）。
-        submitPlayerIntent: async (text: string) => {
-          if (pendingIntentResolve) {
-            const r = pendingIntentResolve;
-            pendingIntentResolve = null;
-            r(text);
-          }
-        },
-        abandon: () => {
-          if (pendingResolve) {
-            const r = pendingResolve;
-            pendingResolve = null;
-            r({
-              commandId: 'abandon',
-              expectedRevision: 0,
-              kind: 'PassAttack',
-              actorId: '',
-              cost: 'attack',
-              payload: {},
-            } as CombatCommand);
-          }
-        },
-        waitForCommand,
-        // §3.5 重开战斗：store.restartCombat 恢复 pre-combat 快照后调它重新走本函数。
-        //    F2：重开走**就绪流程**（先弹就绪面板，玩家点「开始」才再开打），不再直接开打。
-        preSnapshotId,
-        restart: async () => {
-          if (this._lastCombatMarker) {
-            await this.handleCombatTriggerV3(this._lastCombatMarker, '');
-          }
-        },
-      });
-
-      const result = await runCombatV3({
-        saveId: this.saveId,
-        bundle,
-        deps: {
-          clientFactory: this.getClientFactory(),
+      const assessment = await runSkirmishAssessment(
+        {
+          saveId: this.saveId,
           endpoint,
-          stateManager: this.getStateManager(),
-          characters: this.game.characters,
-          // 🆕 经验档位（简单/普通模式，2026-08-24）：战斗胜利经验按存档模式分档
-          experienceMode: this.game.experienceMode,
-          variables: context.variables,
-          context,
-          // 2026-08-09 §2.7: 战斗 Agent 的 systemPrompt 从 agent-config 读（此前恒 undefined，
-          // routeEnemyCommand 回退硬编码 125 字）。照 char_gen/craft_gen 从 chainData 取 configs 的先例。
-          configs: this.chainData?.agentConfigs,
-          // T2（2026-08-10）：Phase 10 模板系统上下文（全部可选，coordinator 缺省兜底）——
-          // combatBrief（marker 组装）/ combatRoster（marker 名单组装）/ 过滤后的世界书 /
-          // 本轮玩家输入 / 触发战斗的正文 / 最近对话历史。首轮 user 消息（情境快照）的数据源。
-          worldBooks: combatWorldBooks,
-          combatBrief,
-          combatRoster,
-          userInput: context.userInput,
-          storyOutput,
-          history: context.history,
-          submitCommand: async () => {}, // 等待态由 v3_awaiting_player_input 事件驱动 store
-          waitForCommand,
-          // 🎭 主持人/DM 模式（2026-08-12）：玩家意图文本桥（生产主路径）。
-          //   coordinator 玩家分支据此走 routePlayerIntent（主持人解析玩家意图）。
-          submitPlayerIntent: async () => {},
-          waitForPlayerIntent,
-          abandon: () => {},
-          // 真实随机源（Q-01）：唯一注入点，委托 dice.ts 的 rollDice（内核禁 Math.random）。
-          // 每次续杯调用会换一批新骰（BeginOutput 后再取，outputId 用计数器区分）。
-          drawDice: () => ({
-            outputId: `draw-${++this._diceDrawSeq}`,
-            dice: rollDice(60, 20),
-          }),
+          enemyHint,
+          sceneHint,
+          playerLevel: playerC.level,
+          playerPower: stats.atk,
+          playerTotalPower: stats.atk + stats.guard + stats.agi + deck,
         },
-        onCombatEvent: (evt) => this.game.applyCombatEvent(evt),
+        { clientFactory: this.getClientFactory() },
+      );
+      // 规则层数值条目（此前只查了名字钩子，这几条一直是死接线）：
+      //  体魄 → HP 上限 ×(1+percent/100)；威压 → 敌方威胁 ×(1−percent/100)
+      const talentList = combatTalents;
+      const physiquePct = hasTitanPhysique(flatEntriesOf(talentList))
+        ? entryStrength(talentList, '体魄', 'percent')
+        : 0;
+      const hpMult = hpMultiplierOf(startHooks);
+      const maxHp = Math.round(playerC.maxHp * (1 + physiquePct / 100) * hpMult);
+      if (hpMult !== 1) {
+        this.emitMessage(`▸ 巨人体魄：HP 上限 ×${hpMult}（→ ${maxHp}）`, 'assistant');
+      }
+      if (physiquePct > 0) {
+        this.emitMessage(
+          `▸ 体魄：HP 上限 +${physiquePct}%（${playerC.maxHp} → ${maxHp}）`,
+          'assistant',
+        );
+      }
+      const fearPct = totalIntimidation(flatEntriesOf(talentList));
+      // 自身状态（S「蛇符咒」隐身 / S「贝蒙斯坦」吸魔）：隐身 = 打不中你，
+      // 与威压同一条「缩放敌方威胁」的口径，所以并进同一个百分比一起算。
+      const selfStatuses = selfStatusesOf(talentList);
+      const stealthPct = totalSelfStatus(selfStatuses, 'threatDown');
+      const threatCut = Math.min(90, fearPct + stealthPct);
+      const intents =
+        threatCut > 0
+          ? assessment.intents.map((it) => ({
+              ...it,
+              threat: Math.max(0, Math.round(it.threat * (1 - threatCut / 100))),
+            }))
+          : assessment.intents;
+      if (fearPct > 0) this.emitMessage(`▸ 威压：敌方威胁 −${fearPct}%（全体）`, 'assistant');
+      if (stealthPct > 0) {
+        this.emitMessage(`▸ 【自身状态·隐身】敌方威胁 −${stealthPct}%（打不中你）`, 'assistant');
+      }
+      const initialEffects = initialSelfEffects(selfStatuses);
+      if (initialEffects.length > 0) {
+        this.emitMessage(
+          `▸ 【自身状态】${initialEffects.map((e) => e.name).join('、')} 开战即生效`,
+          'assistant',
+        );
+      }
+      const base = startSkirmish({
+        enemyName: assessment.enemyName,
+        enemyLevel: assessment.enemyLevel,
+        intents,
+        playerHp: Math.min(playerC.hp, maxHp),
+        playerSp: playerC.sp,
+        playerMaxHp: maxHp,
+        enemyHp: assessment.enemyHp,
+        guard: deckGuard,
+        initialEffects,
+        enemyCount: coerceEnemyCount(assessment.enemyCount),
+        enemyScale: assessment.enemyScale,
       });
+      const session = judgeCrush(stats.atk + stats.guard + stats.agi + deck, assessment.enemyPower)
+        ? crushFinish(base)
+        : base;
+      this.game.setSkirmishSession(session);
+      this.emitMessage(session.log.join('\n'), 'assistant');
+      if (session.finished) await this.settleAndNarrate(session);
+      return { ok: true };
+    } catch (err) {
+      console.warn('[GamePipeline] 敌情评估失败:', err);
+      this.emitMessage('【交锋】敌情评估失败，战斗未能开始（可再试一次）。', 'assistant');
+      return {
+        ok: false,
+        reason: `敌情评估失败：${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  }
 
-      this.game.clearAgentStatus('combat_v3');
-      // 🔴 2026-08-13 真机 debug：战斗终局的 commitChatState 只写 Dexie，而本条链路
-      //（store.startCombat → coordinator.start → startCombatV3）不经过 run() 的
-      // finally —— store 从不回读，HUD 一直是开战前的血量/经验（满血假象）。
-      // 终局落库后回读一次（含 COR-02 存档切走守卫）。
-      if (this.ownsActiveSave) await this.game.refreshFromDb(this.saveId);
-      // 同一真机 debug：记录「最近已结算战斗」供下一轮 dispatcher 上下文（{{RECENT_COMBAT}}）
-      // —— 没有它 dispatcher 不知道正文里的战斗描写是已结算战斗的战后延续，会再发
-      // combat_trigger 把打完的战斗重演一遍。内存级（与 _lastCombatMarker 同口径）；
-      // 放弃的战斗（aborted，未落库）不算已结算，不记录。
-      if (!result.aborted) {
-        this._recentCombat = {
-          allies: [...allyNames],
-          enemies: [...enemyNames],
-          outcome: result.outcome,
-          endedAtTurn: this.game.activeSave?.metadata?.totalTurns ?? 0,
+  /** 一拍反制：出卡走八类语义矩阵（直击/在场/禁打），基础应对 = 派生值 + 同名标签 */
+  /**
+   * 自由文本提名出卡（2026-09-17 路线图 1.1）：交锋活跃时处理玩家输入。
+   * L1 卡名精确匹配（零延迟）→ L2 AI 意图解析（轻量单轮，skirmish_eval 端点，
+   * 严格 JSON 白名单校验）→ 都不命中返回 false，调用方降级走叙事管线。
+   */
+  async trySkirmishFreeText(text: string): Promise<boolean> {
+    const session = this.game.skirmishSession;
+    if (!session || session.finished !== null) return false;
+    const playerC = this.game.player;
+    if (!playerC) return false;
+
+    const deck = playerC.cardAlbum?.deck ?? [];
+    const ready = battleReadyCards(
+      playerC.inventory.filter((i): i is CardItem => i.type === '卡牌'),
+      deck,
+    ).filter((c) => !session.playedCards.includes(c.name));
+
+    // L1：卡名精确匹配
+    const match = matchFreeCardPlay(text, ready, session.playedCards);
+    if (match.kind === '卡') {
+      this.emitMessage(`【自由提名】打出「${match.choice.name}」`, 'assistant');
+      await this.submitSkirmishCounter(match.choice);
+      return true;
+    }
+    if (match.kind === '应对') {
+      await this.submitSkirmishCounter(match.choice);
+      return true;
+    }
+
+    // L2：AI 意图解析（skirmish_eval 端点；未配置则静默回退叙事）
+    const endpoint = this.getEndpointForAgent('skirmish_eval');
+    if (!endpoint) return false;
+    try {
+      const intent = await runSkirmishIntentResolve(
+        {
+          saveId: this.saveId,
+          endpoint,
+          playerText: text,
+          cards: ready.map((c) => ({
+            name: c.name,
+            tags: cardCombatTags(c.词条),
+          })),
+          intentCounters:
+            session.intents[session.beat % Math.max(1, session.intents.length)]?.counters ?? [],
+        },
+        { clientFactory: this.getClientFactory() },
+      );
+      if (intent.kind === 'none') return false;
+      if (intent.kind === 'counter') {
+        this.emitMessage(`【意图解析】基础应对：${intent.move}`, 'assistant');
+        await this.submitSkirmishCounter({ kind: '应对', move: intent.move });
+        return true;
+      }
+      this.emitMessage(
+        `【意图解析】按你的意思打出「${intent.card}」${intent.declaration ? `——「${intent.declaration}」` : ''}`,
+        'assistant',
+      );
+      await this.submitSkirmishCounter({
+        kind: '卡',
+        name: intent.card,
+        ...(intent.declaration ? { intent: intent.declaration } : {}),
+      });
+      return true;
+    } catch (err) {
+      console.warn('[GamePipeline] L2 意图解析失败，降级叙事:', err);
+      return false;
+    }
+  }
+
+  private async submitSkirmishCounter(choice: SkirmishChoice): Promise<void> {
+    const session = this.game.skirmishSession;
+    const playerC = this.game.player;
+    const combatTalents = this.combatTalents();
+    if (!session || session.finished !== null || !playerC) return;
+
+    // 连战递增（天赋）：每多打一拍行动值 +条目量（第一拍无加成）
+    let escalate = 0;
+    for (const t of combatTalents ?? []) {
+      for (const e of t.entries) {
+        if (e.kind === '连战递增') escalate += Math.max(0, Math.round(e.params.amount ?? 0));
+      }
+    }
+
+    let action: SkirmishAction;
+    let activate: ActivateInput | undefined;
+    let prepend: string[] | undefined;
+    let recoil: number | undefined;
+    let sealBroke: string | undefined;
+    let contract: SkirmishContract | undefined;
+    /** 本拍触发组合技后要落账的卡名（双生羁绊每对每场一次） */
+    let comboFired: string[] | undefined;
+    /** 终章（SSS「第六终章」）：持天赋则第 N 拍起自动抹除敌方。
+     *  N = 条目 `终章{beats}` 的强度档（缺省基准 6 拍）——档位让更弱的天赋也能共用这条机制。 */
+    const finalChapter = (combatTalents ?? []).some((t) =>
+      (t.entries ?? []).some((e) => e.kind === '终章'),
+    );
+    const chapterOpts = finalChapter
+      ? {
+          finalChapter: true,
+          finalChapterBeats: entryStrength(combatTalents, '终章', 'beats'),
+        }
+      : {};
+    // 行为合同（SSS 律师函警告）：本拍出卡时登记的禁条；反噬伤害取 `合同{backlash}` 档
+    if (choice.kind === '卡' && choice.contractForbidden) {
+      const hasContractGate = (combatTalents ?? []).some((t) =>
+        (t.entries ?? []).some((e) => e.kind === '合同'),
+      );
+      if (hasContractGate) {
+        contract = {
+          name: `行为合同·禁${choice.contractForbidden}`,
+          forbidden: choice.contractForbidden,
+          backlash: entryStrength(combatTalents, '合同', 'backlash'),
         };
       }
-      // 🆕 结算确认框（2026-08-13 需求 D）：终局数值已落库，摘要注入前弹确认面板——
-      // 上半数值卡（经验/FP/掉落/回合/胜负，顺带解决"结算不可见"），下半可编辑摘要
-      // textarea（防 AI 乱写，玩家可改）。玩家「注入正文」→ emitMessage(编辑后文本)；
-      // 「放弃注入」→ 只收面板（数值不回滚，落库不可逆）。exitCombat 移到确认之后——
-      // 确认期间 isInCombat 靠 store 的 combatSummaryReview 维持。
-      // 放弃的战斗（aborted）不弹确认也不注入（"战斗被放弃"是内部文本，进正文是噪音）。
-      if (!result.aborted && result.narrativeSummary && this.ownsActiveSave) {
-        const finalText = await this.game.awaitCombatSummaryReview({
-          outcome: result.outcome,
-          totalExp: result.totalExp,
-          totalFp: result.totalFp,
-          loot: (result.loot as CombatSummaryResult['loot']) ?? [],
-          rounds: result.rounds,
-          summaryText: result.narrativeSummary,
+    }
+    if (choice.kind === '卡') {
+      // 技能冷却（战斗维度）：冷却中的卡不能打
+      if (isOnCooldown(session.cooldowns, choice.name)) {
+        const left = session.cooldowns?.[choice.name] ?? 0;
+        this.emitMessage(`【交锋】【${choice.name}】冷却中——还剩 ${left} 拍。`, 'assistant');
+        return;
+      }
+      // 会话临时账（真机裁定 2026-09-13）：同一张卡一场只能打出一次
+      if (session.playedCards.includes(choice.name)) {
+        this.emitMessage(
+          `【交锋】【${choice.name}】本局已经用过了——同一张牌一场只能打出一次。`,
+          'assistant',
+        );
+        return;
+      }
+      // InventoryItem.type 是宽松 string，这里做一次卡牌收窄（脏存档的 type 异常按查无卡处理）
+      const found = playerC.inventory.find((i) => i.name === choice.name);
+      const card = found?.type === '卡牌' ? (found as CardItem) : undefined;
+      if (!card) {
+        this.emitMessage(`【交锋】卡里没有【${choice.name}】。`, 'assistant');
+        return;
+      }
+      // 决斗：伙伴卡（召唤/军团）不上场——判定要用真卡的词条
+      const duelBlocked = duelBlocksCard(card, session.duel);
+      if (duelBlocked.blocked) {
+        this.emitMessage(duelBlocked.reason ?? '决斗中这张卡不能上场。', 'assistant');
+        return;
+      }
+      // 封印卡：这一拍的行动就是启封判定（阶段 2 内核分级：启封/哑火/暴走/反噬）
+      if (card.sealed) {
+        const res = sealedCardPlay(
+          card,
+          deriveCombatStats({ attributes: playerC.attributes, level: playerC.level }),
+          this.rollSkirmishD20(),
+          willModifierOf(playerC.attributes),
+          insightModOf(playerC.attributes),
+        );
+        const beatDice = this.rollSkirmishD20();
+        const escalateBeat = escalate > 0 && session.beat > 0 ? escalate * session.beat : 0;
+        action =
+          escalateBeat > 0 && res.action.power > 0
+            ? { ...res.action, power: res.action.power + escalateBeat }
+            : res.action;
+        activate = res.activate;
+        // 好感共鸣：伙伴卡（召唤/军团）破封后效果发动 → 乘共鸣倍率（审计行置拍审计之前）
+        const isBondKind = cardKindOf(card.词条) === '召唤' || cardKindOf(card.词条) === '军团';
+        const sealedBond =
+          res.effectFired && isBondKind
+            ? bondForCard(card.name, this.game.saveProfile?.affections)
+            : null;
+        if (sealedBond && sealedBond.multiplier !== 1 && action.power > 0) {
+          action = { ...action, power: applyBond(action.power, sealedBond.multiplier) };
+        }
+        prepend = [
+          ...res.prepend,
+          ...(escalateBeat > 0
+            ? [`▸ 连战递增：行动值 +${escalateBeat}（第 ${session.beat + 1} 拍）`]
+            : []),
+          ...(sealedBond && sealedBond.multiplier !== 1
+            ? [
+                `▸ 好感共鸣：与【${card.name}】的羁绊（${sealedBond.label} ${sealedBond.affection}）→ 效果 ×${sealedBond.multiplier}`,
+              ]
+            : []),
+        ];
+        recoil = res.recoil;
+        sealBroke = res.sealBroke;
+        const next = playBeat(session, action, beatDice, {
+          activate,
+          prepend,
+          recoil,
+          sealBroke,
+          // 封印卡 MP：破封（效果发动）才扣——哑火/反噬空过不收费
+          ...(res.effectFired ? { mpCost: mpCostOf(card) } : {}),
+          ...(contract ? { contract } : {}),
+          ...chapterOpts,
         });
-        if (finalText && finalText.trim()) {
-          this.emitMessage(`【战斗摘要】${finalText}`, 'assistant');
+        this.game.setSkirmishSession(next);
+        this.emitMessage(next.log.slice(session.log.length).join('\n'), 'assistant');
+        if (next.finished) await this.settleAndNarrate(next);
+        return;
+      }
+      const plan = cardPlayPlan(
+        card,
+        deriveCombatStats({ attributes: playerC.attributes, level: playerC.level }),
+        // MP 硬门槛（2026-09-25 访谈共识）：有效 MP = 角色 MP − 本会话已耗
+        { mp: playerC.mp - (session.mpSpent ?? 0) },
+      );
+      if (plan.mode === '禁打') {
+        this.emitMessage(`【交锋】${plan.reason}。`, 'assistant');
+        return;
+      }
+      action = plan.action;
+      // 在场效果 + 战技附加（2026-09-17）：一张卡可以同时带基础效果与战技，
+      // 故这里统一用 planEffects 归一成数组（零条 = 无激活）。
+      {
+        // 条件加成（A 级批次③）：这里要重算一次——它在另一条方法里，作用域不通用。
+        // 只用到「伙伴卡数」这一条件（战争之王），代价是一次卡组扫描。
+        const deckCond = totalCondBonus(combatTalents, playerC.cardAlbum?.deck, playerC.inventory);
+        const fx = planEffects(plan);
+        // 战争之王（A 级批次③）：伙伴卡越多，在场助战越强。
+        // 只放大**召唤/军团卡带来的 buff**——那正是「伙伴卡的攻击力」在拍制里的形态。
+        const kindForBonus = cardKindOf(card.词条);
+        const isCompanion = kindForBonus === '召唤' || kindForBonus === '军团';
+        // 独行（A「孤狼」）：带「独行」印记的生物卡，场上没有其它友方效果时翻倍。
+        // 「友方效果」= 现存 activeEffects 里除本卡以外的 buff（dot/weaken 是对敌方的，不算友伴）。
+        const alone = isCompanion
+          ? isLoneCard(card) &&
+            !session.activeEffects.some((e) => e.type === 'buff' && e.name !== card.name)
+          : false;
+        let boostedFx = isCompanion
+          ? fx.map((e) =>
+              e.type === 'buff'
+                ? { ...e, amount: Math.round(e.amount * (1 + deckCond.percent / 100)) }
+                : e,
+            )
+          : fx;
+        if (alone) {
+          boostedFx = boostedFx.map((e) => ({ ...e, amount: e.amount * 2 }));
+          prepend = [...(prepend ?? []), `▸ 【独行】场上没有其它友方——${card.name} 的效果翻倍`];
+        }
+        if (isCompanion && deckCond.percent > 0) {
+          prepend = [
+            ...(prepend ?? []),
+            `▸ 【条件加成】伙伴 ${deckCond.evals.find((x) => x.met)?.count ?? 0} 张 → 助战 ×${(
+              1 +
+              deckCond.percent / 100
+            ).toFixed(2)}`,
+          ];
+        }
+        activate =
+          boostedFx.length === 0 ? undefined : boostedFx.length === 1 ? boostedFx[0] : boostedFx;
+      }
+      // 好感共鸣（主人裁定：伙伴卡接入好感度）——打出召唤/军团卡时，同名角色的好感
+      // 等级决定威力与在场效果乘区（好感高伙伴卖力；反感以下消极怠工 ×0.8）。
+      // 名字即羁绊：卡名 = 角色名，查 SaveProfile.affections，零配置。
+      let bond: BondInfo | null = null;
+      const kind = cardKindOf(card.词条);
+      if (kind === '召唤' || kind === '军团') {
+        bond = bondForCard(card.name, this.game.saveProfile?.affections);
+      }
+      if (bond && bond.multiplier !== 1) {
+        if (action.power > 0)
+          action = { ...action, power: applyBond(action.power, bond.multiplier) };
+        if (activate)
+          activate = (Array.isArray(activate) ? activate : [activate]).map((fx) => ({
+            ...fx,
+            amount: applyBond(fx.amount, bond.multiplier),
+          }));
+        prepend = [
+          ...(prepend ?? []),
+          `▸ 好感共鸣：与【${card.name}】的羁绊（${bond.label} ${bond.affection}）→ 效果 ×${bond.multiplier}`,
+        ];
+      }
+    } else {
+      action = basicCounterAction(
+        choice.move,
+        deriveCombatStats({ attributes: playerC.attributes, level: playerC.level }),
+      );
+    }
+    // 行动宣言（主人裁定 2025-09-25 扩权：出卡与基础应对同权）——纯叙事素材，
+    // 数值照常结算；置于拍审计之前的「意图」行
+    if (choice.intent && choice.intent.trim()) {
+      action = { ...action, note: choice.intent.trim().slice(0, 200) };
+    }
+
+    if (escalate > 0 && session.beat > 0) {
+      action = { ...action, power: action.power + escalate * session.beat };
+      prepend = [`▸ 连战递增：行动值 +${escalate * session.beat}（第 ${session.beat + 1} 拍）`];
+    }
+    // 暴击（A/B 战斗维度）：持 `暴击` 条目者，拍内掷 d100 判定暴击。
+    {
+      const critEntry = (combatTalents ?? [])
+        .flatMap((t) => t.entries ?? [])
+        .find((e) => e.kind === '暴击');
+      if (critEntry) {
+        const crit = resolveCrit(
+          action.power,
+          {
+            chance: Math.max(0, Math.round(Number(critEntry.params.chance) || 0)),
+            mult: Math.max(1, Number(critEntry.params.critPower) || 1.5),
+          },
+          this.rollD100(),
+        );
+        if (crit.crit) {
+          action = { ...action, power: crit.power };
+          prepend = [...(prepend ?? []), `▸ ${crit.note}`];
         }
       }
-      this.game.exitCombat(); // 确认收尾后关面板（终局已由 onCombatEvent 置 v3ActiveCombat）
-      const summary: CombatSummaryResult = {
-        narrativeSummary: result.narrativeSummary,
-        patches: result.patches,
-        totalExp: result.totalExp,
-        totalFp: result.totalFp,
-        loot: (result.loot as CombatSummaryResult['loot']) ?? [],
-        rounds: result.rounds,
-        outcome: result.outcome,
-      };
-      return summary;
-    } catch (err) {
-      if (isAbortError(err)) {
-        // 战斗被取消：照样 exitCombat（不能把玩家留在一个不再推进的战斗面板里），
-        // 但不报错状态。内核状态本来就只在终局才落库，中途取消零写入。
-        this.game.clearAgentStatus('combat_v3');
-        this.game.exitCombat();
-        console.log('[GamePipeline] combat_v3 已取消（离开游戏页 / 停止生成）');
-        return null;
+      // 体格差压制（B「体格差压制」）：敌方体型远小于玩家 → 行动值加成
+      const holdsCrush = (combatTalents ?? []).some((t) =>
+        (t.entries ?? []).some((e) => e.kind === '体型压制'),
+      );
+      if (holdsCrush && session.enemyScale) {
+        const crush = bodyScaleCrushBonus(
+          playerBodyScale(playerC.level),
+          coerceBodyScale(session.enemyScale),
+          entryStrength(combatTalents, '体型压制', 'crushPct'),
+        );
+        if (crush.percent > 0) {
+          action = { ...action, power: Math.round(action.power * (1 + crush.percent / 100)) };
+          prepend = [...(prepend ?? []), `▸ ${crush.note}`];
+        }
       }
-      this.game.clearAgentStatus('combat_v3', String(err));
-      this.game.exitCombat();
-      console.error('[GamePipeline] combat_v3 失败:', err);
-      return null;
+    }
+    // 一拳超人系统的代价（SS）：今天已经挥过那一拳 → 当日虚弱（行动值 ×0.5）。
+    // 「24 小时」在这套时间里就是「今天」，跨天由 daily-ledger 的 gameDay 比对自动解除。
+    if (
+      dailyNukePercentOf(collectRuleHooks(combatTalents)) > 0 &&
+      !this.canUseDaily('一拳超人系统')
+    ) {
+      action = { ...action, power: Math.round(action.power * DAILY_NUKE_WEAKNESS) };
+      prepend = [...(prepend ?? []), `▸ 出拳后的虚弱：行动值 ×${DAILY_NUKE_WEAKNESS}`];
+    }
+    // 刀刀暴击（好运之骰的 8 点面）：当日战斗行动值 +25%。走 dailyBuffs，跨天自动失效。
+    if (
+      buffActiveToday(
+        coerceBuffs(this.game.saveProfile?.worldFlags?.dailyBuffs),
+        DAILY_BUFF_COMBAT_CRIT,
+        this.currentGameDay(),
+      )
+    ) {
+      action = { ...action, power: Math.round(action.power * COMBAT_CRIT_MULTIPLIER) };
+      prepend = [...(prepend ?? []), `▸ 刀刀暴击（今日）：行动值 ×${COMBAT_CRIT_MULTIPLIER}`];
+    }
+    // 环境加成（天赋，如 SS「黑潮之子」）：域/场景卡建立了对应环境时，
+    // 防御/闪避应对（= 敏捷与防御那一路）获得档位加成。环境随领域/场景卡存续。
+    const envBonuses = envBonusesOf(combatTalents);
+    if (envBonuses.length > 0) {
+      const activeEnv = new Set(
+        session.activeEffects.map((e) => e.env).filter((v): v is string => !!v),
+      );
+      const hit = envBonuses.find((b) => activeEnv.has(b.env));
+      const isDefensive =
+        choice.kind === '应对' && (choice.move === '防御' || choice.move === '闪避');
+      if (hit && isDefensive) {
+        action = { ...action, power: Math.round(action.power * (1 + hit.percent / 100)) };
+        prepend = [
+          ...(prepend ?? []),
+          `▸ 环境加成（${hit.env}）：防御/闪避应对行动值 +${hit.percent}%`,
+        ];
+      }
+    }
+    // 下克上（天赋）：敌方原生等级高于你时，行动值按档位加成（「无视部分防御」的等价兑现）
+    const vsHigh = entryStrength(combatTalents, '克上', 'vsHigherLevel');
+    if (vsHigh > 0 && session.enemyLevel > playerC.level) {
+      const boosted = Math.round(action.power * (1 + vsHigh / 100));
+      action = { ...action, power: boosted };
+      prepend = [
+        ...(prepend ?? []),
+        `▸ 下克上：敌方 Lv${session.enemyLevel} 高于你 Lv${playerC.level} → 行动值 +${vsHigh}%`,
+      ];
+    }
+    // 懒惰天才（S）：带回「懒惰」印记的生物卡按概率摸鱼跳过行动，行动则暴击翻倍。
+    if (choice.kind === '卡') {
+      const playedCard = playerC.inventory.find((i) => i.name === choice.name);
+      const asCard = playedCard?.type === '卡牌' ? (playedCard as CardItem) : undefined;
+      if (asCard && isLazyCard(asCard)) {
+        const outcome = resolveLazyCard(asCard, action.power, this.rollD100(), {
+          skipPct: entryStrength(combatTalents, '惰性', 'skipPct'),
+          critMult: entryStrength(combatTalents, '惰性', 'critMult'),
+        });
+        if (outcome.kind !== '正常') {
+          action = { ...action, power: outcome.power };
+          prepend = [...(prepend ?? []), `▸ ${outcome.note}`];
+        }
+      }
+      // 双生羁绊（S）：双生本场已打出过 → 组合技（每对每场一次）
+      if (asCard) {
+        const bonds = coerceTwinBonds(this.game.saveProfile?.worldFlags?.twinBonds);
+        const combo = resolveTwinCombo({
+          card: asCard,
+          bonds,
+          playedCards: session.playedCards,
+          alreadyFired: (session.comboFired ?? []).includes(asCard.name),
+          comboMult: entryStrength(combatTalents, '羁绊', 'comboMult'),
+        });
+        if (combo.fired) {
+          action = { ...action, power: Math.round(action.power * combo.power) };
+          prepend = [...(prepend ?? []), `▸ ${combo.note}`];
+          comboFired = [...(comboFired ?? []), asCard.name];
+        }
+      }
+    }
+    // 免死（绞刑架幸存者）：持天赋且本场没用过 → 允许本拍锁血续战
+    const lastStand = this.lastStandOption(session);
+    // MP 扣费（2026-09-25 访谈共识）：主动形态卡打出扣 MP——常规路径恒扣
+    const beatCardItem =
+      choice.kind === '卡'
+        ? playerC.inventory.find((i) => i.name === choice.name && i.type === '卡牌')
+        : undefined;
+    const beatMpCost = beatCardItem ? mpCostOf(beatCardItem as CardItem) : 0;
+    const next = playBeat(
+      session,
+      action,
+      this.rollSkirmishD20(),
+      prepend || activate || finalChapter || lastStand || comboFired || beatMpCost > 0
+        ? {
+            activate,
+            prepend,
+            ...chapterOpts,
+            ...(lastStand ? { lastStand } : {}),
+            ...(comboFired ? { comboFired } : {}),
+            ...(beatMpCost > 0 ? { mpCost: beatMpCost } : {}),
+          }
+        : undefined,
+    );
+    // 技能冷却（战斗维度）：每拍 tick + 打出技能卡时启动冷却
+    let cd = tickCooldowns(session.cooldowns);
+    if (
+      choice.kind === '卡' &&
+      cardKindOf(
+        (playerC.inventory.find((i) => i.name === choice.name) as CardItem | undefined)?.词条 ?? [],
+      ) === '技能'
+    ) {
+      const hasQuick = (combatTalents ?? []).some((t) =>
+        (t.entries ?? []).some((e) => e.kind === '快咏'),
+      );
+      cd = startCooldown(cd, choice.name, hasQuick ? 1 : 2);
+    }
+    next.cooldowns = cd;
+    this.game.setSkirmishSession(next);
+    this.emitMessage(next.log.slice(session.log.length).join('\n'), 'assistant');
+    // 免死刚发动 → 补上「瞬间获得满额 MP」（会话只记 HP；MP 是角色字段，得在这里落库）
+    if (next.lastStandUsed === true && session.lastStandUsed !== true && this.ownsActiveSave) {
+      if (entryStrength(combatTalents, '免死', 'mpRefill') > 0) {
+        const sm = createStateManager(this.saveId);
+        await sm.commitChatState([
+          {
+            op: 'update_character',
+            target: `characters.${playerC.name}`,
+            value: { mp: playerC.maxMp },
+          } as StatePatch,
+        ]);
+        this.emitMessage('▸ 【绞刑架幸存者】满额 MP 瞬间涌回。', 'assistant');
+      }
+    }
+    if (next.finished) await this.settleAndNarrate(next);
+  }
+
+  /** 免死开关：持「免死」条目且本场未用过时给出 hpFloor（封印中的天赋不算数） */
+  private lastStandOption(session: SkirmishSession): { hpFloor: number } | undefined {
+    if (session.lastStandUsed === true) return undefined;
+    const combatTalents = this.combatTalents();
+    const has = combatTalents.some((t) => (t.entries ?? []).some((e) => e.kind === '免死'));
+    if (!has) return undefined;
+    if (entryStrength(combatTalents, '免死', 'perBattle') <= 0) return undefined;
+    return { hpFloor: entryStrength(combatTalents, '免死', 'hpFloor') };
+  }
+
+  /**
+   * 一次性大招。两条天赋共用这一条通道，**限次口径不同**：
+   *  - 倒也可斩（SSS）：每场一次（会话级 `nukeUsed`），缺省 50% 敌方当前 HP
+   *  - 一拳超人系统（SS）：每天一次（daily-ledger 的 `worldFlags.dailyUses`），缺省 80%
+   * 两者都有时每日口径优先（更严的那条说了算），出手后同样消耗 90% 玩家 HP。
+   */
+  private async skirmishNuke(): Promise<void> {
+    const session = this.game.skirmishSession;
+    const playerC = this.game.player;
+    const combatTalents = this.combatTalents();
+    if (!session || session.finished !== null || !playerC) return;
+    const hooks = collectRuleHooks(combatTalents);
+    const dailyPct = dailyNukePercentOf(hooks);
+    const perBattle = hasOncePerBattleNuke(hooks);
+    if (dailyPct <= 0 && !perBattle) {
+      this.emitMessage('【倒也可斩】需要持有对应天赋。', 'assistant');
+      return;
+    }
+    const daily = dailyPct > 0;
+    if (daily) {
+      if (!this.canUseDaily('一拳超人系统')) {
+        this.emitMessage(
+          '【一拳超人系统】今天的那一拳已经挥过了——明天再来（今日行动值处于虚弱）。',
+          'assistant',
+        );
+        return;
+      }
+    } else if (session.nukeUsed === true) {
+      this.emitMessage('【倒也可斩】本场已经用过了——这一招一场只出一次。', 'assistant');
+      return;
+    }
+    const pct = daily ? dailyPct : nukePercentOf(hooks);
+    const cost = Math.max(1, Math.round(session.playerHp * 0.9));
+    const next = playBeat(
+      session,
+      { label: daily ? '一拳超人' : '倒也可斩', power: 0, tags: [] },
+      this.rollSkirmishD20(),
+      {
+        nuke: true,
+        nukePercent: pct,
+        recoil: cost,
+      },
+    );
+    this.game.setSkirmishSession(next);
+    if (daily) await this.markDailyUsed('一拳超人系统');
+    this.emitMessage(next.log.slice(session.log.length).join('\n'), 'assistant');
+    if (next.finished) await this.settleAndNarrate(next);
+  }
+
+  /** 撤退：终局 C 档，脱离接触 */
+  private async fleeSkirmishEncounter(endReason?: string): Promise<void> {
+    const session = this.game.skirmishSession;
+    if (!session || session.finished !== null) return;
+    const next = fleeSkirmish(session, endReason);
+    this.game.setSkirmishSession(next);
+    this.emitMessage(next.log.slice(session.log.length).join('\n'), 'assistant');
+    await this.settleAndNarrate(next);
+  }
+
+  /**
+   * 终局收尾（主人裁定 2026-09-13：终局要 AI 写战斗过程，抒发情绪）：
+   * ① 战斗记叙——AI 对着逐拍审计链写过程叙事（先故事）；② 结算审计链（后账本）；
+   * ③ 同窗原子落库（玩家 EXP/HP + 参战卡经验/消耗，一次 commitChatState）→ 落库后
+   * 回读（否则 HUD 是开战前血量假象）。整场战斗 AI 调用恒为 2 次（评估 + 记叙），
+   * 拍内零 AI——拖沓的病根不回归。记叙失败静默降级（账本照发）。
+   */
+  /**
+   * 跨日恢复（2026-09-25 访谈共识）：MP/SP 回满，HP 每天回上限的 50%。
+   * worldFlags.lastRegenDay 记账（幂等）；无变化零写入。失败只告警不阻断回合。
+   */
+  private async applyDayRolloverRegen(): Promise<void> {
+    const playerC = this.game.player;
+    if (!playerC || !this.ownsActiveSave) return;
+    const today = this.currentGameDay();
+    const flags = (this.game.saveProfile?.worldFlags ?? {}) as Record<string, unknown>;
+    const last = typeof flags['lastRegenDay'] === 'number' ? (flags['lastRegenDay'] as number) : null;
+    if (last !== null && today <= last) return;
+    const days = last === null ? 1 : Math.max(1, Math.min(30, today - last));
+    const hpHeal = Math.ceil((playerC.maxHp || 0) / 2) * days;
+    const sm = createStateManager(this.saveId);
+    const result = await sm.commitChatState([
+      {
+        op: 'update_character',
+        target: `characters.${playerC.name}`,
+        value: {
+          hp: Math.min(playerC.maxHp, playerC.hp + hpHeal) - playerC.hp,
+          mp: (playerC.maxMp ?? 0) - playerC.mp,
+          sp: (playerC.maxSp ?? 0) - playerC.sp,
+        },
+      } as StatePatch,
+      {
+        op: 'set_variable',
+        target: 'worldFlags.lastRegenDay',
+        value: today,
+      } as StatePatch,
+    ]);
+    if (result.success) {
+      await this.game.refreshFromDb();
+    } else {
+      console.warn('[GamePipeline] 跨日恢复落库失败:', result.errors);
+    }
+  }
+
+  private async settleAndNarrate(session: SkirmishSession): Promise<void> {
+    if (!session.finished) return;
+    const playerC = this.game.player;
+    const combatTalents = this.combatTalents();
+    if (!playerC) return;
+    // 规则钩子（名字表）：经验倍率（鸿蒙道体 ×2 / 千秋证果 ×5）——此前 getter 写好了没人调
+    const hooks = collectRuleHooks(combatTalents);
+    // 条件经验（S「宿敌认证系统」）：与宿敌战斗经验翻倍
+    const holdsNemesis = flatEntriesOf(combatTalents).some((e) => e.kind === '宿敌');
+    const nemesis = coerceNemesis(this.game.saveProfile?.worldFlags?.nemesis);
+    const nemesisMult = nemesisExpMultiplier({
+      holdsTalent: holdsNemesis,
+      nemesis,
+      enemyName: session.enemyName,
+      expMult: entryStrength(combatTalents, '宿敌', 'expMult'),
+    });
+    if (nemesisMult.note) this.emitMessage(`▸ ${nemesisMult.note}`, 'assistant');
+    const settlement = settleSkirmish(
+      session,
+      playerC.level,
+      expMultiplierOf(hooks) *
+        nemesisMult.mult *
+        // 通用经验倍率（C「快速成长」等）：条目 `经验倍率{expMult}` 驱动
+        (entryStrength(combatTalents, '经验倍率', 'expMult') || 1) *
+        // 败北强化（A「败北强化」）：败北时的经验加成（名字钩子）
+        (session.finished === '败北' ? defeatExpMultiplierOf(hooks) : 1),
+    );
+    if (!settlement) return;
+
+    // ① 战斗记叙（一次 AI 调用，只演绎不算数）
+    const endpoint = this.getEndpointForAgent('skirmish_epilogue');
+    if (endpoint) {
+      try {
+        const text = await runSkirmishChronicle(
+          {
+            saveId: this.saveId,
+            endpoint,
+            enemyName: session.enemyName,
+            log: session.log,
+            finish: session.finished,
+            endReason: session.endReason,
+          },
+          { clientFactory: this.getClientFactory() },
+        );
+        this.emitMessage(`【战斗记叙】\n${text}`, 'assistant');
+      } catch (err) {
+        console.warn('[GamePipeline] 战斗记叙失败:', err);
+      }
+    }
+
+    // ② 结算审计链（先故事后账本）
+    this.emitMessage(settlement.expLines.join('\n'), 'assistant');
+
+    // ③ 同窗原子落库 + 回读 + 防重触发记录
+    if (this.ownsActiveSave) {
+      const sm = createStateManager(this.saveId);
+      // 首召入库（2026-09-17 巨兽召唤池）：种子查内容仓 cardPool，已有角色名查存档
+      const fortunePool = getCardPool();
+      const settlementPatches = buildSkirmishSettlementPatches({
+        playerName: playerC.name,
+        playerTotalExp: playerC.totalExp,
+        session,
+        settlement,
+        cardOf: (name) => {
+          const found = playerC.inventory.find((i) => i.name === name);
+          return found?.type === '卡牌' ? (found as CardItem) : undefined;
+        },
+        summonSeedOf: (name) => fortunePool.find((c) => c.name === name)?.companion,
+        existingCharacterNames: this.game.characters.map((c) => c.name),
+        playerLocation: playerC.location,
+        saveId: this.saveId,
+      });
+      // 体力/精神账（2026-09-25 访谈共识）：会话内拍拍记账，结算同窗一次落库。
+      // 负数 = delta 口径（update_character 数值负值按减法，钳 0 在提交层统一做）。
+      const spSpent = Math.max(0, Math.round(session.spSpent ?? 0));
+      const mpSpent = Math.max(0, Math.round(session.mpSpent ?? 0));
+      if (spSpent > 0 || mpSpent > 0) {
+        settlementPatches.push({
+          op: 'update_character',
+          target: `characters.${playerC.name}`,
+          value: {
+            ...(spSpent > 0 ? { sp: -spSpent } : {}),
+            ...(mpSpent > 0 ? { mp: -mpSpent } : {}),
+          },
+        } as StatePatch);
+      }
+      // 禁忌仿卡使用惩罚（canon：黑市赝品，声望账本记得每一笔）
+      const imitationUsed: string[] = [];
+      for (const name of session.playedCards) {
+        const played = playerC.inventory.find((i) => i.name === name);
+        const playedData =
+          played?.type === '卡牌'
+            ? ((played as CardItem).data as Record<string, unknown> | undefined)
+            : undefined;
+        if (playedData && typeof playedData.imitationOf === 'string') {
+          imitationUsed.push(name);
+        }
+      }
+      for (const name of imitationUsed) {
+        settlementPatches.push({
+          op: 'delta_variable',
+          target: 'profile.reputation',
+          amount: -3,
+          metadata: { source: 'forbidden_imitation', card: name },
+        } as StatePatch);
+      }
+      if (imitationUsed.length > 0) {
+        this.emitMessage(
+          `【铭法院名录】检测到禁忌仿卡流通：${imitationUsed.join('、')}——声望各 -3，通缉名录已记上一笔。`,
+          'assistant',
+        );
+      }
+      // 胜利素材（SSS「素材之王」）：胜利/碾压时额外掉一份素材（钩子 getter 此前没人调）
+      if (
+        (session.finished === '胜利' || session.finished === '碾压') &&
+        hasVictoryMaterial(hooks)
+      ) {
+        const drop = `素材·Lv${session.enemyLevel}`;
+        settlementPatches.push({
+          op: 'add_item',
+          target: `characters.${playerC.name}`,
+          value: { name: drop, quantity: 1, type: '材料', rarity: '优良' } as unknown as Record<
+            string,
+            unknown
+          >,
+          metadata: { source: 'talent-victory-material' },
+        } as StatePatch);
+        this.emitMessage(`▸ 【素材之王】缴获素材「${drop}」×1`, 'assistant');
+      }
+      // 自我进化（SSS「最终兵器：她」）：结算时让被立为最终兵器的伙伴卡按战况进化
+      {
+        const hasEvolveGate = (combatTalents ?? []).some((t) =>
+          (t.entries ?? []).some((e) => e.kind === '自我进化'),
+        );
+        if (hasEvolveGate) {
+          const weapon = playerC.inventory.find(
+            (i) =>
+              i.type === '卡牌' &&
+              (i as CardItem).data &&
+              ((i as CardItem).data as Record<string, unknown>).finalWeapon === true,
+          ) as CardItem | undefined;
+          const evolved = weapon
+            ? planSelfEvolution(weapon, session.enemyName, session.enemyLevel)
+            : undefined;
+          if (evolved?.ok && evolved.plan) {
+            this.emitMessage(`【最终兵器】${evolved.plan.summary}`, 'assistant');
+            settlementPatches.push({
+              op: 'update_item',
+              target: `characters.${playerC.name}`,
+              value: {
+                name: weapon!.name,
+                changes: { 词条: evolved.plan.new词条 },
+              },
+            } as StatePatch);
+          }
+        }
+      }
+      // 支配者倒影（S）：战败时抄下敌方**威胁最高的一式**作制卡蓝本。
+      //    自动记下并给可见提示——复制本身没代价，用不用在制卡时决定。
+      if (session.finished === '败北') {
+        const holdsMirror = flatEntriesOf(combatTalents).some((e) => e.kind === '倒影');
+        if (holdsMirror) {
+          const target = pickCopyTarget(session.intents);
+          if (target) {
+            const before = coerceBlueprints(this.game.saveProfile?.worldFlags?.skillBlueprints);
+            const cap = Math.max(1, entryStrength(combatTalents, '倒影', 'maxHold'));
+            const after = addBlueprint(
+              before.length >= cap ? before.slice(before.length - cap + 1) : before,
+              {
+                name: target.move,
+                from: session.enemyName,
+                day: this.currentGameDay(),
+                threat: target.threat,
+              },
+            );
+            settlementPatches.push({
+              op: 'set_variable',
+              target: 'worldFlags.skillBlueprints',
+              value: after,
+            } as StatePatch);
+            this.emitMessage(
+              `▸ 【支配者倒影】你记住了【${session.enemyName}】的「${target.move}」（威胁 ${target.threat}）——制卡时可以拿它当蓝本。`,
+              'assistant',
+            );
+          }
+        }
+      }
+      // 宿敌认证（S）：败给更强的敌人 → 他被记为宿敌；战胜宿敌 → 夺取气运并清空。
+      if (holdsNemesis) {
+        const today = this.currentGameDay();
+        if (
+          shouldMarkNemesis({
+            finished: session.finished,
+            enemyLevel: session.enemyLevel,
+            playerLevel: playerC.level,
+          })
+        ) {
+          if (!isNemesisBattle(nemesis, session.enemyName)) {
+            settlementPatches.push({
+              op: 'set_variable',
+              target: 'worldFlags.nemesis',
+              value: { name: session.enemyName, level: session.enemyLevel, since: today },
+            } as StatePatch);
+            this.emitMessage(
+              `▸ 【宿敌认证】你输给了【${session.enemyName}】——从此他视你为宿敌。与他交锋时，训练效率翻倍。`,
+              'assistant',
+            );
+          }
+        } else if (
+          isNemesisBattle(nemesis, session.enemyName) &&
+          (session.finished === '胜利' || session.finished === '碾压')
+        ) {
+          // 夺取气运：一次性把恩怨结清（金钱按宿敌等级折算）
+          const seized = Math.max(10, session.enemyLevel * 10);
+          settlementPatches.push({
+            op: 'update_character',
+            target: `characters.${playerC.name}`,
+            value: { money: playerC.money + seized },
+          } as StatePatch);
+          settlementPatches.push({
+            op: 'set_variable',
+            target: 'worldFlags.nemesis',
+            value: null,
+          } as StatePatch);
+          this.emitMessage(
+            `▸ 【宿敌认证】你赢了【${nemesis!.name}】——夺取其气运：+${seized} GC。这段恩怨结了。`,
+            'assistant',
+          );
+        }
+      }
+      // 打脸升级（S）：被嘲讽标记当天打赢 → 海量经验 + 打脸点数
+      {
+        const holdsSlap = flatEntriesOf(combatTalents).some((e) => e.kind === '打脸');
+        const slap = settleFaceSlap({
+          holdsTalent: holdsSlap,
+          mark: coerceTaunt(this.game.saveProfile?.worldFlags?.taunted),
+          today: this.currentGameDay(),
+          finished: session.finished,
+          expBonus: entryStrength(combatTalents, '打脸', 'expBonus'),
+          pointsPerWin: entryStrength(combatTalents, '打脸', 'pointsPerWin'),
+        });
+        if (slap.expBonus > 0 || slap.points > 0) {
+          const beforePoints = counterOf(
+            coerceCounters(this.game.saveProfile?.worldFlags?.counters),
+            FACE_SLAP_KEY,
+          );
+          settlementPatches.push({
+            op: 'update_character',
+            target: `characters.${playerC.name}`,
+            value: { totalExp: Math.max(0, session.playerHp) * 0 + slap.expBonus },
+            metadata: { delta: true, source: 'face-slap' },
+          } as StatePatch);
+          settlementPatches.push({
+            op: 'set_variable',
+            target: `worldFlags.counters.${FACE_SLAP_KEY}`,
+            value: beforePoints + slap.points,
+          } as StatePatch);
+          // 嘲讽标记用掉即清（打了脸，这事就过去了）
+          settlementPatches.push({
+            op: 'set_variable',
+            target: 'worldFlags.taunted',
+            value: null,
+          } as StatePatch);
+          if (slap.note) this.emitMessage(`▸ ${slap.note}`, 'assistant');
+        }
+      }
+      // 终点「强敌型」（委托×地图闭环 决议 #13 修订）：在目的地击败目标之敌 → 写证据，
+      // 委托板下一次扫账（scanFinaleCommissions）发卡结案。Code 只记证据不发卡——
+      // 发卡与「已完成」记档在扫账里一次原子提交，避免战斗结算半途插一条交付流。
+      if (session.finished === '胜利' || session.finished === '碾压') {
+        const cFlags = coerceCommissionsFlags(this.game.saveProfile?.worldFlags?.commissions);
+        const cDefs = this.game.allCommissionDefs();
+        for (const activeEntry of cFlags.active ?? []) {
+          const cDef = cDefs.find((d) => d.name === activeEntry.defName);
+          if (cDef?.finale?.type !== '强敌') continue;
+          const finaleTarget = cDef.finale.target;
+          if (!finaleTarget) continue;
+          const enemyName = session.enemyName ?? '';
+          if (!enemyName.includes(finaleTarget) && !finaleTarget.includes(enemyName)) continue;
+          if (!midTierRefHit(cDef.destMidTier, cFlags.currentMidTier)) continue;
+          settlementPatches.push({
+            op: 'set_variable',
+            target: `worldFlags.commissions.finaleEvidence.${cDef.name}`,
+            value: 'battle',
+          } as StatePatch);
+          this.emitMessage(
+            `▸ 【终点】${finaleTarget} 已倒下——委托「${cDef.name}」可以结案了。`,
+            'assistant',
+          );
+        }
+      }
+      // 复生（S「再生」）：败北结算时 HP 不落 0——不死之身，只是这一场输了。
+      // 与「免死」分工：那条管**战中**续战（会话级），这条管**战后**不真死（结算级）。
+      if (session.finished === '败北') {
+        const reviveGate = (combatTalents ?? []).some((t) =>
+          (t.entries ?? []).some((e) => e.kind === '复生'),
+        );
+        if (reviveGate) {
+          const floor = Math.max(1, entryStrength(combatTalents, '复生', 'hpFloor'));
+          settlementPatches.push({
+            op: 'update_character',
+            target: `characters.${playerC.name}`,
+            value: { hp: Math.max(floor, session.playerHp) },
+          } as StatePatch);
+          this.emitMessage(
+            `▸ 【再生】肉身重新聚拢——战败，但没有真正死去（HP 保底 ${floor}）。`,
+            'assistant',
+          );
+        }
+      }
+      // 同契（SS「爱」）：与首张伙伴卡同步成长——战斗经验按 syncPct 同步。
+      // 「首张伙伴卡」= 卡组第一张召唤/军团卡（确定序；卡组顺序即玩家心意）。
+      if (settlement.exp.total > 0) {
+        const holdsBond = flatEntriesOf(combatTalents).some((e) => e.kind === '同契');
+        if (holdsBond) {
+          const syncPct = entryStrength(combatTalents, '同契', 'syncPct');
+          const firstCompanion = (playerC.cardAlbum?.deck ?? [])
+            .map((n) => playerC.inventory.find((i) => i.name === n && i.type === '卡牌'))
+            .find((c) => {
+              const words = (c as CardItem | undefined)?.词条 ?? [];
+              return words.includes('召唤') || words.includes('军团');
+            }) as CardItem | undefined;
+          if (firstCompanion && syncPct > 0) {
+            const syncExp = Math.round(settlement.exp.total * (syncPct / 100));
+            if (syncExp > 0) {
+              settlementPatches.push({
+                op: 'update_item',
+                target: `characters.${playerC.name}`,
+                value: {
+                  name: firstCompanion.name,
+                  changes: { cardExp: (firstCompanion.cardExp ?? 0) + syncExp },
+                },
+              } as StatePatch);
+              this.emitMessage(
+                `▸ 【同契】你与【${firstCompanion.name}】同频共振——她分得 ${syncExp} 卡牌经验`,
+                'assistant',
+              );
+            }
+          }
+        }
+      }
+      // 败犬烙印（SS）：每次战败在灵魂上留一枚。累计计数走 worldFlags.counters，
+      // **不随天失效**——攒着，直到制卡时烧掉一枚扭转命运。
+      if (session.finished === '败北') {
+        const scarGate = (combatTalents ?? []).some((t) =>
+          (t.entries ?? []).some((e) => e.kind === '烙印'),
+        );
+        if (scarGate) {
+          const before = counterOf(
+            coerceCounters(this.game.saveProfile?.worldFlags?.counters),
+            '败犬烙印',
+          );
+          const cap = entryStrength(combatTalents, '烙印', 'maxHold');
+          const next = Math.min(cap > 0 ? cap : 9, before + 1);
+          if (next > before) {
+            settlementPatches.push({
+              op: 'set_variable',
+              target: 'worldFlags.counters.败犬烙印',
+              value: next,
+            } as StatePatch);
+            this.emitMessage(
+              `▸ 【败犬烙印】这一败在你灵魂上留下一枚烙印（${before} → ${next}）——制卡时可烧掉一枚扭转词条冲突。`,
+              'assistant',
+            );
+          } else {
+            this.emitMessage(
+              `▸ 【败犬烙印】烙印已满（${before}/${cap}）——先烧掉几枚再用。`,
+              'assistant',
+            );
+          }
+        }
+      }
+      // 战败补偿（SSS「世界线的收束点」）：败北 + 持钩子 → 抽三条「如果你赢了」的 if 线，
+      // 其中一条成真（经验/金钱/素材三选一），并入同窗 patch
+      if (session.finished === '败北' && hasDefeatReward(collectRuleHooks(combatTalents))) {
+        const plan = planDefeatCompensation(playerC.level);
+        this.emitMessage(plan.summary, 'assistant');
+        const g = plan.granted;
+        if (g.rewardKind === 'exp' && g.exp) {
+          settlementPatches.push({
+            op: 'update_character',
+            target: `characters.${playerC.name}`,
+            value: { totalExp: playerC.totalExp + g.exp },
+            metadata: { delta: true, source: 'defeat_compensation' },
+          } as StatePatch);
+        } else if (g.rewardKind === 'gold' && g.gold) {
+          settlementPatches.push({
+            op: 'update_character',
+            target: `characters.${playerC.name}`,
+            value: { money: g.gold },
+            metadata: { delta: true, source: 'defeat_compensation' },
+          } as StatePatch);
+        } else if (g.material) {
+          settlementPatches.push({
+            op: 'add_item',
+            target: `characters.${playerC.name}`,
+            value: {
+              name: g.material.name,
+              quantity: g.material.quantity,
+              type: '材料',
+            },
+          } as StatePatch);
+        }
+      }
+      // 击杀掠取（天赋）：胜利/碾压时按条目缴获赏金（delta 入账）
+      let killGc = 0;
+      if (session.finished === '胜利' || session.finished === '碾压') {
+        for (const t of combatTalents ?? []) {
+          for (const e of t.entries) {
+            if (e.kind === '击杀掠取') killGc += Math.max(0, Math.round(e.params.gold ?? 0));
+          }
+        }
+      }
+      if (killGc > 0) {
+        settlementPatches.push({
+          op: 'update_character',
+          target: `characters.${playerC.name}`,
+          value: { money: killGc },
+          metadata: { delta: true, source: 'skirmish-kill' },
+        });
+        this.emitMessage(`▸ 击杀掠取：缴获 ${killGc} G`, 'assistant');
+      }
+      // 无名河封印账：本场终局递减一场，归零归还（与结算同一次原子落库）
+      const sealedLedger = coerceSealedTalents(this.game.saveProfile?.worldFlags?.sealedTalents);
+      if (Object.keys(sealedLedger).length > 0) {
+        const tick = decrementSealedTalents(sealedLedger);
+        settlementPatches.push({
+          op: 'set_variable',
+          target: 'worldFlags.sealedTalents',
+          value: tick.ledger,
+        } as StatePatch);
+        for (const name of tick.returned) {
+          this.emitMessage(`▸ 【无名河】河水退去——天赋【${name}】回到了你身上`, 'assistant');
+        }
+      }
+      const result = await sm.commitChatState(settlementPatches);
+      if (result.errors.length > 0) {
+        console.warn('[GamePipeline] 交锋结算部分失败:', result.errors);
+      }
+      await this.game.refreshFromDb(this.saveId);
+      // 记录「最近已结算战斗」防 dispatcher 对已结算战斗再发 combat_trigger（v3 同款语义）
+      this._recentCombat = {
+        allies: [playerC.name],
+        enemies: [session.enemyName],
+        outcome:
+          session.finished === '撤退'
+            ? 'fled'
+            : session.finished === '败北'
+              ? 'enemy_win'
+              : 'ally_win',
+        endedAtTurn: this.game.activeSave?.metadata?.totalTurns ?? 0,
+      };
+    }
+  }
+
+  /**
+   * 融合起名（T8-② 裁定 B）：把两源天赋与产物骨架条目交给 AI 起名写描述。
+   * 只演绎不算数——条目数值由 Code 化学反应定案；失败走玩家自填兜底。
+   */
+  private async runTalentFusionNaming(
+    sourceA: string,
+    sourceB: string,
+    entryLines: string[],
+  ): Promise<{ ok: boolean; name?: string; description?: string; reason?: string }> {
+    const endpoint = this.getEndpointForAgent('talent-naming');
+    if (!endpoint) return { ok: false, reason: 'talent-naming 未解析到 API 池' };
+    try {
+      const r = await runTalentFusionNaming(
+        { saveId: this.saveId, endpoint, sourceA, sourceB, productEntryLines: entryLines },
+        { clientFactory: this.getClientFactory() },
+      );
+      return { ok: true, name: r.name, description: r.description };
+    } catch (err) {
+      return { ok: false, reason: err instanceof Error ? err.message : String(err) };
     }
   }
 
@@ -2732,6 +4030,8 @@ export class GamePipeline {
     for (const marker of markers) {
       try {
         this.updateAgentActivityStatus('craft_gen', runActivityId);
+        const playerTalentList = this.game.player?.talents?.list ?? [];
+        const talentBias = buildCraftBiasLines(playerTalentList).join('\n');
         const request = {
           saveId: this.saveId,
           marker,
@@ -2741,15 +4041,32 @@ export class GamePipeline {
           configs: this.chainData?.agentConfigs,
           worldBooks: this.chainData?.worldBooks,
           presets: this.chainData?.presets,
+          talentBias,
+          // 制卡评级上浮：当日「制卡顺利」+1 档；预付了败犬烙印则再 +2 档。
+          // 烙印在这里**真正扣掉**（预付开关随之清零），扣不动就退化成 +1。
+          ratingLift: await this.consumeCraftLift(),
+          // 赌徒谬论：厄运层数与单次上限（只在**对冲融合/相克**上兑现，用掉即清空）
+          misfortuneLayers: counterOf(
+            coerceCounters(this.game.saveProfile?.worldFlags?.counters),
+            MISFORTUNE_KEY,
+          ),
+          misfortuneMaxLift: entryStrength(playerTalentList, '赌运', 'maxLift'),
+          // 时间回溯：预付开关（失败才触发，成功不浪费）
+          rewindArmed: this.game.saveProfile?.worldFlags?.pendingRewind === true,
+          rewindLift: 1,
         } as any;
+        // 禁忌仿卡配方（2026-09-17）：内容仓 cardPool 带 imitation 字段的条目
+        const imitationRecipes = getCardPool().filter((c) => c.imitation);
         const result = await runCraftGenChain(request, {
           clientFactory,
           stateManager,
+          imitationRecipes,
         });
         this.clearAgentActivityStatus('craft_gen', undefined, runActivityId);
         if (result.narrative) {
           this.emitMessage(result.narrative, 'assistant');
         }
+        await this.settleCraftFlowHooks(result, playerTalentList, this.game.player?.name);
       } catch (err) {
         if (isAbortError(err)) {
           this.clearAgentActivityStatus('craft_gen', undefined, runActivityId);
@@ -2843,7 +4160,7 @@ export class GamePipeline {
    * 🔴 2026-08-02 批量 item_gen 的单批上限。
    *
    * 一次打包过多请求会让 item_gen 单次调用耗时暴涨（9 个请求 ≈ 240s+，见
-   * fated-poem-debug-2743e219），且 AI 思考过重（7817 字 reasoning）容易撞超时。
+   * narrative-debug-2743e219），且 AI 思考过重（7817 字 reasoning）容易撞超时。
    * 超上限时按此值分批，每批仍是一次调用（相对逐条 N 次已大幅缩减）。
    * 5 个/批 ≈ 2 批，总耗时 ≈ 2 × 单批时间，比 9 个挤一批更稳。
    */
@@ -2909,75 +4226,9 @@ export class GamePipeline {
   }
 
   /**
-   * `image_prompt` 侧链（图像生成 G 阶段 / D28）—— 中文那句话 → danbooru 串。
-   *
-   * 这就是 `scene-image-store` 的 `runPromptAgent` 缝要的那个实现，形状与它逐字对齐
-   * （`ImagePromptOutput | ImageGenFailure`），于是接线只剩一行 `runPromptAgent: (r, s) =>
-   * pipeline.runImagePromptAgent(r, s)`。
-   *
-   * 🔴 **限额 `checkQuota` 必须在本方法之前**（D32）。两处花钱（LLM token + Anlas），
-   * 闸门要在最前面 —— 否则自动档会为被限流器拦下的插画白烧一次侧链调用。这条排序
-   * 由 store 的 `generate()` 保证，本方法只管调用本身。
-   *
-   * 🔴 **不抛错**：一切失败降级成 `errorKind: 'prompt-agent'`，上游一次都不会发。
-   *
-   * 🔴 `systemPromptOverride` 是**当前方言**那段话（图像 v2 / C3·C5）。方言拥有整个装配
-   *    契约，「教模型怎么说话」是其中一格 —— 而方言解析只在 `scene-image-seams` 一处
-   *    发生（本方法不认识方言，也不该认识）。传进来就**合并**进 image_prompt 那条 config，
-   *    不传就照旧走 agent-config / 模板兜底。
-   */
-  async runImagePromptAgent(
-    request: ImagePromptRequest,
-    signal?: AbortSignal,
-    systemPromptOverride?: string,
-  ): Promise<ImagePromptOutput | ImageGenFailure> {
-    const fail = (detail: string): ImageGenFailure => ({
-      ok: false,
-      kind: 'prompt-agent',
-      message: '提示词生成失败了，点重试；或自己写一份',
-      detail,
-      retryable: true,
-    });
-
-    const endpoint = this.getEndpointForAgent('image_prompt');
-    if (!endpoint) return fail('未配置 API endpoint');
-
-    const activityRunId = this.activeRunId ?? this.game.startAgentActivityRun(undefined, true);
-    this.game.updateAgentStatus('image_prompt', activityRunId);
-    let activityError: string | undefined;
-
-    try {
-      // 手动档可能在任何时候点（甚至本会话还没跑过一轮），chainData 不能假定已就绪
-      const chain = await this.ensureChainData();
-      const { callImagePromptAgent } = await import('@engine/image-prompt-agent');
-      const result = await callImagePromptAgent(
-        {
-          saveId: this.saveId,
-          request,
-          context: this.currentContext ?? this.buildContext(''),
-          endpoint,
-          configs: withImagePromptSystem(chain.agentConfigs, systemPromptOverride),
-          worldBooks: chain.worldBooks,
-          presets: chain.presets,
-          ...(signal ? { signal } : {}),
-        },
-        { clientFactory: this.getClientFactory(activityRunId) },
-      );
-      if (!result.ok) activityError = result.detail;
-      return result.ok ? result.value : result;
-    } catch (err) {
-      activityError = err instanceof Error ? err.message : String(err);
-      console.error('[GamePipeline] image_prompt 侧链失败:', err);
-      return fail(activityError);
-    } finally {
-      this.game.clearAgentStatus('image_prompt', activityError, activityRunId);
-    }
-  }
-
-  /**
    * 侧链要用的 configs/worldBooks/presets —— run() 里那三行的**惰性版本**。
    *
-   * 存在的理由只有一个：手动点「生成插画」不经过 run()，而 `chainData` 是 run()
+   * 存在的理由只有一个：手动触发的侧链不经过 run()，而 `chainData` 是 run()
    * 才填的。缺它时 systemPrompt 会退化成一行 stub（char_gen 2026-07-17 的真机教训）。
    */
   private async ensureChainData(): Promise<{
@@ -2989,12 +4240,7 @@ export class GamePipeline {
     if (this.chainData) return this.chainData;
     const { presets, agentDefaults } = await this.loadPresets();
     const worldBooks = await this.loadActiveWorldBooks();
-    const systemCoreWorkshopBookIds = await this.loadSystemCoreWorkshopBookIds(worldBooks);
-    const agentConfigs = this.buildAgentConfigs(
-      agentDefaults,
-      undefined,
-      systemCoreWorkshopBookIds,
-    );
+    const agentConfigs = this.buildAgentConfigs(agentDefaults);
     this.chainData = { agentConfigs, worldBooks, presets, agentDefaults };
     return this.chainData;
   }
