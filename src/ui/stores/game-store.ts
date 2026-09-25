@@ -76,6 +76,7 @@ import { isRerollFace, rollOnTable } from '@engine/card-workshop/fortune-dice';
 import { DAILY_BUFF_CRAFT_LUCK } from '@engine/card-workshop/fortune-dice';
 import type { FortuneDiceTable } from '@engine/card-workshop/fortune-dice';
 import { planRarityUpgrade, registerMaterialElements } from '@engine/card-workshop/material';
+import { insightModOf } from '@engine/card-workshop/derived-stats';
 import { planUnequalExchange } from '@engine/card-workshop/unequal-exchange';
 import { floorRarityForLevel, planMaterialGacha } from '@engine/card-workshop/material-gacha';
 import { addSpirit, coerceSpirits } from '@engine/card-workshop/behind-spirits';
@@ -1317,7 +1318,8 @@ export const useGameStore = defineStore('game', () => {
     // 产出定义来自卡池（内容仓 + 自定义卡，按名字查）
     const def = findCardDefinition(cardName);
     const y = def?.yield;
-    if (!y || (!y.name && !y.gc)) {
+    // 回复字段（2026-09-25）单独成立门槛：纯回复卡（如止血药膏）可以不产出物品/金钱
+    if (!y || (!y.name && !y.gc && !y.hp && !y.mp && !y.sp)) {
       return { ok: false, reason: '这张卡没有产出定义，无法使用' };
     }
 
@@ -1344,6 +1346,20 @@ export const useGameStore = defineStore('game', () => {
         metadata: { delta: true, source: 'supply_card' },
       } as StatePatch);
     }
+    // 使用即恢复（2026-09-25 访谈共识）：正数 = delta 加量，钳上限在提交层统一做
+    const recovery = {
+      ...(y.hp && y.hp > 0 ? { hp: Math.round(y.hp) } : {}),
+      ...(y.mp && y.mp > 0 ? { mp: Math.round(y.mp) } : {}),
+      ...(y.sp && y.sp > 0 ? { sp: Math.round(y.sp) } : {}),
+    };
+    if (Object.keys(recovery).length > 0) {
+      patches.push({
+        op: 'update_character',
+        target,
+        value: recovery,
+        metadata: { delta: true, source: 'supply_card' },
+      } as StatePatch);
+    }
 
     const sm = createStateManager(activeSaveId.value);
     const result = await sm.commitChatState(patches);
@@ -1353,9 +1369,12 @@ export const useGameStore = defineStore('game', () => {
     const parts: string[] = [];
     if (y.name) parts.push(`${y.name} ×${Math.max(1, Math.round(y.quantity ?? 1))}`);
     if (y.gc) parts.push(`${Math.round(y.gc)} GC`);
+    if (y.hp && y.hp > 0) parts.push(`HP +${Math.round(y.hp)}`);
+    if (y.mp && y.mp > 0) parts.push(`MP +${Math.round(y.mp)}`);
+    if (y.sp && y.sp > 0) parts.push(`SP +${Math.round(y.sp)}`);
     return {
       ok: true,
-      summary: `使用「${cardName}」——获得 ${parts.join('、')}（卡已消耗）`,
+      summary: `使用「${cardName}」——${parts.join('、')}（卡已消耗）`,
     };
   }
 
@@ -2037,6 +2056,7 @@ export const useGameStore = defineStore('game', () => {
       ...(input.blueprintName ? { blueprint: { name: input.blueprintName } } : {}),
       inventory: playerChar.inventory,
       d20: 1 + Math.floor(Math.random() * 20),
+      insightMod: insightModOf(playerChar.attributes),
       fallbackName: intentName ?? `${input.mainName}·卡`,
       talents: playerChar.talents?.list ?? [],
       expMult: strengthOf('经验倍率', 'expMult'),

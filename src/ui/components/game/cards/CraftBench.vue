@@ -23,6 +23,7 @@ import {
 } from '@engine/card-workshop/material';
 import type { MaterialSpec } from '@engine/card-workshop/card-fusion';
 import { deriveFallbackProductName } from '@engine/card-craft-narrate';
+import { insightModOf } from '@engine/card-workshop/derived-stats';
 import { REPAIR_RECIPE, isDamaged, planQuench, planRepair } from '@engine/card-workshop/repair';
 import type { RepairPlan } from '@engine/card-workshop/repair';
 import { cardKindOf } from '@engine/card-workshop/card-kind';
@@ -535,6 +536,7 @@ const craftPreview = computed(() => {
     intent: craftIntent.value,
     inventory: inv,
     d20: 10, // 预览用中位数骰，实际掷骰在提交时
+    insightMod: insightModOf(player.value?.attributes),
     fallbackName: deriveFallbackProductName(craftIntent.value) ?? `${craftMain.value}·卡`,
     talents: [],
     lift: {},

@@ -171,12 +171,43 @@ export function planEffects(plan: CardPlayPlan): CardInPlayEffect[] {
   return list;
 }
 
+// ═══ MP 门槛（2026-09-25 访谈共识：MP=交锋资源）═══
+// 主动显灵的形态打出扣 MP（铭灵显世需精神支撑）；装备=持续在场不重复收费、
+// 物资=道具通道、素材=不可打出，三者免。MP 不足硬门槛（禁打）——基础应对
+// （强攻/防御/闪避）不耗 MP 永远可用，交锋不会卡死。
+export const CARD_MP_COST_BY_TIER: Readonly<Record<string, number>> = Object.freeze({
+  白铁: 5,
+  青铜: 10,
+  白银: 20,
+  鎏金: 35,
+  星辉: 55,
+});
+
+/** 打出要烧 MP 的形态（访谈共识口径：技能/领域/召唤/军团） */
+const MP_COST_KINDS: ReadonlySet<string> = new Set(['技能', '领域', '召唤', '军团']);
+
+/** 这张卡打出要扣的 MP（不扣费的形态返回 0；UI 成本标注共用） */
+export function mpCostOf(card: Pick<CardItem, 'cardTier' | '词条'>): number {
+  const kind = cardKindOf(card.词条);
+  if (!MP_COST_KINDS.has(kind)) return 0;
+  return CARD_MP_COST_BY_TIER[card.cardTier] ?? 0;
+}
+
 /** 八类 → 交锋拍出牌计划（纯函数；数值见矩阵注释） */
 export function cardPlayPlan(
   card: Pick<CardItem, 'name' | 'cardTier' | '词条' | 'cardPowerBonus' | '战技'>,
   stats: { atk: number },
+  resources?: { mp?: number },
 ): CardPlayPlan {
   const kind = cardKindOf(card.词条);
+  // MP 硬门槛（先于可打性之外的判定；缺省 resources = 老调用零门槛，测试零迁移）
+  const cost = mpCostOf(card);
+  if (cost > 0 && resources?.mp !== undefined && resources.mp < cost) {
+    return {
+      mode: '禁打',
+      reason: `MP 不足——打出「${card.name}」需要 ${cost} MP（当前 ${resources.mp}）`,
+    };
+  }
   // 🔴 2026-09-18 裁决：禁打判据统一走 isPlayable（素材 = 材料载体；物资 = 纯道具卡）。
   //    物资卡此前是「直击」（与技能同类的一次性攻击卡），现按道具定位退出战斗——
   //    它的使用在卡册/背包页的道具通道，不在交锋里。
@@ -260,11 +291,13 @@ export function sealedCardPlay(
   stats: { atk: number },
   d20: number,
   willMod: number,
+  insightMod = 0,
 ): SealedPlayResult {
-  const outcome = judgeUnseal(card, d20, willMod);
+  const outcome = judgeUnseal(card, d20, willMod, insightMod);
   const dc = unsealDC(card);
+  const bonusText = `意志${willMod}${insightMod ? `${insightMod > 0 ? '+' : ''}${insightMod}理解` : ''}`;
   const prepend = [
-    `▸ 启封判定：d20=${d20}+意志${willMod} vs DC${dc} → ${outcome.kind}（${outcome.margin >= 0 ? '+' : ''}${outcome.margin}）`,
+    `▸ 启封判定：d20=${d20}+${bonusText} vs DC${dc} → ${outcome.kind}（${outcome.margin >= 0 ? '+' : ''}${outcome.margin}）`,
   ];
   const rebound = REBOUND_DAMAGE[card.cardTier] ?? REBOUND_DAMAGE['白铁'];
 

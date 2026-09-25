@@ -46,6 +46,8 @@ import {
 import { applyBond, bondForCard, type BondInfo } from '@engine/card-workshop/affection-bond';
 import { cardKindOf } from '@engine/card-workshop/card-kind';
 import { willModifierOf } from '@engine/card-workshop/unsealing';
+import { mpCostOf } from '@engine/card-workshop/entry-combat';
+import { insightModOf } from '@engine/card-workshop/derived-stats';
 import { getCommissionDefs } from '@engine/commission-runtime';
 import { coerceCommissionsFlags } from '@engine/card-workshop/commission-flags';
 /** 蜡痕计数键（白蜡城代价；worldFlags.counters 段） */
@@ -571,6 +573,14 @@ export class GamePipeline {
     isUserMessage = true,
     sourceMessageId?: string,
   ): Promise<boolean> {
+    // 跨日恢复（2026-09-25 访谈共识）：日切时 MP/SP 回满、HP 回上限的 50%。
+    // 挂在每回合开头——gameDay 比对 worldFlags.lastRegenDay，幂等且不依赖显式日切事件；
+    // 隔了多天（旅途补足/快进）按天循环补（HP 每天最多回一半，睡够照样有痕）。
+    // 🔴 fire-and-forget：await 会把「isGenerating 置位」推迟一个微任务，
+    //    破坏 abort 时序（Stop 锁位测试实证）——恢复晚半拍无感，锁位早半拍致命。
+    void this.applyDayRolloverRegen().catch((err) =>
+      console.warn('[GamePipeline] 跨日恢复失败（不阻断回合）:', err),
+    );
     if (this.abortController || !this.ownsActiveSave) return false;
     console.log(
       '[GamePipeline] run() called — userInput length:',
@@ -1133,6 +1143,7 @@ export class GamePipeline {
       talents: this.game.player?.talents,
       // 行动选项方案（2026-09-23 共识稿）：存档级选择（worldFlags）+ 全局自定义库
       // （settings）。{{OPTION_POLICY}} 数据源；id 缺席/未知由 resolveOptionScheme 回落标准。
+      insightMod: insightModOf(this.game.player?.attributes),
       optionSchemeId: (this.game.saveProfile?.worldFlags as Record<string, unknown> | undefined)?.[
         'optionSchemeId'
       ] as string | undefined,
@@ -2929,6 +2940,7 @@ export class GamePipeline {
         enemyLevel: assessment.enemyLevel,
         intents,
         playerHp: Math.min(playerC.hp, maxHp),
+        playerSp: playerC.sp,
         playerMaxHp: maxHp,
         enemyHp: assessment.enemyHp,
         guard: deckGuard,
@@ -3104,6 +3116,7 @@ export class GamePipeline {
           deriveCombatStats({ attributes: playerC.attributes, level: playerC.level }),
           this.rollSkirmishD20(),
           willModifierOf(playerC.attributes),
+          insightModOf(playerC.attributes),
         );
         const beatDice = this.rollSkirmishD20();
         const escalateBeat = escalate > 0 && session.beat > 0 ? escalate * session.beat : 0;
@@ -3139,6 +3152,8 @@ export class GamePipeline {
           prepend,
           recoil,
           sealBroke,
+          // 封印卡 MP：破封（效果发动）才扣——哑火/反噬空过不收费
+          ...(res.effectFired ? { mpCost: mpCostOf(card) } : {}),
           ...(contract ? { contract } : {}),
           ...chapterOpts,
         });
@@ -3150,6 +3165,8 @@ export class GamePipeline {
       const plan = cardPlayPlan(
         card,
         deriveCombatStats({ attributes: playerC.attributes, level: playerC.level }),
+        // MP 硬门槛（2026-09-25 访谈共识）：有效 MP = 角色 MP − 本会话已耗
+        { mp: playerC.mp - (session.mpSpent ?? 0) },
       );
       if (plan.mode === '禁打') {
         this.emitMessage(`【交锋】${plan.reason}。`, 'assistant');
@@ -3348,17 +3365,24 @@ export class GamePipeline {
     }
     // 免死（绞刑架幸存者）：持天赋且本场没用过 → 允许本拍锁血续战
     const lastStand = this.lastStandOption(session);
+    // MP 扣费（2026-09-25 访谈共识）：主动形态卡打出扣 MP——常规路径恒扣
+    const beatCardItem =
+      choice.kind === '卡'
+        ? playerC.inventory.find((i) => i.name === choice.name && i.type === '卡牌')
+        : undefined;
+    const beatMpCost = beatCardItem ? mpCostOf(beatCardItem as CardItem) : 0;
     const next = playBeat(
       session,
       action,
       this.rollSkirmishD20(),
-      prepend || activate || finalChapter || lastStand || comboFired
+      prepend || activate || finalChapter || lastStand || comboFired || beatMpCost > 0
         ? {
             activate,
             prepend,
             ...chapterOpts,
             ...(lastStand ? { lastStand } : {}),
             ...(comboFired ? { comboFired } : {}),
+            ...(beatMpCost > 0 ? { mpCost: beatMpCost } : {}),
           }
         : undefined,
     );
@@ -3471,6 +3495,43 @@ export class GamePipeline {
    * 回读（否则 HUD 是开战前血量假象）。整场战斗 AI 调用恒为 2 次（评估 + 记叙），
    * 拍内零 AI——拖沓的病根不回归。记叙失败静默降级（账本照发）。
    */
+  /**
+   * 跨日恢复（2026-09-25 访谈共识）：MP/SP 回满，HP 每天回上限的 50%。
+   * worldFlags.lastRegenDay 记账（幂等）；无变化零写入。失败只告警不阻断回合。
+   */
+  private async applyDayRolloverRegen(): Promise<void> {
+    const playerC = this.game.player;
+    if (!playerC || !this.ownsActiveSave) return;
+    const today = this.currentGameDay();
+    const flags = (this.game.saveProfile?.worldFlags ?? {}) as Record<string, unknown>;
+    const last = typeof flags['lastRegenDay'] === 'number' ? (flags['lastRegenDay'] as number) : null;
+    if (last !== null && today <= last) return;
+    const days = last === null ? 1 : Math.max(1, Math.min(30, today - last));
+    const hpHeal = Math.ceil((playerC.maxHp || 0) / 2) * days;
+    const sm = createStateManager(this.saveId);
+    const result = await sm.commitChatState([
+      {
+        op: 'update_character',
+        target: `characters.${playerC.name}`,
+        value: {
+          hp: Math.min(playerC.maxHp, playerC.hp + hpHeal) - playerC.hp,
+          mp: (playerC.maxMp ?? 0) - playerC.mp,
+          sp: (playerC.maxSp ?? 0) - playerC.sp,
+        },
+      } as StatePatch,
+      {
+        op: 'set_variable',
+        target: 'worldFlags.lastRegenDay',
+        value: today,
+      } as StatePatch,
+    ]);
+    if (result.success) {
+      await this.game.refreshFromDb();
+    } else {
+      console.warn('[GamePipeline] 跨日恢复落库失败:', result.errors);
+    }
+  }
+
   private async settleAndNarrate(session: SkirmishSession): Promise<void> {
     if (!session.finished) return;
     const playerC = this.game.player;
@@ -3543,6 +3604,20 @@ export class GamePipeline {
         playerLocation: playerC.location,
         saveId: this.saveId,
       });
+      // 体力/精神账（2026-09-25 访谈共识）：会话内拍拍记账，结算同窗一次落库。
+      // 负数 = delta 口径（update_character 数值负值按减法，钳 0 在提交层统一做）。
+      const spSpent = Math.max(0, Math.round(session.spSpent ?? 0));
+      const mpSpent = Math.max(0, Math.round(session.mpSpent ?? 0));
+      if (spSpent > 0 || mpSpent > 0) {
+        settlementPatches.push({
+          op: 'update_character',
+          target: `characters.${playerC.name}`,
+          value: {
+            ...(spSpent > 0 ? { sp: -spSpent } : {}),
+            ...(mpSpent > 0 ? { mp: -mpSpent } : {}),
+          },
+        } as StatePatch);
+      }
       // 禁忌仿卡使用惩罚（canon：黑市赝品，声望账本记得每一笔）
       const imitationUsed: string[] = [];
       for (const name of session.playedCards) {

@@ -1998,6 +1998,11 @@ export interface AgentContext {
    */
   optionSchemeId?: string;
   customOptionSchemes?: import('./option-policy').OptionScheme[];
+  /**
+   * 理解修正（2026-09-25 共识：智力=制卡轴）——⌊(智力−10)/2⌋。
+   * {{TALENT}} 块尾的叙事注入行用（鉴定/眼力演绎素材）；缺省 = 未供值按 +0。
+   */
+  insightMod?: number;
   /** EJS `ui.notify` 的出口（不给 = 静默丢弃）。由 game-pipeline 接到 Toast */
   ejsNotify?: (message: string, level: 'info' | 'success' | 'warning' | 'error') => void;
   /** EJS `ui.log` 的出口（不给 = 丢弃）。**绝不落真 console**，免得刷屏 */

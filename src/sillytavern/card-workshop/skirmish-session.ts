@@ -82,6 +82,16 @@ export interface SkirmishSession {
   enemyScale?: string;
   /** 禁忌卡本场已用卡名账（每张每场限一次；2026-09-19 禁忌卡七链） */
   forbiddenUsed?: string[];
+  /**
+   * 体力账（2026-09-25 访谈共识：SP=体力命脉）：开战时玩家 SP 快照与本场已耗。
+   * 🔴 只记账不落库——结算层同窗提交 `sp -= spSpent`；每拍实时扣太碎。
+   * 力竭判据：playerSp − spSpent ≤ 0 → 败北（与 HP 归零同路径，先到先触发；
+   * 复生/免死管死不管累，不救 SP 线）。缺省 undefined = 旧调用零改动。
+   */
+  playerSp?: number;
+  spSpent?: number;
+  /** 本场 MP 已耗（主动形态卡打出扣费；结算层提交 `mp -= mpSpent`） */
+  mpSpent?: number;
 }
 
 export interface StartSkirmishInput {
@@ -106,6 +116,8 @@ export interface StartSkirmishInput {
   enemyScale?: string;
   /** 禁忌卡本场已用卡名账（每张每场限一次；2026-09-19 禁忌卡七链） */
   forbiddenUsed?: string[];
+  /** 开战时玩家 SP 快照（体力账；缺省 = 不启用体力账，旧测试零迁移） */
+  playerSp?: number;
 }
 
 const clampHp = (n: number, fallback: number): number => {
@@ -115,6 +127,10 @@ const clampHp = (n: number, fallback: number): number => {
 
 const finiteOr = (n: number | undefined, fallback: number): number =>
   typeof n === 'number' && Number.isFinite(n) ? n : fallback;
+
+/** 交锋拍 SP 拍耗（2026-09-25 访谈共识）：出卡 5 / 基础应对 3 */
+export const SP_COST_PLAY = 5;
+export const SP_COST_COUNTER = 3;
 
 /** 开战：预提交意图夹逼入账，开场行写审计 */
 export function startSkirmish(input: StartSkirmishInput): SkirmishSession {
@@ -145,6 +161,9 @@ export function startSkirmish(input: StartSkirmishInput): SkirmishSession {
     })),
     unsealedCards: [],
     finished: null,
+    ...(input.playerSp !== undefined
+      ? { playerSp: Math.max(0, Math.round(finiteOr(input.playerSp, 0))) }
+      : {}),
   };
   // 无敌方招式（评估被夹逼成空）→ 不战自溃，UI 永不卡在无拍可打的账本上
   if (intents.length === 0) {
@@ -200,6 +219,8 @@ export interface BeatOptions {
   /** 本拍打出的在场卡（领域/场景/装备/召唤/军团），效果从下一拍起生效 */
   /** 本拍激活的在场效果（单条；战技附加会带来第二条，故也接受数组） */
   activate?: ActivateInput;
+  /** 本拍 MP 扣费（主动形态卡；2026-09-25 访谈共识。拦人在 cardPlayPlan，这里只记账） */
+  mpCost?: number;
   /** 启封判定等前置审计行（置于意图行之后、拍审计之前） */
   prepend?: string[];
   /** 暴走/反噬反冲：拍末玩家 HP −n（clamp 0，可致死 → 败北） */
@@ -535,6 +556,30 @@ export function playBeat(
   }
   if (next.playerHp <= 0) {
     return withFinish(next, '败北', [`▸ 玩家倒下——败北（经验照常结算，评价 C）`]);
+  }
+  // ── 体力账（2026-09-25 访谈共识）：出卡 5 SP / 基础应对 3 SP，拍拍扣 ──
+  // MP 只记账不拦人（拦截在 cardPlayPlan 的硬门槛）；SP 归零 = 力竭败北，
+  // 与 HP 归零同路径、先到先触发（敌方先倒下已在上面的胜利分支收口）。
+  if (s.playerSp !== undefined) {
+    const spCost = action.cardName ? SP_COST_PLAY : SP_COST_COUNTER;
+    const mpCost = Math.max(0, Math.round(opts?.mpCost ?? 0));
+    const spSpent = (s.spSpent ?? 0) + spCost;
+    const lines2 = [
+      `▸ 体力 −${spCost}（剩 ${Math.max(0, s.playerSp - spSpent)}）`,
+      ...(mpCost > 0 ? [`▸ 精神 −${mpCost}`] : []),
+    ];
+    const withSpend: SkirmishSession = {
+      ...next,
+      spSpent,
+      ...(mpCost > 0 ? { mpSpent: (s.mpSpent ?? 0) + mpCost } : {}),
+      log: [...next.log, ...lines2],
+    };
+    if (s.playerSp - spSpent <= 0) {
+      return withFinish(withSpend, '败北', [
+        `▸ 体力耗尽——你扶着膝盖喘息，再抬不起手（力竭败北，经验照常结算，评价 C）`,
+      ]);
+    }
+    return withSpend;
   }
   return next;
 }

@@ -11,13 +11,24 @@ import type { CardItem } from '@engine/types';
 import { useGameStore } from '../../../stores/game-store';
 import type { BasicCounter } from '@engine/card-workshop/skirmish';
 import { BASIC_COUNTERS } from '@engine/card-workshop/skirmish';
-import { cardCombatTags } from '@engine/card-workshop/entry-combat';
+import { cardCombatTags, mpCostOf, CARD_MP_COST_BY_TIER } from '@engine/card-workshop/entry-combat';
+import { SP_COST_PLAY, SP_COST_COUNTER } from '@engine/card-workshop/skirmish-session';
 import { recommendCards } from '@engine/card-workshop/free-card-play';
 import { battleReadyCards } from '@engine/card-workshop/deck-power';
 import { cardTierVar } from '../../../lib/quality-colors';
 
 const game = useGameStore();
 const session = computed(() => game.skirmishSession);
+/** MP/SP 成本（2026-09-25 访谈共识）：出卡标 MP 档位费 + 统一 SP 拍耗；MP 不足灰置 */
+const effectiveMp = computed(() => {
+  const p = game.player;
+  if (!p) return 0;
+  return Math.max(0, (p.mp ?? 0) - (session.value?.mpSpent ?? 0));
+});
+function costOf(c: Pick<CardItem, 'cardTier' | '词条'>): number {
+  return mpCostOf(c);
+}
+const SP_PLAY = SP_COST_PLAY;
 const currentIntent = computed(() => {
   const s = session.value;
   if (!s || s.finished !== null || s.intents.length === 0) return null;
@@ -35,6 +46,7 @@ const cardOptions = computed(() => {
   return ranked.map((c) => ({
     name: c.name,
     cardTier: c.cardTier,
+    词条: c.词条,
     tags: cardCombatTags(c.词条),
     used: used.has(c.name),
     counterHits: c.counterHits,
@@ -391,20 +403,21 @@ function dismiss() {
         :key="c.name"
         type="button"
         class="strip-card"
-        :class="{ selected: selectedCard === c.name, spent: c.used }"
+        :class="{ selected: selectedCard === c.name, spent: c.used, 'mp-short': costOf(c) > 0 && costOf(c) > effectiveMp }"
         role="listitem"
         :disabled="game.skirmishBusy || c.used"
         :title="
           c.used
             ? `${c.name}｜本局已用（一场一次）`
-            : c.tags.length > 0
-              ? `${c.name}｜反制：${c.tags.join('/')}`
-              : c.name
+            : `${c.name}｜MP ${costOf(c)} · SP ${SP_COST_PLAY}${c.tags.length > 0 ? `｜反制：${c.tags.join('/')}` : ''}`
         "
         @click="onCard(c.name)"
       >
         <span class="tier-dot" :style="{ background: cardTierVar(c.cardTier) }" />
         {{ c.name }}
+        <span v-if="costOf(c) > 0" class="cost-badge" :class="{ short: costOf(c) > effectiveMp }"
+          >{{ costOf(c) }}MP</span
+        >
         <span v-if="c.recommended" class="rec-badge">相性✓</span>
         <span v-if="c.used" class="tag-hint">已用</span>
         <span v-else-if="c.tags.length > 0" class="tag-hint">{{ c.tags.join('·') }}</span>
@@ -632,6 +645,20 @@ function dismiss() {
   color: var(--theme-text-muted, #967756);
 }
 </style>
+.cost-badge {
+  font-size: 0.65rem;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: rgba(80, 140, 255, 0.15);
+  color: var(--theme-text-secondary);
+}
+.cost-badge.short {
+  background: rgba(220, 60, 60, 0.2);
+  color: #d66;
+}
+.strip-card.mp-short {
+  opacity: 0.45;
+}
 .rec-badge { font-size: 0.625rem; font-weight: 700; padding: 0 5px; border-radius: 999px; color:
 var(--theme-success); border: 1px solid color-mix(in srgb, var(--theme-success) 40%, transparent);
 background: color-mix(in srgb, var(--theme-success) 10%, transparent); } .contract-row { display:

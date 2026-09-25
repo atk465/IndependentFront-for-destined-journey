@@ -135,6 +135,11 @@ export interface CardCraftInput {
   inventory: readonly InventoryItem[];
   /** Code 侧掷的 d20（1..20，调用方传入） */
   d20: number;
+  /**
+   * 理解修正（2026-09-25 访谈共识：智力=制卡轴）——评级掷骰加 ⌊(智力−10)/2⌋，
+   * 调用方算好传入（planCardCraft 是纯函数不读角色）。缺省 0 = 智力 10。
+   */
+  insightMod?: number;
   /** 产物名的临时兜底（AI 命名失败时用；AI 成功后调用方覆盖） */
   fallbackName?: string;
   /** 玩家天赋列表（应用制卡侧条目加成） */
@@ -148,6 +153,11 @@ export interface CardCraftInput {
   /** 通用经验倍率（C「快速成长」等；缺省 1） */
   expMult?: number;
   blueprint?: { name: string };
+}
+
+/** 数值兜底：非有限值按 0（脏数据绝不抛） */
+function finiteOr0(n: number | undefined): number {
+  return typeof n === 'number' && Number.isFinite(n) ? n : 0;
 }
 
 /** 从天赋列表摊平条目 */
@@ -201,8 +211,12 @@ export function planCardCraft(input: CardCraftInput): {
 
   // ② 基础评级 + Code 侧掷骰（评级是制卡唯一的成败信号）
   const baseRating = base.recipe.rating;
-  let rating = rollCraftRating(baseRating, input.d20);
-  audit.push(`检定：d20=${Math.max(1, Math.min(20, Math.round(input.d20)))} → 评级「${rating}」`);
+  const insight = Math.round(finiteOr0(input.insightMod));
+  let rating = rollCraftRating(baseRating, input.d20 + insight);
+  const insightTag = insight ? `${insight > 0 ? '+' : ''}${insight}（理解）` : '';
+  audit.push(
+    `检定：d20=${Math.max(1, Math.min(20, Math.round(input.d20)))}${insightTag} → 评级「${rating}」`,
+  );
 
   // ③ 天赋上浮：制卡顺利/烙印 → 相克厄运 → 时间回溯
   let card = base;

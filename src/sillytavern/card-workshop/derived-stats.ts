@@ -29,6 +29,16 @@ const attrOf = (attributes: Record<string, number> | undefined, key: string): nu
   return typeof raw === 'number' && Number.isFinite(raw) ? raw : 10;
 };
 
+/**
+ * 心智修正（2026-09-25 访谈共识：智力=制卡轴）——⌊(属性−10)/2⌋ 同款口径：
+ * - 意志修正（精神）：启封判定的意志轴（unsealing.willModifierOf，同公式）
+ * - 理解修正（智力）：制卡评级掷骰修正 + 启封判定的理解轴 + 叙事面「眼力」演绎素材
+ * 智力 10±0、12+1、16+3、8−1；脏值按 10。
+ */
+export function insightModOf(attributes: Record<string, number> | undefined): number {
+  return Math.floor((attrOf(attributes, 'int') - 10) / 2);
+}
+
 /** 五维 + 等级 → 攻/防/敏（脏数据兜底，绝不抛） */
 export function deriveCombatStats(input: {
   attributes?: Record<string, number>;

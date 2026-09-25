@@ -8,6 +8,8 @@ import { normalizeItemType } from '@engine/field-enums';
 import type { CardItem, InventoryItem } from '@engine/types';
 import { cardKindOf, isPlayableCard } from '@engine/card-workshop/card-kind';
 import { cardTierVar } from '../../lib/quality-colors';
+import { deriveCombatStats, insightModOf } from '@engine/card-workshop/derived-stats';
+import { willModifierOf } from '@engine/card-workshop/unsealing';
 import { getTierConfig } from '@engine/tier-constants';
 import { getRequiredXpForLevel } from '@engine/exp-table';
 import type { AllocatableAttr } from '@engine/attribute-allocation';
@@ -172,6 +174,29 @@ const expMax = computed<number | null>(() => {
 
 /** 一次只放一个请求过去 —— 最后 1 点被连点两下会拿到一次「没有可用的自由属性点」 */
 const allocating = ref(false);
+
+// ═══ 派生战斗值（2026-09-25 访谈共识：智力=制卡轴，面板展示口径）═══
+const derivedRow = computed(() => {
+  const p = player.value;
+  if (!p) return [];
+  const stats = deriveCombatStats({ attributes: p.attributes, level: p.level });
+  const mod = (v: number) => (v > 0 ? `+${v}` : String(v));
+  return [
+    { label: '攻击', value: String(stats.atk), title: '2×力量 + 等级——交锋拍出卡行动值' },
+    { label: '防御', value: String(stats.guard), title: '2×体质 + ⌊等级/2⌋——交锋受伤减免基数' },
+    { label: '敏捷', value: String(stats.agi), title: '2×敏捷 + ⌊等级/2⌋——闪避应对行动值' },
+    {
+      label: '意志',
+      value: mod(willModifierOf(p.attributes)),
+      title: '⌊(精神−10)/2⌋——启封判定与意志对抗',
+    },
+    {
+      label: '理解',
+      value: mod(insightModOf(p.attributes)),
+      title: '⌊(智力−10)/2⌋——制卡评级与启封判定的理解轴',
+    },
+  ];
+});
 
 const attrEntries = computed(() =>
   Object.entries(player.value?.attributes ?? {}).map(([key, value]) => {
@@ -571,6 +596,12 @@ function buffType(cat: string): 'buff' | 'debuff' | 'special' {
                 >
                   +
                 </button>
+              </div>
+            </div>
+            <div class="attr-grid derived-grid" role="list" aria-label="派生战斗值">
+              <div v-for="d in derivedRow" :key="d.label" class="kv-item" :title="d.title">
+                <span class="kv-label">{{ d.label }}</span>
+                <span class="kv-value">{{ d.value }}</span>
               </div>
             </div>
           </div>

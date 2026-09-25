@@ -2829,6 +2829,8 @@ export class StateManager {
             : null;
 
         const d20 = 1 + Math.floor(Math.random() * 20);
+        // 体力账（2026-09-25）：玩家当前 SP 供旅途扣减与抵达劣势判定
+        const playerChar = (await this.readCharacters()).find((c) => c.type === 'player');
         const outcome = planArrivalSync({
           flags: current,
           lastTileId,
@@ -2836,6 +2838,7 @@ export class StateManager {
           routeDays: route?.days ?? null,
           midTier: midTierSnapshot,
           d20,
+          ...(playerChar ? { playerSp: playerChar.sp } : {}),
         });
 
         // 到访计数（counters 段，永不过期——到过就是到过）
@@ -2859,6 +2862,17 @@ export class StateManager {
         }
 
         await updateCommissionsFlags(profile, outcome.flags);
+        // 旅途 SP 落库（补足天数的体力消耗；锁外提交——角色行不在 profile 里）
+        if (outcome.travelSpCost > 0 && playerChar) {
+          const spm = createStateManager(this.saveId);
+          await spm.commitChatState([
+            {
+              op: 'update_character',
+              target: `characters.${playerChar.name}`,
+              value: { sp: -outcome.travelSpCost },
+            } as StatePatch,
+          ]);
+        }
         return outcome;
       });
     } catch (err) {

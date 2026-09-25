@@ -147,7 +147,11 @@ function coerceCardYield(raw: unknown): CardCatalogItem['yield'] {
   const name = typeof y.name === 'string' && y.name.trim() ? y.name.trim() : undefined;
   const gc =
     typeof y.gc === 'number' && Number.isFinite(y.gc) && y.gc > 0 ? Math.round(y.gc) : undefined;
-  if (!name && !gc) return undefined;
+  // 使用即恢复（2026-09-25）：hp/mp/sp 透传——手写纯回复卡没有 name/gc 也能成立
+  const hp = typeof y.hp === 'number' && Number.isFinite(y.hp) && y.hp > 0 ? Math.round(y.hp) : undefined;
+  const mp = typeof y.mp === 'number' && Number.isFinite(y.mp) && y.mp > 0 ? Math.round(y.mp) : undefined;
+  const sp = typeof y.sp === 'number' && Number.isFinite(y.sp) && y.sp > 0 ? Math.round(y.sp) : undefined;
+  if (!name && !gc && !hp && !mp && !sp) return undefined;
   return {
     ...(name ? { name } : {}),
     quantity:
@@ -156,6 +160,9 @@ function coerceCardYield(raw: unknown): CardCatalogItem['yield'] {
         : 1,
     itemType: y.itemType === '材料' ? '材料' : '消耗品',
     ...(gc ? { gc } : {}),
+    ...(hp ? { hp } : {}),
+    ...(mp ? { mp } : {}),
+    ...(sp ? { sp } : {}),
   };
 }
 

@@ -252,6 +252,11 @@ export const ARRIVAL_DANGER_THRESHOLD = 4;
 export const EXPLORATION_ROLL_COUNTER_KEY = '探索掷骰';
 
 /** 抵达判定 DC：2×危险系数 + 6（危险 4 → 14，5 → 16），封顶 18（与采集 DC 同一上限） */
+/** 旅途 SP 拍耗（2026-09-25 访谈共识）：每旅途日 4 点 */
+export const TRAVEL_SP_PER_DAY = 4;
+/** 人困马乏（旅途结束 SP < 20%）：抵达判定 DC +2 */
+export const TRAVEL_ARRIVAL_DC_PENALTY = 2;
+
 export function arrivalDCOf(danger: number): number {
   return Math.min(18, Math.max(0, Math.floor(danger)) * 2 + 6);
 }
@@ -272,6 +277,12 @@ export interface ArrivalSyncInput {
   midTier: CurrentMidTierSnapshot | null;
   /** 抵达判定的 d20 骰值（1~20；缺省 = 不掷判定） */
   d20?: number;
+  /**
+   * 玩家当前 SP（2026-09-25 访谈共识：SP=旅途劳作轴）。传入即启用两件事：
+   * ①旅途补足按每旅途日 4 SP 扣（outcome.travelSpCost 由调用方落库）；
+   * ②旅途结束 SP < 20% → 抵达判定 DC +2（人困马乏，惊动了什么都躲不利索）。
+   */
+  playerSp?: number;
 }
 
 export interface ArrivalSyncOutcome {
@@ -281,6 +292,8 @@ export interface ArrivalSyncOutcome {
   visitCounterKey?: string;
   /** 补足的分钟数（0 = 不补） */
   topUpMinutes: number;
+  /** 旅途 SP 消耗（每旅途日 4 点；0 = 没赶路/未启用体力账；调用方落库） */
+  travelSpCost: number;
   /** 本次抵达判定结果（未掷/未触发 = 缺省） */
   threat?: ArrivalThreat;
 }
@@ -317,6 +330,16 @@ export function planArrivalSync(input: ArrivalSyncInput): ArrivalSyncOutcome {
       ? visitCounterKey(input.midTier.name.length > 0 ? input.midTier.name : input.midTier.id)
       : undefined;
 
+  // ── 旅途 SP（2026-09-25）：每旅途日 4 点；人困马乏（<20%）抵达判定劣势 DC+2 ──
+  const travelDays = moved && input.routeDays !== null ? Math.max(0, Math.floor(input.routeDays)) : 0;
+  const travelSpCost =
+    input.playerSp !== undefined ? travelDays * TRAVEL_SP_PER_DAY : 0;
+  const spAfterTravel =
+    input.playerSp !== undefined
+      ? Math.max(0, input.playerSp - travelSpCost)
+      : undefined;
+  const spExhausted = spAfterTravel !== undefined && spAfterTravel < input.playerSp! * 0.2;
+
   // ── 抵达判定（中层变化 × 危险层 × 给了骰值） ──
   let threat: ArrivalThreat | undefined;
   if (
@@ -327,7 +350,7 @@ export function planArrivalSync(input: ArrivalSyncInput): ArrivalSyncOutcome {
     typeof input.d20 === 'number' &&
     Number.isFinite(input.d20)
   ) {
-    const dc = arrivalDCOf(input.midTier.danger);
+    const dc = arrivalDCOf(input.midTier.danger) + (spExhausted ? TRAVEL_ARRIVAL_DC_PENALTY : 0);
     const roll = Math.max(1, Math.min(20, Math.floor(input.d20)));
     if (roll <= dc) {
       threat = {
@@ -372,6 +395,7 @@ export function planArrivalSync(input: ArrivalSyncInput): ArrivalSyncOutcome {
     flags: next,
     ...(visitCounterKey_ ? { visitCounterKey: visitCounterKey_ } : {}),
     topUpMinutes,
+    travelSpCost,
     ...(threat ? { threat } : {}),
   };
 }

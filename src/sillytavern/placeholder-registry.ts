@@ -726,6 +726,7 @@ const TALENT_CHANNEL_LABEL: Record<string, string> = {
  */
 function renderTalentsBlock(
   talents: NonNullable<import('./types').CharacterState['talents']>,
+  insightMod?: number,
 ): string {
   const lines: string[] = ['<talents>'];
   lines.push(
@@ -748,6 +749,10 @@ function renderTalentsBlock(
     talents.list.length >= talents.capacity
       ? '⚠ 玩家天赋已满员——如需授予新天赋，请先在叙事中引导玩家遗忘或融合（见天赋面板）。'
       : '玩家有空的天赋位——遇到重大里程碑（突破/大事件/完成高难委托）可在叙事中授予一个新天赋。',
+  );
+  lines.push(
+    `玩家理解修正：${insightMod !== undefined ? (insightMod > 0 ? '+' : '') + insightMod : '+0'}`,
+    '（智力衍生，2026-09-25 共识。鉴定/眼力/读铭/识破仿卡等场景按它演绎眼力高低；它不是战斗数值，不要在正文里报数字。）',
   );
   lines.push(
     '授予纪律：天赋名与描述由你创作（贴合故事风味），骨架条目必须从上面的条目池逐字组合；',
@@ -1104,7 +1109,7 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
     const words = renderCustomTalentWords();
     const hasList = talents && Array.isArray(talents.list) && talents.list.length > 0;
     if (!hasList) return words;
-    return renderTalentsBlock(talents) + (words ? `\n${words}` : '');
+    return renderTalentsBlock(talents, ctx.insightMod) + (words ? `\n${words}` : '');
   },
 
   /**

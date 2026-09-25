@@ -108,7 +108,8 @@ describe('StatusOverview — 自由属性点', () => {
     expect(wrapper.find('.attr-free').exists()).toBe(false);
     expect(wrapper.findAll('.attr-plus')).toHaveLength(0);
     // 属性值本身照旧
-    expect(wrapper.findAll('.attr-grid .kv-value')).toHaveLength(5);
+    // 2026-09-25 派生值行加了第二格 .attr-grid（攻/防/敏/意志/理解）——只数五维那一格
+    expect(wrapper.findAll('.attr-grid:not(.derived-grid) .kv-value')).toHaveLength(5);
   });
 
   it('字段缺席（老存档）当作 0 处理', async () => {

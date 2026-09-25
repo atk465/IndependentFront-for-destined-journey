@@ -81,12 +81,19 @@ export function unsealDC(card: UnsealCardSpec): number {
 }
 
 /**
- * 意志对抗：margin = (d20 + willMod) - DC，按失败幅度分级抗命。
+ * 意志+理解双轴对抗（2026-09-25 访谈共识）：margin = (d20 + willMod + insightMod) - DC，
+ * 按失败幅度分级抗命。启封是「意志与理解」的复合判定——心要稳（精神），铭要懂（智力）。
  * 边界规则：nat 20 自动突破（封印必有裂缝）；nat 1 必定抗命且不劣于哑火。
  */
-export function judgeUnseal(card: UnsealCardSpec, d20: number, willMod: number): UnsealOutcome {
+export function judgeUnseal(
+  card: UnsealCardSpec,
+  d20: number,
+  willMod: number,
+  insightMod = 0,
+): UnsealOutcome {
   const roll = Math.max(1, Math.min(20, Math.floor(d20)));
-  const margin = roll + willMod - unsealDC(card);
+  const bonus = willMod + (Number.isFinite(insightMod) ? insightMod : 0);
+  const margin = roll + bonus - unsealDC(card);
 
   if (roll === 20) return { kind: '启封', margin };
   if (roll === 1) {
