@@ -196,6 +196,11 @@ export interface SkirmishChronicleRequest {
   finish: '胜利' | '碾压' | '撤退' | '败北';
   /** 玩家主动结束战斗时写的结束理由（主人裁定：作为 AI 写过程与收束的参考） */
   endReason?: string;
+  /**
+   * 本场动用的禁忌卡名单（2026-09-25 主人裁定：禁忌卡胜利后 AI 一样描述战斗过程，
+   * 且改写规则的那一幕必须成为记叙高潮）。缺省空 = 本场没动禁忌卡。
+   */
+  forbiddenCards?: readonly string[];
 }
 
 /** 战斗记叙 system 提示词（只演绎不算数；主人裁定 2026-09-13：终局要写战斗过程，抒发情绪） */
@@ -218,7 +223,14 @@ export function buildChronicleMessages(req: SkirmishChronicleRequest): Array<{
     ...(req.endReason
       ? [`6. 玩家亲口给出了这场战斗的结束缘由：「${req.endReason}」——收束必须贴合这个缘由来写。`]
       : []),
-    '7. 用中文，贴合敌方与场景的风味，收在一句有余韵的话上。',
+    ...(req.forbiddenCards && req.forbiddenCards.length > 0
+      ? [
+          `8. 本场玩家动用了禁忌卡：${req.forbiddenCards.join('、')}——它改写规则的那一幕`,
+          '   必须是整段记叙的高潮：先写禁忌之力撕开常规的样子（世界为之错了一拍），',
+          '   再写它落到敌人身上的结局。代价行（天赋被卷走/气血代价）也要有分量地写。',
+        ]
+      : []),
+    '9. 用中文，贴合敌方与场景的风味，收在一句有余韵的话上。',
   ].join('\n');
   return [
     { role: 'system', content: system },

@@ -172,6 +172,21 @@ describe('buildChronicleMessages —— 战斗记叙提示词', () => {
     expect(msgs[1].content).toContain('星辉冒险者');
     expect(msgs[1].content).toContain('▸ 打出 燎原符卡：d20=17');
   });
+  it('禁忌卡胜利：卡名进提示词且改写一幕必须是高潮（2026-09-25 主人裁定）', () => {
+    const msgs = buildChronicleMessages({
+      saveId: 's',
+      endpoint: {} as never,
+      enemyName: '守疤人',
+      playerTitle: '冒险者',
+      log: ['◆ 战斗模式 · 交锋拍制 ◆', '▸ 【禁忌卡·无名河】除名发动'],
+      finish: '胜利',
+      forbiddenCards: ['禁忌卡·无名河'],
+    });
+    expect(msgs[0].content).toContain('禁忌卡·无名河');
+    expect(msgs[0].content).toContain('高潮');
+    expect(msgs[0].content).toContain('代价');
+  });
+
   it('玩家主动结束：结束缘由进提示词，收束必须贴合（主人裁定）', () => {
     const msgs = buildChronicleMessages({
       saveId: 's',

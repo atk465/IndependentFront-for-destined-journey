@@ -3563,7 +3563,11 @@ export class GamePipeline {
     if (!settlement) return;
 
     // ① 战斗记叙（一次 AI 调用，只演绎不算数）
-    const endpoint = this.getEndpointForAgent('skirmish_epilogue');
+    // 端点锚定正文（2026-09-25）：skirmish_epilogue 不在内容包默认层 12 agent 名单里，
+    // 单查会落「API 池第一个」——那未必是正文可用的池（禁忌卡胜利后没有 AI 记叙的
+    // 观感差异正是这个：正文能跑、记叙敲错门后静默跳过）。叙事锚 story。
+    const endpoint =
+      this.getEndpointForAgent('skirmish_epilogue') ?? this.getEndpointForAgent('story');
     if (endpoint) {
       try {
         const text = await runSkirmishChronicle(
@@ -3574,6 +3578,9 @@ export class GamePipeline {
             log: session.log,
             finish: session.finished,
             endReason: session.endReason,
+            ...(session.forbiddenUsed && session.forbiddenUsed.length > 0
+              ? { forbiddenCards: session.forbiddenUsed }
+              : {}),
           },
           { clientFactory: this.getClientFactory() },
         );
