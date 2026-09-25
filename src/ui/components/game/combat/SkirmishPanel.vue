@@ -146,13 +146,33 @@ async function doCapture() {
 }
 /** 已选中待发动的卡（点卡 → 填宣言 → 发动） */
 const selectedCard = ref<string | null>(null);
+const selectedCounter = ref<BasicCounter | null>(null);
+const SP_COUNTER = SP_COST_COUNTER;
+const counterIntentText = ref('');
 const cardIntentText = ref('');
 /** 结束战斗流（展开理由输入） */
 const ending = ref(false);
 const endReasonText = ref('');
 
 function onCounter(move: BasicCounter) {
-  void game.submitSkirmishCounter({ kind: '应对', move });
+  // 2026-09-25 主人裁定：应对与出卡同权——点选后开宣言框（可留空直接发动）
+  selectedCounter.value = move;
+  counterIntentText.value = '';
+}
+function confirmCounter() {
+  if (!selectedCounter.value) return;
+  const intent = counterIntentText.value.trim();
+  void game.submitSkirmishCounter({
+    kind: '应对',
+    move: selectedCounter.value,
+    ...(intent ? { intent } : {}),
+  });
+  selectedCounter.value = null;
+  counterIntentText.value = '';
+}
+function cancelCounter() {
+  selectedCounter.value = null;
+  counterIntentText.value = '';
 }
 function onCard(name: string) {
   selectedCard.value = name;
@@ -250,10 +270,11 @@ function dismiss() {
         :key="m"
         type="button"
         class="counter-btn"
+        :class="{ selected: selectedCounter === m }"
         :disabled="game.skirmishBusy"
         @click="onCounter(m)"
       >
-        {{ m }}
+        {{ m }}<span class="sp-badge">{{ SP_COUNTER }}</span>
       </button>
       <button
         v-if="duelAvailable"
@@ -340,6 +361,28 @@ function dismiss() {
           确认结束
         </button>
         <button type="button" class="counter-btn" @click="ending = false">继续战斗</button>
+      </div>
+    </div>
+
+    <!-- 应对宣言：与出卡宣言同权（2026-09-25 主人裁定），纯叙事素材 -->
+    <div v-if="selectedCounter && !session.finished" class="note-box">
+      <p class="note-title">用【{{ selectedCounter }}】做什么？（可留空——终局 AI 记叙会参考这句话）</p>
+      <textarea
+        v-model="counterIntentText"
+        class="note-input"
+        rows="2"
+        :placeholder="selectedCounter === '闪避' ? '如：侧身让过角尖，顺势卸掉它的冲势' : selectedCounter === '防御' ? '如：横刀固守，把它的锋头憋回去' : '如：踏中门直进，照它张开的左肋打'"
+      ></textarea>
+      <div class="note-actions">
+        <button
+          type="button"
+          class="counter-btn primary"
+          :disabled="game.skirmishBusy"
+          @click="confirmCounter"
+        >
+          发动（{{ SP_COUNTER }} SP）
+        </button>
+        <button type="button" class="counter-btn" @click="cancelCounter">取消</button>
       </div>
     </div>
 
@@ -645,6 +688,18 @@ function dismiss() {
   color: var(--theme-text-muted, #967756);
 }
 </style>
+.sp-badge {
+  font-size: 0.65rem;
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: rgba(90, 160, 90, 0.15);
+  color: var(--theme-text-secondary);
+}
+.counter-btn.selected {
+  border-color: var(--theme-primary);
+  color: var(--theme-primary);
+}
 .cost-badge {
   font-size: 0.65rem;
   padding: 0 4px;

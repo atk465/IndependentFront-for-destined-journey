@@ -3234,15 +3234,16 @@ export class GamePipeline {
           `▸ 好感共鸣：与【${card.name}】的羁绊（${bond.label} ${bond.affection}）→ 效果 ×${bond.multiplier}`,
         ];
       }
-      // 出卡宣言（主人裁定：纯叙事素材，数值照常结算；置于拍审计之前的「意图」行）
-      if (choice.intent && choice.intent.trim()) {
-        action = { ...action, note: choice.intent.trim().slice(0, 200) };
-      }
     } else {
       action = basicCounterAction(
         choice.move,
         deriveCombatStats({ attributes: playerC.attributes, level: playerC.level }),
       );
+    }
+    // 行动宣言（主人裁定 2025-09-25 扩权：出卡与基础应对同权）——纯叙事素材，
+    // 数值照常结算；置于拍审计之前的「意图」行
+    if (choice.intent && choice.intent.trim()) {
+      action = { ...action, note: choice.intent.trim().slice(0, 200) };
     }
 
     if (escalate > 0 && session.beat > 0) {

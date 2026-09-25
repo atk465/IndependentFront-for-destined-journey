@@ -164,7 +164,10 @@ describe('buildChronicleMessages —— 战斗记叙提示词', () => {
     expect(msgs[0].content).toContain('「碾压」');
     expect(msgs[0].content).toContain('不得引入任何新数值');
     expect(msgs[0].content).toContain('200~350 字');
-    expect(msgs[0].content).toContain('拍次推进');
+    expect(msgs[0].content).toContain('连续的动作画面');
+    // 2026-09-25 主人裁定：叙事禁机制词（拍/行动值/威胁/审计/反制）
+    expect(msgs[0].content).toContain('禁止机制词');
+    expect(msgs[0].content).not.toContain('每一拍的反制');
     expect(msgs[0].content).not.toContain('结束缘由');
     expect(msgs[1].content).toContain('星辉冒险者');
     expect(msgs[1].content).toContain('▸ 打出 燎原符卡：d20=17');

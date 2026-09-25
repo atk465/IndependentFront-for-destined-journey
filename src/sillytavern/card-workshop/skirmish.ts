@@ -76,7 +76,12 @@ export type SkirmishChoice =
       /** 行为合同（SSS 律师函警告）：本拍附加的禁条选择；需持有「合同」条目 */
       contractForbidden?: CounterTag;
     }
-  | { kind: '应对'; move: BasicCounter };
+  | {
+      kind: '应对';
+      move: BasicCounter;
+      /** 应对宣言（2026-09-25 主人裁定：与出卡宣言同权）——这一下用来做什么 */
+      intent?: string;
+    };
 
 /** 敌方拍内意图（AI 战前预提交、Code 夹逼校验后的可信形状） */
 export interface EnemyIntent {
