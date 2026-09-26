@@ -47,6 +47,7 @@ import { applyBond, bondForCard, type BondInfo } from '@engine/card-workshop/aff
 import { cardKindOf } from '@engine/card-workshop/card-kind';
 import { willModifierOf } from '@engine/card-workshop/unsealing';
 import { mpCostOf } from '@engine/card-workshop/entry-combat';
+import { deriveCardEffects } from '@engine/card-workshop/card-effects';
 import { insightModOf } from '@engine/card-workshop/derived-stats';
 import { getCommissionDefs } from '@engine/commission-runtime';
 import { coerceCommissionsFlags } from '@engine/card-workshop/commission-flags';
@@ -3154,6 +3155,16 @@ export class GamePipeline {
           sealBroke,
           // 封印卡 MP：破封（效果发动）才扣——哑火/反噬空过不收费
           ...(res.effectFired ? { mpCost: mpCostOf(card) } : {}),
+          // 封印卡效果：破封才结算
+          ...(res.effectFired
+            ? (() => {
+                const fx = deriveCardEffects(card as CardItem);
+                return {
+                  ...(fx.length > 0 ? { effects: fx } : {}),
+                  ...(session.enemyCount !== undefined ? { enemyCount: session.enemyCount } : {}),
+                };
+              })()
+            : {}),
           ...(contract ? { contract } : {}),
           ...chapterOpts,
         });
@@ -3372,21 +3383,19 @@ export class GamePipeline {
         ? playerC.inventory.find((i) => i.name === choice.name && i.type === '卡牌')
         : undefined;
     const beatMpCost = beatCardItem ? mpCostOf(beatCardItem as CardItem) : 0;
-    const next = playBeat(
-      session,
-      action,
-      this.rollSkirmishD20(),
-      prepend || activate || finalChapter || lastStand || comboFired || beatMpCost > 0
-        ? {
-            activate,
-            prepend,
-            ...chapterOpts,
-            ...(lastStand ? { lastStand } : {}),
-            ...(comboFired ? { comboFired } : {}),
-            ...(beatMpCost > 0 ? { mpCost: beatMpCost } : {}),
-          }
-        : undefined,
-    );
+    // 效果池（2026-09-25）：打出卡的结构化效果（派生打底/精配覆写/AI 池内选已经门禁）
+    const beatEffects = beatCardItem ? deriveCardEffects(beatCardItem as CardItem) : [];
+    const beatOpts = {
+      activate,
+      prepend,
+      ...chapterOpts,
+      ...(lastStand ? { lastStand } : {}),
+      ...(comboFired ? { comboFired } : {}),
+      ...(beatMpCost > 0 ? { mpCost: beatMpCost } : {}),
+      ...(beatEffects.length > 0 ? { effects: beatEffects } : {}),
+      ...(session.enemyCount !== undefined ? { enemyCount: session.enemyCount } : {}),
+    };
+    const next = playBeat(session, action, this.rollSkirmishD20(), beatOpts);
     // 技能冷却（战斗维度）：每拍 tick + 打出技能卡时启动冷却
     let cd = tickCooldowns(session.cooldowns);
     if (
@@ -3616,13 +3625,15 @@ export class GamePipeline {
       // 负数 = delta 口径（update_character 数值负值按减法，钳 0 在提交层统一做）。
       const spSpent = Math.max(0, Math.round(session.spSpent ?? 0));
       const mpSpent = Math.max(0, Math.round(session.mpSpent ?? 0));
-      if (spSpent > 0 || mpSpent > 0) {
+      const mpGained = Math.max(0, Math.round(session.mpGained ?? 0));
+      const mpNet = mpSpent - mpGained;
+      if (spSpent > 0 || mpNet !== 0) {
         settlementPatches.push({
           op: 'update_character',
           target: `characters.${playerC.name}`,
           value: {
             ...(spSpent > 0 ? { sp: -spSpent } : {}),
-            ...(mpSpent > 0 ? { mp: -mpSpent } : {}),
+            ...(mpNet !== 0 ? { mp: -mpNet } : {}),
           },
         } as StatePatch);
       }

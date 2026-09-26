@@ -148,6 +148,28 @@ async function doCapture() {
 const selectedCard = ref<string | null>(null);
 const selectedCounter = ref<BasicCounter | null>(null);
 const SP_COUNTER = SP_COST_COUNTER;
+
+// ═══ 状态徽标行（2026-09-25 效果池）：符号+层数+剩余拍数，悬停见说明 ═══
+const STATUS_ICON: Record<string, string> = {
+  dot: '🔥',
+  weaken: '⬇',
+  vulnerable: '🎯',
+  stun: '💫',
+  buff: '⬆',
+  shield: '🛡',
+  regen: '✚',
+};
+const enemyStatuses = computed(() =>
+  (session.value?.activeEffects ?? []).filter((e) =>
+    ['dot', 'weaken', 'vulnerable', 'stun'].includes(e.type),
+  ),
+);
+const playerStatuses = computed(() =>
+  (session.value?.activeEffects ?? []).filter((e) => ['buff', 'shield', 'regen'].includes(e.type)),
+);
+function statusText(e: { name: string; amount: number; beatsLeft?: number }): string {
+  return `${e.name}${e.amount ? ` ${e.amount}` : ''}·${e.beatsLeft ?? '∞'}拍`;
+}
 const counterIntentText = ref('');
 const cardIntentText = ref('');
 /** 结束战斗流（展开理由输入） */
@@ -263,6 +285,23 @@ function dismiss() {
         currentIntent.counters.join(' / ')
       }})
     </p>
+
+    <div
+      v-if="playerStatuses.length > 0"
+      class="status-row"
+      role="list"
+      aria-label="我方状态"
+    >
+      <span
+        v-for="e in playerStatuses"
+        :key="e.name + e.type"
+        class="status-badge mine"
+        role="listitem"
+        :title="`${e.name}：${e.type === 'shield' ? '每拍减伤' : e.type === 'regen' ? '每拍回复' : '行动值加成'}${e.beatsLeft !== undefined ? `，剩 ${e.beatsLeft} 拍` : ''}`"
+      >
+        {{ STATUS_ICON[e.type] }}{{ statusText(e) }}
+      </span>
+    </div>
 
     <div v-if="!session.finished" class="counter-row">
       <button
@@ -688,6 +727,24 @@ function dismiss() {
   color: var(--theme-text-muted, #967756);
 }
 </style>
+.status-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 2px 0 4px;
+}
+.status-badge {
+  font-size: 0.68rem;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(200, 60, 60, 0.15);
+  color: var(--theme-text-primary);
+  border: 1px solid rgba(200, 60, 60, 0.3);
+}
+.status-badge.mine {
+  background: rgba(90, 160, 90, 0.12);
+  border-color: rgba(90, 160, 90, 0.3);
+}
 .sp-badge {
   font-size: 0.65rem;
   margin-left: 4px;

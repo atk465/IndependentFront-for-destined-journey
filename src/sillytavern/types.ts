@@ -1157,6 +1157,12 @@ export interface CardItem extends InventoryItem {
   cardPowerBonus?: number;
   /** 战技（「战技附加」天赋制卡时授予）：打出此卡时附加的战斗状态。旧存档可缺 */
   战技?: { status: string; power: number; beats: number };
+  /**
+   * 效果池登记（2026-09-25 效果池）：卡牌的结构化战斗效果（CardEffectDef[]，
+   * 经 coerceCardEffects 门禁后存储）。缺省/非法 = 出牌时按素材元素派生打底；
+   * 精配覆写（registerCardEffects）优先级最高。存原始形状，读侧门禁——存档健壮性口径。
+   */
+  cardEffects?: unknown;
 }
 
 /** 融合配方（确定性内核 card-fusion.ts 的输入/输出） */

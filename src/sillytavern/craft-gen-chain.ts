@@ -53,6 +53,7 @@ import {
   isDesireDominant,
 } from './card-workshop/craft-talent-bonus';
 import { liftFromMisfortune } from './card-workshop/craft-flow-hooks';
+import { EFFECT_POOL, coerceCardEffects } from './card-workshop/card-effects';
 import { cardCatalogToItem } from './start-catalog-mechanics';
 import { extractJsonPayload } from './model-json';
 
@@ -165,6 +166,11 @@ export interface CraftGenOutput {
   perfectionBonus?: string;
   itemRequests: ItemRequest[];
   narrative: string;
+  /**
+   * 效果池选择（2026-09-25 效果池：AI 从池内选，原始未门禁——
+   * 卡组装点经 coerceCardEffects 校验，非法回落元素派生）
+   */
+  effects?: unknown;
   craftParams: {
     industry: CraftIndustry;
     targetQuality: QualityLevel;
@@ -236,8 +242,25 @@ ${request.talentBias}
 </制卡师天赋倾向>
 `
     : '';
+  // 效果池清单（2026-09-25 效果池）：AI 从池内选效果骨架（类型/目标/时机，数值池内定值）
+  const effectPoolBlock = EFFECT_POOL.map(
+    (e, i) =>
+      `${i + 1}. ${e.action}｜定值 ${e.value}${e.duration ? `｜持续 ${e.duration} 拍` : ''}${
+        e.cost
+          ? `｜代价 ${Object.entries(e.cost)
+              .map(([k, v]) => `${k.toUpperCase()} ${v}`)
+              .join(' ')}`
+          : ''
+      }｜${e.text}`,
+  ).join('\n');
+  const effectPoolWrapped = `<效果池>
+制卡师可以从下面的效果池中为产物卡选择至多 2 条效果（输出在 <effects> JSON 数组里，动作/数值/持续/代价逐字照抄池内定值，不得自创或改数；不选就不输出 <effects>）：
+${effectPoolBlock}
+示例：<effects>[{"trigger":"打出时","target":"敌单体","action":"灼烧","value":4,"duration":2}]</effects>
+</效果池>
+`;
   const craftLocalParams: Record<string, string> = {
-    CRAFT_REQUEST: talentBiasBlock + (markerBody || request.storyOutput),
+    CRAFT_REQUEST: talentBiasBlock + effectPoolWrapped + (markerBody || request.storyOutput),
   };
 
   // 真机修(2026-07-17): configs/worldBooks/presets 透传
@@ -440,6 +463,7 @@ export function parseCraftResultXML(xml: string): CraftGenOutput {
     try {
       const parsed = JSON.parse(json);
       return {
+        ...(parsed.effects !== undefined ? { effects: parsed.effects } : {}),
         success: parsed.success ?? false,
         productName: parsed.product_name ?? parsed.productName ?? '',
         quality: (parsed.quality ?? '普通') as QualityLevel,
@@ -754,6 +778,13 @@ export async function runCraftGenChain(
       const entryBoost = applyCraftEntryTalents(cardProduct, talentList as never);
       cardProduct = entryBoost.card;
       notes.push(...entryBoost.notes);
+      // 效果池（2026-09-25）：AI 池内选经门禁存卡——非法/未选回落出牌时元素派生
+      const aiEffects = coerceCardEffects(craftOutput.effects);
+      if (aiEffects.length > 0) {
+        cardProduct = { ...cardProduct, cardEffects: aiEffects } as typeof cardProduct;
+        craftOutput.narrative = [craftOutput.narrative,
+          `▸ 效果池：本卡登记 ${aiEffects.map((e) => e.action).join('、')}（AI 池内选择）`].filter(Boolean).join('\n');
+      }
       // 天赋审计行并入制作叙事（让玩家看到天赋确实生效）
       if (notes.length > 0) {
         craftOutput.narrative = [craftOutput.narrative, ...notes].filter(Boolean).join('\n');
@@ -816,11 +847,23 @@ function parseCraftResultTag(xml: string): CraftGenOutput {
   const itemRequestsXML = tagInner(xml, 'item_requests');
   const itemRequests = itemRequestsXML ? parseItemRequestsXML(itemRequestsXML) : [];
 
+  // 解析 <effects>（2026-09-25 效果池：AI 池内选择的原始 JSON，卡组装点门禁）
+  const effectsXML = tagInner(xml, 'effects');
+  let effects: unknown;
+  if (effectsXML) {
+    try {
+      effects = JSON.parse(effectsXML.trim());
+    } catch {
+      effects = undefined;
+    }
+  }
+
   // 解析 <craft_params>
   const craftParamsXML = tagInner(xml, 'craft_params');
   const craftParams = parseCraftParams(craftParamsXML ?? '');
 
   return {
+    ...(effects !== undefined ? { effects } : {}),
     success,
     productName,
     quality,

@@ -27,6 +27,11 @@ import {
 import { activateListOf, type ActivateInput, type CardInPlayEffect } from './entry-combat';
 import { duelSuppressesEffect, type DuelRules } from './battle-rules';
 import { ENTRY_STRENGTH_BASELINE } from './talent-entry';
+import {
+  deriveCardEffects,
+  effectLineOf,
+  type CardEffectDef,
+} from './card-effects';
 
 /** 会话终局态；null = 交锋中 */
 export type SkirmishFinish = null | '胜利' | '碾压' | '撤退' | '败北';
@@ -92,6 +97,10 @@ export interface SkirmishSession {
   spSpent?: number;
   /** 本场 MP 已耗（主动形态卡打出扣费；结算层提交 `mp -= mpSpent`） */
   mpSpent?: number;
+  /** 效果池：本场敌方防护累计削减（破防；resolveBeat 侧 guard 减它） */
+  guardDown?: number;
+  /** 效果池：本场 MP 累计回复（凝神；结算层与 mpSpent 轧差落库） */
+  mpGained?: number;
 }
 
 export interface StartSkirmishInput {
@@ -221,6 +230,13 @@ export interface BeatOptions {
   activate?: ActivateInput;
   /** 本拍 MP 扣费（主动形态卡；2026-09-25 访谈共识。拦人在 cardPlayPlan，这里只记账） */
   mpCost?: number;
+  /**
+   * 本拍打出的卡带来的结构化效果（2026-09-25 效果池；调用方 deriveCardEffects 算好传入）。
+   * 翻译规则见 translateCardEffects：动作层即时结算进拍账，状态层入 activeEffects。
+   */
+  effects?: readonly CardEffectDef[];
+  /** 敌方数量（敌全体倍化用；缺省 1）——与 session.enemyCount 同源，避免再读会话 */
+  enemyCount?: number;
   /** 启封判定等前置审计行（置于意图行之后、拍审计之前） */
   prepend?: string[];
   /** 暴走/反噬反冲：拍末玩家 HP −n（clamp 0，可致死 → 败北） */
@@ -269,6 +285,103 @@ export const NUKE_PERCENT = 50;
 
 /** 打一拍：拍结算 + 记账 + 终局判定（只按 HP 归零终局；拍数不限，招式轮换）。
  *  未开始/已结束/无敌方招式 → 原样返回（幂等） */
+// ═══ 效果池翻译（2026-09-25：CardEffectDef → 拍内结算） ═══
+
+/** 翻译结果：动作层的即时结算值 + 状态层的在场登记 */
+export interface TranslatedEffects {
+  /** 打出时·伤害 → 行动值追加 */
+  powerBonus: number;
+  /** 打出时·连击 → 行动值乘区（1.5 = +50%；与 powerBonus 相乘前先加） */
+  powerMult: number;
+  /** 打出时·治疗/吸血 → 拍末玩家 HP 回复（吸血按本拍对敌伤害折算在 playBeat 内补） */
+  heal: number;
+  /** 打出时·凝神 → 拍末 MP 回复（落库由结算层） */
+  mpHeal: number;
+  /** 打出时·破防 → 本场敌方防护削减（累计） */
+  guardDown: number;
+  /** 状态层 → 在场登记（叠层合并后） */
+  activate: CardInPlayEffect[];
+  /** 审计行 */
+  lines: string[];
+}
+
+/**
+ * CardEffectDef[] → 拍内结算件。敌全体按 enemyCount 倍化（单血池语义：打一群就是
+ * 打得多）。吸血拆两半：即时 HP 按 value 三成、真伤折算部分并入本拍对敌伤害
+ * ——初稿只做定值半（value 三成），伤害折算另批精化。
+ */
+export function translateCardEffects(
+  effects: readonly CardEffectDef[] | undefined,
+  enemyCount: number,
+): TranslatedEffects {
+  const out: TranslatedEffects = { powerBonus: 0, powerMult: 1, heal: 0, mpHeal: 0, guardDown: 0, activate: [], lines: [] };
+  if (!effects || effects.length === 0) return out;
+  const mult = Math.max(1, Math.round(enemyCount));
+  for (const e of effects) {
+    const scaled = e.target === '敌全体' ? e.value * mult : e.value;
+    switch (e.action) {
+      case '伤害':
+        out.powerBonus += scaled;
+        out.lines.push(`▸ 【效果】直接伤害 +${scaled}`);
+        break;
+      case '连击':
+        out.powerMult *= 1 + scaled / 100;
+        out.lines.push(`▸ 【效果】连击：本拍行动值 +${scaled}%`);
+        break;
+      case '治疗':
+        out.heal += scaled;
+        out.lines.push(`▸ 【效果】回复 ${scaled} HP`);
+        break;
+      case '吸血':
+        out.heal += Math.round(scaled * 0.3);
+        out.powerBonus += scaled;
+        out.lines.push(`▸ 【效果】吸血：伤害 +${scaled}，并回复其三成`);
+        break;
+      case '破防':
+        out.guardDown += scaled;
+        out.lines.push(`▸ 【效果】破防：敌方防护 −${scaled}（本场）`);
+        break;
+      case '驱散':
+        // 拍制下敌方无增益系统（2026-09-25 实现期替换：凝神）——保留类型位，结算走 mpHeal
+        out.mpHeal += 10;
+        out.lines.push(`▸ 【效果】凝神：MP +10`);
+        break;
+      case '中毒':
+      case '灼烧':
+      case '流血':
+      case '虚弱':
+      case '易伤':
+      case '迟缓':
+      case '眩晕':
+      case '冰冻':
+      case '护盾':
+      case '格挡': {
+        const type =
+          e.action === '易伤' ? 'vulnerable' : e.action === '护盾' || e.action === '格挡' ? 'shield' : 'dot';
+        const eff: CardInPlayEffect = {
+          name: e.action,
+          type: type as CardInPlayEffect['type'],
+          amount: scaled,
+          beatsLeft: Math.max(1, Math.round(e.duration ?? 1)),
+        };
+        const twin = out.activate.find((a) => a.name === eff.name && a.type === eff.type);
+        if (twin) {
+          // 叠层：量叠加、时长取长
+          twin.amount += eff.amount;
+          twin.beatsLeft = Math.max(twin.beatsLeft ?? 1, eff.beatsLeft ?? 1);
+        } else {
+          out.activate.push(eff);
+        }
+        out.lines.push(`▸ 【效果】${effectLineOf(e)}`);
+        break;
+      }
+      default:
+        break;
+    }
+  }
+  return out;
+}
+
 export function playBeat(
   s: SkirmishSession,
   action: SkirmishAction,
@@ -303,16 +416,31 @@ export function playBeat(
   const buffTotal = s.activeEffects
     .filter((e) => e.type === 'buff')
     .reduce((sum, e) => sum + Math.max(0, e.amount), 0);
-  const effectiveAction =
-    buffTotal > 0 ? { ...action, power: Math.max(0, action.power) + buffTotal } : action;
+  // 效果池翻译（2026-09-25）：打出时动作层即时结算、状态层进在场登记
+  const fx = translateCardEffects(opts?.effects, opts?.enemyCount ?? s.enemyCount ?? 1);
+  const rawPower = Math.max(0, action.power) + fx.powerBonus;
+  const effectiveAction = {
+    ...action,
+    power: Math.round(rawPower * fx.powerMult) + (buffTotal > 0 ? buffTotal : 0),
+  };
+
+  // 本拍在场护盾（护盾/格挡状态）+ 本拍易伤层数——供 resolveBeat 乘区与减伤
+  const liveShield = live
+    .filter((e) => e.type === 'shield')
+    .reduce((sum, e) => sum + Math.max(0, e.amount), 0);
+  const liveVuln = live
+    .filter((e) => e.type === 'vulnerable')
+    .reduce((sum, e) => sum + Math.max(0, e.amount), 0);
 
   const result = resolveBeat({
     intent: effectiveIntent,
     action: effectiveAction,
     playerHp: s.playerHp,
     enemyHp: s.enemyHp,
-    guard: s.guard,
+    guard: Math.max(0, s.guard - (s.guardDown ?? 0)),
     dice,
+    ...(liveShield > 0 ? { shield: liveShield } : {}),
+    ...(liveVuln > 0 ? { vulnerable: liveVuln } : {}),
   });
   const lines = [
     // 出卡宣言（主人裁定：玩家写这张牌用来做什么，纯叙事素材，置于拍审计之前）
@@ -442,11 +570,19 @@ export function playBeat(
     );
   }
 
+  // 效果池·打出时回复（治疗/吸血三成）：并入 HP 链（上限钳制）
+  const fxHeal = Math.max(0, Math.round(fx.heal));
+  const playerHpAfterFxHeal =
+    fxHeal > 0 ? Math.min(s.playerMaxHp, playerHpAfterRegen + fxHeal) : playerHpAfterRegen;
+  if (fxHeal > 0 && playerHpAfterFxHeal > playerHpAfterRegen) {
+    lines.push(`▸ 【效果】回复 ${playerHpAfterFxHeal - playerHpAfterRegen} HP`);
+  }
+
   // 禁忌卡 HP 覆盖（天罚锁 1 / 许愿回复 / 蜡封回复）——优先级高于反冲与吸魔
   const playerHpAfterOverride =
-    playerHpOverride !== null ? Math.min(playerHpOverride, s.playerMaxHp) : playerHpAfterRegen;
-  if (playerHpOverride !== null && playerHpAfterOverride !== playerHpAfterRegen) {
-    lines.push(`▸ 禁忌之力改写了你的气血：${playerHpAfterRegen} → ${playerHpAfterOverride}`);
+    playerHpOverride !== null ? Math.min(playerHpOverride, s.playerMaxHp) : playerHpAfterFxHeal;
+  if (playerHpOverride !== null && playerHpAfterOverride !== playerHpAfterFxHeal) {
+    lines.push(`▸ 禁忌之力改写了你的气血：${playerHpAfterFxHeal} → ${playerHpAfterOverride}`);
   }
 
   // 免死（绞刑架幸存者）：HP 本会归零 → 锁血续战（每场一次；MP 回满由调用方落库）
@@ -466,7 +602,7 @@ export function playBeat(
   const decremented = s.activeEffects.map((e) =>
     e.beatsLeft !== undefined ? { ...e, beatsLeft: Math.max(0, e.beatsLeft - 1) } : e,
   );
-  const activateList = activateListOf(opts?.activate);
+  const activateList = [...activateListOf(opts?.activate), ...fx.activate];
   const stunBeats: number | null =
     (opts?.ageEnd === true && forbiddenGuard) || (opts?.waxNight === true && forbiddenGuard)
       ? 2
@@ -475,16 +611,31 @@ export function playBeat(
         : null;
   const tideAmount: number | null =
     opts?.beastTideAmount !== undefined && forbiddenGuard ? opts.beastTideAmount : null;
-  const nextEffects = [
-    ...decremented.filter((e) => e.beatsLeft === undefined || e.beatsLeft > 0),
-    ...activateList.map((a) => ({
+  // 同名同型叠层合并（效果池 2026-09-25：灼烧/流血等可叠层——量叠加、时长取长）
+  const mergedEffects = [...decremented.filter((e) => e.beatsLeft === undefined || e.beatsLeft > 0)];
+  for (const a of activateList) {
+    const normalized = {
       name: a.name,
       type: a.type,
       amount: Math.max(0, Math.round(a.amount)),
       ...(a.beatsLeft !== undefined ? { beatsLeft: Math.max(1, a.beatsLeft) } : {}),
       // 领域/场景卡建立的环境随效果存续（环境加成天赋据此判定）
       ...(a.env ? { env: a.env } : {}),
-    })),
+    };
+    const twin = mergedEffects.find(
+      (e) => e.name === normalized.name && e.type === normalized.type,
+    );
+    if (twin) {
+      twin.amount += normalized.amount;
+      if (normalized.beatsLeft !== undefined || twin.beatsLeft !== undefined) {
+        twin.beatsLeft = Math.max(twin.beatsLeft ?? 0, normalized.beatsLeft ?? 0);
+      }
+    } else {
+      mergedEffects.push(normalized);
+    }
+  }
+  const nextEffects = [
+    ...mergedEffects,
     // 禁忌卡效果（岁除/蜡封之夜/大愿=stun；兽潮=无期限 dot）
     ...(stunBeats !== null
       ? [
@@ -550,6 +701,8 @@ export function playBeat(
         }
       : {}),
     ...(nukeRequested ? { nukeUsed: true } : {}),
+    ...(fx.guardDown > 0 ? { guardDown: (s.guardDown ?? 0) + fx.guardDown } : {}),
+    ...(fx.mpHeal > 0 ? { mpGained: (s.mpGained ?? 0) + fx.mpHeal } : {}),
   };
   if (next.enemyHp <= 0) {
     return withFinish(next, '胜利', [`▸ 【${s.enemyName}】倒下——胜利！`]);

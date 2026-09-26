@@ -110,8 +110,10 @@ export interface CardInPlayEffect {
   name: string;
   /** dot = 每拍拍末敌方持续损失；buff = 每拍玩家行动值加成；
    *  weaken = 每拍敌方威胁降低；stun = 敌方本拍放弃行动；
-   *  regen = 每拍玩家 HP 回复（自身状态「吸魔」等） */
-  type: 'dot' | 'buff' | 'weaken' | 'stun' | 'regen';
+   *  regen = 每拍玩家 HP 回复（自身状态「吸魔」等）；
+   *  2026-09-25 效果池扩展：vulnerable = 敌方受最终伤害 +value%；
+   *  shield = 每拍玩家减伤 value（护盾/格挡） */
+  type: 'dot' | 'buff' | 'weaken' | 'stun' | 'regen' | 'vulnerable' | 'shield';
   amount: number;
   /** 持续拍数（缺省 = 整场）；每拍结束递减，归零移除 */
   beatsLeft?: number;

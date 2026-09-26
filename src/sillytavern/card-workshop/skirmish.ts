@@ -118,6 +118,12 @@ export interface BeatInput {
   guard: number;
   /** d20，调用方从骰带通道取得；越界夹逼 1..20 */
   dice: number;
+  /** 2026-09-25 效果池：本拍护盾减伤（护盾/格挡；直接抵扣玩家承伤） */
+  shield?: number;
+  /** 2026-09-25 效果池：易伤层数值（敌方承伤 +value%） */
+  vulnerable?: number;
+  /** 2026-09-25 效果池：破防累计（敌方防护减免被削）——留作防护轴扩展位，本批护盾走 shield */
+  guardDown?: number;
 }
 
 export interface BeatResult {
@@ -236,8 +242,16 @@ export function resolveBeat(input: BeatInput): BeatResult {
   const margin = roll - threat;
   const countered = margin >= 0;
 
-  const enemyDamage = power + (countered ? margin : 0);
-  const playerDamage = countered ? 0 : Math.max(1, threat - Math.floor(guard / 2));
+  let enemyDamage = power + (countered ? margin : 0);
+  // 易伤（效果池）：敌方承伤放大（乘区，向下取整）
+  const vuln = Number.isFinite(input.vulnerable) ? Math.max(0, input.vulnerable!) : 0;
+  if (vuln > 0) enemyDamage = Math.round(enemyDamage * (1 + vuln / 100));
+  let playerDamage = countered ? 0 : Math.max(1, threat - Math.floor(guard / 2));
+  // 护盾/格挡（效果池）：先于减伤公式直接抵扣，可到 0（护住了就是护住了）
+  const shield = Number.isFinite(input.shield) ? Math.max(0, input.shield!) : 0;
+  if (shield > 0 && playerDamage > 0) {
+    playerDamage = Math.max(0, playerDamage - shield);
+  }
   const playerHp = Number.isFinite(input.playerHp) ? Math.max(0, Math.round(input.playerHp)) : 0;
   const enemyHp = Number.isFinite(input.enemyHp) ? Math.max(0, Math.round(input.enemyHp)) : 0;
   const afterPlayer = Math.max(0, playerHp - playerDamage);
