@@ -447,6 +447,7 @@ export function playBeat(
     ...(action.note ? [`▸ 意图：${action.note}`] : []),
     ...(opts?.prepend ?? []),
     ...effectLines,
+    ...fx.lines,
     ...(buffTotal > 0 ? [`▸ 在场加成：行动值 +${buffTotal}`] : []),
     ...result.audit,
   ];

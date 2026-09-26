@@ -280,6 +280,23 @@ function dismiss() {
       </div>
     </div>
 
+    <div
+      v-if="enemyStatuses.length > 0"
+      class="status-row"
+      role="list"
+      aria-label="敌方状态"
+    >
+      <span
+        v-for="e in enemyStatuses"
+        :key="e.name + e.type"
+        class="status-badge"
+        role="listitem"
+        :title="`${e.name}：${e.type === 'vulnerable' ? '受到的伤害增加' : e.type === 'stun' ? '本拍放弃行动' : e.type === 'weaken' ? '威胁降低' : '每拍拍末损失'}${e.beatsLeft !== undefined ? `，剩 ${e.beatsLeft} 拍` : ''}`"
+      >
+        {{ STATUS_ICON[e.type] }}{{ statusText(e) }}
+      </span>
+    </div>
+
     <p v-if="currentIntent" class="intent-line">
       ▶ {{ currentIntent.move }}（威胁 {{ currentIntent.threat }} ｜ 可反制：{{
         currentIntent.counters.join(' / ')
