@@ -159,17 +159,49 @@ const STATUS_ICON: Record<string, string> = {
   buff: '⬆',
   shield: '🛡',
   regen: '✚',
+  poisonPct: '☠',
+  fear: '😱',
+  confusion: '🌀',
+  sleep: '💤',
+  bind: '⛓',
+  curse: '🕯',
+  mark: '🏹',
+  divineShield: '✨',
+  thorns: '🌵',
 };
+const ENEMY_STATUS_TYPES = ['dot', 'weaken', 'vulnerable', 'stun', 'poisonPct', 'fear', 'confusion', 'sleep', 'bind', 'curse', 'mark'];
 const enemyStatuses = computed(() =>
-  (session.value?.activeEffects ?? []).filter((e) =>
-    ['dot', 'weaken', 'vulnerable', 'stun'].includes(e.type),
-  ),
+  (session.value?.activeEffects ?? []).filter((e) => ENEMY_STATUS_TYPES.includes(e.type)),
 );
 const playerStatuses = computed(() =>
-  (session.value?.activeEffects ?? []).filter((e) => ['buff', 'shield', 'regen'].includes(e.type)),
+  (session.value?.activeEffects ?? []).filter((e) =>
+    ['buff', 'shield', 'regen', 'divineShield', 'thorns'].includes(e.type),
+  ),
 );
 function statusText(e: { name: string; amount: number; beatsLeft?: number }): string {
   return `${e.name}${e.amount ? ` ${e.amount}` : ''}·${e.beatsLeft ?? '∞'}拍`;
+}
+
+const STATUS_DESC: Record<string, string> = {
+  vulnerable: '受到的伤害增加',
+  curse: '受到的伤害增加',
+  stun: '本拍放弃行动',
+  sleep: '沉睡——放弃行动',
+  weaken: '威胁降低',
+  fear: '威胁减半且无法反制',
+  bind: '威胁锁 1',
+  poisonPct: '每拍损失当前气血的百分比',
+  mark: '每拍额外损失',
+  confusion: '自伤',
+  dot: '每拍拍末损失',
+  buff: '行动值加成',
+  shield: '每拍减伤',
+  regen: '每拍回复',
+  divineShield: '免疫下一拍全部伤害',
+  thorns: '受击反弹',
+};
+function statusDesc(e: { type: string }): string {
+  return STATUS_DESC[e.type] ?? '每拍拍末损失';
 }
 const counterIntentText = ref('');
 const cardIntentText = ref('');
@@ -292,7 +324,7 @@ function dismiss() {
         :key="e.name + e.type"
         class="status-badge"
         role="listitem"
-        :title="`${e.name}：${e.type === 'vulnerable' ? '受到的伤害增加' : e.type === 'stun' ? '本拍放弃行动' : e.type === 'weaken' ? '威胁降低' : '每拍拍末损失'}${e.beatsLeft !== undefined ? `，剩 ${e.beatsLeft} 拍` : ''}`"
+        :title="`${e.name}：${statusDesc(e)}${e.beatsLeft !== undefined ? `，剩 ${e.beatsLeft} 拍` : ''}`"
       >
         {{ STATUS_ICON[e.type] }}{{ statusText(e) }}
       </span>

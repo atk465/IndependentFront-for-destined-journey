@@ -299,6 +299,8 @@ export interface TranslatedEffects {
   mpHeal: number;
   /** 打出时·破防 → 本场敌方防护削减（累计） */
   guardDown: number;
+  /** 打出时·真实伤害 → 拍末无视减免直扣敌方 HP（2026-09-25 效果批一） */
+  directDamage?: number;
   /** 状态层 → 在场登记（叠层合并后） */
   activate: CardInPlayEffect[];
   /** 审计行 */
@@ -346,6 +348,16 @@ export function translateCardEffects(
         out.mpHeal += 10;
         out.lines.push(`▸ 【效果】凝神：MP +10`);
         break;
+      case '真实伤害':
+        // 无视护盾/减免：直接从敌方 HP 扣（敌方防护减免对它无效）——标记为真实，结算层扣
+        out.directDamage = (out.directDamage ?? 0) + scaled;
+        out.lines.push(`▸ 【效果】真实伤害 ${scaled}（无视一切减免）`);
+        break;
+      case '净化':
+        // 我方负面状态系统双向化之前先挂 MP 通道（同驱散位；状态可叠加后即有真实目标）
+        out.mpHeal += 8;
+        out.lines.push(`▸ 【效果】净化：MP +8`);
+        break;
       case '中毒':
       case '灼烧':
       case '流血':
@@ -355,9 +367,34 @@ export function translateCardEffects(
       case '眩晕':
       case '冰冻':
       case '护盾':
-      case '格挡': {
+      case '格挡':
+      case '剧毒':
+      case '恐惧':
+      case '混乱':
+      case '沉睡':
+      case '束缚':
+      case '诅咒':
+      case '标记':
+      case '圣盾':
+      case '反伤': {
         const type =
-          e.action === '易伤' ? 'vulnerable' : e.action === '护盾' || e.action === '格挡' ? 'shield' : 'dot';
+          e.action === '易伤' || e.action === '诅咒'
+            ? 'vulnerable'
+            : e.action === '护盾' || e.action === '格挡' || e.action === '圣盾' || e.action === '反伤'
+              ? 'shield'
+              : e.action === '剧毒'
+                ? 'poisonPct'
+                : e.action === '恐惧'
+                  ? 'fear'
+                  : e.action === '混乱'
+                    ? 'confusion'
+                    : e.action === '沉睡'
+                      ? 'sleep'
+                      : e.action === '束缚'
+                        ? 'bind'
+                        : e.action === '标记'
+                          ? 'mark'
+                          : 'dot';
         const eff: CardInPlayEffect = {
           name: e.action,
           type: type as CardInPlayEffect['type'],
@@ -399,17 +436,33 @@ export function playBeat(
 
   // 在场战技：眩晕（敌方本拍放弃行动）/ 减速（威胁降低），只在剩余拍数内生效
   const live = s.activeEffects.filter((e) => e.beatsLeft === undefined || e.beatsLeft > 0);
-  const stunActive = live.some((e) => e.type === 'stun');
+  const stunActive =
+    live.some((e) => e.type === 'stun') || live.some((e) => e.type === 'sleep');
   const weakenTotal = live
     .filter((e) => e.type === 'weaken')
     .reduce((sum, e) => sum + Math.max(0, e.amount), 0);
-  const effectiveIntent = stunActive
+  // 效果批一（2026-09-25）：恐惧/束缚的意图改写——恐惧=威胁减半+反制面关闭；
+  // 束缚=威胁锁 1。多效果叠加取最强（恐惧 > 束缚 > 减速）。
+  const liveFear = live.some((e) => e.type === 'fear');
+  const liveBind = live.some((e) => e.type === 'bind');
+  let effectiveIntent = stunActive
     ? { ...intent, threat: 0 }
-    : weakenTotal > 0
-      ? { ...intent, threat: Math.max(0, intent.threat - weakenTotal) }
-      : intent;
+    : liveFear
+      ? { ...intent, threat: Math.max(1, Math.round(intent.threat / 2)), counters: [] as typeof intent.counters }
+      : liveBind
+        ? { ...intent, threat: 1 }
+        : weakenTotal > 0
+          ? { ...intent, threat: Math.max(0, intent.threat - weakenTotal) }
+          : intent;
   const effectLines: string[] = [];
-  if (stunActive) effectLines.push(`▸ 敌方被【眩晕】——本拍放弃行动`);
+  if (stunActive) {
+    const sleeping = live.some((e) => e.type === 'sleep');
+    effectLines.push(
+      sleeping ? `▸ 敌方【沉睡】——这几拍放弃行动` : `▸ 敌方被【眩晕】——本拍放弃行动`,
+    );
+  }
+  else if (liveFear) effectLines.push(`▸ 【恐惧】攫住了它——威胁减半，反制面关闭`);
+  else if (liveBind) effectLines.push(`▸ 【束缚】缠住了它的手脚——威胁锁 1`);
   else if (weakenTotal > 0) effectLines.push(`▸ 减速战技：敌方威胁 −${weakenTotal}`);
 
   // 在场加成（此前打出的领域/装备/召唤…）：行动值先行叠加，审计单列一行可复算
@@ -432,6 +485,8 @@ export function playBeat(
     .filter((e) => e.type === 'vulnerable')
     .reduce((sum, e) => sum + Math.max(0, e.amount), 0);
 
+  // 圣盾（效果批一）：一次性免疫下一拍全部伤害——live 时玩家承伤归 0，拍末消耗
+  const liveDivine = live.find((e) => e.type === 'divineShield');
   const result = resolveBeat({
     intent: effectiveIntent,
     action: effectiveAction,
@@ -442,6 +497,8 @@ export function playBeat(
     ...(liveShield > 0 ? { shield: liveShield } : {}),
     ...(liveVuln > 0 ? { vulnerable: liveVuln } : {}),
   });
+  const playerDamageBase = result.playerDamage ?? 0;
+  const divineBlocked = liveDivine !== undefined && playerDamageBase > 0;
   const lines = [
     // 出卡宣言（主人裁定：玩家写这张牌用来做什么，纯叙事素材，置于拍审计之前）
     ...(action.note ? [`▸ 意图：${action.note}`] : []),
@@ -460,22 +517,66 @@ export function playBeat(
     : s.activeEffects
         .filter((e) => e.type === 'dot')
         .reduce((sum, e) => sum + Math.max(0, e.amount), 0);
-  const enemyHpAfterDot = Math.max(0, result.enemyHp - dotTotal);
+  // 效果批一（2026-09-25）：剧毒=当前气血百分比毒；标记=固定额外扣；混乱=敌方自伤
+  const poisonPctTotal = dotSuppressed
+    ? 0
+    : s.activeEffects
+        .filter((e) => e.type === 'poisonPct')
+        .reduce((sum, e) => sum + Math.max(1, Math.round((result.enemyHp * e.amount) / 100)), 0);
+  const markTotal = dotSuppressed
+    ? 0
+    : s.activeEffects.filter((e) => e.type === 'mark').reduce((sum, e) => sum + Math.max(0, e.amount), 0);
+  const confusionTotal = dotSuppressed
+    ? 0
+    : s.activeEffects
+        .filter((e) => e.type === 'confusion')
+        .reduce((sum, e) => sum + Math.max(0, e.amount), 0);
+  const extraDot = poisonPctTotal + markTotal + confusionTotal;
+  const enemyHpAfterDot = Math.max(0, result.enemyHp - dotTotal - extraDot);
   if (dotTotal > 0 && result.enemyHp > 0) {
     lines.push(`▸ 在场持续：敌方 −${dotTotal}（${result.enemyHp} → ${enemyHpAfterDot}）`);
   } else if (dotSuppressed && s.activeEffects.some((e) => e.type === 'dot')) {
     lines.push('▸ 【决斗】场地不在场——持续伤害被隔离（免疫一切外部伤害）');
   }
+  if (poisonPctTotal > 0) {
+    lines.push(`▸ 【剧毒】腐蚀：敌方 −${poisonPctTotal}（当前气血的百分比）`);
+  }
+  if (markTotal > 0) {
+    lines.push(`▸ 【标记】锁定：敌方额外 −${markTotal}`);
+  }
+  if (confusionTotal > 0) {
+    lines.push(`▸ 【混乱】反噬：敌方自伤 −${confusionTotal}`);
+  }
+
+  // 反伤（效果批一）：受击时反弹——未被反制且实受了伤害才弹
+  const liveThorns = dotSuppressed
+    ? 0
+    : live
+        .filter((e) => e.type === 'thorns')
+        .reduce((sum, e) => sum + Math.max(0, e.amount), 0);
+  const thornsDamage =
+    !result.countered && playerDamageBase > 0 && liveThorns > 0 ? liveThorns : 0;
+  const enemyHpAfterThorns = Math.max(0, enemyHpAfterDot - thornsDamage);
+  if (thornsDamage > 0) {
+    lines.push(`▸ 【反伤】荆棘回敬：敌方 −${thornsDamage}`);
+  }
 
   // 倒也可斩 nuke 伤害（拍末追加，可收人头）
-  const afterNuke = nukeDamage > 0 ? Math.max(0, enemyHpAfterDot - nukeDamage) : enemyHpAfterDot;
+  const afterNuke = nukeDamage > 0 ? Math.max(0, enemyHpAfterThorns - nukeDamage) : enemyHpAfterThorns;
   if (nukeDamage > 0) {
     lines.push(`▸ 倒也可斩：敌方 −${nukeDamage}（${enemyHpAfterDot} → ${afterNuke}）`);
   }
 
+  // 效果池·真实伤害（效果批一）：无视一切减免，拍末直扣
+  const directDamage = Math.max(0, Math.round(fx.directDamage ?? 0));
+  const afterDirect = Math.max(0, afterNuke - directDamage);
+  if (directDamage > 0) {
+    lines.push(`▸ 【效果】真实伤害：敌方 −${directDamage}（无视一切减免）`);
+  }
+
   // 行为合同反噬（SSS 律师函警告）：敌方本拍意图触碰禁条 → 真实伤害
   const contractHit = contractBacklash(s.contracts, intent);
-  const afterContract = Math.max(0, afterNuke - contractHit.total);
+  const afterContract = Math.max(0, afterDirect - contractHit.total);
   if (contractHit.total > 0) {
     lines.push(
       `▸ 行为合同违约（${contractHit.violated.map((c) => c.name).join('、')}）：敌方 −${contractHit.total} 真实伤害（${afterNuke} → ${afterContract}）`,
@@ -546,9 +647,15 @@ export function playBeat(
     }
   }
 
+  // 圣盾（效果批一）：一次性免疫——被挡下的伤害原样补回 HP 链
+  const hpAfterBeat = result.playerHp + (divineBlocked ? playerDamageBase : 0);
+  if (divineBlocked && liveDivine) {
+    lines.push(`▸ 【圣盾】光芒展开——本拍 ${playerDamageBase} 点伤害被完全挡下（护盾消耗）`);
+  }
+
   // 暴走/反噬反冲（启封失败的代价）：拍末玩家扣血，可致死
   const recoil = opts?.recoil ?? 0;
-  const playerHpAfterRecoil = Math.max(0, result.playerHp - Math.max(0, Math.round(recoil)));
+  const playerHpAfterRecoil = Math.max(0, hpAfterBeat - Math.max(0, Math.round(recoil)));
   if (recoil > 0) {
     lines.push(
       `▸ 失控反冲：玩家 −${Math.round(recoil)}（${result.playerHp} → ${playerHpAfterRecoil}）`,

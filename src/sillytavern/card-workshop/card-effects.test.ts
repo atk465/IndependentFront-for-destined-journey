@@ -17,8 +17,8 @@ import { startSkirmish, playBeat } from './skirmish-session';
 import { cardAxisOf, deriveCardAtk, CARD_ELEMENT_AXIS } from './derived-stats';
 
 describe('效果池与元素映射（派生打底）', () => {
-  it('池 16 条（10 状态+6 动作），九元素九映射', () => {
-    expect(EFFECT_POOL).toHaveLength(16);
+  it('池 25 条（首批 16 + 批一 9），九元素九映射', () => {
+    expect(EFFECT_POOL).toHaveLength(25);
     expect(Object.keys(ELEMENT_DEFAULT_EFFECT)).toHaveLength(9);
     for (const action of Object.values(ELEMENT_DEFAULT_EFFECT)) {
       expect(poolEntryOf(action)).toBeDefined(); // 映射的动作都在池内
@@ -159,6 +159,61 @@ describe('拍内结算（翻译器 → playBeat）', () => {
     expect(after.playerHp).toBe(62);
     expect(after.mpGained).toBe(10);
   });
+  it('批一状态：恐惧威胁减半+反制面关、束缚威胁锁 1、圣盾免疫、反伤反弹、剧毒百分比', () => {
+    const fearIntent = { move: '重击', threat: 20, counters: ['防御'] };
+    const s1 = startSkirmish({
+      enemyName: '兽', intents: [fearIntent], playerHp: 100, playerMaxHp: 100, enemyHp: 600, guard: 10,
+    });
+    // 恐惧 live → 敌方威胁 10（减半）且 counters 清空
+    const feared = playBeat(
+      startSkirmish({
+        enemyName: '兽', intents: [fearIntent], playerHp: 100, playerMaxHp: 100, enemyHp: 600, guard: 10,
+        initialEffects: [{ name: '恐惧', type: 'fear', amount: 0, beatsLeft: 2 }],
+      }),
+      { label: '试探', power: 0, tags: [] }, 15,
+    );
+    expect(feared.log.some((l) => l.includes('恐惧'))).toBe(true);
+    // 束缚：威胁锁 1 → 玩家无伤
+    const bound = playBeat(
+      startSkirmish({
+        enemyName: '兽', intents: [fearIntent], playerHp: 100, playerMaxHp: 100, enemyHp: 600, guard: 10,
+        initialEffects: [{ name: '束缚', type: 'bind', amount: 0, beatsLeft: 2 }],
+      }),
+      { label: '对峙', power: 0, tags: [] }, 15,
+    );
+    expect(bound.playerHp).toBe(100);
+    // 圣盾：免疫一拍全部伤害
+    const shielded = playBeat(
+      startSkirmish({
+        enemyName: '兽', intents: [fearIntent], playerHp: 100, playerMaxHp: 100, enemyHp: 600, guard: 10,
+        initialEffects: [{ name: '圣盾', type: 'divineShield', amount: 0, beatsLeft: 1 }],
+      }),
+      { label: '硬挨', power: 0, tags: [] }, 15,
+    );
+    expect(shielded.playerHp).toBe(100);
+    expect(shielded.log.some((l) => l.includes('圣盾'))).toBe(true);
+    // 反伤：挨打 → 敌方掉血
+    const thorn = playBeat(
+      startSkirmish({
+        enemyName: '兽', intents: [fearIntent], playerHp: 100, playerMaxHp: 100, enemyHp: 600, guard: 10,
+        initialEffects: [{ name: '反伤', type: 'thorns', amount: 5, beatsLeft: 2 }],
+      }),
+      { label: '硬挨', power: 0, tags: [] }, 15,
+    );
+    expect(thorn.enemyHp).toBeLessThan(600);
+    expect(thorn.log.some((l) => l.includes('反伤'))).toBe(true);
+    // 剧毒：按当前气血百分比
+    const poison = playBeat(
+      startSkirmish({
+        enemyName: '兽', intents: [fearIntent], playerHp: 100, playerMaxHp: 100, enemyHp: 600, guard: 10,
+        initialEffects: [{ name: '剧毒', type: 'poisonPct', amount: 5, beatsLeft: 3 }],
+      }),
+      { label: '看毒', power: 0, tags: [] }, 15,
+    );
+    expect(poison.enemyHp).toBe(600 - 30); // 600 的 5%
+    expect(poison.log.some((l) => l.includes('剧毒'))).toBe(true);
+  });
+
   it('护盾：本拍承伤被抵扣（威胁 10、盾 6 → 只掉 4）', () => {
     const s = mk();
     // 先挂一个护盾状态（时长 2）

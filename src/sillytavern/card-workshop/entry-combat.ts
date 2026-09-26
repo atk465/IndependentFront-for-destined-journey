@@ -113,7 +113,23 @@ export interface CardInPlayEffect {
    *  regen = 每拍玩家 HP 回复（自身状态「吸魔」等）；
    *  2026-09-25 效果池扩展：vulnerable = 敌方受最终伤害 +value%；
    *  shield = 每拍玩家减伤 value（护盾/格挡） */
-  type: 'dot' | 'buff' | 'weaken' | 'stun' | 'regen' | 'vulnerable' | 'shield';
+  type:
+    | 'dot'
+    | 'buff'
+    | 'weaken'
+    | 'stun'
+    | 'regen'
+    | 'vulnerable'
+    | 'shield'
+    | 'poisonPct'
+    | 'fear'
+    | 'confusion'
+    | 'sleep'
+    | 'bind'
+    | 'curse'
+    | 'mark'
+    | 'divineShield'
+    | 'thorns';
   amount: number;
   /** 持续拍数（缺省 = 整场）；每拍结束递减，归零移除 */
   beatsLeft?: number;

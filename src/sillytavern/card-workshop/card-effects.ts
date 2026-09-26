@@ -30,6 +30,8 @@ export type EffectAction =
   | '连击'
   | '破防'
   | '驱散'
+  | '真实伤害'
+  | '净化'
   // 状态层（持续/叠层）
   | '中毒'
   | '灼烧'
@@ -40,7 +42,17 @@ export type EffectAction =
   | '眩晕'
   | '冰冻'
   | '护盾'
-  | '格挡';
+  | '格挡'
+  // 状态层第二批（2026-09-25 效果批一）
+  | '剧毒'
+  | '恐惧'
+  | '混乱'
+  | '沉睡'
+  | '束缚'
+  | '诅咒'
+  | '标记'
+  | '圣盾'
+  | '反伤';
 
 /** 代价（首批只收三种资源；正数值） */
 export interface EffectCost {
@@ -99,6 +111,16 @@ export const EFFECT_POOL: readonly PoolEntry[] = [
   { action: '冰冻', value: 2, duration: 2, cost: { mp: 8 }, text: '敌方跳过攻击且威胁 −2（2 拍）' },
   { action: '护盾', value: 6, duration: 3, text: '每拍玩家减伤 6（3 拍）' },
   { action: '格挡', value: 4, duration: 1, text: '本拍玩家减伤 4，可叠层' },
+  // ── 状态层第二批（效果批一 2026-09-25） ──
+  { action: '剧毒', value: 5, duration: 3, text: '每拍敌方损失当前气血的 5%，可叠层（3 拍）' },
+  { action: '恐惧', value: 0, duration: 2, text: '敌方威胁减半且无法反制（2 拍）' },
+  { action: '混乱', value: 6, duration: 2, text: '敌方每拍自伤 6（2 拍）' },
+  { action: '沉睡', value: 0, duration: 2, text: '敌方沉睡两拍放弃行动' },
+  { action: '束缚', value: 0, duration: 2, text: '敌方威胁锁 1（2 拍）' },
+  { action: '诅咒', value: 20, duration: 4, text: '敌方受到的伤害 +20%（4 拍）' },
+  { action: '标记', value: 5, duration: 3, text: '敌方每拍额外损失 5 HP（3 拍）' },
+  { action: '圣盾', value: 0, duration: 1, cost: { mp: 12 }, text: '免疫下一拍的全部伤害（一次性）' },
+  { action: '反伤', value: 5, duration: 2, text: '受击时敌方反弹 5 HP（2 拍）' },
 ];
 
 /** 池查询：动作 → 池内定值条目（找不到 = 池外，门禁丢弃） */
