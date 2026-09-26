@@ -48,7 +48,7 @@ import { cardKindOf } from '@engine/card-workshop/card-kind';
 import { willModifierOf } from '@engine/card-workshop/unsealing';
 import { mpCostOf } from '@engine/card-workshop/entry-combat';
 import { deriveCardEffects } from '@engine/card-workshop/card-effects';
-import { insightModOf } from '@engine/card-workshop/derived-stats';
+import { deriveCardAtk, insightModOf } from '@engine/card-workshop/derived-stats';
 import { getCommissionDefs } from '@engine/commission-runtime';
 import { coerceCommissionsFlags } from '@engine/card-workshop/commission-flags';
 /** 蜡痕计数键（白蜡城代价；worldFlags.counters 段） */
@@ -3114,7 +3114,8 @@ export class GamePipeline {
       if (card.sealed) {
         const res = sealedCardPlay(
           card,
-          deriveCombatStats({ attributes: playerC.attributes, level: playerC.level }),
+          // 元素主属性轴（2026-09-25）：卡的行动值挂元素对应属性，不再一律力量
+          { atk: deriveCardAtk(card.词条, playerC.attributes, playerC.level) },
           this.rollSkirmishD20(),
           willModifierOf(playerC.attributes),
           insightModOf(playerC.attributes),
@@ -3175,7 +3176,8 @@ export class GamePipeline {
       }
       const plan = cardPlayPlan(
         card,
-        deriveCombatStats({ attributes: playerC.attributes, level: playerC.level }),
+        // 元素主属性轴（2026-09-25）：按卡的主属性派生行动值
+        { atk: deriveCardAtk(card.词条, playerC.attributes, playerC.level) },
         // MP 硬门槛（2026-09-25 访谈共识）：有效 MP = 角色 MP − 本会话已耗
         { mp: playerC.mp - (session.mpSpent ?? 0) },
       );

@@ -47,6 +47,54 @@ export function deriveCombatStats(input: {
   return applyStatMultiplier(deriveBaseCombatStats(input), 1);
 }
 
+// ═══ 元素主属性轴（2026-09-25 访谈共识：卡牌强度挂角色属性）═══
+//
+// 每张卡的行动值改用「元素主属性」派生（2×对应属性+等级）：火金走力量、
+// 水冰走精神、雷风走敏捷、土走体质、光暗走智力、无元素兜底力量。
+// 角色 build 决定哪套卡组强——加点就是选玩法；五维全部进战斗面。
+export type AttributeAxis = 'str' | 'dex' | 'con' | 'int' | 'spi';
+
+export const CARD_ELEMENT_AXIS: Readonly<Record<string, AttributeAxis>> = Object.freeze({
+  火: 'str',
+  金: 'str',
+  水: 'spi',
+  冰: 'spi',
+  雷: 'dex',
+  风: 'dex',
+  土: 'con',
+  光: 'int',
+  暗: 'int',
+});
+
+export const AXIS_LABEL: Readonly<Record<AttributeAxis, string>> = Object.freeze({
+  str: '力量',
+  dex: '敏捷',
+  con: '体质',
+  int: '智力',
+  spi: '精神',
+});
+
+/** 卡的主属性轴：词条中首个命中九元素的映射；无元素/未知 → 力量（现状口径） */
+export function cardAxisOf(词条: readonly string[] | null | undefined): AttributeAxis {
+  const words = Array.isArray(词条) ? 词条 : [];
+  for (const w of words) {
+    const axis = CARD_ELEMENT_AXIS[w];
+    if (axis) return axis;
+  }
+  return 'str';
+}
+
+/** 按卡的主属性轴派生行动值：2×对应属性 + 等级（脏数据兜底与 deriveCombatStats 同口径） */
+export function deriveCardAtk(
+  词条: readonly string[] | null | undefined,
+  attributes: Record<string, number> | undefined,
+  level: number,
+): number {
+  const axis = cardAxisOf(词条);
+  const lv = typeof level === 'number' && Number.isFinite(level) ? Math.max(1, Math.round(level)) : 1;
+  return 2 * attrOf(attributes, axis) + lv;
+}
+
 /** 基础派生（不含天赋倍率） */
 export function deriveBaseCombatStats(input: {
   attributes?: Record<string, number>;

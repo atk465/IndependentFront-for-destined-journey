@@ -14,6 +14,7 @@ import {
   effectLineOf,
 } from './card-effects';
 import { startSkirmish, playBeat } from './skirmish-session';
+import { cardAxisOf, deriveCardAtk, CARD_ELEMENT_AXIS } from './derived-stats';
 
 describe('效果池与元素映射（派生打底）', () => {
   it('池 16 条（10 状态+6 动作），九元素九映射', () => {
@@ -88,6 +89,24 @@ describe('数值微差（双轨之二）', () => {
   });
   it('无元素全零（两张同档无元素卡的差异由效果层承担）', () => {
     expect(statModsOf(['技能'], '白银')).toEqual({ atk: 0, mp: 0, guard: 0 });
+  });
+});
+
+describe('元素主属性轴（卡牌强度挂角色属性）', () => {
+  it('九元素九轴映射；无元素兜底力量', () => {
+    expect(CARD_ELEMENT_AXIS['火']).toBe('str');
+    expect(CARD_ELEMENT_AXIS['水']).toBe('spi');
+    expect(CARD_ELEMENT_AXIS['雷']).toBe('dex');
+    expect(CARD_ELEMENT_AXIS['土']).toBe('con');
+    expect(CARD_ELEMENT_AXIS['光']).toBe('int');
+    expect(cardAxisOf(['技能'])).toBe('str');
+    expect(cardAxisOf(['技能', '暗'])).toBe('int');
+  });
+  it('行动值 = 2×对应属性 + 等级：智力 16 用光卡优于力量 10', () => {
+    const attrs = { str: 10, dex: 10, con: 10, int: 16, spi: 10 };
+    expect(deriveCardAtk(['技能', '光'], attrs, 12)).toBe(2 * 16 + 12);
+    expect(deriveCardAtk(['技能', '火'], attrs, 12)).toBe(2 * 10 + 12);
+    // 同一张卡在不同 build 手里强度不同——加点就是选玩法
   });
 });
 

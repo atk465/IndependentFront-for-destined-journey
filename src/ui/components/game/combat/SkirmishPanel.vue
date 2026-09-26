@@ -13,6 +13,7 @@ import type { BasicCounter } from '@engine/card-workshop/skirmish';
 import { BASIC_COUNTERS } from '@engine/card-workshop/skirmish';
 import { cardCombatTags, mpCostOf, CARD_MP_COST_BY_TIER } from '@engine/card-workshop/entry-combat';
 import { SP_COST_PLAY, SP_COST_COUNTER } from '@engine/card-workshop/skirmish-session';
+import { cardAxisOf, AXIS_LABEL } from '@engine/card-workshop/derived-stats';
 import { recommendCards } from '@engine/card-workshop/free-card-play';
 import { battleReadyCards } from '@engine/card-workshop/deck-power';
 import { cardTierVar } from '../../../lib/quality-colors';
@@ -508,7 +509,7 @@ function dismiss() {
         :title="
           c.used
             ? `${c.name}｜本局已用（一场一次）`
-            : `${c.name}｜MP ${costOf(c)} · SP ${SP_COST_PLAY}${c.tags.length > 0 ? `｜反制：${c.tags.join('/')}` : ''}`
+            : `${c.name}｜MP ${costOf(c)} · SP ${SP_COST_PLAY}${c.tags.length > 0 ? `｜反制：${c.tags.join('/')}` : ''}｜属性轴：${AXIS_LABEL[cardAxisOf(c.词条)]}`
         "
         @click="onCard(c.name)"
       >
