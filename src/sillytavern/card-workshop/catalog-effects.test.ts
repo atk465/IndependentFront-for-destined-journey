@@ -2,7 +2,24 @@
  * catalog-effects.test.ts — 购卡效果贯通：catalog.effects → cardCatalogToItem 门禁透传
  */
 import { describe, it, expect } from 'vitest';
-import { cardCatalogToItem } from '../start-catalog-mechanics';
+import { cardCatalogToItem, parseCatalogData } from '../start-catalog-mechanics';
+
+describe('parseCatalogData：effects 字段保留（注册链前提）', () => {
+  it('cardPool 条目的 effects 原样透传（不剥离）', () => {
+    const raw = {
+      cardPool: [
+        {
+          id: 'e1', name: '带效果卡', cardTier: '星辉', formEntry: '技能',
+          effects: [{ trigger: '每拍', target: '敌单体', action: '灼烧', value: 4, duration: 2 }],
+        },
+      ],
+    };
+    const data = parseCatalogData(raw);
+    expect(data.cardPool[0].effects).toEqual([
+      { trigger: '每拍', target: '敌单体', action: '灼烧', value: 4, duration: 2 },
+    ]);
+  });
+});
 
 describe('cardCatalogToItem：效果池登记贯通（效果批四）', () => {
   it('catalog.effects 门禁后随卡落库', () => {

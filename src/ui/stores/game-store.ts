@@ -169,6 +169,7 @@ import {
 import type { TalentTemplate } from '@engine/card-workshop/talent-entry';
 import type { CardCatalogItem } from '@engine/start-catalog-mechanics';
 import { parseCatalogData } from '@engine/start-catalog-mechanics';
+import { coerceCardEffects, registerCardEffects } from '@engine/card-workshop/card-effects';
 import {
   findSoulWeapon,
   planSoulWeapon,
@@ -1948,6 +1949,12 @@ export const useGameStore = defineStore('game', () => {
     // 素材元素档案（2026-09-25）：内容包 catalog.materialElements → material.ts 注册表。
     // 采集素材名大多不含元素字样，按名猜会让词条成片为空；档案由内容仓正典给定。
     registerMaterialElements(parseCatalogData(getContentRegistry().catalog).materialElements);
+    // 高阶卡精配覆写（效果批四收尾）：内容包 cardPool[].effects → card-effects 注册表。
+    // 按名注册 → 任何途径获得的同名卡出牌时都带精配效果（旧存档已持有的也覆盖）。
+    for (const c of parseCatalogData(getContentRegistry().catalog).cardPool) {
+      const fx = coerceCardEffects((c as { effects?: unknown }).effects);
+      if (fx.length > 0) registerCardEffects({ [c.name]: fx });
+    }
     // 会话稿盖回（见 sessionCustomTalents 的说明）：读档按存档重建注册表后，
     // 把"这次会话在编辑器里写的"重新注册上去，否则先写内容再开档会白写。
     for (const t of sessionCustomTalents.values()) registerCustomTalent(t);

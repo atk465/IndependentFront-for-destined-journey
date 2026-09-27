@@ -363,6 +363,17 @@ export function translateCardEffects(
         out.lines.push(`▸ 【效果】穿透：敌方防护 −${scaled}（本场）`);
         break;
       case '治疗':
+        // 每拍触发：持续回复 → regen 在场效果（领域/装备型持续治疗）
+        if (e.trigger === '每拍') {
+          out.activate.push({
+            name: e.action,
+            type: 'regen',
+            amount: scaled,
+            beatsLeft: Math.max(1, Math.round(e.duration ?? 2)),
+          });
+          out.lines.push(`▸ 【效果】持续回复：此后每拍 +${scaled} HP`);
+          break;
+        }
         // 拍结束触发：治疗并入拍末 HP 链（与常规治疗同通道、时机在拍末）
         if (e.trigger === '拍结束') {
           out.endBeatHeal = (out.endBeatHeal ?? 0) + scaled;
