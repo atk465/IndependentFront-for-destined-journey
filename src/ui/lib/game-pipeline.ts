@@ -2944,6 +2944,10 @@ export class GamePipeline {
         playerSp: playerC.sp,
         playerMaxHp: maxHp,
         enemyHp: assessment.enemyHp,
+        // 多敌实体（2026-09-28 效果批六后续）：逐敌档案透传（含角色/风格/轮换）
+        ...(assessment.enemies && assessment.enemies.length > 0
+          ? { enemies: assessment.enemies }
+          : {}),
         guard: deckGuard,
         initialEffects,
         enemyCount: coerceEnemyCount(assessment.enemyCount),

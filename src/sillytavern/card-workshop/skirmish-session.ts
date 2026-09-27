@@ -18,6 +18,7 @@ import {
   formatExpAudit,
   cardExpGain,
   resolveBeat,
+  counterBonusOf,
   type EnemyIntent,
   type ExpAudit,
   type SkirmishAction,
@@ -88,6 +89,14 @@ export interface SkirmishSession {
   /** 禁忌卡本场已用卡名账（每张每场限一次；2026-09-19 禁忌卡七链） */
   forbiddenUsed?: string[];
   /**
+   * 敌人实体（2026-09-28 多敌实体化共识）：每个敌人独立 HP/意图轮换/状态/角色。
+   * 缺省 undefined = 单实体退化（enemyHp 兼容字段照旧），旧存档与旧调用零迁移。
+   * 首领/杂兵：首领倒下才胜利；杂兵存活给首领护卫减伤（每只 −20%，三只封顶 −60%）。
+   */
+  enemies?: readonly EnemyEntity[];
+  /** 当前指定目标（enemies 下标）；缺省 = 威胁最高的存活敌 */
+  targetIndex?: number;
+  /**
    * 体力账（2026-09-25 访谈共识：SP=体力命脉）：开战时玩家 SP 快照与本场已耗。
    * 🔴 只记账不落库——结算层同窗提交 `sp -= spSpent`；每拍实时扣太碎。
    * 力竭判据：playerSp − spSpent ≤ 0 → 败北（与 HP 归零同路径，先到先触发；
@@ -106,6 +115,25 @@ export interface SkirmishSession {
    * 每当本拍发生治疗，逐条触发一次（每拍每条至多一次）。
    */
   healResponses?: { name: string; action: string; value: number }[];
+}
+
+/** 单个敌人实体（多敌实体化 2026-09-28） */
+export interface EnemyEntity {
+  /** 敌名（同场可重名，内部以下标区分） */
+  name: string;
+  role: '首领' | '杂兵';
+  hp: number;
+  maxHp: number;
+  /** 该敌的意图轮换（循环使用） */
+  intents: readonly EnemyIntent[];
+  /** 轮换游标 */
+  intentIndex: number;
+  /** 逐敌独立登记的负面状态（效果批五/六语义：各自层数与剩余拍数） */
+  statuses: { name: string; type: string; amount: number; beatsLeft?: number }[];
+  /** 风格（拖时间/爆发/均衡…，评估 Agent 定，仅叙事与数值标定参考） */
+  style?: string;
+  /** 是否已退场（HP 归零；退场后意图不再结算） */
+  dead?: boolean;
 }
 
 export interface StartSkirmishInput {
@@ -132,6 +160,17 @@ export interface StartSkirmishInput {
   forbiddenUsed?: string[];
   /** 开战时玩家 SP 快照（体力账；缺省 = 不启用体力账，旧测试零迁移） */
   playerSp?: number;
+  /**
+   * 多敌实体（2026-09-28 多敌实体化）：每敌独立 HP/意图轮换/角色（首领|杂兵）。
+   * 传入即启用多敌模式（enemyHp 单池兼容字段照旧可用作首领血量）；缺省 = 单敌。
+   */
+  enemies?: readonly {
+    name: string;
+    role?: '首领' | '杂兵';
+    hp: number;
+    intents: readonly EnemyIntent[];
+    style?: string;
+  }[];
   /** 开战即登记的治疗时响应（效果批六；测试与特殊遭遇用） */
   healResponses?: { name: string; action: string; value: number }[];
 }
@@ -181,9 +220,24 @@ export function startSkirmish(input: StartSkirmishInput): SkirmishSession {
       ? { playerSp: Math.max(0, Math.round(finiteOr(input.playerSp, 0))) }
       : {}),
     ...(input.healResponses ? { healResponses: input.healResponses } : {}),
+    ...(input.enemies && input.enemies.length > 0
+      ? {
+          enemies: input.enemies.map((e) => ({
+            name: e.name,
+            role: (e.role ?? '杂兵') as '首领' | '杂兵',
+            hp: clampHp(e.hp, 0),
+            maxHp: clampHp(e.hp, 0),
+            intents: e.intents,
+            intentIndex: 0,
+            statuses: [],
+            ...(e.style ? { style: e.style } : {}),
+            dead: false,
+          })),
+        }
+      : {}),
   };
   // 无敌方招式（评估被夹逼成空）→ 不战自溃，UI 永不卡在无拍可打的账本上
-  if (intents.length === 0) {
+  if (intents.length === 0 && !(session.enemies && session.enemies.some((e) => !e.dead))) {
     return withFinish(session, '胜利', [`▸ 【${session.enemyName}】毫无章法——不战自溃！`]);
   }
   return session;
@@ -536,8 +590,11 @@ export function playBeat(
   s: SkirmishSession,
   action: SkirmishAction,
   dice: number,
-  opts?: BeatOptions,
+  opts?: BeatOptions & { targetIndex?: number },
 ): SkirmishSession {
+  // 多敌模式（2026-09-28 多敌实体化）：逐敌结算——目标敌走反制/伤害主路，
+  // 其余存活敌威胁照常砸玩家（防护/护盾减，不可反制）
+  if (s.enemies && s.enemies.length > 0) return playMultiEnemyBeat(s, action, dice, opts);
   const intent = currentIntent(s);
   if (!intent) return s;
 
@@ -1086,6 +1143,132 @@ export function playBeat(
   }
   return next;
 }
+
+/**
+ * 多敌拍结算（2026-09-28 多敌实体化共识）：
+ * - 每个存活敌各出一条意图，全部结算：玩家反制指定目标（免其伤+造成伤），
+ *   其余敌威胁照常（防护/护盾减，不可反制）
+ * - 敌全体（AOE）行动逐敌全额结算（护卫减伤只保护首领）
+ * - 护卫减伤：存活杂兵每只首领承伤 −20%，三只封顶 −60%
+ * - 死亡：逐敌 HP 归零即退场（意图移除）；首领倒下 = 即刻胜利；全灭 = 胜利
+ * 确定性契约与单敌同款：纯函数、骰值传入、终局后幂等。
+ */
+export function playMultiEnemyBeat(
+  s: SkirmishSession,
+  action: SkirmishAction,
+  dice: number,
+  opts?: BeatOptions & { targetIndex?: number },
+): SkirmishSession {
+  const enemies = s.enemies;
+  if (!enemies || enemies.length === 0) return s;
+  const alive = enemies.map((e, i) => ({ e, i })).filter(({ e }) => !e.dead && e.hp > 0);
+  if (alive.length === 0) return withFinish(s, '胜利', ['▸ 敌方已全灭——胜利！']);
+
+  // 目标：指定下标（存活才有效），否则默认威胁最高者
+  const targetIdx =
+    opts?.targetIndex !== undefined &&
+    enemies[opts.targetIndex] &&
+    !enemies[opts.targetIndex].dead &&
+    enemies[opts.targetIndex].hp > 0
+      ? opts.targetIndex
+      : alive.reduce((best, cur) => (cur.e.hp > enemies[best].hp ? cur.i : best), alive[0].i);
+  const target = enemies[targetIdx];
+  const targetIntent = target.intents[target.intentIndex % target.intents.length] ?? null;
+
+  const lines: string[] = [];
+  const spCost = action.cardName ? SP_COST_PLAY : SP_COST_COUNTER;
+  const mpCost = Math.max(0, Math.round(opts?.mpCost ?? 0));
+
+  // ── 玩家行动 vs 目标敌 ──
+  const targetThreat = targetIntent ? Math.max(0, Math.round(targetIntent.threat)) : 0;
+  const targetCounters = targetIntent?.counters ?? [];
+  const bonus = counterBonusOf(
+    { move: targetIntent?.move ?? '', threat: targetThreat, counters: targetCounters },
+    action.tags,
+  );
+  const roll = dice + Math.max(0, Math.round(action.power)) + bonus;
+  const countered = roll >= targetThreat;
+  const playerToTarget = Math.max(0, Math.round(action.power)) + (countered ? roll - targetThreat : 0);
+  lines.push(
+    countered
+      ? `▸ 反制【${target.name}】的 ${targetIntent?.move ?? '攻击'}：d20=${dice}+行动值${Math.max(0, Math.round(action.power))}+克制${bonus} = ${roll} ≥ 威胁${targetThreat} → 反制成功（余量 ${roll - targetThreat}）`
+      : `▸ 反制失败（差 ${targetThreat - roll}）——行动值 ${Math.max(0, Math.round(action.power))} 仍造成等量伤害`,
+  );
+
+  // ── 其余存活敌：威胁直砸玩家（防护/护盾减免，不可反制） ──
+  let incoming = 0;
+  const incomingLines: string[] = [];
+  for (const { e, i } of alive) {
+    if (i === targetIdx) continue;
+    const it = e.intents[e.intentIndex % e.intents.length];
+    const t = it ? Math.max(0, Math.round(it.threat)) : 0;
+    if (t <= 0) continue;
+    incoming += t;
+    incomingLines.push(`▸ 【${e.name}】${it?.move ?? '攻击'}：威胁 ${t}`);
+  }
+
+  // ── 死亡退场 ──
+  const deaths: string[] = [];
+
+  // 玩家承伤：目标未反制部分 + 其余敌直砸，防护/护盾/免疫统一在入口减
+  const attackerCount = alive.length;
+  const playerDamage = countered
+    ? Math.max(attackerCount > 0 ? 1 : 0, incoming - Math.floor(s.guard / 2))
+    : Math.max(1, targetThreat + incoming - Math.floor(s.guard / 2));
+  const playerHpAfter = Math.max(0, s.playerHp - playerDamage);
+
+  // 目标承伤：玩家伤害（反制成功加余量），护卫减伤只保护首领
+  const aliveMinions = alive.filter(({ e: en }) => en.role === '杂兵').length;
+  let targetDamage = playerToTarget;
+  if (target.role === '首领') {
+    const reduce = Math.min(60, aliveMinions * 20);
+    targetDamage = Math.max(0, Math.round(targetDamage * (1 - reduce / 100)));
+    if (reduce > 0) lines.push(`▸ 【护卫】${aliveMinions} 只杂兵庇护——首领承伤 −${reduce}%`);
+  }
+  const targetHpAfter = Math.max(0, target.hp - targetDamage);
+  lines.push(
+    `▸ ${action.cardName ? `打出 ${action.cardName}：` : ''}对【${target.name}】造成 ${targetDamage}（HP ${target.hp} → ${targetHpAfter}）`,
+  );
+
+  // 死亡判定
+  if (targetHpAfter <= 0) deaths.push(`▸ 【${target.name}】倒下！`);
+
+  // ── 敌方意图游标推进 ──
+  const nextEnemies = enemies.map((e, i) => {
+    if (e.dead || e.hp <= 0) return e;
+    const hp = i === targetIdx ? targetHpAfter : e.hp;
+    if (hp <= 0) return { ...e, hp: 0, dead: true, intentIndex: e.intentIndex + 1 };
+    return { ...e, hp, intentIndex: (e.intentIndex + 1) % Math.max(1, e.intents.length) };
+  });
+
+  const next: SkirmishSession = {
+    ...s,
+    beat: s.beat + 1,
+    playerHp: Math.max(0, s.playerHp - playerDamage),
+    enemies: nextEnemies,
+    playedCards: action.cardName && !s.playedCards.includes(action.cardName)
+      ? [...s.playedCards, action.cardName]
+      : s.playedCards,
+    counteredBeats: s.counteredBeats + (countered ? 1 : 0),
+    log: [...s.log, ...lines, ...incomingLines, ...deaths],
+  };
+
+  // 终局：首领倒下或全灭 → 胜利
+  const leaderDead = nextEnemies.some((e) => e.role === '首领' && e.dead);
+  const allDead = nextEnemies.every((e) => e.dead || e.hp <= 0);
+  if (leaderDead || allDead) {
+    return withFinish(next, '胜利', [
+      ...(leaderDead ? [`▸ 【首领】倒下——护卫崩解，胜利！`] : []),
+      `▸ 【敌方全灭】——胜利！`,
+    ]);
+  }
+  if (next.playerHp <= 0) {
+    return withFinish(next, '败北', ['▸ 玩家倒下——败北（经验照常结算，评价 C）']);
+  }
+  return next;
+}
+
+/** 数值碾压速胜：跳过交锋直接结算（评价封顶 S，经验照常） */
 
 /** 数值碾压速胜：跳过交锋直接结算（评价封顶 S，经验照常） */
 export function crushFinish(s: SkirmishSession): SkirmishSession {

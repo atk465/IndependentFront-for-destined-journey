@@ -219,6 +219,48 @@ function statusDesc(e: { type: string }): string {
   return STATUS_DESC[e.type] ?? '每拍拍末损失';
 }
 const counterIntentText = ref('');
+
+// ═══ 多敌实体视图（2026-09-28 多敌实体化）═══
+const enemyEntities = computed(() => session.value?.enemies ?? []);
+const aliveEnemies = computed(() =>
+  enemyEntities.value.map((e, i) => ({ ...e, i })).filter((e) => !e.dead && e.hp > 0),
+);
+const selectedTarget = ref<number | null>(null);
+const currentTargetIdx = computed(() => {
+  if (selectedTarget.value !== null) {
+    const e = enemyEntities.value[selectedTarget.value];
+    if (e && !e.dead && e.hp > 0) return selectedTarget.value;
+  }
+  // 默认威胁最高者
+  let best = -1;
+  let bestThreat = -1;
+  for (const e of aliveEnemies.value) {
+    const it = e.intents[e.intentIndex % Math.max(1, e.intents.length)];
+    const t = it?.threat ?? 0;
+    if (t > bestThreat) {
+      bestThreat = t;
+      best = aliveEnemies.value.indexOf(e);
+    }
+  }
+  return best;
+});
+function selectTarget(i: number) {
+  selectedTarget.value = i;
+}
+const STATUS_ENEMY_ICON: Record<string, string> = {
+  dot: '🔥',
+  vulnerable: '🎯',
+  stun: '💫',
+  weaken: '⬇',
+  poisonPct: '☠',
+  fear: '😱',
+  confusion: '🌀',
+  sleep: '💤',
+  bind: '⛓',
+  curse: '🕯',
+  mark: '🏹',
+  mutation: '🧬',
+};
 const cardIntentText = ref('');
 /** 结束战斗流（展开理由输入） */
 const ending = ref(false);
@@ -301,7 +343,31 @@ function dismiss() {
     </header>
 
     <div class="hp-row">
-      <div class="hp-block">
+      <div v-if="enemyEntities.length > 0" class="hp-block enemy-list">
+        <button
+          v-for="(e, i) in aliveEnemies"
+          :key="e.name + i"
+          type="button"
+          class="enemy-row"
+          :class="{ targeted: currentTargetIdx === i }"
+          :disabled="game.skirmishBusy"
+          :title="`指定目标：${e.name}（威胁 ${e.intents[e.intentIndex % Math.max(1, e.intents.length)]?.threat ?? 0}）`"
+          @click="selectTarget(i)"
+        >
+          <span class="hp-name">{{ e.name }}<span v-if="e.role === '首领'" class="role-tag">首</span></span>
+          <span class="hp-text">{{ e.hp }}/{{ e.maxHp }}</span>
+          <span
+            v-for="st in e.statuses.filter((s) => s.beatsLeft === undefined || s.beatsLeft > 0)"
+            :key="st.name"
+            class="status-badge"
+            :title="statusDesc(st)"
+          >
+            {{ STATUS_ENEMY_ICON[st.type] ?? '◌' }}{{ statusText(st) }}
+          </span>
+          <span class="hp-bar foe"><span class="hp-fill" :style="{ width: `${(e.hp / Math.max(1, e.maxHp)) * 100}%` }" /></span>
+        </button>
+      </div>
+      <div v-else class="hp-block">
         <div class="hp-head">
           <span class="hp-name">{{ session.enemyName }}</span>
           <span class="hp-level">Lv.{{ session.enemyLevel }}</span>
@@ -681,6 +747,35 @@ function dismiss() {
 }
 .hp-bar.mine .hp-fill {
   background: var(--theme-success, #78b96d);
+}
+.enemy-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.enemy-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--theme-text-primary, inherit);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.enemy-row.targeted {
+  border-color: var(--theme-primary, #c7a77e);
+  background: color-mix(in srgb, var(--theme-primary, #c7a77e) 10%, transparent);
+}
+.role-tag {
+  font-size: 0.62rem;
+  margin-left: 4px;
+  padding: 0 3px;
+  border-radius: 3px;
+  background: rgba(200, 120, 60, 0.25);
 }
 .intent-line {
   margin: 0;

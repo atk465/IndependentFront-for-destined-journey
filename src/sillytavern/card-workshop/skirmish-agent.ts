@@ -72,6 +72,18 @@ export interface SkirmishAssessment {
   enemyCount?: number;
   /** 敌方体型（战斗维度：体格差压制；缺省「常人」。评估 Agent 可选声明） */
   enemyScale?: string;
+  /**
+   * 多敌实体档案（2026-09-28 效果批六后续）：每敌独立 HP/角色/招式轮换/风格。
+   * 声明 2+ 敌时引擎切多敌模式：逐敌血条与目标选择，首领倒下即胜，
+   * 存活杂兵给首领护卫减伤（每只 −20%，封顶 −60%）。
+   */
+  enemies?: {
+    name: string;
+    role: '首领' | '杂兵';
+    hp: number;
+    intents: EnemyIntent[];
+    style?: string;
+  }[];
 }
 
 /** 敌情评估 system 提示词（纯函数，测试钉关键约束） */
@@ -92,6 +104,7 @@ export function buildAssessmentMessages(req: SkirmishAssessRequest): Array<{
     `4. 威胁标定：玩家的典型行动值约为 ${power}（反制掷骰 = d20 + 行动值 + 克制加成，对上 threat 即反制成功）。请把 threat 设在这个量级：势均力敌 ≈ ${power + 10}，明显弱于玩家 ≈ ${Math.max(1, power - 5)}，头目级 ≈ ${power + 15}。enemyLevel 参考玩家等级 ${plLevel} 上下浮动。enemyHp 决定战斗节奏：这场战斗会打到一方 HP 清空为止，请把 HP 标定成势均力敌或略有压力的量级（约单拍伤害 × 4~8）。`,
     `5. enemyPower = 敌方总战力，玩家综合战力约为 ${Math.max(1, Math.round(req.playerTotalPower ?? power))}；远弱于玩家（≤ 一半）的遭遇会被跳拍碾压结算，请如实标定。`,
     '6. move/hook 用中文短句，hook 写敌方该式的动作画面，不写结果（结果由结算产生）。',
+    '7. 多敌遭遇（2~3 敌）：逐敌输出 enemies 数组——每敌独立 hp/两式轮换/风格（拖时间=血厚威胁低、爆发=威胁高血脆、均衡居中）；敌 0 固定标 role「首领」，其余标「杂兵」。总威胁预算不变（各敌威胁相加 ≈ 单敌标定量），首领略高于杂兵。',
   ].join('\n');
   const user = [
     req.enemyHint ? `敌方线索：${req.enemyHint}` : '敌方线索：（无，请依场景自拟一只有趣的遭遇）',
@@ -134,6 +147,30 @@ export function parseSkirmishAssessment(raw: string): SkirmishAssessment | null 
           ? Math.round(o.enemyPower)
           : level,
       intents: coerceIntents(o.intents),
+      // 多敌实体档案（效果批六后续）：逐敌透传，脏条目丢弃（无名/无 HP）
+      ...(Array.isArray(o.enemies) && o.enemies.length > 0
+        ? {
+            enemies: o.enemies
+              .filter(
+                (e) =>
+                  e &&
+                  typeof e.name === 'string' &&
+                  e.name.trim() &&
+                  typeof e.hp === 'number' &&
+                  Number.isFinite(e.hp) &&
+                  e.hp > 0 &&
+                  Array.isArray(e.intents) &&
+                  e.intents.length > 0,
+              )
+              .map((e) => ({
+                name: String(e.name).trim(),
+                role: e.role === '首领' ? ('首领' as const) : ('杂兵' as const),
+                hp: Math.round(e.hp),
+                intents: coerceIntents(e.intents),
+                ...(typeof e.style === 'string' && e.style.trim() ? { style: e.style.trim() } : {}),
+              })),
+          }
+        : {}),
     };
   });
 }
