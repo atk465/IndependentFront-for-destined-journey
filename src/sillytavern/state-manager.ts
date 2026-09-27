@@ -1482,6 +1482,8 @@ export class StateManager {
           ? { cardPowerBonus: cardValue.cardPowerBonus }
           : {}),
         ...(cardValue.战技 !== undefined ? { 战技: cardValue.战技 } : {}),
+        // 效果池登记（2026-09-25 效果批四·附魔）：门禁后的结构化效果集随卡落库
+        ...(cardValue.cardEffects !== undefined ? { cardEffects: cardValue.cardEffects } : {}),
       });
     }
     await this.persistCharacter(char);

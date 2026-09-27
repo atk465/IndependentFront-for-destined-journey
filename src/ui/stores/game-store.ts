@@ -1398,17 +1398,19 @@ export const useGameStore = defineStore('game', () => {
     if (!plan.ok) return { ok: false, reason: plan.reason };
 
     const nextEffects = plan.nextEffects ?? [];
+    // cardEffects 是数组实体——守卫禁 update_character 写数组（防 AI 假字段污染）。
+    // 附魔走 remove_item + add_item 原子对（与修复/重铸同款专用通道）。
+    // 🔴 detach 切断 Vue 代理——卡来自响应式 inventory，嵌套数组不切 structured clone 必炸
+    const enchantedCard: CardItem = detach({ ...card, cardEffects: nextEffects }) as CardItem;
     const sm = createStateManager(activeSaveId.value);
     const result = await sm.commitChatState([
+      { op: 'remove_item', target: `characters.${playerChar.name}`, value: { name: cardName, quantity: 1 } },
+      { op: 'add_item', target: `characters.${playerChar.name}`, value: enchantedCard as unknown as Record<string, unknown> },
       {
         op: 'update_character',
         target: `characters.${playerChar.name}`,
-        value: {
-          // money 按绝对值写（与 craftCard 同口径：Code 算完再落）
-          money: Math.max(0, playerChar.money - plan.cost!),
-          // cardEffects 整字段替换（门禁后的完整效果集）
-          cardEffects: detach(nextEffects) as unknown as Record<string, unknown>,
-        },
+        // money 按绝对值写（与 craftCard 同口径：Code 算完再落）
+        value: { money: Math.max(0, playerChar.money - plan.cost!) },
       } as StatePatch,
     ]);
     if (!result.success) return { ok: false, reason: result.errors.join('; ') };
