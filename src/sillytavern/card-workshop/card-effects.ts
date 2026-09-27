@@ -18,7 +18,15 @@
 import type { CardTier } from '../field-enums';
 
 /** 触发时机（首批三种 + 击杀时 + 效果批五：拍结束/消耗时。「拍开始」与「每拍」同源合并——见 backlog） */
-export type EffectTrigger = '打出时' | '每拍' | '受击时' | '击杀时' | '拍结束' | '消耗时';
+export type EffectTrigger =
+  | '打出时'
+  | '每拍'
+  | '受击时'
+  | '击杀时'
+  | '拍结束'
+  | '消耗时'
+  | '治疗时'
+  | '施法时';
 /** 目标三值：单血池下「敌全体」按 enemyCount 倍化 */
 export type EffectTarget = '敌单体' | '敌全体' | '自身';
 /** 动作层六动作 + 状态层十状态 */
@@ -67,6 +75,8 @@ export type EffectAction =
   | '退化'
   | '死亡倒计时'
   | '缴械'
+  // 状态层第五批（效果批六 2026-09-28）
+  | '免疫'
   // 动作层第四批
   | '汲取'
   // 强化档（效果批四 2026-09-25）：既有机制的池内定值高档
@@ -162,6 +172,8 @@ export const EFFECT_POOL: readonly PoolEntry[] = [
     text: '3 拍后敌方直接倒下（延迟处决，期间不叠层）',
   },
   { action: '缴械', value: 40, duration: 2, text: '敌方威胁 −40%（2 拍）' },
+  // ── 状态层第五批（效果批六 2026-09-28） ──
+  { action: '免疫', value: 0, duration: 2, cost: { mp: 18 }, text: '免疫一切伤害（2 拍）' },
   { action: '汲取', value: 20, duration: 0, text: '击杀时回复最大气血的 20%' },
   // ── 强化档（效果批四：连击/斩杀/破防的池内定值高档） ──
   { action: '双击', value: 100, duration: 0, cost: { sp: 4 }, text: '本拍行动值 +100%（两段连出）' },
@@ -339,7 +351,9 @@ function isTrigger(v: unknown): v is EffectTrigger {
     v === '受击时' ||
     v === '击杀时' ||
     v === '拍结束' ||
-    v === '消耗时'
+    v === '消耗时' ||
+    v === '治疗时' ||
+    v === '施法时'
   );
 }
 function isTarget(v: unknown): v is EffectTarget {

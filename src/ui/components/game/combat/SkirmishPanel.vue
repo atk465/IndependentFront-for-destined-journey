@@ -172,6 +172,7 @@ const STATUS_ICON: Record<string, string> = {
   silence: '🤐',
   parry: '⚔',
   initiative: '⚡',
+  immune: '🌟',
 };
 const ENEMY_STATUS_TYPES = ['dot', 'weaken', 'vulnerable', 'stun', 'poisonPct', 'fear', 'confusion', 'sleep', 'bind', 'curse', 'mark', 'charm', 'silence'];
 const enemyStatuses = computed(() =>
@@ -179,7 +180,7 @@ const enemyStatuses = computed(() =>
 );
 const playerStatuses = computed(() =>
   (session.value?.activeEffects ?? []).filter((e) =>
-    ['buff', 'shield', 'regen', 'divineShield', 'thorns', 'parry', 'initiative'].includes(e.type),
+    ['buff', 'shield', 'regen', 'divineShield', 'thorns', 'parry', 'initiative', 'immune'].includes(e.type),
   ),
 );
 function statusText(e: { name: string; amount: number; beatsLeft?: number }): string {
@@ -212,6 +213,7 @@ const STATUS_DESC: Record<string, string> = {
   degrade: '行动值逐拍加深',
   deathTimer: '倒数归零直接倒下',
   disarm: '威胁降低',
+  immune: '免疫一切伤害',
 };
 function statusDesc(e: { type: string }): string {
   return STATUS_DESC[e.type] ?? '每拍拍末损失';

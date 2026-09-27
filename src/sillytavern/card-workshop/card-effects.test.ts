@@ -18,8 +18,8 @@ import { cardAxisOf, deriveCardAtk, CARD_ELEMENT_AXIS } from './derived-stats';
 import type { CardEffectDef } from './card-effects';
 
 describe('效果池与元素映射（派生打底）', () => {
-  it('池 42 条（前三批 36 + 批四强化档 5 + 批五变异 1），九元素九映射', () => {
-    expect(EFFECT_POOL).toHaveLength(42);
+  it('池 43 条（前四批 42 + 批六免疫 1），九元素九映射', () => {
+    expect(EFFECT_POOL).toHaveLength(43);
     expect(Object.keys(ELEMENT_DEFAULT_EFFECT)).toHaveLength(9);
     for (const action of Object.values(ELEMENT_DEFAULT_EFFECT)) {
       expect(poolEntryOf(action)).toBeDefined(); // 映射的动作都在池内
@@ -442,6 +442,49 @@ describe('planEnchant（附魔规划）', () => {
     expect(
       planEnchant({ card, effect: { ...effect, action: '飞天', value: 1 }, money: 999 }).ok,
     ).toBe(false);
+  });
+});
+
+describe('效果批六（免疫/治疗时响应）', () => {
+  const intent = { move: '重击', threat: 20, counters: ['防御'] };
+  const mk = (init?: { name: string; type: never; amount?: number; beatsLeft?: number }) =>
+    startSkirmish({
+      enemyName: '兽', intents: [intent], playerHp: 100, playerMaxHp: 100,
+      enemyHp: 600, guard: 10,
+      ...(init
+        ? { initialEffects: [init as { name: string; type: 'dot'; amount: number; beatsLeft: number }] }
+        : {}),
+    });
+  it('免疫：N 拍全免窗——所有伤害归零', () => {
+    const after = playBeat(
+      mk({ name: '免疫', type: 'immune' as never, amount: 0, beatsLeft: 2 }),
+      { label: '硬抗', power: 0, tags: [] },
+      15,
+    );
+    expect(after.playerHp).toBe(100);
+    expect(after.log.some((l) => l.includes('免疫'))).toBe(true);
+  });
+  it('治疗时响应：治疗发生 → 登记的响应连锁触发', () => {
+    const s = startSkirmish({
+      enemyName: '兽', intents: [intent], playerHp: 50, playerMaxHp: 100,
+      enemyHp: 600, guard: 10,
+      healResponses: [{ name: '治疗响应·护盾', action: '护盾', value: 4 }],
+    });
+    // 打出带治疗的效果：治疗 8 → 响应护盾 +4
+    const after = playBeat(s, { label: '圣水', power: 0, tags: [] }, 15, {
+      effects: [{ trigger: '打出时', target: '自身', action: '治疗', value: 8 }],
+    });
+    // 护盾响应把敌方 15 点伤害减掉 4 → 50-11+8=47
+    expect(after.playerHp).toBe(47);
+  });
+  it('无治疗发生 → 响应不触发', () => {
+    const s = startSkirmish({
+      enemyName: '兽', intents: [intent], playerHp: 100, playerMaxHp: 100,
+      enemyHp: 600, guard: 10,
+      healResponses: [{ name: '治疗响应·护盾', action: '护盾', value: 4 }],
+    });
+    const after = playBeat(s, { label: '空挥', power: 0, tags: [] }, 15);
+    expect(after.playerHp).toBe(85); // 敌方反击照常（威胁 20，无防护）
   });
 });
 

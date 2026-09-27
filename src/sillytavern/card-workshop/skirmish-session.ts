@@ -101,6 +101,11 @@ export interface SkirmishSession {
   guardDown?: number;
   /** 效果池：本场 MP 累计回复（凝神；结算层与 mpSpent 轧差落库） */
   mpGained?: number;
+  /**
+   * 治疗时响应（效果批六）：本场登记的「治疗时」效果（来自打出的卡）。
+   * 每当本拍发生治疗，逐条触发一次（每拍每条至多一次）。
+   */
+  healResponses?: { name: string; action: string; value: number }[];
 }
 
 export interface StartSkirmishInput {
@@ -127,6 +132,8 @@ export interface StartSkirmishInput {
   forbiddenUsed?: string[];
   /** 开战时玩家 SP 快照（体力账；缺省 = 不启用体力账，旧测试零迁移） */
   playerSp?: number;
+  /** 开战即登记的治疗时响应（效果批六；测试与特殊遭遇用） */
+  healResponses?: { name: string; action: string; value: number }[];
 }
 
 const clampHp = (n: number, fallback: number): number => {
@@ -173,6 +180,7 @@ export function startSkirmish(input: StartSkirmishInput): SkirmishSession {
     ...(input.playerSp !== undefined
       ? { playerSp: Math.max(0, Math.round(finiteOr(input.playerSp, 0))) }
       : {}),
+    ...(input.healResponses ? { healResponses: input.healResponses } : {}),
   };
   // 无敌方招式（评估被夹逼成空）→ 不战自溃，UI 永不卡在无拍可打的账本上
   if (intents.length === 0) {
@@ -309,6 +317,8 @@ export interface TranslatedEffects {
   endBeatHeal?: number;
   /** 消耗时效果（效果批五）：消耗结算时落给玩家（治疗/MP） */
   onConsume?: { action: string; value: number }[];
+  /** 治疗时效果（效果批六）：登记为本场响应（打出的卡带此触发时） */
+  healResponses?: { name: string; action: string; value: number }[];
   /** 击杀时效果（效果批三：汲取等；胜利时结算） */
   onKill?: { action: string; value: number }[];
   /** 状态层 → 在场登记（叠层合并后） */
@@ -431,7 +441,8 @@ export function translateCardEffects(
       case '感染':
       case '退化':
       case '缴械':
-      case '变异': {
+      case '变异':
+      case '免疫': {
         const type =
           e.action === '易伤' || e.action === '诅咒'
             ? 'vulnerable'
@@ -500,6 +511,12 @@ export function translateCardEffects(
     if (e.trigger !== '消耗时') continue;
     if (!out.onConsume) out.onConsume = [];
     out.onConsume.push({ action: e.action, value: e.value });
+  }
+  // 治疗时（效果批六）：登记为本场响应——此后每次治疗触发一次
+  for (const e of effects) {
+    if (e.trigger !== '治疗时') continue;
+    if (!out.healResponses) out.healResponses = [];
+    out.healResponses.push({ name: `治疗响应·${e.action}`, action: e.action, value: e.value });
   }
   return out;
 }
@@ -596,6 +613,21 @@ export function playBeat(
   const liveDivine = live.find((e) => e.type === 'divineShield');
   // 先攻（效果批二）：持续期间反制掷骰 +3
   const liveInitiative = live.some((e) => e.type === 'initiative');
+  // 治疗时响应（效果批六）：本拍有任何治疗 → 登记的响应连锁触发（每拍每条一次）
+  const fxHealEarly = Math.max(0, Math.round(fx.heal));
+  const drainEarly = live
+    .filter((e) => e.type === 'drain')
+    .reduce((sum, e) => sum + Math.max(0, e.amount), 0);
+  const baseHealedEarly = fxHealEarly + drainEarly;
+  const responses = baseHealedEarly > 0 ? (s.healResponses ?? []) : [];
+  const responseHeal = responses
+    .filter((r) => r.action === '治疗')
+    .reduce((sum, r) => sum + Math.max(0, Math.round(r.value)), 0);
+  const responseShield = responses
+    .filter((r) => r.action === '护盾')
+    .reduce((sum, r) => sum + Math.max(0, Math.round(r.value)), 0);
+  // 免疫（效果批六）：N 拍全免窗——全部伤害归零（强于圣盾的持续版）
+  const liveImmune = live.some((e) => e.type === 'immune');
   const result = resolveBeat({
     intent: { ...effectiveIntent, threat: effectiveThreat },
     action: effectiveAction,
@@ -603,11 +635,14 @@ export function playBeat(
     enemyHp: s.enemyHp,
     guard: Math.max(0, s.guard - (s.guardDown ?? 0)),
     dice: dice + (liveInitiative ? 3 : 0),
-    ...(liveShield > 0 ? { shield: liveShield } : {}),
+    ...(liveShield + responseShield > 0
+      ? { shield: liveShield + responseShield }
+      : {}),
     ...(liveVuln + mutationVuln > 0 ? { vulnerable: liveVuln + mutationVuln } : {}),
   });
   const playerDamageBase = result.playerDamage ?? 0;
   const divineBlocked = liveDivine !== undefined && playerDamageBase > 0;
+  const immuneBlocked = liveImmune && playerDamageBase > 0;
   const lines = [
     // 出卡宣言（主人裁定：玩家写这张牌用来做什么，纯叙事素材，置于拍审计之前）
     ...(action.note ? [`▸ 意图：${action.note}`] : []),
@@ -781,8 +816,11 @@ export function playBeat(
   }
 
   // 圣盾（效果批一）：一次性免疫——被挡下的伤害原样补回 HP 链
-  const hpAfterBeat = result.playerHp + (divineBlocked ? playerDamageBase : 0);
-  if (divineBlocked && liveDivine) {
+  const hpAfterBeat =
+    result.playerHp + (immuneBlocked || divineBlocked ? playerDamageBase : 0);
+  if (immuneBlocked) {
+    lines.push(`▸ 【免疫】本拍 ${playerDamageBase} 点伤害被完全挡下`);
+  } else if (divineBlocked && liveDivine) {
     lines.push(`▸ 【圣盾】光芒展开——本拍 ${playerDamageBase} 点伤害被完全挡下（护盾消耗）`);
   }
 
@@ -816,17 +854,25 @@ export function playBeat(
   // 寄生（效果批三）：拍末吸血转给玩家
   const drainHealAmount = Math.max(0, Math.round(drainHeal));
   const endBeatHeal = Math.max(0, Math.round(fx.endBeatHeal ?? 0));
-  const healedTotal = fxHeal + drainHealAmount + endBeatHeal;
+  const baseHealed = fxHeal + drainHealAmount + endBeatHeal;
+  const healedTotal = baseHealed + responseHeal;
   const playerHpAfterFxHeal =
     healedTotal > 0 ? Math.min(s.playerMaxHp, playerHpAfterRegen + healedTotal) : playerHpAfterRegen;
   if (fxHeal > 0 && playerHpAfterFxHeal > playerHpAfterRegen) {
     lines.push(`▸ 【效果】回复 ${playerHpAfterFxHeal - playerHpAfterRegen} HP`);
+  }
+  if (responseHeal > 0 && playerHpAfterFxHeal > playerHpAfterRegen) {
+    lines.push(
+      `▸ 【治疗时响应】额外回复 ${playerHpAfterFxHeal - playerHpAfterRegen - fxHeal - drainHealAmount - endBeatHeal} HP`,
+    );
   }
   if (endBeatHeal > 0 && playerHpAfterFxHeal > playerHpAfterRegen + fxHeal) {
     lines.push(
       `▸ 【效果】拍末回复 ${playerHpAfterFxHeal - playerHpAfterRegen - fxHeal} HP`,
     );
   }
+
+
   if (drainHealAmount > 0 && playerHpAfterFxHeal > playerHpAfterRegen + fxHeal) {
     lines.push(
       `▸ 【寄生】汲取 ${playerHpAfterFxHeal - playerHpAfterRegen - fxHeal} HP（${playerHpAfterRegen + fxHeal} → ${playerHpAfterFxHeal}）`,

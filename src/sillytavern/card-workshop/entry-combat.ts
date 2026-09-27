@@ -139,7 +139,8 @@ export interface CardInPlayEffect {
     | 'degrade'
     | 'deathTimer'
     | 'disarm'
-    | 'mutation';
+    | 'mutation'
+    | 'immune';
   amount: number;
   /** 持续拍数（缺省 = 整场）；每拍结束递减，归零移除 */
   beatsLeft?: number;
