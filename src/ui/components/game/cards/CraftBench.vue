@@ -23,6 +23,8 @@ import {
 } from '@engine/card-workshop/material';
 import type { MaterialSpec } from '@engine/card-workshop/card-fusion';
 import { deriveFallbackProductName } from '@engine/card-craft-narrate';
+import { EFFECT_POOL, effectLineOf } from '@engine/card-workshop/card-effects';
+import { planEnchant, ENCHANT_BASE_COST } from '@engine/card-workshop/card-enchant';
 import { insightModOf } from '@engine/card-workshop/derived-stats';
 import { REPAIR_RECIPE, isDamaged, planQuench, planRepair } from '@engine/card-workshop/repair';
 import type { RepairPlan } from '@engine/card-workshop/repair';
@@ -578,6 +580,64 @@ async function doCraftCard() {
   craftSubB.value = '';
   craftIntent.value = '';
   craftBlueprint.value = '';
+}
+
+// ═══ 附魔区（2026-09-25 效果批四：效果池追加登记）═══
+const enchantCardName = ref('');
+const enchantAction = ref('');
+const enchanting = ref(false);
+const enchantMsg = ref('');
+const enchantErr = ref('');
+const enchantableCards = computed(() =>
+  (player.value?.inventory ?? []).filter(
+    (i): i is CardItem =>
+      i.type === '卡牌' && !['物资', '素材'].includes(cardKindOf((i as CardItem).词条 ?? [])),
+  ),
+);
+const enchantEffectOptions = computed(() =>
+  EFFECT_POOL.map((e) => ({
+    action: e.action,
+    label: `${e.action}——${e.text}${e.cost ? `［${Object.entries(e.cost).map(([k, v]) => `${k.toUpperCase()} ${v}`).join(' ')}］` : ''}`,
+    cost: ENCHANT_BASE_COST + e.value * 2,
+  })),
+);
+const enchantTarget = computed(() =>
+  enchantableCards.value.find((c) => c.name === enchantCardName.value),
+);
+const enchantPreview = computed(() => {
+  const opt = enchantEffectOptions.value.find((o) => o.action === enchantAction.value);
+  const card = enchantTarget.value;
+  if (!opt || !card) return undefined;
+  const entry = EFFECT_POOL.find((e) => e.action === opt.action)!;
+  return planEnchant(
+    {
+      card,
+      effect: {
+        trigger: entry.duration > 0 ? '每拍' : '打出时',
+        target: ['治疗', '护盾', '格挡'].includes(opt.action) ? '自身' : '敌单体',
+        action: opt.action,
+        value: entry.value,
+        duration: entry.duration,
+      },
+      money: player.value?.money ?? 0,
+    },
+  );
+});
+async function doEnchant() {
+  const preview = enchantPreview.value;
+  if (!preview?.ok || !enchantCardName.value) return;
+  enchanting.value = true;
+  enchantErr.value = '';
+  enchantMsg.value = '';
+  const r = await game.enchantCard(enchantCardName.value, preview.effect!);
+  enchanting.value = false;
+  if (!r.ok) {
+    enchantErr.value = r.reason ?? '附魔失败';
+    return;
+  }
+  enchantMsg.value = r.summary ?? '附魔完成';
+  enchantCardName.value = '';
+  enchantAction.value = '';
 }
 
 // ═══ 足之炼金术区（`炼金` 条目：S「足之炼金术」）═══
@@ -1500,6 +1560,47 @@ const RATING_HINT: Record<string, string> = {
           @click="doCraftCard"
         >
           开始制卡
+        </AppButton>
+      </div>
+    </section>
+
+    <!-- 附魔区（效果批四）：给战斗卡追加效果池内的效果 -->
+    <section v-if="enchantableCards.length > 0" class="repair-section" aria-label="附魔">
+      <h4 class="d-label">附魔</h4>
+      <div class="slot-card">
+        <div class="slot-price">
+          给战斗卡追加一条效果池内的效果——<b>效果从池内选，数值池内定值</b>，每卡最多 2
+          条；附魔不可逆。
+        </div>
+        <div class="slot-head">
+          <select v-model="enchantCardName" class="slot-select" aria-label="选择附魔目标">
+            <option value="" disabled>目标卡…</option>
+            <option v-for="c in enchantableCards" :key="c.name" :value="c.name">{{ c.name }}</option>
+          </select>
+          <select v-model="enchantAction" class="slot-select" aria-label="选择效果">
+            <option value="" disabled>效果…</option>
+            <option v-for="o in enchantEffectOptions" :key="o.action" :value="o.action">
+              {{ o.label }}
+            </option>
+          </select>
+        </div>
+        <div v-if="enchantPreview?.ok" class="craft-preview">
+          <span class="chip">造价 {{ enchantPreview.cost }} GC</span>
+          <span class="chip">{{ effectLineOf(enchantPreview.effect!) }}</span>
+        </div>
+        <p v-if="enchantPreview && !enchantPreview.ok" class="clash-warn" role="alert">
+          {{ enchantPreview.reason }}
+        </p>
+        <p v-if="enchantMsg" class="bench-note">{{ enchantMsg }}</p>
+        <p v-if="enchantErr" class="clash-warn" role="alert">{{ enchantErr }}</p>
+        <AppButton
+          size="sm"
+          variant="primary"
+          :disabled="!enchantPreview?.ok || enchanting"
+          :loading="enchanting"
+          @click="doEnchant"
+        >
+          附魔
         </AppButton>
       </div>
     </section>

@@ -331,8 +331,14 @@ export function translateCardEffects(
         out.lines.push(`▸ 【效果】直接伤害 +${scaled}`);
         break;
       case '连击':
+      case '双击':
+      case '风怒':
         out.powerMult *= 1 + scaled / 100;
-        out.lines.push(`▸ 【效果】连击：本拍行动值 +${scaled}%`);
+        out.lines.push(`▸ 【效果】【${e.action}】本拍行动值 +${scaled}%`);
+        break;
+      case '穿透':
+        out.guardDown += scaled;
+        out.lines.push(`▸ 【效果】穿透：敌方防护 −${scaled}（本场）`);
         break;
       case '治疗':
         out.heal += scaled;
@@ -358,9 +364,11 @@ export function translateCardEffects(
         out.lines.push(`▸ 【效果】真实伤害 ${scaled}（无视一切减免）`);
         break;
       case '斩杀':
-        // 终局判定在 playBeat（敌方 HP% 对阈值）；此处只登记阈值
-        out.executePct = e.value;
-        out.lines.push(`▸ 【效果】斩杀线 ${e.value}%（当前气血低于此线直接击杀）`);
+      case '超杀':
+      case '处决':
+        // 终局判定在 playBeat（敌方 HP% 对阈值）；此处只登记阈值（多条取最高线）
+        out.executePct = Math.max(out.executePct ?? 0, e.value);
+        out.lines.push(`▸ 【效果】${e.action}线 ${e.value}%（当前气血低于此线直接击杀）`);
         break;
       case '死亡倒计时': {
         const beats = Math.max(1, Math.round(e.duration ?? 3));

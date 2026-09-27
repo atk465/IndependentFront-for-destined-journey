@@ -18,8 +18,8 @@ import { cardAxisOf, deriveCardAtk, CARD_ELEMENT_AXIS } from './derived-stats';
 import type { CardEffectDef } from './card-effects';
 
 describe('效果池与元素映射（派生打底）', () => {
-  it('池 36 条（首批 16 + 批一 9 + 批二 5 + 批三 6），九元素九映射', () => {
-    expect(EFFECT_POOL).toHaveLength(36);
+  it('池 41 条（前三批 36 + 批四强化档 5），九元素九映射', () => {
+    expect(EFFECT_POOL).toHaveLength(41);
     expect(Object.keys(ELEMENT_DEFAULT_EFFECT)).toHaveLength(9);
     for (const action of Object.values(ELEMENT_DEFAULT_EFFECT)) {
       expect(poolEntryOf(action)).toBeDefined(); // 映射的动作都在池内
@@ -362,6 +362,86 @@ describe('效果批三（寄生/感染/退化/死亡倒计时/缴械/汲取）',
     expect(after.finished).toBe('胜利');
     expect(after.playerHp).toBe(70); // 50 + 20% × 100
     expect(after.log.some((l) => l.includes('汲取'))).toBe(true);
+  });
+});
+
+describe('效果批四（强化档）', () => {
+  const intent = { move: '重击', threat: 20, counters: ['防御'] };
+  it('池内定值：双击100/风怒150/超杀30/穿透8/处决40', () => {
+    for (const [action, value] of [
+      ['双击', 100],
+      ['风怒', 150],
+      ['超杀', 30],
+      ['穿透', 8],
+      ['处决', 40],
+    ] as const) {
+      expect(poolEntryOf(action)?.value).toBe(value);
+    }
+  });
+  it('双击/风怒 → 行动值乘区；穿透 → 破防累计', () => {
+    const s = startSkirmish({
+      enemyName: '兽', intents: [intent], playerHp: 100, playerMaxHp: 100,
+      enemyHp: 600, guard: 10,
+    });
+    const after = playBeat(s, { label: '出招', power: 20, tags: [] }, 15, {
+      effects: [{ trigger: '打出时', target: '敌单体', action: '双击', value: 100 }],
+    });
+    // 行动值 20×2 = 40
+    expect(after.log.some((l) => l.includes('40'))).toBe(true);
+    const after2 = playBeat(after, { label: '穿透', power: 10, tags: [] }, 15, {
+      effects: [{ trigger: '打出时', target: '敌单体', action: '穿透', value: 8 }],
+    });
+    expect(after2.guardDown).toBe(8);
+  });
+  it('超杀 30% 线：敌方 25% 直接终局', () => {
+    const s = startSkirmish({
+      enemyName: '兽', intents: [intent], playerHp: 100, playerMaxHp: 100,
+      enemyHp: 150, enemyMaxHp: 600, guard: 10, // 25% < 30%
+    });
+    const after = playBeat(s, { label: '超杀', power: 5, tags: [] }, 15, {
+      effects: [{ trigger: '打出时', target: '敌单体', action: '超杀', value: 30 }],
+    });
+    expect(after.finished).toBe('胜利');
+  });
+});
+
+import { planEnchant, ENCHANT_BASE_COST } from './card-enchant';
+
+describe('planEnchant（附魔规划）', () => {
+  const card = {
+    name: '铁剑卡', cardTier: '青铜' as const, 词条: ['技能', '金'], cardEffects: [],
+  };
+  const effect = { trigger: '打出时', target: '敌单体', action: '灼烧', value: 4, duration: 2 };
+  it('合法附魔：造价 = 60 + 定值×2，效果集追加', () => {
+    const r = planEnchant({ card, effect, money: 200 });
+    expect(r.ok).toBe(true);
+    expect(r.cost).toBe(ENCHANT_BASE_COST + 8);
+    expect(r.nextEffects).toHaveLength(1);
+  });
+  it('物资/素材拒附魔', () => {
+    const r = planEnchant({
+      card: { name: '干粮卡', cardTier: '白铁' as never, 词条: ['物资'], cardEffects: [] },
+      effect, money: 999,
+    });
+    expect(r.ok).toBe(false);
+  });
+  it('同名效果唯一；上限 2 条', () => {
+    const withBurn = { ...card, cardEffects: [effect] };
+    expect(planEnchant({ card: withBurn, effect, money: 999 }).ok).toBe(false);
+    const two = {
+      ...card,
+      cardEffects: [
+        effect,
+        { trigger: '每拍', target: '自身', action: '治疗', value: 12 },
+      ],
+    };
+    expect(planEnchant({ card: two, effect, money: 999 }).ok).toBe(false);
+  });
+  it('钱不够拒；池外效果拒', () => {
+    expect(planEnchant({ card, effect, money: 10 }).ok).toBe(false);
+    expect(
+      planEnchant({ card, effect: { ...effect, action: '飞天', value: 1 }, money: 999 }).ok,
+    ).toBe(false);
   });
 });
 

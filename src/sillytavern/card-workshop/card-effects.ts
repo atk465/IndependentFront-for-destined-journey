@@ -67,7 +67,13 @@ export type EffectAction =
   | '死亡倒计时'
   | '缴械'
   // 动作层第四批
-  | '汲取';
+  | '汲取'
+  // 强化档（效果批四 2026-09-25）：既有机制的池内定值高档
+  | '双击'
+  | '风怒'
+  | '超杀'
+  | '穿透'
+  | '处决';
 
 /** 代价（首批只收三种资源；正数值） */
 export interface EffectCost {
@@ -156,6 +162,12 @@ export const EFFECT_POOL: readonly PoolEntry[] = [
   },
   { action: '缴械', value: 40, duration: 2, text: '敌方威胁 −40%（2 拍）' },
   { action: '汲取', value: 20, duration: 0, text: '击杀时回复最大气血的 20%' },
+  // ── 强化档（效果批四：连击/斩杀/破防的池内定值高档） ──
+  { action: '双击', value: 100, duration: 0, cost: { sp: 4 }, text: '本拍行动值 +100%（两段连出）' },
+  { action: '风怒', value: 150, duration: 0, cost: { sp: 6 }, text: '本拍行动值 +150%（三段连出）' },
+  { action: '超杀', value: 30, duration: 0, cost: { mp: 25 }, text: '敌方当前气血低于 30% 时直接击杀' },
+  { action: '穿透', value: 8, duration: 0, text: '本场敌方防护 −8（穿透护甲）' },
+  { action: '处决', value: 40, duration: 0, cost: { mp: 30 }, text: '敌方当前气血低于 40% 时直接击杀' },
 ];
 
 /** 池查询：动作 → 池内定值条目（找不到 = 池外，门禁丢弃） */

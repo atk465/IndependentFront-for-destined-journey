@@ -77,6 +77,7 @@ import { DAILY_BUFF_CRAFT_LUCK } from '@engine/card-workshop/fortune-dice';
 import type { FortuneDiceTable } from '@engine/card-workshop/fortune-dice';
 import { planRarityUpgrade, registerMaterialElements } from '@engine/card-workshop/material';
 import { insightModOf } from '@engine/card-workshop/derived-stats';
+import { planEnchant } from '@engine/card-workshop/card-enchant';
 import { planUnequalExchange } from '@engine/card-workshop/unequal-exchange';
 import { floorRarityForLevel, planMaterialGacha } from '@engine/card-workshop/material-gacha';
 import { addSpirit, coerceSpirits } from '@engine/card-workshop/behind-spirits';
@@ -1375,6 +1376,46 @@ export const useGameStore = defineStore('game', () => {
     return {
       ok: true,
       summary: `使用「${cardName}」——${parts.join('、')}（卡已消耗）`,
+    };
+  }
+
+  /**
+   * 附魔（2026-09-25 效果批四）：给战斗卡追加一条效果池内的效果。
+   * 纯玩家主动操作——planEnchant 校验（形态/重复/条数/门禁/造价），这里只管提交。
+   */
+  async function enchantCard(
+    cardName: string,
+    effect: { trigger: string; target: string; action: string; value: number; duration?: number },
+  ): Promise<{ ok: boolean; reason?: string; summary?: string }> {
+    const playerChar = player.value;
+    if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
+    const card = playerChar.inventory.find(
+      (i): i is CardItem => i.name === cardName && i.type === '卡牌',
+    );
+    if (!card) return { ok: false, reason: '找不到该卡' };
+
+    const plan = planEnchant({ card, effect, money: playerChar.money });
+    if (!plan.ok) return { ok: false, reason: plan.reason };
+
+    const nextEffects = plan.nextEffects ?? [];
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState([
+      {
+        op: 'update_character',
+        target: `characters.${playerChar.name}`,
+        value: {
+          // money 按绝对值写（与 craftCard 同口径：Code 算完再落）
+          money: Math.max(0, playerChar.money - plan.cost!),
+          // cardEffects 整字段替换（门禁后的完整效果集）
+          cardEffects: detach(nextEffects) as unknown as Record<string, unknown>,
+        },
+      } as StatePatch,
+    ]);
+    if (!result.success) return { ok: false, reason: result.errors.join('; ') };
+    await refreshFromDb();
+    return {
+      ok: true,
+      summary: `「${cardName}」附魔完成——登记「${plan.effect!.action}」，花费 ${plan.cost} GC`,
     };
   }
 
@@ -4657,6 +4698,7 @@ export const useGameStore = defineStore('game', () => {
     repairCard,
     quenchCard,
     useSupplyCard,
+    enchantCard,
     drawFortune,
     devourCard,
     smeltCards,
