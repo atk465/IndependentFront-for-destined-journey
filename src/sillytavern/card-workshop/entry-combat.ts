@@ -129,7 +129,11 @@ export interface CardInPlayEffect {
     | 'curse'
     | 'mark'
     | 'divineShield'
-    | 'thorns';
+    | 'thorns'
+    | 'charm'
+    | 'silence'
+    | 'parry'
+    | 'initiative';
   amount: number;
   /** 持续拍数（缺省 = 整场）；每拍结束递减，归零移除 */
   beatsLeft?: number;

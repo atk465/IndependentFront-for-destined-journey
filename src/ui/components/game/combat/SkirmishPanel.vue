@@ -168,14 +168,18 @@ const STATUS_ICON: Record<string, string> = {
   mark: '🏹',
   divineShield: '✨',
   thorns: '🌵',
+  charm: '💗',
+  silence: '🤐',
+  parry: '⚔',
+  initiative: '⚡',
 };
-const ENEMY_STATUS_TYPES = ['dot', 'weaken', 'vulnerable', 'stun', 'poisonPct', 'fear', 'confusion', 'sleep', 'bind', 'curse', 'mark'];
+const ENEMY_STATUS_TYPES = ['dot', 'weaken', 'vulnerable', 'stun', 'poisonPct', 'fear', 'confusion', 'sleep', 'bind', 'curse', 'mark', 'charm', 'silence'];
 const enemyStatuses = computed(() =>
   (session.value?.activeEffects ?? []).filter((e) => ENEMY_STATUS_TYPES.includes(e.type)),
 );
 const playerStatuses = computed(() =>
   (session.value?.activeEffects ?? []).filter((e) =>
-    ['buff', 'shield', 'regen', 'divineShield', 'thorns'].includes(e.type),
+    ['buff', 'shield', 'regen', 'divineShield', 'thorns', 'parry', 'initiative'].includes(e.type),
   ),
 );
 function statusText(e: { name: string; amount: number; beatsLeft?: number }): string {
@@ -199,6 +203,10 @@ const STATUS_DESC: Record<string, string> = {
   regen: '每拍回复',
   divineShield: '免疫下一拍全部伤害',
   thorns: '受击反弹',
+  charm: '敌方攻击转嫁为对它自己的伤害',
+  silence: '敌方无法反制',
+  parry: '反制成功返还 SP',
+  initiative: '反制掷骰 +3',
 };
 function statusDesc(e: { type: string }): string {
   return STATUS_DESC[e.type] ?? '每拍拍末损失';

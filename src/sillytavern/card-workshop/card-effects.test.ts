@@ -17,8 +17,8 @@ import { startSkirmish, playBeat } from './skirmish-session';
 import { cardAxisOf, deriveCardAtk, CARD_ELEMENT_AXIS } from './derived-stats';
 
 describe('效果池与元素映射（派生打底）', () => {
-  it('池 25 条（首批 16 + 批一 9），九元素九映射', () => {
-    expect(EFFECT_POOL).toHaveLength(25);
+  it('池 30 条（首批 16 + 批一 9 + 批二 5），九元素九映射', () => {
+    expect(EFFECT_POOL).toHaveLength(30);
     expect(Object.keys(ELEMENT_DEFAULT_EFFECT)).toHaveLength(9);
     for (const action of Object.values(ELEMENT_DEFAULT_EFFECT)) {
       expect(poolEntryOf(action)).toBeDefined(); // 映射的动作都在池内
@@ -224,6 +224,76 @@ describe('拍内结算（翻译器 → playBeat）', () => {
     const hit = playBeat(shielded, { label: '防御', power: 0, tags: ['防御'] }, 15);
     // 防御被反制 → 无伤；换不反制的骰验证：直接看护盾行存在即可（公式单测已覆盖减伤）
     expect(hit.playerHp).toBeLessThanOrEqual(hpBefore);
+  });
+});
+
+describe('效果批二（魅惑/沉默/招架/先攻/斩杀）', () => {
+  const intent = { move: '重击', threat: 20, counters: ['防御'] };
+  const mk = (extra?: { name: string; type: never; amount?: number; beatsLeft?: number }) =>
+    startSkirmish({
+      enemyName: '兽',
+      intents: [intent],
+      playerHp: 100,
+      playerMaxHp: 100,
+      enemyHp: 600,
+      enemyMaxHp: 600,
+      guard: 10,
+      ...(extra
+        ? { initialEffects: [extra as { name: string; type: 'dot'; amount: number; beatsLeft: number }] }
+        : {}),
+    });
+  it('魅惑：敌方攻击转嫁——拍末敌方额外掉威胁值的血', () => {
+    const after = playBeat(
+      mk({ name: '魅惑', type: 'charm' as never, amount: 0, beatsLeft: 1 }),
+      { label: '抛媚眼', power: 5, tags: [] },
+      15,
+    );
+    expect(after.log.some((l) => l.includes('魅惑'))).toBe(true);
+  });
+  it('沉默：反制面关闭但威胁不变（挨打但打不动我方反制）', () => {
+    const after = playBeat(
+      mk({ name: '沉默', type: 'silence' as never, amount: 0, beatsLeft: 2 }),
+      { label: '封口', power: 0, tags: [] },
+      15,
+    );
+    expect(after.log.some((l) => l.includes('沉默'))).toBe(true);
+  });
+  it('招架：反制成功返还 2 SP（spSpent 轧差）', () => {
+    const s = { ...mk(), playerSp: 50 };
+    const afterPlay = playBeat(s, { label: '出招', power: 10, tags: [], cardName: 'x' }, 15); // spSpent 5
+    const afterParry = playBeat(
+      { ...afterPlay, activeEffects: [{ name: '招架', type: 'parry' as never, amount: 5, beatsLeft: 2 }] },
+      { label: '防御', power: 30, tags: ['防御'] },
+      18,
+    ); // 反制成功
+    expect(afterParry.spSpent).toBe(5 + 3 - 2);
+  });
+  it('先攻：反制掷骰 +3（传入骰 15 → 检定按 18 算）', () => {
+    const after = playBeat(
+      mk({ name: '先攻', type: 'initiative' as never, amount: 3, beatsLeft: 2 }),
+      { label: '抢手', power: 10, tags: [] },
+      15,
+    );
+    expect(after.log.some((l) => l.includes('d20=18'))).toBe(true);
+  });
+  it('斩杀：敌方 HP 低于 15% 直接终局；高于则空过', () => {
+    const low = startSkirmish({
+      enemyName: '兽', intents: [intent], playerHp: 100, playerMaxHp: 100,
+      enemyHp: 80, enemyMaxHp: 600, guard: 10,
+    });
+    const executed = playBeat(low, { label: '处刑', power: 5, tags: [] }, 15, {
+      effects: [{ trigger: '打出时', target: '敌单体', action: '斩杀', value: 15 }],
+    });
+    expect(executed.finished).toBe('胜利');
+    expect(executed.log.some((l) => l.includes('斩杀'))).toBe(true);
+    const high = startSkirmish({
+      enemyName: '兽', intents: [intent], playerHp: 100, playerMaxHp: 100,
+      enemyHp: 300, enemyMaxHp: 600, guard: 10,
+    });
+    const notYet = playBeat(high, { label: '试斩', power: 5, tags: [] }, 15, {
+      effects: [{ trigger: '打出时', target: '敌单体', action: '斩杀', value: 15 }],
+    });
+    expect(notYet.finished).toBeNull();
   });
 });
 

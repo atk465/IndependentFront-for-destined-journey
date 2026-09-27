@@ -52,7 +52,14 @@ export type EffectAction =
   | '诅咒'
   | '标记'
   | '圣盾'
-  | '反伤';
+  | '反伤'
+  // 状态层第三批（效果批二）
+  | '魅惑'
+  | '沉默'
+  | '招架'
+  | '先攻'
+  // 动作层第三批
+  | '斩杀';
 
 /** 代价（首批只收三种资源；正数值） */
 export interface EffectCost {
@@ -121,6 +128,13 @@ export const EFFECT_POOL: readonly PoolEntry[] = [
   { action: '标记', value: 5, duration: 3, text: '敌方每拍额外损失 5 HP（3 拍）' },
   { action: '圣盾', value: 0, duration: 1, cost: { mp: 12 }, text: '免疫下一拍的全部伤害（一次性）' },
   { action: '反伤', value: 5, duration: 2, text: '受击时敌方反弹 5 HP（2 拍）' },
+  // ── 状态层第三批（效果批二 2026-09-25） ──
+  { action: '魅惑', value: 0, duration: 1, cost: { mp: 10 }, text: '敌方本拍为你说話——它的攻击转嫁为对你的伤害减免（1 拍）' },
+  { action: '沉默', value: 0, duration: 2, text: '敌方无法反制（威胁不变，2 拍）' },
+  { action: '招架', value: 5, duration: 2, text: '反制成功时返还 2 SP（2 拍）' },
+  { action: '先攻', value: 3, duration: 2, text: '反制掷骰 +3（2 拍）' },
+  // ── 动作层第三批 ──
+  { action: '斩杀', value: 15, duration: 0, cost: { mp: 20 }, text: '敌方当前气血低于 15% 时直接击杀（未达线则本条空过）' },
 ];
 
 /** 池查询：动作 → 池内定值条目（找不到 = 池外，门禁丢弃） */

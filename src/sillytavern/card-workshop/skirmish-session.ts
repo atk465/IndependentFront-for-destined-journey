@@ -301,6 +301,8 @@ export interface TranslatedEffects {
   guardDown: number;
   /** 打出时·真实伤害 → 拍末无视减免直扣敌方 HP（2026-09-25 效果批一） */
   directDamage?: number;
+  /** 打出时·斩杀线（% of 敌方上限；效果批二） */
+  executePct?: number;
   /** 状态层 → 在场登记（叠层合并后） */
   activate: CardInPlayEffect[];
   /** 审计行 */
@@ -353,6 +355,11 @@ export function translateCardEffects(
         out.directDamage = (out.directDamage ?? 0) + scaled;
         out.lines.push(`▸ 【效果】真实伤害 ${scaled}（无视一切减免）`);
         break;
+      case '斩杀':
+        // 终局判定在 playBeat（敌方 HP% 对阈值）；此处只登记阈值
+        out.executePct = e.value;
+        out.lines.push(`▸ 【效果】斩杀线 ${e.value}%（当前气血低于此线直接击杀）`);
+        break;
       case '净化':
         // 我方负面状态系统双向化之前先挂 MP 通道（同驱散位；状态可叠加后即有真实目标）
         out.mpHeal += 8;
@@ -376,7 +383,11 @@ export function translateCardEffects(
       case '诅咒':
       case '标记':
       case '圣盾':
-      case '反伤': {
+      case '反伤':
+      case '魅惑':
+      case '沉默':
+      case '招架':
+      case '先攻': {
         const type =
           e.action === '易伤' || e.action === '诅咒'
             ? 'vulnerable'
@@ -394,7 +405,15 @@ export function translateCardEffects(
                         ? 'bind'
                         : e.action === '标记'
                           ? 'mark'
-                          : 'dot';
+                          : e.action === '魅惑'
+                            ? 'charm'
+                            : e.action === '沉默'
+                              ? 'silence'
+                              : e.action === '招架'
+                                ? 'parry'
+                                : e.action === '先攻'
+                                  ? 'initiative'
+                                  : 'dot';
         const eff: CardInPlayEffect = {
           name: e.action,
           type: type as CardInPlayEffect['type'],
@@ -445,11 +464,14 @@ export function playBeat(
   // 束缚=威胁锁 1。多效果叠加取最强（恐惧 > 束缚 > 减速）。
   const liveFear = live.some((e) => e.type === 'fear');
   const liveBind = live.some((e) => e.type === 'bind');
+  const liveSilence = live.some((e) => e.type === 'silence');
   let effectiveIntent = stunActive
     ? { ...intent, threat: 0 }
     : liveFear
       ? { ...intent, threat: Math.max(1, Math.round(intent.threat / 2)), counters: [] as typeof intent.counters }
-      : liveBind
+      : liveSilence
+        ? { ...intent, counters: [] as typeof intent.counters }
+        : liveBind
         ? { ...intent, threat: 1 }
         : weakenTotal > 0
           ? { ...intent, threat: Math.max(0, intent.threat - weakenTotal) }
@@ -462,6 +484,7 @@ export function playBeat(
     );
   }
   else if (liveFear) effectLines.push(`▸ 【恐惧】攫住了它——威胁减半，反制面关闭`);
+  else if (liveSilence) effectLines.push(`▸ 【沉默】封了它的口——无法反制`);
   else if (liveBind) effectLines.push(`▸ 【束缚】缠住了它的手脚——威胁锁 1`);
   else if (weakenTotal > 0) effectLines.push(`▸ 减速战技：敌方威胁 −${weakenTotal}`);
 
@@ -487,13 +510,15 @@ export function playBeat(
 
   // 圣盾（效果批一）：一次性免疫下一拍全部伤害——live 时玩家承伤归 0，拍末消耗
   const liveDivine = live.find((e) => e.type === 'divineShield');
+  // 先攻（效果批二）：持续期间反制掷骰 +3
+  const liveInitiative = live.some((e) => e.type === 'initiative');
   const result = resolveBeat({
     intent: effectiveIntent,
     action: effectiveAction,
     playerHp: s.playerHp,
     enemyHp: s.enemyHp,
     guard: Math.max(0, s.guard - (s.guardDown ?? 0)),
-    dice,
+    dice: dice + (liveInitiative ? 3 : 0),
     ...(liveShield > 0 ? { shield: liveShield } : {}),
     ...(liveVuln > 0 ? { vulnerable: liveVuln } : {}),
   });
@@ -531,7 +556,13 @@ export function playBeat(
     : s.activeEffects
         .filter((e) => e.type === 'confusion')
         .reduce((sum, e) => sum + Math.max(0, e.amount), 0);
-  const extraDot = poisonPctTotal + markTotal + confusionTotal;
+  // 魅惑（效果批二）：敌方本拍为玩家作战——它的攻击（威胁值）转嫁为对它自己的伤害
+  const charmTotal = dotSuppressed
+    ? 0
+    : live.some((e) => e.type === 'charm')
+      ? Math.max(0, effectiveIntent.threat)
+      : 0;
+  const extraDot = poisonPctTotal + markTotal + confusionTotal + charmTotal;
   const enemyHpAfterDot = Math.max(0, result.enemyHp - dotTotal - extraDot);
   if (dotTotal > 0 && result.enemyHp > 0) {
     lines.push(`▸ 在场持续：敌方 −${dotTotal}（${result.enemyHp} → ${enemyHpAfterDot}）`);
@@ -546,6 +577,9 @@ export function playBeat(
   }
   if (confusionTotal > 0) {
     lines.push(`▸ 【混乱】反噬：敌方自伤 −${confusionTotal}`);
+  }
+  if (charmTotal > 0) {
+    lines.push(`▸ 【魅惑】它为你出手——攻击转嫁：敌方 −${charmTotal}`);
   }
 
   // 反伤（效果批一）：受击时反弹——未被反制且实受了伤害才弹
@@ -812,6 +846,18 @@ export function playBeat(
     ...(fx.guardDown > 0 ? { guardDown: (s.guardDown ?? 0) + fx.guardDown } : {}),
     ...(fx.mpHeal > 0 ? { mpGained: (s.mpGained ?? 0) + fx.mpHeal } : {}),
   };
+  // 斩杀（效果批二）：本拍打出了斩杀效果，且敌方当前气血低于阈值 → 直接击杀
+  const executePct = Math.max(0, Math.round(fx.executePct ?? 0));
+  if (executePct > 0 && next.enemyHp > 0) {
+    const threshold = Math.max(1, Math.round((s.enemyMaxHp * executePct) / 100));
+    if (next.enemyHp <= threshold) {
+      return withFinish(
+        { ...next, enemyHp: 0, log: [...next.log, `▸ 【斩杀】${s.enemyName} 的气血已坠过 ${executePct}% 之线——当场了结`] },
+        '胜利',
+        [`▸ 【${s.enemyName}】倒下——胜利！`],
+      );
+    }
+  }
   if (next.enemyHp <= 0) {
     return withFinish(next, '胜利', [`▸ 【${s.enemyName}】倒下——胜利！`]);
   }
@@ -824,9 +870,11 @@ export function playBeat(
   if (s.playerSp !== undefined) {
     const spCost = action.cardName ? SP_COST_PLAY : SP_COST_COUNTER;
     const mpCost = Math.max(0, Math.round(opts?.mpCost ?? 0));
-    const spSpent = (s.spSpent ?? 0) + spCost;
+    // 招架（效果批二）：反制成功返还 2 SP——在账内轧差，结算落库自然少扣
+    const parryRefund = result.countered && live.some((e) => e.type === 'parry') ? 2 : 0;
+    const spSpent = Math.max(0, (s.spSpent ?? 0) + spCost - parryRefund);
     const lines2 = [
-      `▸ 体力 −${spCost}（剩 ${Math.max(0, s.playerSp - spSpent)}）`,
+      `▸ 体力 −${spCost}${parryRefund ? `（招架返还 2）` : ''}（剩 ${Math.max(0, s.playerSp - spSpent)}）`,
       ...(mpCost > 0 ? [`▸ 精神 −${mpCost}`] : []),
     ];
     const withSpend: SkirmishSession = {
