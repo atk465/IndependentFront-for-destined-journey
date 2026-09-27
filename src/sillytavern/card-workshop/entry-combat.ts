@@ -133,7 +133,12 @@ export interface CardInPlayEffect {
     | 'charm'
     | 'silence'
     | 'parry'
-    | 'initiative';
+    | 'initiative'
+    | 'drain'
+    | 'infest'
+    | 'degrade'
+    | 'deathTimer'
+    | 'disarm';
   amount: number;
   /** 持续拍数（缺省 = 整场）；每拍结束递减，归零移除 */
   beatsLeft?: number;

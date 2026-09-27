@@ -303,6 +303,8 @@ export interface TranslatedEffects {
   directDamage?: number;
   /** 打出时·斩杀线（% of 敌方上限；效果批二） */
   executePct?: number;
+  /** 击杀时效果（效果批三：汲取等；胜利时结算） */
+  onKill?: { action: string; value: number }[];
   /** 状态层 → 在场登记（叠层合并后） */
   activate: CardInPlayEffect[];
   /** 审计行 */
@@ -360,6 +362,17 @@ export function translateCardEffects(
         out.executePct = e.value;
         out.lines.push(`▸ 【效果】斩杀线 ${e.value}%（当前气血低于此线直接击杀）`);
         break;
+      case '死亡倒计时': {
+        const beats = Math.max(1, Math.round(e.duration ?? 3));
+        out.activate.push({
+          name: '死亡倒计时',
+          type: 'deathTimer',
+          amount: beats,
+          beatsLeft: beats,
+        });
+        out.lines.push(`▸ 【效果】死亡倒计时 ${beats} 拍——倒数结束敌方直接倒下`);
+        break;
+      }
       case '净化':
         // 我方负面状态系统双向化之前先挂 MP 通道（同驱散位；状态可叠加后即有真实目标）
         out.mpHeal += 8;
@@ -387,7 +400,11 @@ export function translateCardEffects(
       case '魅惑':
       case '沉默':
       case '招架':
-      case '先攻': {
+      case '先攻':
+      case '寄生':
+      case '感染':
+      case '退化':
+      case '缴械': {
         const type =
           e.action === '易伤' || e.action === '诅咒'
             ? 'vulnerable'
@@ -413,7 +430,15 @@ export function translateCardEffects(
                                 ? 'parry'
                                 : e.action === '先攻'
                                   ? 'initiative'
-                                  : 'dot';
+                                  : e.action === '寄生'
+                                    ? 'drain'
+                                    : e.action === '感染'
+                                      ? 'infest'
+                                      : e.action === '退化'
+                                        ? 'degrade'
+                                        : e.action === '缴械'
+                                          ? 'disarm'
+                                          : 'dot';
         const eff: CardInPlayEffect = {
           name: e.action,
           type: type as CardInPlayEffect['type'],
@@ -434,6 +459,12 @@ export function translateCardEffects(
       default:
         break;
     }
+  }
+  // 击杀时（效果批三）：胜利时结算的效果账
+  for (const e of effects) {
+    if (e.trigger !== '击杀时') continue;
+    if (!out.onKill) out.onKill = [];
+    out.onKill.push({ action: e.action, value: e.value });
   }
   return out;
 }
@@ -458,18 +489,21 @@ export function playBeat(
   const stunActive =
     live.some((e) => e.type === 'stun') || live.some((e) => e.type === 'sleep');
   const weakenTotal = live
-    .filter((e) => e.type === 'weaken')
+    .filter((e) => e.type === 'weaken' || e.type === 'degrade')
     .reduce((sum, e) => sum + Math.max(0, e.amount), 0);
   // 效果批一（2026-09-25）：恐惧/束缚的意图改写——恐惧=威胁减半+反制面关闭；
   // 束缚=威胁锁 1。多效果叠加取最强（恐惧 > 束缚 > 减速）。
   const liveFear = live.some((e) => e.type === 'fear');
   const liveBind = live.some((e) => e.type === 'bind');
   const liveSilence = live.some((e) => e.type === 'silence');
+  const liveDisarm = live.some((e) => e.type === 'disarm');
   let effectiveIntent = stunActive
     ? { ...intent, threat: 0 }
     : liveFear
       ? { ...intent, threat: Math.max(1, Math.round(intent.threat / 2)), counters: [] as typeof intent.counters }
-      : liveSilence
+      : liveDisarm
+        ? { ...intent, threat: Math.max(1, Math.round(intent.threat * 0.6)) }
+        : liveSilence
         ? { ...intent, counters: [] as typeof intent.counters }
         : liveBind
         ? { ...intent, threat: 1 }
@@ -484,6 +518,7 @@ export function playBeat(
     );
   }
   else if (liveFear) effectLines.push(`▸ 【恐惧】攫住了它——威胁减半，反制面关闭`);
+  else if (liveDisarm) effectLines.push(`▸ 【缴械】它的兵器脱手——威胁 −40%`);
   else if (liveSilence) effectLines.push(`▸ 【沉默】封了它的口——无法反制`);
   else if (liveBind) effectLines.push(`▸ 【束缚】缠住了它的手脚——威胁锁 1`);
   else if (weakenTotal > 0) effectLines.push(`▸ 减速战技：敌方威胁 −${weakenTotal}`);
@@ -540,7 +575,7 @@ export function playBeat(
   const dotTotal = dotSuppressed
     ? 0
     : s.activeEffects
-        .filter((e) => e.type === 'dot')
+        .filter((e) => e.type === 'dot' || e.type === 'infest')
         .reduce((sum, e) => sum + Math.max(0, e.amount), 0);
   // 效果批一（2026-09-25）：剧毒=当前气血百分比毒；标记=固定额外扣；混乱=敌方自伤
   const poisonPctTotal = dotSuppressed
@@ -562,7 +597,11 @@ export function playBeat(
     : live.some((e) => e.type === 'charm')
       ? Math.max(0, effectiveIntent.threat)
       : 0;
-  const extraDot = poisonPctTotal + markTotal + confusionTotal + charmTotal;
+  // 寄生（效果批三）：每拍敌方 −X、玩家 +X（双头结算）
+  const liveDrain = dotSuppressed ? [] : live.filter((e) => e.type === 'drain');
+  const drainEnemy = liveDrain.reduce((sum, e) => sum + Math.max(0, e.amount), 0);
+  const drainHeal = liveDrain.reduce((sum, e) => sum + Math.max(0, e.amount), 0);
+  const extraDot = poisonPctTotal + markTotal + confusionTotal + charmTotal + drainEnemy;
   const enemyHpAfterDot = Math.max(0, result.enemyHp - dotTotal - extraDot);
   if (dotTotal > 0 && result.enemyHp > 0) {
     lines.push(`▸ 在场持续：敌方 −${dotTotal}（${result.enemyHp} → ${enemyHpAfterDot}）`);
@@ -714,10 +753,18 @@ export function playBeat(
 
   // 效果池·打出时回复（治疗/吸血三成）：并入 HP 链（上限钳制）
   const fxHeal = Math.max(0, Math.round(fx.heal));
+  // 寄生（效果批三）：拍末吸血转给玩家
+  const drainHealAmount = Math.max(0, Math.round(drainHeal));
+  const healedTotal = fxHeal + drainHealAmount;
   const playerHpAfterFxHeal =
-    fxHeal > 0 ? Math.min(s.playerMaxHp, playerHpAfterRegen + fxHeal) : playerHpAfterRegen;
+    healedTotal > 0 ? Math.min(s.playerMaxHp, playerHpAfterRegen + healedTotal) : playerHpAfterRegen;
   if (fxHeal > 0 && playerHpAfterFxHeal > playerHpAfterRegen) {
     lines.push(`▸ 【效果】回复 ${playerHpAfterFxHeal - playerHpAfterRegen} HP`);
+  }
+  if (drainHealAmount > 0 && playerHpAfterFxHeal > playerHpAfterRegen + fxHeal) {
+    lines.push(
+      `▸ 【寄生】汲取 ${playerHpAfterFxHeal - playerHpAfterRegen - fxHeal} HP（${playerHpAfterRegen + fxHeal} → ${playerHpAfterFxHeal}）`,
+    );
   }
 
   // 禁忌卡 HP 覆盖（天罚锁 1 / 许愿回复 / 蜡封回复）——优先级高于反冲与吸魔
@@ -776,6 +823,11 @@ export function playBeat(
       mergedEffects.push(normalized);
     }
   }
+  // 感染/退化（效果批三）：逐拍加深 +1——只成长「上一拍已在场」的效果，
+  // 本拍新激活的从下一拍才开始加深（首拍按池内定值结算）
+  for (const e of mergedEffects) {
+    if ((e.type === 'infest' || e.type === 'degrade') && decremented.includes(e)) e.amount += 1;
+  }
   const nextEffects = [
     ...mergedEffects,
     // 禁忌卡效果（岁除/蜡封之夜/大愿=stun；兽潮=无期限 dot）
@@ -805,7 +857,7 @@ export function playBeat(
     lines.push(`▸ 【${a.name}】${line}`);
   }
 
-  const next: SkirmishSession = {
+  let next: SkirmishSession = {
     ...s,
     beat: s.beat + 1,
     playerHp: playerHpFinal,
@@ -846,6 +898,14 @@ export function playBeat(
     ...(fx.guardDown > 0 ? { guardDown: (s.guardDown ?? 0) + fx.guardDown } : {}),
     ...(fx.mpHeal > 0 ? { mpGained: (s.mpGained ?? 0) + fx.mpHeal } : {}),
   };
+  // 死亡倒计时到期（效果批三）：倒数走完 → 敌方直接倒下
+  const timerExpired = decremented.find(
+    (e) => e.type === 'deathTimer' && (e.beatsLeft ?? 1) <= 0,
+  );
+  if (timerExpired) {
+    lines.push(`▸ 【死亡倒计时】归零——【${s.enemyName}】的铭文走到了尽头`);
+  }
+
   // 斩杀（效果批二）：本拍打出了斩杀效果，且敌方当前气血低于阈值 → 直接击杀
   const executePct = Math.max(0, Math.round(fx.executePct ?? 0));
   if (executePct > 0 && next.enemyHp > 0) {
@@ -858,8 +918,19 @@ export function playBeat(
       );
     }
   }
-  if (next.enemyHp <= 0) {
-    return withFinish(next, '胜利', [`▸ 【${s.enemyName}】倒下——胜利！`]);
+  if (next.enemyHp <= 0 || timerExpired) {
+    if (timerExpired) next = { ...next, enemyHp: 0 };
+    // 击杀时效果（效果批三·汲取）：胜利的同窗内回复
+    let victory = next;
+    const killLines: string[] = [];
+    for (const k of fx.onKill ?? []) {
+      if (k.action === '汲取') {
+        const heal = Math.max(1, Math.round((s.playerMaxHp * k.value) / 100));
+        victory = { ...victory, playerHp: Math.min(s.playerMaxHp, victory.playerHp + heal) };
+        killLines.push(`▸ 【汲取】吞噬余烬——回复 ${heal} HP`);
+      }
+    }
+    return withFinish(victory, '胜利', [...killLines, `▸ 【${s.enemyName}】倒下——胜利！`]);
   }
   if (next.playerHp <= 0) {
     return withFinish(next, '败北', [`▸ 玩家倒下——败北（经验照常结算，评价 C）`]);

@@ -17,8 +17,8 @@
 
 import type { CardTier } from '../field-enums';
 
-/** 触发时机（首批三种） */
-export type EffectTrigger = '打出时' | '每拍' | '受击时';
+/** 触发时机（首批三种 + 效果批三：击杀时。「拍开始」与「每拍」同源合并——见 backlog） */
+export type EffectTrigger = '打出时' | '每拍' | '受击时' | '击杀时';
 /** 目标三值：单血池下「敌全体」按 enemyCount 倍化 */
 export type EffectTarget = '敌单体' | '敌全体' | '自身';
 /** 动作层六动作 + 状态层十状态 */
@@ -59,7 +59,15 @@ export type EffectAction =
   | '招架'
   | '先攻'
   // 动作层第三批
-  | '斩杀';
+  | '斩杀'
+  // 状态层第四批（效果批三 2026-09-25）
+  | '寄生'
+  | '感染'
+  | '退化'
+  | '死亡倒计时'
+  | '缴械'
+  // 动作层第四批
+  | '汲取';
 
 /** 代价（首批只收三种资源；正数值） */
 export interface EffectCost {
@@ -135,6 +143,19 @@ export const EFFECT_POOL: readonly PoolEntry[] = [
   { action: '先攻', value: 3, duration: 2, text: '反制掷骰 +3（2 拍）' },
   // ── 动作层第三批 ──
   { action: '斩杀', value: 15, duration: 0, cost: { mp: 20 }, text: '敌方当前气血低于 15% 时直接击杀（未达线则本条空过）' },
+  // ── 状态/动作第四批（效果批三 2026-09-25） ──
+  { action: '寄生', value: 4, duration: 3, text: '每拍敌方 −4、你 +4 HP（3 拍）' },
+  { action: '感染', value: 2, duration: 3, text: '每拍敌方 −2 且逐拍加深 +1（3 拍）' },
+  { action: '退化', value: 1, duration: 3, text: '敌方行动值每拍 −1 且逐拍加深（3 拍）' },
+  {
+    action: '死亡倒计时',
+    value: 3,
+    duration: 3,
+    cost: { mp: 15 },
+    text: '3 拍后敌方直接倒下（延迟处决，期间不叠层）',
+  },
+  { action: '缴械', value: 40, duration: 2, text: '敌方威胁 −40%（2 拍）' },
+  { action: '汲取', value: 20, duration: 0, text: '击杀时回复最大气血的 20%' },
 ];
 
 /** 池查询：动作 → 池内定值条目（找不到 = 池外，门禁丢弃） */
@@ -297,7 +318,7 @@ export function coerceCardEffects(raw: unknown): CardEffects {
 }
 
 function isTrigger(v: unknown): v is EffectTrigger {
-  return v === '打出时' || v === '每拍' || v === '受击时';
+  return v === '打出时' || v === '每拍' || v === '受击时' || v === '击杀时';
 }
 function isTarget(v: unknown): v is EffectTarget {
   return v === '敌单体' || v === '敌全体' || v === '自身';

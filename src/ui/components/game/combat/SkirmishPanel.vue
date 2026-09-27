@@ -207,6 +207,11 @@ const STATUS_DESC: Record<string, string> = {
   silence: '敌方无法反制',
   parry: '反制成功返还 SP',
   initiative: '反制掷骰 +3',
+  drain: '每拍吸血转给你',
+  infest: '每拍加深',
+  degrade: '行动值逐拍加深',
+  deathTimer: '倒数归零直接倒下',
+  disarm: '威胁降低',
 };
 function statusDesc(e: { type: string }): string {
   return STATUS_DESC[e.type] ?? '每拍拍末损失';

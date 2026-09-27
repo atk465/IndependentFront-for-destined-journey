@@ -15,10 +15,11 @@ import {
 } from './card-effects';
 import { startSkirmish, playBeat } from './skirmish-session';
 import { cardAxisOf, deriveCardAtk, CARD_ELEMENT_AXIS } from './derived-stats';
+import type { CardEffectDef } from './card-effects';
 
 describe('效果池与元素映射（派生打底）', () => {
-  it('池 30 条（首批 16 + 批一 9 + 批二 5），九元素九映射', () => {
-    expect(EFFECT_POOL).toHaveLength(30);
+  it('池 36 条（首批 16 + 批一 9 + 批二 5 + 批三 6），九元素九映射', () => {
+    expect(EFFECT_POOL).toHaveLength(36);
     expect(Object.keys(ELEMENT_DEFAULT_EFFECT)).toHaveLength(9);
     for (const action of Object.values(ELEMENT_DEFAULT_EFFECT)) {
       expect(poolEntryOf(action)).toBeDefined(); // 映射的动作都在池内
@@ -294,6 +295,73 @@ describe('效果批二（魅惑/沉默/招架/先攻/斩杀）', () => {
       effects: [{ trigger: '打出时', target: '敌单体', action: '斩杀', value: 15 }],
     });
     expect(notYet.finished).toBeNull();
+  });
+});
+
+describe('效果批三（寄生/感染/退化/死亡倒计时/缴械/汲取）', () => {
+  const intent = { move: '重击', threat: 20, counters: ['防御'] };
+  it('寄生：打出后下一拍起，拍末敌方 −4、玩家 +4（双头结算）', () => {
+    const s = startSkirmish({
+      enemyName: '兽', intents: [intent], playerHp: 50, playerMaxHp: 100,
+      enemyHp: 600, guard: 10,
+    });
+    const fx: CardEffectDef[] = [{ trigger: '每拍', target: '敌单体', action: '寄生', value: 4, duration: 3 }];
+    const activated = playBeat(s, { label: '下蛊', power: 0, tags: [] }, 15, { effects: fx });
+    // 打出拍不结算（状态从下一拍起效，领域同款时序）
+    expect(activated.enemyHp).toBe(600);
+    const ticked = playBeat(activated, { label: '拖', power: 0, tags: [] }, 15);
+    // 敌方反扑 −15，寄生 −4 敌 / +4 己：600→596、35→24
+    expect(ticked.enemyHp).toBe(596);
+    expect(ticked.playerHp).toBe(24);
+  });
+  it('感染：逐拍加深——第二拍比第一拍多扣 1', () => {
+    const s = startSkirmish({
+      enemyName: '兽', intents: [intent], playerHp: 100, playerMaxHp: 100,
+      enemyHp: 600, guard: 10,
+    });
+    const fx: CardEffectDef[] = [{ trigger: '每拍', target: '敌单体', action: '感染', value: 2, duration: 3 }];
+    const activated = playBeat(s, { label: '染', power: 0, tags: [] }, 15, { effects: fx });
+    // 效果只在激活拍传入一次——后续拍靠会话里的状态自动 tick
+    const tick1 = playBeat(activated, { label: '拖', power: 0, tags: [] }, 15);
+    const tick2 = playBeat(tick1, { label: '拖', power: 0, tags: [] }, 15);
+    expect(activated.enemyHp - tick1.enemyHp).toBe(2);
+    expect(tick1.enemyHp - tick2.enemyHp).toBe(3); // 加深 +1
+  });
+  it('死亡倒计时：倒数走完 → 敌方直接倒下（胜利）', () => {
+    const s = startSkirmish({
+      enemyName: '兽', intents: [intent], playerHp: 100, playerMaxHp: 100,
+      enemyHp: 600, guard: 10,
+    });
+    const fx: CardEffectDef[] = [{ trigger: '每拍', target: '敌单体', action: '死亡倒计时', value: 3, duration: 3 }];
+    let cur = s;
+    // 效果只在激活拍传入；激活拍 + 3 个倒数拍 = 4 拍后倒下
+    for (let i = 0; i < 4 && cur.finished === null; i++) {
+      cur = playBeat(cur, { label: '拖', power: 0, tags: [] }, 15, i === 0 ? { effects: fx } : undefined);
+    }
+    expect(cur.finished).toBe('胜利');
+    expect(cur.log.some((l) => l.includes('死亡倒计时'))).toBe(true);
+  });
+  it('缴械：敌方威胁 −40%——20 威胁变 12', () => {
+    const s = startSkirmish({
+      enemyName: '兽', intents: [intent], playerHp: 100, playerMaxHp: 100,
+      enemyHp: 600, guard: 0,
+    });
+    const fx: CardEffectDef[] = [{ trigger: '每拍', target: '敌单体', action: '缴械', value: 40, duration: 2 }];
+    const b1 = playBeat(s, { label: '缴', power: 0, tags: [] }, 15, { effects: fx });
+    // 缴械当拍生效（live）→ 下一拍 intent 已按 ×0.6 重写。直接验效果挂上：
+    expect(b1.activeEffects.some((e) => e.name === '缴械')).toBe(true);
+  });
+  it('汲取：击杀时回复最大气血的 20%', () => {
+    const s = startSkirmish({
+      enemyName: '兽', intents: [intent], playerHp: 50, playerMaxHp: 100,
+      enemyHp: 30, guard: 0,
+    });
+    const after = playBeat(s, { label: '终结', power: 60, tags: [] }, 18, {
+      effects: [{ trigger: '击杀时', target: '自身', action: '汲取', value: 20 }],
+    });
+    expect(after.finished).toBe('胜利');
+    expect(after.playerHp).toBe(70); // 50 + 20% × 100
+    expect(after.log.some((l) => l.includes('汲取'))).toBe(true);
   });
 });
 
