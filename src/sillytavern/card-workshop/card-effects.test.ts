@@ -18,8 +18,8 @@ import { cardAxisOf, deriveCardAtk, CARD_ELEMENT_AXIS } from './derived-stats';
 import type { CardEffectDef } from './card-effects';
 
 describe('效果池与元素映射（派生打底）', () => {
-  it('池 41 条（前三批 36 + 批四强化档 5），九元素九映射', () => {
-    expect(EFFECT_POOL).toHaveLength(41);
+  it('池 42 条（前三批 36 + 批四强化档 5 + 批五变异 1），九元素九映射', () => {
+    expect(EFFECT_POOL).toHaveLength(42);
     expect(Object.keys(ELEMENT_DEFAULT_EFFECT)).toHaveLength(9);
     for (const action of Object.values(ELEMENT_DEFAULT_EFFECT)) {
       expect(poolEntryOf(action)).toBeDefined(); // 映射的动作都在池内

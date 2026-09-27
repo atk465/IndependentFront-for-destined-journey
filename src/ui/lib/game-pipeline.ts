@@ -44,7 +44,7 @@ import {
   type ActivateInput,
 } from '@engine/card-workshop/entry-combat';
 import { applyBond, bondForCard, type BondInfo } from '@engine/card-workshop/affection-bond';
-import { cardKindOf } from '@engine/card-workshop/card-kind';
+import { cardKindOf, isConsumableKind } from '@engine/card-workshop/card-kind';
 import { willModifierOf } from '@engine/card-workshop/unsealing';
 import { mpCostOf } from '@engine/card-workshop/entry-combat';
 import { deriveCardEffects } from '@engine/card-workshop/card-effects';
@@ -3623,6 +3623,41 @@ export class GamePipeline {
         playerLocation: playerC.location,
         saveId: this.saveId,
       });
+      // 消耗时效果（效果批五）：本场被消耗的技能/领域/场景卡带「消耗时」触发的，
+      // 结算同窗把治疗/MP 落给玩家（无战斗数值面——战斗已结束）
+      const consumeLines: string[] = [];
+      let consumeHeal = 0;
+      let consumeMp = 0;
+      for (const name of session.playedCards) {
+        const played = playerC.inventory.find((i) => i.name === name && i.type === '卡牌');
+        if (!played || !isConsumableKind(cardKindOf((played as CardItem).词条 ?? []))) continue;
+        for (const fx of deriveCardEffects(played as CardItem)) {
+          if (fx.trigger !== '消耗时') continue;
+          if (fx.action === '治疗') {
+            consumeHeal += fx.value;
+            consumeLines.push(`▸ 【消耗时·${name}】回复 ${fx.value} HP`);
+          } else if (fx.action === '驱散' || fx.action === '净化') {
+            consumeMp += fx.value;
+            consumeLines.push(`▸ 【消耗时·${name}】回复 ${fx.value} MP`);
+          }
+        }
+      }
+      if (consumeHeal > 0 || consumeMp > 0) {
+        settlementPatches.push({
+          op: 'update_character',
+          target: `characters.${playerC.name}`,
+          value: {
+            ...(consumeHeal > 0
+              ? { hp: Math.min(playerC.maxHp, playerC.hp + consumeHeal) - playerC.hp }
+              : {}),
+            ...(consumeMp > 0 ? { mp: Math.min(playerC.maxMp, playerC.mp + consumeMp) - playerC.mp } : {}),
+          },
+        } as StatePatch);
+      }
+      if (consumeLines.length > 0) {
+        this.emitMessage(consumeLines.join('\n'), 'assistant');
+      }
+
       // 体力/精神账（2026-09-25 访谈共识）：会话内拍拍记账，结算同窗一次落库。
       // 负数 = delta 口径（update_character 数值负值按减法，钳 0 在提交层统一做）。
       const spSpent = Math.max(0, Math.round(session.spSpent ?? 0));

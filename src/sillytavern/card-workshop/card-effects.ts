@@ -17,8 +17,8 @@
 
 import type { CardTier } from '../field-enums';
 
-/** 触发时机（首批三种 + 效果批三：击杀时。「拍开始」与「每拍」同源合并——见 backlog） */
-export type EffectTrigger = '打出时' | '每拍' | '受击时' | '击杀时';
+/** 触发时机（首批三种 + 击杀时 + 效果批五：拍结束/消耗时。「拍开始」与「每拍」同源合并——见 backlog） */
+export type EffectTrigger = '打出时' | '每拍' | '受击时' | '击杀时' | '拍结束' | '消耗时';
 /** 目标三值：单血池下「敌全体」按 enemyCount 倍化 */
 export type EffectTarget = '敌单体' | '敌全体' | '自身';
 /** 动作层六动作 + 状态层十状态 */
@@ -53,6 +53,7 @@ export type EffectAction =
   | '标记'
   | '圣盾'
   | '反伤'
+  | '变异'
   // 状态层第三批（效果批二）
   | '魅惑'
   | '沉默'
@@ -168,6 +169,8 @@ export const EFFECT_POOL: readonly PoolEntry[] = [
   { action: '超杀', value: 30, duration: 0, cost: { mp: 25 }, text: '敌方当前气血低于 30% 时直接击杀' },
   { action: '穿透', value: 8, duration: 0, text: '本场敌方防护 −8（穿透护甲）' },
   { action: '处决', value: 40, duration: 0, cost: { mp: 30 }, text: '敌方当前气血低于 40% 时直接击杀' },
+  // ── 状态层第五批（效果批五 2026-09-28） ──
+  { action: '变异', value: 4, duration: 2, text: '每拍敌方随机变异：威胁+3 / 承伤+8% / 自伤4（2 拍）' },
 ];
 
 /** 池查询：动作 → 池内定值条目（找不到 = 池外，门禁丢弃） */
@@ -330,7 +333,14 @@ export function coerceCardEffects(raw: unknown): CardEffects {
 }
 
 function isTrigger(v: unknown): v is EffectTrigger {
-  return v === '打出时' || v === '每拍' || v === '受击时' || v === '击杀时';
+  return (
+    v === '打出时' ||
+    v === '每拍' ||
+    v === '受击时' ||
+    v === '击杀时' ||
+    v === '拍结束' ||
+    v === '消耗时'
+  );
 }
 function isTarget(v: unknown): v is EffectTarget {
   return v === '敌单体' || v === '敌全体' || v === '自身';

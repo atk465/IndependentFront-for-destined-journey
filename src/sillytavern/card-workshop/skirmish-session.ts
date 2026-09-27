@@ -303,6 +303,12 @@ export interface TranslatedEffects {
   directDamage?: number;
   /** 打出时·斩杀线（% of 敌方上限；效果批二） */
   executePct?: number;
+  /** 拍结束·伤害（效果批五）：全部结算完成后直扣敌方 */
+  endBeatDamage?: number;
+  /** 拍结束·治疗（效果批五）：并入玩家 HP 链 */
+  endBeatHeal?: number;
+  /** 消耗时效果（效果批五）：消耗结算时落给玩家（治疗/MP） */
+  onConsume?: { action: string; value: number }[];
   /** 击杀时效果（效果批三：汲取等；胜利时结算） */
   onKill?: { action: string; value: number }[];
   /** 状态层 → 在场登记（叠层合并后） */
@@ -327,6 +333,12 @@ export function translateCardEffects(
     const scaled = e.target === '敌全体' ? e.value * mult : e.value;
     switch (e.action) {
       case '伤害':
+        // 拍结束触发（效果批五）：不进行动值，延迟到拍末全部结算后直扣敌方
+        if (e.trigger === '拍结束') {
+          out.endBeatDamage = (out.endBeatDamage ?? 0) + scaled;
+          out.lines.push(`▸ 【效果】拍末追加 ${scaled} 伤害`);
+          break;
+        }
         out.powerBonus += scaled;
         out.lines.push(`▸ 【效果】直接伤害 +${scaled}`);
         break;
@@ -341,6 +353,12 @@ export function translateCardEffects(
         out.lines.push(`▸ 【效果】穿透：敌方防护 −${scaled}（本场）`);
         break;
       case '治疗':
+        // 拍结束触发：治疗并入拍末 HP 链（与常规治疗同通道、时机在拍末）
+        if (e.trigger === '拍结束') {
+          out.endBeatHeal = (out.endBeatHeal ?? 0) + scaled;
+          out.lines.push(`▸ 【效果】拍末回复 ${scaled} HP`);
+          break;
+        }
         out.heal += scaled;
         out.lines.push(`▸ 【效果】回复 ${scaled} HP`);
         break;
@@ -412,7 +430,8 @@ export function translateCardEffects(
       case '寄生':
       case '感染':
       case '退化':
-      case '缴械': {
+      case '缴械':
+      case '变异': {
         const type =
           e.action === '易伤' || e.action === '诅咒'
             ? 'vulnerable'
@@ -430,7 +449,9 @@ export function translateCardEffects(
                         ? 'bind'
                         : e.action === '标记'
                           ? 'mark'
-                          : e.action === '魅惑'
+                          : e.action === '变异'
+                            ? 'mutation'
+                            : e.action === '魅惑'
                             ? 'charm'
                             : e.action === '沉默'
                               ? 'silence'
@@ -473,6 +494,12 @@ export function translateCardEffects(
     if (e.trigger !== '击杀时') continue;
     if (!out.onKill) out.onKill = [];
     out.onKill.push({ action: e.action, value: e.value });
+  }
+  // 消耗时（效果批五）：技能/领域/场景卡在结算时被消耗——效果账带出（治疗/MP 落结算窗）
+  for (const e of effects) {
+    if (e.trigger !== '消耗时') continue;
+    if (!out.onConsume) out.onConsume = [];
+    out.onConsume.push({ action: e.action, value: e.value });
   }
   return out;
 }
@@ -537,11 +564,25 @@ export function playBeat(
     .reduce((sum, e) => sum + Math.max(0, e.amount), 0);
   // 效果池翻译（2026-09-25）：打出时动作层即时结算、状态层进在场登记
   const fx = translateCardEffects(opts?.effects, opts?.enemyCount ?? s.enemyCount ?? 1);
+
+  // 变异（效果批五）：live 时每拍按拍骰随机一项——威胁+3 / 敌承伤+8% / 敌自伤4
+  const liveMutation = live.some((e) => e.type === 'mutation');
+  let mutationThreat = 0;
+  let mutationVuln = 0;
+  let mutationSelf = 0;
+  if (liveMutation) {
+    const roll = dice % 3;
+    if (roll === 0) mutationThreat = 3;
+    else if (roll === 1) mutationVuln = 8;
+    else mutationSelf = 4;
+  }
   const rawPower = Math.max(0, action.power) + fx.powerBonus;
   const effectiveAction = {
     ...action,
     power: Math.round(rawPower * fx.powerMult) + (buffTotal > 0 ? buffTotal : 0),
   };
+  // 变异威胁：仅影响本拍敌方威胁判定（resolveBeat 输入侧），不改敌方意图本体
+  const effectiveThreat = effectiveIntent.threat + mutationThreat;
 
   // 本拍在场护盾（护盾/格挡状态）+ 本拍易伤层数——供 resolveBeat 乘区与减伤
   const liveShield = live
@@ -556,14 +597,14 @@ export function playBeat(
   // 先攻（效果批二）：持续期间反制掷骰 +3
   const liveInitiative = live.some((e) => e.type === 'initiative');
   const result = resolveBeat({
-    intent: effectiveIntent,
+    intent: { ...effectiveIntent, threat: effectiveThreat },
     action: effectiveAction,
     playerHp: s.playerHp,
     enemyHp: s.enemyHp,
     guard: Math.max(0, s.guard - (s.guardDown ?? 0)),
     dice: dice + (liveInitiative ? 3 : 0),
     ...(liveShield > 0 ? { shield: liveShield } : {}),
-    ...(liveVuln > 0 ? { vulnerable: liveVuln } : {}),
+    ...(liveVuln + mutationVuln > 0 ? { vulnerable: liveVuln + mutationVuln } : {}),
   });
   const playerDamageBase = result.playerDamage ?? 0;
   const divineBlocked = liveDivine !== undefined && playerDamageBase > 0;
@@ -609,7 +650,8 @@ export function playBeat(
   const liveDrain = dotSuppressed ? [] : live.filter((e) => e.type === 'drain');
   const drainEnemy = liveDrain.reduce((sum, e) => sum + Math.max(0, e.amount), 0);
   const drainHeal = liveDrain.reduce((sum, e) => sum + Math.max(0, e.amount), 0);
-  const extraDot = poisonPctTotal + markTotal + confusionTotal + charmTotal + drainEnemy;
+  const extraDot =
+    poisonPctTotal + markTotal + confusionTotal + charmTotal + drainEnemy + mutationSelf;
   const enemyHpAfterDot = Math.max(0, result.enemyHp - dotTotal - extraDot);
   if (dotTotal > 0 && result.enemyHp > 0) {
     lines.push(`▸ 在场持续：敌方 −${dotTotal}（${result.enemyHp} → ${enemyHpAfterDot}）`);
@@ -624,6 +666,9 @@ export function playBeat(
   }
   if (confusionTotal > 0) {
     lines.push(`▸ 【混乱】反噬：敌方自伤 −${confusionTotal}`);
+  }
+  if (mutationSelf > 0) {
+    lines.push(`▸ 【变异】铭文扭曲：敌方自伤 −${mutationSelf}`);
   }
   if (charmTotal > 0) {
     lines.push(`▸ 【魅惑】它为你出手——攻击转嫁：敌方 −${charmTotal}`);
@@ -658,6 +703,13 @@ export function playBeat(
   // 行为合同反噬（SSS 律师函警告）：敌方本拍意图触碰禁条 → 真实伤害
   const contractHit = contractBacklash(s.contracts, intent);
   const afterContract = Math.max(0, afterDirect - contractHit.total);
+
+  // 拍结束·伤害（效果批五）：常规结算全部完成后追加（受护盾/减免影响的其余部分已定，此段为追加直伤——非无视减免）
+  const endBeatDamage = Math.max(0, Math.round(fx.endBeatDamage ?? 0));
+  const afterEndBeat = Math.max(0, afterContract - endBeatDamage);
+  if (endBeatDamage > 0) {
+    lines.push(`▸ 【效果】拍末追加：敌方 −${endBeatDamage}`);
+  }
   if (contractHit.total > 0) {
     lines.push(
       `▸ 行为合同违约（${contractHit.violated.map((c) => c.name).join('、')}）：敌方 −${contractHit.total} 真实伤害（${afterNuke} → ${afterContract}）`,
@@ -667,10 +719,10 @@ export function playBeat(
   // 终章：第 N 拍起敌方被即刻抹除（无视减免；N 缺省 6）
   const chapterAt = Math.max(1, Math.round(opts?.finalChapterBeats ?? FINAL_CHAPTER_BEAT));
   const chapterActive = opts?.finalChapter === true && s.beat + 1 >= chapterAt;
-  if (chapterActive && afterContract > 0) {
+  if (chapterActive && afterEndBeat > 0) {
     lines.push(`▸ 【第六终章】第 ${s.beat + 1} 次行动——抹除发动：敌方 −${afterContract}（归零）`);
   }
-  let enemyHpFinal = chapterActive ? 0 : afterContract;
+  let enemyHpFinal = chapterActive ? 0 : afterEndBeat;
 
   // ── 禁忌卡六正本（2026-09-19 七链；每张每场限一次，代价由调用方结算层落） ──
   const forbiddenCard = opts?.forbiddenCard;
@@ -763,11 +815,17 @@ export function playBeat(
   const fxHeal = Math.max(0, Math.round(fx.heal));
   // 寄生（效果批三）：拍末吸血转给玩家
   const drainHealAmount = Math.max(0, Math.round(drainHeal));
-  const healedTotal = fxHeal + drainHealAmount;
+  const endBeatHeal = Math.max(0, Math.round(fx.endBeatHeal ?? 0));
+  const healedTotal = fxHeal + drainHealAmount + endBeatHeal;
   const playerHpAfterFxHeal =
     healedTotal > 0 ? Math.min(s.playerMaxHp, playerHpAfterRegen + healedTotal) : playerHpAfterRegen;
   if (fxHeal > 0 && playerHpAfterFxHeal > playerHpAfterRegen) {
     lines.push(`▸ 【效果】回复 ${playerHpAfterFxHeal - playerHpAfterRegen} HP`);
+  }
+  if (endBeatHeal > 0 && playerHpAfterFxHeal > playerHpAfterRegen + fxHeal) {
+    lines.push(
+      `▸ 【效果】拍末回复 ${playerHpAfterFxHeal - playerHpAfterRegen - fxHeal} HP`,
+    );
   }
   if (drainHealAmount > 0 && playerHpAfterFxHeal > playerHpAfterRegen + fxHeal) {
     lines.push(

@@ -138,7 +138,8 @@ export interface CardInPlayEffect {
     | 'infest'
     | 'degrade'
     | 'deathTimer'
-    | 'disarm';
+    | 'disarm'
+    | 'mutation';
   amount: number;
   /** 持续拍数（缺省 = 整场）；每拍结束递减，归零移除 */
   beatsLeft?: number;
