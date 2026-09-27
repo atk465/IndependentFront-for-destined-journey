@@ -130,6 +130,12 @@ export interface CardCatalogItem {
     ofName: string;
     materials: string[];
   };
+  /**
+   * 效果池登记（2026-09-25 效果批四）：购买/发放时经 coerceCardEffects 门禁后
+   * 写入实体卡的 cardEffects（原始形状存储，读侧再门禁——存档健壮性口径）。
+   * 未登记 = 出牌时按素材元素派生打底。
+   */
+  effects?: unknown;
 }
 
 /**
@@ -146,9 +152,13 @@ export function matchImitation(
   return pool.find((c) => c.imitation && key(c.imitation.materials) === wanted);
 }
 
+import { coerceCardEffects } from './card-workshop/card-effects';
+
 /** 卡目录条目 → 实体卡（确定性构造；recipe 为快照占位，逻辑键=名字，铁律1/3） */
 export function cardCatalogToItem(c: CardCatalogItem): import('./types').CardItem {
   const 词条 = c.element ? [c.element, c.formEntry] : [c.formEntry];
+  // 效果池登记（2026-09-25 效果批四）：门禁后随卡落库——非法条目整批丢弃，回落元素派生
+  const gatedEffects = coerceCardEffects(c.effects);
   return {
     name: c.name,
     quantity: 1,
@@ -158,6 +168,7 @@ export function cardCatalogToItem(c: CardCatalogItem): import('./types').CardIte
     词条,
     description: c.description,
     sealed: false,
+    ...(gatedEffects.length > 0 ? { cardEffects: gatedEffects } : {}),
     recipe: {
       mainMaterial: c.name,
       subMaterials: [],

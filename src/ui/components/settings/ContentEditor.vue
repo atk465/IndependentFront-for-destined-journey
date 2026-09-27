@@ -31,6 +31,7 @@ import {
 } from '@engine/card-workshop/custom-commissions';
 import type { CommissionDef } from '@engine/card-workshop/commission';
 import { QUEST_CHAIN_COMMISSION_SEEDS } from '@engine/card-workshop/quest-chain-seeds';
+import { EFFECT_POOL, coerceCardEffects } from '@engine/card-workshop/card-effects';
 import type { RandomEventDef } from '@engine/types-random-events';
 import { getMapPack } from '@engine/map-runtime';
 import { getCommissionDefs } from '@engine/commission-runtime';
@@ -133,7 +134,7 @@ function removeTalent(name: string) {
 // 购卡编辑器
 // ════════════════════════════════════════════════════════════════════
 
-const FORMS = ['装备', '技能', '领域', '物资', '召唤', '军团'] as const;
+const FORMS = ['装备', '技能', '领域', '场景', '物资', '召唤', '军团'] as const;
 const ELEMENTS = ['', '火', '水', '风', '土', '雷', '光', '暗', '冰', '金'] as const;
 
 const cName = ref('');
@@ -148,6 +149,34 @@ const cYieldQty = ref(1);
 const cYieldIsMaterial = ref(false);
 const cMsg = ref('');
 const cErr = ref('');
+// 效果池选择（2026-09-25 效果批四）：购卡效果从池内选、数值池内定值（≤2 条）
+const EFFECT_POOL_LIST = EFFECT_POOL;
+const cEffects = ref<{ trigger: string; target: string; action: string; value: number; duration?: number }[]>([]);
+const cEffectsErr = computed(() => {
+  if (cEffects.value.length > 2) return '每卡最多登记 2 条效果';
+  for (const e of cEffects.value) {
+    const entry = EFFECT_POOL_LIST.find((p) => p.action === e.action);
+    if (!entry) return `效果「${e.action}」不在池内`;
+    if (e.value !== entry.value || (e.duration ?? 0) !== entry.duration) {
+      return `「${e.action}」的数值/持续须照抄池内定值（${entry.value}${entry.duration ? ` / ${entry.duration} 拍` : ''}）`;
+    }
+  }
+  return '';
+});
+function addCardEffect(action: string) {
+  const entry = EFFECT_POOL_LIST.find((p) => p.action === action);
+  if (!entry || cEffects.value.some((e) => e.action === action)) return;
+  cEffects.value.push({
+    trigger: entry.duration > 0 ? '每拍' : '打出时',
+    target: ['治疗', '护盾', '格挡'].includes(entry.action) ? '自身' : '敌单体',
+    action: entry.action,
+    value: entry.value,
+    duration: entry.duration,
+  });
+}
+function removeCardEffect(i: number) {
+  cEffects.value.splice(i, 1);
+}
 
 /** 这张卡的形态是否需要产出定义（物资/素材） */
 const needsYield = computed(() => cForm.value === '物资' || cForm.value === '素材');
@@ -175,6 +204,9 @@ async function saveCard() {
     cost: cCost.value,
   };
   if (cElement.value) item.element = cElement.value;
+  // 效果池门禁：只收池内定值条目（UI 层已约束，此处兜底）
+  const gatedEffects = coerceCardEffects(cEffects.value);
+  if (gatedEffects.length > 0) item.effects = gatedEffects;
   if (needsYield.value && cYieldName.value.trim()) {
     item.yield = {
       name: cYieldName.value.trim(),
@@ -195,6 +227,7 @@ async function saveCard() {
   cYieldName.value = '';
   cYieldQty.value = 1;
   cYieldIsMaterial.value = false;
+  cEffects.value = [];
 }
 function removeCard(id: string) {
   game.removeCustomCard(id);
@@ -678,9 +711,39 @@ function removeCommission(item: { def: { name: string }; isSeed: boolean }) {
         >
       </div>
 
+      <!-- 效果池登记（2026-09-25 效果批四）：效果从池内选、数值池内定值，购买后随卡生效 -->
+      <div class="entries-section">
+        <div class="entries-head">
+          <span>效果登记（{{ cEffects.length }}/2，出牌时结算）</span>
+          <select
+            class="entry-select"
+            :value="''"
+            aria-label="添加效果"
+            @change="addCardEffect(($event.target as HTMLSelectElement).value)"
+          >
+            <option value="" disabled>+ 从效果池添加…</option>
+            <option
+              v-for="e in EFFECT_POOL_LIST.filter((p) => !cEffects.some((c) => c.action === p.action))"
+              :key="e.action"
+              :value="e.action"
+            >
+              {{ e.action }}——{{ e.text }}
+            </option>
+          </select>
+        </div>
+        <div v-for="(e, i) in cEffects" :key="e.action" class="entry-row">
+          <span class="chip">{{ e.action }} {{ e.value }}{{ e.duration ? `/${e.duration}拍` : '' }}</span>
+          <button type="button" class="remove-btn" @click="removeCardEffect(i)">✕</button>
+        </div>
+        <p v-if="cEffectsErr" class="warn">{{ cEffectsErr }}</p>
+      </div>
+
       <p v-if="cMsg" class="ok-msg">{{ cMsg }}</p>
       <p v-if="cErr" class="err-msg">{{ cErr }}</p>
-      <AppButton variant="primary" :disabled="!cName.trim() || !cTier || !cForm" @click="saveCard"
+      <AppButton
+        variant="primary"
+        :disabled="!cName.trim() || !cTier || !cForm || !!cEffectsErr"
+        @click="saveCard"
         >添加到购卡池</AppButton
       >
 
