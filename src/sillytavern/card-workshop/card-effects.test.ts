@@ -18,8 +18,8 @@ import { cardAxisOf, deriveCardAtk, CARD_ELEMENT_AXIS } from './derived-stats';
 import { conditionsMet, type CardEffectDef } from './card-effects';
 
 describe('效果池与元素映射（派生打底）', () => {
-  it('池 59 条（53 + 批十慎用 6），九元素九映射', () => {
-    expect(EFFECT_POOL).toHaveLength(59);
+  it('池 62 条（59 + 批十一契约赌注成就 3），九元素九映射', () => {
+    expect(EFFECT_POOL).toHaveLength(62);
     expect(Object.keys(ELEMENT_DEFAULT_EFFECT)).toHaveLength(9);
     for (const action of Object.values(ELEMENT_DEFAULT_EFFECT)) {
       expect(poolEntryOf(action)).toBeDefined(); // 映射的动作都在池内
@@ -1069,6 +1069,95 @@ describe('效果批十（慎用清单：支配/时间裂缝/夺式/封印/断章
     // 2 层在场（护盾/回复不加行动值）：15+6=21% → 20*1.21=24.2→24
     expect(two.enemyHp).toBe(600 - 24);
     expect(two.log.some((l) => l.includes('【连锁风暴】') && l.includes('2 层'))).toBe(true);
+  });
+});
+
+describe('效果批十一（契约/赌注/成就）', () => {
+  // threat 30 / dice 5 / power 10 → 反制必败（15 < 30）
+  const mk = (playerHp = 100, threat = 30) =>
+    startSkirmish({
+      enemyName: '盟兽',
+      intents: [{ move: '重压', threat, counters: [] }],
+      playerHp,
+      playerMaxHp: Math.max(playerHp, 120),
+      enemyHp: 600,
+      guard: 0,
+    });
+  const card = { label: '打一拍', power: 0, tags: [], cardName: '补拍卡' };
+  const hit10 = { label: '打一拍', power: 10, tags: [], cardName: '赌卡' };
+
+  it('池门禁：三条新效果全在池内', () => {
+    for (const a of ['契约·血誓', '赌一手', '功业'] as const) {
+      expect(poolEntryOf(a)).toBeDefined();
+    }
+  });
+
+  it('契约·血誓：守约兑现 18 HP；违约反噬 8', () => {
+    // threat 16（roll 15 恰败，承 16/拍）：立约拍为窗口第 1 拍，第 4 拍到期清算
+    const act = {
+      trigger: '每拍' as const,
+      target: '自身' as const,
+      action: '契约·血誓' as const,
+      value: 2,
+      duration: 3,
+    };
+    const parry = { label: '应对', power: 0, tags: [] };
+    // 守约路：出卡 1+1=2 ≥ 2 → 兑现
+    const w0 = playBeat(mk(100, 16), { ...card, cardName: '契约卡' }, 5, { effects: [act] });
+    const w1 = playBeat(w0, card, 5, {});
+    const w2 = playBeat(w1, parry, 5, {});
+    const w3 = playBeat(w2, parry, 5, {});
+    expect(w3.log.slice(w2.log.length).some((l) => l.includes('守约兑现'))).toBe(true);
+    expect(w3.playerHp).toBe(100 - 64 + 18);
+    // 违约路：立约后再没出卡 → 1 < 2 反噬
+    const l0 = playBeat(mk(100, 16), { ...card, cardName: '契约卡' }, 5, { effects: [act] });
+    const l1 = playBeat(l0, parry, 5, {});
+    const l2 = playBeat(l1, parry, 5, {});
+    const l3 = playBeat(l2, parry, 5, {});
+    expect(l3.log.slice(l2.log.length).some((l) => l.includes('违约反噬'))).toBe(true);
+    expect(l3.playerHp).toBe(100 - 64 - 8);
+  });
+  it('赌一手：反制成功赢彩头，失手注金尽没', () => {
+    const act = {
+      trigger: '打出时' as const,
+      target: '自身' as const,
+      action: '赌一手' as const,
+      value: 0,
+    };
+    // 赢：threat 6 → roll 15 ≥ 6 反制成功：-10 注 + 20 彩 = 净 +10，MP +5
+    const win = playBeat(mk(70, 6), hit10, 5, { effects: [act] });
+    expect(win.log.some((l) => l.includes('赌胜'))).toBe(true);
+    expect(win.playerHp).toBe(70 - 10 + 20);
+    expect(win.mpGained).toBe(5);
+    // 输：threat 30 → 反制失败：拍伤 30 + 注 10 + 失手 10
+    const lose = playBeat(mk(70), hit10, 5, { effects: [act] });
+    expect(lose.log.some((l) => l.includes('失手'))).toBe(true);
+    expect(lose.playerHp).toBe(70 - 30 - 10 - 10);
+  });
+
+  it('功业：反制累计 3 次兑现嘉奖（行动值 +10 整场）', () => {
+    const feat = { name: '功业', type: 'feat' as const, amount: 3 };
+    const s = startSkirmish({
+      enemyName: '盟兽',
+      intents: [{ move: '轻拍', threat: 6, counters: [] }],
+      playerHp: 100,
+      playerMaxHp: 120,
+      enemyHp: 600,
+      guard: 0,
+      initialEffects: [feat],
+    });
+    const hit = { label: '打一拍', power: 10, tags: [] };
+    const b1 = playBeat(s, hit, 5, {});
+    const b2 = playBeat(b1, hit, 5, {});
+    // 第三次反制达账 → 嘉奖落袋、功业移除
+    const b3 = playBeat(b2, hit, 5, {});
+    expect(b3.log.slice(b2.log.length).some((l) => l.includes('【功业】达成'))).toBe(true);
+    const fx3 = b3.activeEffects ?? [];
+    expect(fx3.some((e) => e.type === 'feat')).toBe(false);
+    expect(fx3.find((e) => e.name === '功业·嘉奖')?.amount).toBe(10);
+    // 第四拍嘉奖生效：行动值 20 → 反制成功余量 19 → 伤害 39
+    const b4 = playBeat(b3, hit, 5, {});
+    expect(b4.enemyHp).toBe(b3.enemyHp - 39);
   });
 });
 

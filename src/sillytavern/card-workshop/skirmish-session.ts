@@ -378,6 +378,8 @@ export interface TranslatedEffects {
   stealForm?: boolean;
   /** 打出时·连锁风暴（效果批十）：行动值 +base%，每层在场效果再 +perEffect% */
   chainStorm?: { base: number; perEffect: number };
+  /** 打出时·赌一手（效果批十一）：押注本拍反制结果——注金/彩头/失手伤 */
+  bet?: { stake: number; winHeal: number; winMp: number; loseHurt: number };
   /** 拍结束·伤害（效果批五）：全部结算完成后直扣敌方 */
   endBeatDamage?: number;
   /** 拍结束·治疗（效果批五）：并入玩家 HP 链 */
@@ -524,6 +526,11 @@ export function translateCardEffects(
         out.chainStorm = { base: scaled, perEffect: 3 };
         out.lines.push(`▸ 【效果】连锁风暴：每层在场效果都在为它供能（预警：连锁位）`);
         break;
+      case '赌一手':
+        // 赌注（效果批十一）：输赢只有拍末知道——playBeat 依反制结果清算
+        out.bet = { stake: 10, winHeal: 20, winMp: 5, loseHurt: 10 };
+        out.lines.push(`▸ 【效果】赌一手：注金压上桌了——这一拍见分晓`);
+        break;
       case '死亡倒计时': {
         const beats = Math.max(1, Math.round(e.duration ?? 3));
         out.activate.push({
@@ -594,7 +601,9 @@ export function translateCardEffects(
       case '进化':
       case '连携锚':
       case '支配':
-      case '封印': {
+      case '封印':
+      case '契约·血誓':
+      case '功业': {
         const type =
           e.action === '易伤' || e.action === '诅咒'
             ? 'vulnerable'
@@ -649,13 +658,17 @@ export function translateCardEffects(
                                                           ? 'dominate'
                                                           : e.action === '封印'
                                                             ? 'seal'
-                                                            : 'dot';
+                                                            : e.action === '契约·血誓'
+                                                              ? 'pact'
+                                                              : e.action === '功业'
+                                                                ? 'feat'
+                                                                : 'dot';
         const eff: CardInPlayEffect = {
           name: e.action,
           type: type as CardInPlayEffect['type'],
           // 任务的目标张数是契约口径，不随敌全体倍化；时之锚金额 0（锚点在 playBeat 落定）
           amount:
-            e.action === '任务'
+            e.action === '任务' || e.action === '契约·血誓' || e.action === '功业'
               ? Math.max(1, Math.round(e.value))
               : e.action === '时之锚'
                 ? 0
@@ -1363,6 +1376,29 @@ export function playBeat(
     }
   }
 
+  // 赌一手（效果批十一）：押注本拍反制——赢了通吃，输了注金尽没再加伤（注金不押到致死）
+  if (fx.bet && next.playerHp > 0) {
+    const stake = Math.min(fx.bet.stake, next.playerHp);
+    next = {
+      ...next,
+      playerHp: next.playerHp - stake,
+      log: [...next.log, `▸ 【赌一手】押上 ${stake} HP 作注`],
+    };
+    if (result.countered) {
+      next = {
+        ...next,
+        playerHp: Math.min(s.playerMaxHp, next.playerHp + fx.bet.winHeal),
+        mpGained: (s.mpGained ?? 0) + fx.bet.winMp,
+        log: [...next.log, `▸ 【赌一手】赌胜——赢回 ${fx.bet.winHeal} HP 与 ${fx.bet.winMp} MP`],
+      };
+    } else {
+      next = {
+        ...next,
+        playerHp: Math.max(0, next.playerHp - fx.bet.loseHurt),
+        log: [...next.log, `▸ 【赌一手】失手——注金尽没，再伤 ${fx.bet.loseHurt} HP`],
+      };
+    }
+  }
   // 死亡倒计时到期（效果批三）：倒数走完 → 敌方直接倒下
   const timerExpired = decremented.find((e) => e.type === 'deathTimer' && (e.beatsLeft ?? 1) <= 0);
   if (timerExpired) {
@@ -1411,6 +1447,39 @@ export function playBeat(
       playerHp: Math.min(s.playerMaxHp, next.playerHp + reward),
       activeEffects: (next.activeEffects ?? []).filter((e) => e !== quest),
       log: [...next.log, `▸ 【任务】完成——出卡 ${quest.amount} 张如期兑现，回复 ${reward} HP`],
+    };
+  }
+  // 契约·血誓（效果批十一）：到期清算——达标兑现，违约反噬（任务区结算：不救致死拍）
+  const expiringPacts = s.activeEffects.filter((e) => e.type === 'pact' && (e.beatsLeft ?? 1) <= 1);
+  for (const pact of expiringPacts) {
+    const goal = Math.max(1, pact.amount);
+    if ((events['出卡'] ?? 0) >= goal) {
+      next = {
+        ...next,
+        playerHp: Math.min(s.playerMaxHp, next.playerHp + 18),
+        log: [...next.log, `▸ 【契约·血誓】守约兑现——${goal} 张卡如期打出，回复 18 HP`],
+      };
+    } else {
+      next = {
+        ...next,
+        playerHp: Math.max(0, next.playerHp - 8),
+        log: [
+          ...next.log,
+          `▸ 【契约·血誓】违约反噬——出卡 ${events['出卡'] ?? 0}/${goal}，自伤 8 HP`,
+        ],
+      };
+    }
+  }
+  // 功业（效果批十一）：成就达成——账本反制数达标即兑现嘉奖（一次性，buff 不涉生死）
+  const feat = (next.activeEffects ?? []).find((e) => e.type === 'feat');
+  if (feat && (events['反制成功'] ?? 0) >= Math.max(1, feat.amount)) {
+    next = {
+      ...next,
+      activeEffects: [
+        ...(next.activeEffects ?? []).filter((e) => e !== feat),
+        { name: '功业·嘉奖', type: 'buff', amount: 10 },
+      ],
+      log: [...next.log, `▸ 【功业】达成——${feat.amount} 次反制如愿，行动值 +10（整场）`],
     };
   }
   // ── 体力账（2026-09-25 访谈共识）：出卡 5 SP / 基础应对 3 SP，拍拍扣 ──

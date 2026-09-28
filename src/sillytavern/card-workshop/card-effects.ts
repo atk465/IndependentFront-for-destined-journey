@@ -96,7 +96,11 @@ export type EffectAction =
   | '夺式'
   | '封印'
   | '断章'
-  | '连锁风暴';
+  | '连锁风暴'
+  // 契约/赌注/成就（效果批十一 2026-09-28）：策略与信息类收官——窗口契约/反制赌注/账本成就
+  | '契约·血誓'
+  | '赌一手'
+  | '功业';
 
 /** 代价（首批只收三种资源；正数值） */
 export interface EffectCost {
@@ -359,6 +363,26 @@ export const EFFECT_POOL: readonly PoolEntry[] = [
     duration: 0,
     cost: { mp: 15 },
     text: '【预警·连锁】行动值 +15%，你的每层在场效果再 +3%（连锁有界放大）',
+  },
+  // ── 契约/赌注/成就（效果批十一：窗口契约 / 反制赌注 / 账本成就） ──
+  {
+    action: '契约·血誓',
+    value: 2,
+    duration: 3,
+    cost: { mp: 8 },
+    text: '立约：3 拍内出满 2 张卡 → 到期兑现 18 HP；违约 → 反噬自伤 8',
+  },
+  {
+    action: '赌一手',
+    value: 0,
+    duration: 0,
+    text: '押 10 HP 作注：本拍反制成功 → 赢回 20 HP 与 5 MP；失手 → 注金尽没再伤 10',
+  },
+  {
+    action: '功业',
+    value: 3,
+    duration: 0,
+    text: '成就：本场累计反制成功 3 次 → 行动值 +10（整场，一次兑现）',
   },
 ];
 

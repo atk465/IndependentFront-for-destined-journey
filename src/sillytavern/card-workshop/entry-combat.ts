@@ -153,7 +153,10 @@ export interface CardInPlayEffect {
     | 'comboAnchor'
     // 慎用清单（效果批十）：dominate = 威胁转嫁敌自伤；seal = 威胁锁 1 整场
     | 'dominate'
-    | 'seal';
+    | 'seal'
+    // 契约/赌注/成就（效果批十一）：pact = 窗口契约（到期清算）；feat = 账本成就（达标嘉奖）
+    | 'pact'
+    | 'feat';
   amount: number;
   /** 持续拍数（缺省 = 整场）；每拍结束递减，归零移除 */
   beatsLeft?: number;
