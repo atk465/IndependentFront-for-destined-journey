@@ -18,8 +18,8 @@ import { cardAxisOf, deriveCardAtk, CARD_ELEMENT_AXIS } from './derived-stats';
 import { conditionsMet, type CardEffectDef } from './card-effects';
 
 describe('效果池与元素映射（派生打底）', () => {
-  it('池 43 条（前四批 42 + 批六免疫 1），九元素九映射', () => {
-    expect(EFFECT_POOL).toHaveLength(43);
+  it('池 47 条（43 + 批八信息策略 4），九元素九映射', () => {
+    expect(EFFECT_POOL).toHaveLength(47);
     expect(Object.keys(ELEMENT_DEFAULT_EFFECT)).toHaveLength(9);
     for (const action of Object.values(ELEMENT_DEFAULT_EFFECT)) {
       expect(poolEntryOf(action)).toBeDefined(); // 映射的动作都在池内
@@ -44,7 +44,9 @@ describe('效果池与元素映射（派生打底）', () => {
     const fx = deriveCardEffects({ name: '火球术', 词条: ['技能', '火'], cardTier: '青铜' });
     expect(fx[0].action).toBe('伤害');
     clearCardEffectOverrides();
-    expect(deriveCardEffects({ name: '火球术', 词条: ['技能', '火'], cardTier: '青铜' })[0].action).toBe('灼烧');
+    expect(
+      deriveCardEffects({ name: '火球术', 词条: ['技能', '火'], cardTier: '青铜' })[0].action,
+    ).toBe('灼烧');
   });
 });
 
@@ -125,15 +127,10 @@ describe('拍内结算（翻译器 → playBeat）', () => {
     });
   it('打出时·伤害：行动值追加（敌全体 ×enemyCount 倍化）', () => {
     const s = mk(2);
-    const after = playBeat(
-      s,
-      { label: '火雨', power: 20, tags: [] },
-      15,
-      {
-        effects: [{ trigger: '打出时', target: '敌全体', action: '伤害', value: 8 }],
-        enemyCount: 2,
-      },
-    );
+    const after = playBeat(s, { label: '火雨', power: 20, tags: [] }, 15, {
+      effects: [{ trigger: '打出时', target: '敌全体', action: '伤害', value: 8 }],
+      enemyCount: 2,
+    });
     // 行动值 = 20 + 8×2 = 36（敌全体倍化）
     expect(after.log.some((l) => l.includes('36'))).toBe(true);
   });
@@ -162,54 +159,81 @@ describe('拍内结算（翻译器 → playBeat）', () => {
   });
   it('批一状态：恐惧威胁减半+反制面关、束缚威胁锁 1、圣盾免疫、反伤反弹、剧毒百分比', () => {
     const fearIntent = { move: '重击', threat: 20, counters: ['防御'] };
-    const s1 = startSkirmish({
-      enemyName: '兽', intents: [fearIntent], playerHp: 100, playerMaxHp: 100, enemyHp: 600, guard: 10,
-    });
     // 恐惧 live → 敌方威胁 10（减半）且 counters 清空
     const feared = playBeat(
       startSkirmish({
-        enemyName: '兽', intents: [fearIntent], playerHp: 100, playerMaxHp: 100, enemyHp: 600, guard: 10,
+        enemyName: '兽',
+        intents: [fearIntent],
+        playerHp: 100,
+        playerMaxHp: 100,
+        enemyHp: 600,
+        guard: 10,
         initialEffects: [{ name: '恐惧', type: 'fear', amount: 0, beatsLeft: 2 }],
       }),
-      { label: '试探', power: 0, tags: [] }, 15,
+      { label: '试探', power: 0, tags: [] },
+      15,
     );
     expect(feared.log.some((l) => l.includes('恐惧'))).toBe(true);
     // 束缚：威胁锁 1 → 玩家无伤
     const bound = playBeat(
       startSkirmish({
-        enemyName: '兽', intents: [fearIntent], playerHp: 100, playerMaxHp: 100, enemyHp: 600, guard: 10,
+        enemyName: '兽',
+        intents: [fearIntent],
+        playerHp: 100,
+        playerMaxHp: 100,
+        enemyHp: 600,
+        guard: 10,
         initialEffects: [{ name: '束缚', type: 'bind', amount: 0, beatsLeft: 2 }],
       }),
-      { label: '对峙', power: 0, tags: [] }, 15,
+      { label: '对峙', power: 0, tags: [] },
+      15,
     );
     expect(bound.playerHp).toBe(100);
     // 圣盾：免疫一拍全部伤害
     const shielded = playBeat(
       startSkirmish({
-        enemyName: '兽', intents: [fearIntent], playerHp: 100, playerMaxHp: 100, enemyHp: 600, guard: 10,
+        enemyName: '兽',
+        intents: [fearIntent],
+        playerHp: 100,
+        playerMaxHp: 100,
+        enemyHp: 600,
+        guard: 10,
         initialEffects: [{ name: '圣盾', type: 'divineShield', amount: 0, beatsLeft: 1 }],
       }),
-      { label: '硬挨', power: 0, tags: [] }, 15,
+      { label: '硬挨', power: 0, tags: [] },
+      15,
     );
     expect(shielded.playerHp).toBe(100);
     expect(shielded.log.some((l) => l.includes('圣盾'))).toBe(true);
     // 反伤：挨打 → 敌方掉血
     const thorn = playBeat(
       startSkirmish({
-        enemyName: '兽', intents: [fearIntent], playerHp: 100, playerMaxHp: 100, enemyHp: 600, guard: 10,
+        enemyName: '兽',
+        intents: [fearIntent],
+        playerHp: 100,
+        playerMaxHp: 100,
+        enemyHp: 600,
+        guard: 10,
         initialEffects: [{ name: '反伤', type: 'thorns', amount: 5, beatsLeft: 2 }],
       }),
-      { label: '硬挨', power: 0, tags: [] }, 15,
+      { label: '硬挨', power: 0, tags: [] },
+      15,
     );
     expect(thorn.enemyHp).toBeLessThan(600);
     expect(thorn.log.some((l) => l.includes('反伤'))).toBe(true);
     // 剧毒：按当前气血百分比
     const poison = playBeat(
       startSkirmish({
-        enemyName: '兽', intents: [fearIntent], playerHp: 100, playerMaxHp: 100, enemyHp: 600, guard: 10,
+        enemyName: '兽',
+        intents: [fearIntent],
+        playerHp: 100,
+        playerMaxHp: 100,
+        enemyHp: 600,
+        guard: 10,
         initialEffects: [{ name: '剧毒', type: 'poisonPct', amount: 5, beatsLeft: 3 }],
       }),
-      { label: '看毒', power: 0, tags: [] }, 15,
+      { label: '看毒', power: 0, tags: [] },
+      15,
     );
     expect(poison.enemyHp).toBe(600 - 30); // 600 的 5%
     expect(poison.log.some((l) => l.includes('剧毒'))).toBe(true);
@@ -240,7 +264,11 @@ describe('效果批二（魅惑/沉默/招架/先攻/斩杀）', () => {
       enemyMaxHp: 600,
       guard: 10,
       ...(extra
-        ? { initialEffects: [extra as { name: string; type: 'dot'; amount: number; beatsLeft: number }] }
+        ? {
+            initialEffects: [
+              extra as { name: string; type: 'dot'; amount: number; beatsLeft: number },
+            ],
+          }
         : {}),
     });
   it('魅惑：敌方攻击转嫁——拍末敌方额外掉威胁值的血', () => {
@@ -263,7 +291,10 @@ describe('效果批二（魅惑/沉默/招架/先攻/斩杀）', () => {
     const s = { ...mk(), playerSp: 50 };
     const afterPlay = playBeat(s, { label: '出招', power: 10, tags: [], cardName: 'x' }, 15); // spSpent 5
     const afterParry = playBeat(
-      { ...afterPlay, activeEffects: [{ name: '招架', type: 'parry' as never, amount: 5, beatsLeft: 2 }] },
+      {
+        ...afterPlay,
+        activeEffects: [{ name: '招架', type: 'parry' as never, amount: 5, beatsLeft: 2 }],
+      },
       { label: '防御', power: 30, tags: ['防御'] },
       18,
     ); // 反制成功
@@ -279,8 +310,13 @@ describe('效果批二（魅惑/沉默/招架/先攻/斩杀）', () => {
   });
   it('斩杀：敌方 HP 低于 15% 直接终局；高于则空过', () => {
     const low = startSkirmish({
-      enemyName: '兽', intents: [intent], playerHp: 100, playerMaxHp: 100,
-      enemyHp: 80, enemyMaxHp: 600, guard: 10,
+      enemyName: '兽',
+      intents: [intent],
+      playerHp: 100,
+      playerMaxHp: 100,
+      enemyHp: 80,
+      enemyMaxHp: 600,
+      guard: 10,
     });
     const executed = playBeat(low, { label: '处刑', power: 5, tags: [] }, 15, {
       effects: [{ trigger: '打出时', target: '敌单体', action: '斩杀', value: 15 }],
@@ -288,8 +324,13 @@ describe('效果批二（魅惑/沉默/招架/先攻/斩杀）', () => {
     expect(executed.finished).toBe('胜利');
     expect(executed.log.some((l) => l.includes('斩杀'))).toBe(true);
     const high = startSkirmish({
-      enemyName: '兽', intents: [intent], playerHp: 100, playerMaxHp: 100,
-      enemyHp: 300, enemyMaxHp: 600, guard: 10,
+      enemyName: '兽',
+      intents: [intent],
+      playerHp: 100,
+      playerMaxHp: 100,
+      enemyHp: 300,
+      enemyMaxHp: 600,
+      guard: 10,
     });
     const notYet = playBeat(high, { label: '试斩', power: 5, tags: [] }, 15, {
       effects: [{ trigger: '打出时', target: '敌单体', action: '斩杀', value: 15 }],
@@ -302,10 +343,16 @@ describe('效果批三（寄生/感染/退化/死亡倒计时/缴械/汲取）',
   const intent = { move: '重击', threat: 20, counters: ['防御'] };
   it('寄生：打出后下一拍起，拍末敌方 −4、玩家 +4（双头结算）', () => {
     const s = startSkirmish({
-      enemyName: '兽', intents: [intent], playerHp: 50, playerMaxHp: 100,
-      enemyHp: 600, guard: 10,
+      enemyName: '兽',
+      intents: [intent],
+      playerHp: 50,
+      playerMaxHp: 100,
+      enemyHp: 600,
+      guard: 10,
     });
-    const fx: CardEffectDef[] = [{ trigger: '每拍', target: '敌单体', action: '寄生', value: 4, duration: 3 }];
+    const fx: CardEffectDef[] = [
+      { trigger: '每拍', target: '敌单体', action: '寄生', value: 4, duration: 3 },
+    ];
     const activated = playBeat(s, { label: '下蛊', power: 0, tags: [] }, 15, { effects: fx });
     // 打出拍不结算（状态从下一拍起效，领域同款时序）
     expect(activated.enemyHp).toBe(600);
@@ -316,10 +363,16 @@ describe('效果批三（寄生/感染/退化/死亡倒计时/缴械/汲取）',
   });
   it('感染：逐拍加深——第二拍比第一拍多扣 1', () => {
     const s = startSkirmish({
-      enemyName: '兽', intents: [intent], playerHp: 100, playerMaxHp: 100,
-      enemyHp: 600, guard: 10,
+      enemyName: '兽',
+      intents: [intent],
+      playerHp: 100,
+      playerMaxHp: 100,
+      enemyHp: 600,
+      guard: 10,
     });
-    const fx: CardEffectDef[] = [{ trigger: '每拍', target: '敌单体', action: '感染', value: 2, duration: 3 }];
+    const fx: CardEffectDef[] = [
+      { trigger: '每拍', target: '敌单体', action: '感染', value: 2, duration: 3 },
+    ];
     const activated = playBeat(s, { label: '染', power: 0, tags: [] }, 15, { effects: fx });
     // 效果只在激活拍传入一次——后续拍靠会话里的状态自动 tick
     const tick1 = playBeat(activated, { label: '拖', power: 0, tags: [] }, 15);
@@ -329,32 +382,53 @@ describe('效果批三（寄生/感染/退化/死亡倒计时/缴械/汲取）',
   });
   it('死亡倒计时：倒数走完 → 敌方直接倒下（胜利）', () => {
     const s = startSkirmish({
-      enemyName: '兽', intents: [intent], playerHp: 100, playerMaxHp: 100,
-      enemyHp: 600, guard: 10,
+      enemyName: '兽',
+      intents: [intent],
+      playerHp: 100,
+      playerMaxHp: 100,
+      enemyHp: 600,
+      guard: 10,
     });
-    const fx: CardEffectDef[] = [{ trigger: '每拍', target: '敌单体', action: '死亡倒计时', value: 3, duration: 3 }];
+    const fx: CardEffectDef[] = [
+      { trigger: '每拍', target: '敌单体', action: '死亡倒计时', value: 3, duration: 3 },
+    ];
     let cur = s;
     // 效果只在激活拍传入；激活拍 + 3 个倒数拍 = 4 拍后倒下
     for (let i = 0; i < 4 && cur.finished === null; i++) {
-      cur = playBeat(cur, { label: '拖', power: 0, tags: [] }, 15, i === 0 ? { effects: fx } : undefined);
+      cur = playBeat(
+        cur,
+        { label: '拖', power: 0, tags: [] },
+        15,
+        i === 0 ? { effects: fx } : undefined,
+      );
     }
     expect(cur.finished).toBe('胜利');
     expect(cur.log.some((l) => l.includes('死亡倒计时'))).toBe(true);
   });
   it('缴械：敌方威胁 −40%——20 威胁变 12', () => {
     const s = startSkirmish({
-      enemyName: '兽', intents: [intent], playerHp: 100, playerMaxHp: 100,
-      enemyHp: 600, guard: 0,
+      enemyName: '兽',
+      intents: [intent],
+      playerHp: 100,
+      playerMaxHp: 100,
+      enemyHp: 600,
+      guard: 0,
     });
-    const fx: CardEffectDef[] = [{ trigger: '每拍', target: '敌单体', action: '缴械', value: 40, duration: 2 }];
+    const fx: CardEffectDef[] = [
+      { trigger: '每拍', target: '敌单体', action: '缴械', value: 40, duration: 2 },
+    ];
     const b1 = playBeat(s, { label: '缴', power: 0, tags: [] }, 15, { effects: fx });
     // 缴械当拍生效（live）→ 下一拍 intent 已按 ×0.6 重写。直接验效果挂上：
     expect(b1.activeEffects.some((e) => e.name === '缴械')).toBe(true);
   });
   it('汲取：击杀时回复最大气血的 20%', () => {
     const s = startSkirmish({
-      enemyName: '兽', intents: [intent], playerHp: 50, playerMaxHp: 100,
-      enemyHp: 30, guard: 0,
+      enemyName: '兽',
+      intents: [intent],
+      playerHp: 50,
+      playerMaxHp: 100,
+      enemyHp: 30,
+      guard: 0,
     });
     const after = playBeat(s, { label: '终结', power: 60, tags: [] }, 18, {
       effects: [{ trigger: '击杀时', target: '自身', action: '汲取', value: 20 }],
@@ -380,8 +454,12 @@ describe('效果批四（强化档）', () => {
   });
   it('双击/风怒 → 行动值乘区；穿透 → 破防累计', () => {
     const s = startSkirmish({
-      enemyName: '兽', intents: [intent], playerHp: 100, playerMaxHp: 100,
-      enemyHp: 600, guard: 10,
+      enemyName: '兽',
+      intents: [intent],
+      playerHp: 100,
+      playerMaxHp: 100,
+      enemyHp: 600,
+      guard: 10,
     });
     const after = playBeat(s, { label: '出招', power: 20, tags: [] }, 15, {
       effects: [{ trigger: '打出时', target: '敌单体', action: '双击', value: 100 }],
@@ -395,8 +473,13 @@ describe('效果批四（强化档）', () => {
   });
   it('超杀 30% 线：敌方 25% 直接终局', () => {
     const s = startSkirmish({
-      enemyName: '兽', intents: [intent], playerHp: 100, playerMaxHp: 100,
-      enemyHp: 150, enemyMaxHp: 600, guard: 10, // 25% < 30%
+      enemyName: '兽',
+      intents: [intent],
+      playerHp: 100,
+      playerMaxHp: 100,
+      enemyHp: 150,
+      enemyMaxHp: 600,
+      guard: 10, // 25% < 30%
     });
     const after = playBeat(s, { label: '超杀', power: 5, tags: [] }, 15, {
       effects: [{ trigger: '打出时', target: '敌单体', action: '超杀', value: 30 }],
@@ -409,7 +492,10 @@ import { planEnchant, ENCHANT_BASE_COST } from './card-enchant';
 
 describe('planEnchant（附魔规划）', () => {
   const card = {
-    name: '铁剑卡', cardTier: '青铜' as const, 词条: ['技能', '金'], cardEffects: [],
+    name: '铁剑卡',
+    cardTier: '青铜' as const,
+    词条: ['技能', '金'],
+    cardEffects: [],
   };
   const effect = { trigger: '打出时', target: '敌单体', action: '灼烧', value: 4, duration: 2 };
   it('合法附魔：造价 = 60 + 定值×2，效果集追加', () => {
@@ -421,7 +507,8 @@ describe('planEnchant（附魔规划）', () => {
   it('物资/素材拒附魔', () => {
     const r = planEnchant({
       card: { name: '干粮卡', cardTier: '白铁' as never, 词条: ['物资'], cardEffects: [] },
-      effect, money: 999,
+      effect,
+      money: 999,
     });
     expect(r.ok).toBe(false);
   });
@@ -430,10 +517,7 @@ describe('planEnchant（附魔规划）', () => {
     expect(planEnchant({ card: withBurn, effect, money: 999 }).ok).toBe(false);
     const two = {
       ...card,
-      cardEffects: [
-        effect,
-        { trigger: '每拍', target: '自身', action: '治疗', value: 12 },
-      ],
+      cardEffects: [effect, { trigger: '每拍', target: '自身', action: '治疗', value: 12 }],
     };
     expect(planEnchant({ card: two, effect, money: 999 }).ok).toBe(false);
   });
@@ -449,10 +533,18 @@ describe('效果批六（免疫/治疗时响应）', () => {
   const intent = { move: '重击', threat: 20, counters: ['防御'] };
   const mk = (init?: { name: string; type: never; amount?: number; beatsLeft?: number }) =>
     startSkirmish({
-      enemyName: '兽', intents: [intent], playerHp: 100, playerMaxHp: 100,
-      enemyHp: 600, guard: 10,
+      enemyName: '兽',
+      intents: [intent],
+      playerHp: 100,
+      playerMaxHp: 100,
+      enemyHp: 600,
+      guard: 10,
       ...(init
-        ? { initialEffects: [init as { name: string; type: 'dot'; amount: number; beatsLeft: number }] }
+        ? {
+            initialEffects: [
+              init as { name: string; type: 'dot'; amount: number; beatsLeft: number },
+            ],
+          }
         : {}),
     });
   it('免疫：N 拍全免窗——所有伤害归零', () => {
@@ -466,8 +558,12 @@ describe('效果批六（免疫/治疗时响应）', () => {
   });
   it('治疗时响应：治疗发生 → 登记的响应连锁触发', () => {
     const s = startSkirmish({
-      enemyName: '兽', intents: [intent], playerHp: 50, playerMaxHp: 100,
-      enemyHp: 600, guard: 10,
+      enemyName: '兽',
+      intents: [intent],
+      playerHp: 50,
+      playerMaxHp: 100,
+      enemyHp: 600,
+      guard: 10,
       healResponses: [{ name: '治疗响应·护盾', action: '护盾', value: 4 }],
     });
     // 打出带治疗的效果：治疗 8 → 响应护盾 +4
@@ -479,8 +575,12 @@ describe('效果批六（免疫/治疗时响应）', () => {
   });
   it('无治疗发生 → 响应不触发', () => {
     const s = startSkirmish({
-      enemyName: '兽', intents: [intent], playerHp: 100, playerMaxHp: 100,
-      enemyHp: 600, guard: 10,
+      enemyName: '兽',
+      intents: [intent],
+      playerHp: 100,
+      playerMaxHp: 100,
+      enemyHp: 600,
+      guard: 10,
       healResponses: [{ name: '治疗响应·护盾', action: '护盾', value: 4 }],
     });
     const after = playBeat(s, { label: '空挥', power: 0, tags: [] }, 15);
@@ -498,21 +598,31 @@ describe('条件位（效果批七：交锋内账本）', () => {
     // 多条件 AND
     expect(
       conditionsMet(
-        [{ event: '出卡', count: 1 }, { event: '承受伤害', count: 1 }],
+        [
+          { event: '出卡', count: 1 },
+          { event: '承受伤害', count: 1 },
+        ],
         { 出卡: 1, 承受伤害: 1 },
       ),
     ).toBe(true);
   });
   it('条件不满足 → 效果空过+战报注明；满足 → 正常结算', () => {
     const s = startSkirmish({
-      enemyName: '兽', intents: [intent], playerHp: 100, playerMaxHp: 100,
-      enemyHp: 600, guard: 10,
+      enemyName: '兽',
+      intents: [intent],
+      playerHp: 100,
+      playerMaxHp: 100,
+      enemyHp: 600,
+      guard: 10,
     });
     // 场上没出过卡（账本空）→ 条件「出卡≥2」不满足 → 空过
     const skipped = playBeat(s, { label: '条件技', power: 20, tags: [] }, 15, {
       effects: [
         {
-          trigger: '打出时', target: '敌单体', action: '伤害', value: 8,
+          trigger: '打出时',
+          target: '敌单体',
+          action: '伤害',
+          value: 8,
           conditions: [{ event: '出卡', count: 2 }],
         },
       ],
@@ -522,8 +632,13 @@ describe('条件位（效果批七：交锋内账本）', () => {
   });
   it('账本递增：出卡/受击/治疗 计入 beatEvents', () => {
     const s = startSkirmish({
-      enemyName: '兽', intents: [intent], playerHp: 100, playerMaxHp: 100,
-      enemyHp: 600, guard: 10, playerSp: 50,
+      enemyName: '兽',
+      intents: [intent],
+      playerHp: 100,
+      playerMaxHp: 100,
+      enemyHp: 600,
+      guard: 10,
+      playerSp: 50,
     });
     const after = playBeat(s, { label: '打一拍', power: 10, tags: [], cardName: '铁剑卡' }, 15, {
       effects: [{ trigger: '打出时', target: '自身', action: '治疗', value: 5 }],
@@ -532,6 +647,156 @@ describe('条件位（效果批七：交锋内账本）', () => {
     // 反制成功（25≥20）→ 玩家未承伤，不记「承受伤害」；敌方掉血也不记玩家侧击杀
     expect(after.beatEvents?.['承受伤害']).toBeUndefined();
     expect(after.beatEvents?.['治疗']).toBe(1);
+  });
+});
+
+describe('效果批八（信息策略类：窥探/洞悉/任务/分支）', () => {
+  const mk3 = () =>
+    startSkirmish({
+      enemyName: '三式兽',
+      intents: [
+        { move: '扑咬', threat: 6, counters: [] },
+        { move: '重锤', threat: 14, counters: ['格挡'] },
+        { move: '蓄力', threat: 4, counters: [] },
+      ],
+      playerHp: 100,
+      playerMaxHp: 100,
+      enemyHp: 600,
+      guard: 10,
+    });
+
+  it('池门禁：四条新效果全在池内', () => {
+    for (const a of ['窥探', '洞悉', '任务', '分支'] as const) {
+      expect(poolEntryOf(a)).toBeDefined();
+    }
+  });
+
+  it('窥探：战报摊开完整招式轮换（▶ 标当前式）', () => {
+    const s = mk3();
+    const after = playBeat(s, { label: '窥探之眼', power: 10, tags: [] }, 15, {
+      effects: [{ trigger: '打出时', target: '敌单体', action: '窥探', value: 0 }],
+    });
+    const line = after.log.find((l) => l.includes('【窥探】'));
+    expect(line).toBeDefined();
+    expect(line).toContain('共 3 式');
+    expect(line).toContain('扑咬');
+    expect(line).toContain('重锤');
+    expect(line).toContain('蓄力');
+    expect(line).toContain('▶');
+  });
+
+  it('洞悉：打出次拍起预读未来 2 拍的招式与威胁', () => {
+    const s = mk3();
+    // 拍 0 打出洞悉（状态层自下拍生效）
+    const s1 = playBeat(s, { label: '洞悉', power: 10, tags: [] }, 15, {
+      effects: [{ trigger: '每拍', target: '敌单体', action: '洞悉', value: 0, duration: 2 }],
+    });
+    expect(s1.log.some((l) => l.includes('【洞悉】预读'))).toBe(false);
+    // 拍 1：insight 已在场 → 预读 intents[2]（下拍）与 intents[0]（下下拍）
+    const s2 = playBeat(s1, { label: '打一拍', power: 10, tags: [] }, 15, {});
+    const line = s2.log.find((l) => l.includes('【洞悉】预读'));
+    expect(line).toBeDefined();
+    expect(line).toContain('蓄力');
+    expect(line).toContain('扑咬');
+    // 时长走完（2 拍）后不再预读——log 跨拍累积，只查拍 3 的增量行
+    const s3 = playBeat(s2, { label: '打一拍', power: 10, tags: [] }, 15, {});
+    const s4 = playBeat(s3, { label: '打一拍', power: 10, tags: [] }, 15, {});
+    expect(s4.log.slice(s3.log.length).some((l) => l.includes('【洞悉】预读'))).toBe(false);
+  });
+
+  it('任务：3 拍内出满 3 张卡 → 回复 15 HP、任务移除', () => {
+    const mk = () =>
+      startSkirmish({
+        enemyName: '任务兽',
+        intents: [{ move: '重压', threat: 20, counters: [] }],
+        playerHp: 90,
+        playerMaxHp: 100,
+        enemyHp: 600,
+        guard: 0,
+      });
+    const act = {
+      trigger: '每拍' as const,
+      target: '自身' as const,
+      action: '任务' as const,
+      value: 3,
+      duration: 3,
+    };
+    const card = { label: '打一拍', power: 0, tags: [], cardName: '补拍卡' };
+    // 对照：同骰同拍无任务 → 量出每拍净损
+    const c1 = playBeat(mk(), card, 5, {});
+    const c2 = playBeat(c1, card, 5, {});
+    const dmg = c1.playerHp - c2.playerHp;
+    expect(dmg).toBeGreaterThan(0);
+    // 任务路：拍 0 登记任务，拍 2 账本出卡数达 3 → 回 15
+    const s0 = playBeat(mk(), { ...card, cardName: '任务卡' }, 5, { effects: [act] });
+    const s1 = playBeat(s0, card, 5, {});
+    const s2 = playBeat(s1, card, 5, {});
+    expect(s2.log.some((l) => l.includes('【任务】完成'))).toBe(true);
+    expect(s1.playerHp - s2.playerHp).toBe(dmg - 15);
+    expect((s2.activeEffects ?? []).some((e) => e.type === 'quest')).toBe(false);
+  });
+
+  it('分支：d10 ≥ 6 行动值追加，骰败走回复', () => {
+    const effects = [
+      { trigger: '打出时' as const, target: '敌单体' as const, action: '分支' as const, value: 12 },
+    ];
+    // 90 血起手：反制成功不掉血也能吃满 8 点回复
+    const mk30 = () =>
+      startSkirmish({
+        enemyName: '铁壁兽',
+        intents: [{ move: '铁壁', threat: 30, counters: [] }],
+        playerHp: 90,
+        playerMaxHp: 100,
+        enemyHp: 600,
+        guard: 0,
+      });
+    // dice=5 → br=6 成功路；反制必败（5+10<30）→ 对敌伤害=行动值本身，恰好多 12
+    const base = playBeat(mk30(), { label: '对照', power: 10, tags: [] }, 5, {});
+    const win = playBeat(mk30(), { label: '分支', power: 10, tags: [] }, 5, { effects });
+    expect(win.enemyHp).toBe(base.enemyHp - 12);
+    expect(win.log.some((l) => l.includes('走向杀伐'))).toBe(true);
+    // dice=24 → br=5 失败路：反制成功无承伤，玩家净回 8
+    const loseBase = playBeat(mk30(), { label: '对照', power: 10, tags: [] }, 24, {});
+    const lose = playBeat(mk30(), { label: '分支', power: 10, tags: [] }, 24, { effects });
+    expect(lose.playerHp).toBe(loseBase.playerHp + 8);
+    expect(lose.log.some((l) => l.includes('走向回护'))).toBe(true);
+  });
+
+  it('多敌读侧：窥探/洞悉作用于目标敌', () => {
+    const s = startSkirmish({
+      enemyName: '首领',
+      intents: [{ move: '横扫', threat: 8, counters: [] }],
+      playerHp: 100,
+      playerMaxHp: 100,
+      enemyHp: 400,
+      enemies: [
+        {
+          name: '爪牙甲',
+          role: '杂兵',
+          hp: 80,
+          intents: [
+            { move: '撕咬', threat: 6, counters: [] },
+            { move: '嚎叫', threat: 2, counters: [] },
+          ],
+        },
+        {
+          name: '窟主',
+          role: '首领',
+          hp: 200,
+          intents: [{ move: '碎颅', threat: 16, counters: ['闪避'] }],
+        },
+      ],
+      initialEffects: [{ name: '洞悉', type: 'insight', amount: 0, beatsLeft: 2 }],
+    });
+    // 不指定目标 → 默认 HP 最高 = 窟主（200 > 80）
+    const after = playBeat(s, { label: '窥探', power: 10, tags: [], cardName: '窥探卡' }, 15, {
+      effects: [{ trigger: '打出时', target: '敌单体', action: '窥探', value: 0 }],
+    });
+    const peek = after.log.find((l) => l.includes('【窥探】'));
+    expect(peek).toContain('窟主');
+    expect(peek).toContain('碎颅');
+    const insight = after.log.find((l) => l.includes('【洞悉】预读'));
+    expect(insight).toContain('窟主');
   });
 });
 

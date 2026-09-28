@@ -19,14 +19,7 @@ import type { CardTier } from '../field-enums';
 
 /** 触发时机（首批三种 + 击杀时 + 效果批五：拍结束/消耗时。「拍开始」与「每拍」同源合并——见 backlog） */
 export type EffectTrigger =
-  | '打出时'
-  | '每拍'
-  | '受击时'
-  | '击杀时'
-  | '拍结束'
-  | '消耗时'
-  | '治疗时'
-  | '施法时';
+  '打出时' | '每拍' | '受击时' | '击杀时' | '拍结束' | '消耗时' | '治疗时' | '施法时';
 /** 目标三值：单血池下「敌全体」按 enemyCount 倍化 */
 export type EffectTarget = '敌单体' | '敌全体' | '自身';
 /** 动作层六动作 + 状态层十状态 */
@@ -84,7 +77,12 @@ export type EffectAction =
   | '风怒'
   | '超杀'
   | '穿透'
-  | '处决';
+  | '处决'
+  // 信息策略类（效果批八 2026-09-28）：敌方无手牌系统——「查看手牌」重诠释为招式轮换读侧
+  | '窥探'
+  | '洞悉'
+  | '任务'
+  | '分支';
 
 /** 代价（首批只收三种资源；正数值） */
 export interface EffectCost {
@@ -95,14 +93,7 @@ export interface EffectCost {
 
 /** 交锋内事件（效果批七·条件位：会话账本八计数器，拍拍递增、会话结束清零） */
 export type BeatEvent =
-  | '出卡'
-  | '受击'
-  | '造成伤害'
-  | '承受伤害'
-  | '治疗'
-  | '反制成功'
-  | '击杀'
-  | '友方退场';
+  '出卡' | '受击' | '造成伤害' | '承受伤害' | '治疗' | '反制成功' | '击杀' | '友方退场';
 
 /** 效果条件（公式第 7 位落地；单条件数组，全部满足才结算） */
 export interface EffectCondition {
@@ -156,7 +147,13 @@ export const EFFECT_POOL: readonly PoolEntry[] = [
   // ── 动作层（打出时一次性） ──
   { action: '伤害', value: 8, duration: 0, text: '造成 8 点直接伤害' },
   { action: '治疗', value: 12, duration: 0, text: '回复 12 点 HP' },
-  { action: '吸血', value: 10, duration: 0, cost: { mp: 5 }, text: '造成 10 点伤害并回复其中三成 HP' },
+  {
+    action: '吸血',
+    value: 10,
+    duration: 0,
+    cost: { mp: 5 },
+    text: '造成 10 点伤害并回复其中三成 HP',
+  },
   { action: '连击', value: 50, duration: 0, cost: { sp: 3 }, text: '本拍行动值 +50%（两段出手）' },
   { action: '破防', value: 4, duration: 0, text: '本场敌方防护 −4（穿透护甲）' },
   { action: '驱散', value: 0, duration: 0, text: '驱散敌方全部增益状态' },
@@ -179,15 +176,33 @@ export const EFFECT_POOL: readonly PoolEntry[] = [
   { action: '束缚', value: 0, duration: 2, text: '敌方威胁锁 1（2 拍）' },
   { action: '诅咒', value: 20, duration: 4, text: '敌方受到的伤害 +20%（4 拍）' },
   { action: '标记', value: 5, duration: 3, text: '敌方每拍额外损失 5 HP（3 拍）' },
-  { action: '圣盾', value: 0, duration: 1, cost: { mp: 12 }, text: '免疫下一拍的全部伤害（一次性）' },
+  {
+    action: '圣盾',
+    value: 0,
+    duration: 1,
+    cost: { mp: 12 },
+    text: '免疫下一拍的全部伤害（一次性）',
+  },
   { action: '反伤', value: 5, duration: 2, text: '受击时敌方反弹 5 HP（2 拍）' },
   // ── 状态层第三批（效果批二 2026-09-25） ──
-  { action: '魅惑', value: 0, duration: 1, cost: { mp: 10 }, text: '敌方本拍为你说話——它的攻击转嫁为对你的伤害减免（1 拍）' },
+  {
+    action: '魅惑',
+    value: 0,
+    duration: 1,
+    cost: { mp: 10 },
+    text: '敌方本拍为你说話——它的攻击转嫁为对你的伤害减免（1 拍）',
+  },
   { action: '沉默', value: 0, duration: 2, text: '敌方无法反制（威胁不变，2 拍）' },
   { action: '招架', value: 5, duration: 2, text: '反制成功时返还 2 SP（2 拍）' },
   { action: '先攻', value: 3, duration: 2, text: '反制掷骰 +3（2 拍）' },
   // ── 动作层第三批 ──
-  { action: '斩杀', value: 15, duration: 0, cost: { mp: 20 }, text: '敌方当前气血低于 15% 时直接击杀（未达线则本条空过）' },
+  {
+    action: '斩杀',
+    value: 15,
+    duration: 0,
+    cost: { mp: 20 },
+    text: '敌方当前气血低于 15% 时直接击杀（未达线则本条空过）',
+  },
   // ── 状态/动作第四批（效果批三 2026-09-25） ──
   { action: '寄生', value: 4, duration: 3, text: '每拍敌方 −4、你 +4 HP（3 拍）' },
   { action: '感染', value: 2, duration: 3, text: '每拍敌方 −2 且逐拍加深 +1（3 拍）' },
@@ -204,13 +219,59 @@ export const EFFECT_POOL: readonly PoolEntry[] = [
   { action: '免疫', value: 0, duration: 2, cost: { mp: 18 }, text: '免疫一切伤害（2 拍）' },
   { action: '汲取', value: 20, duration: 0, text: '击杀时回复最大气血的 20%' },
   // ── 强化档（效果批四：连击/斩杀/破防的池内定值高档） ──
-  { action: '双击', value: 100, duration: 0, cost: { sp: 4 }, text: '本拍行动值 +100%（两段连出）' },
-  { action: '风怒', value: 150, duration: 0, cost: { sp: 6 }, text: '本拍行动值 +150%（三段连出）' },
-  { action: '超杀', value: 30, duration: 0, cost: { mp: 25 }, text: '敌方当前气血低于 30% 时直接击杀' },
+  {
+    action: '双击',
+    value: 100,
+    duration: 0,
+    cost: { sp: 4 },
+    text: '本拍行动值 +100%（两段连出）',
+  },
+  {
+    action: '风怒',
+    value: 150,
+    duration: 0,
+    cost: { sp: 6 },
+    text: '本拍行动值 +150%（三段连出）',
+  },
+  {
+    action: '超杀',
+    value: 30,
+    duration: 0,
+    cost: { mp: 25 },
+    text: '敌方当前气血低于 30% 时直接击杀',
+  },
   { action: '穿透', value: 8, duration: 0, text: '本场敌方防护 −8（穿透护甲）' },
-  { action: '处决', value: 40, duration: 0, cost: { mp: 30 }, text: '敌方当前气血低于 40% 时直接击杀' },
+  {
+    action: '处决',
+    value: 40,
+    duration: 0,
+    cost: { mp: 30 },
+    text: '敌方当前气血低于 40% 时直接击杀',
+  },
   // ── 状态层第五批（效果批五 2026-09-28） ──
-  { action: '变异', value: 4, duration: 2, text: '每拍敌方随机变异：威胁+3 / 承伤+8% / 自伤4（2 拍）' },
+  {
+    action: '变异',
+    value: 4,
+    duration: 2,
+    text: '每拍敌方随机变异：威胁+3 / 承伤+8% / 自伤4（2 拍）',
+  },
+  // ── 信息策略类（效果批八 2026-09-28：读侧信息 + 目标契约 + 掷骰分支） ──
+  { action: '窥探', value: 0, duration: 0, text: '揭示敌方完整招式轮换（全部招式·威胁·反制面）' },
+  {
+    action: '洞悉',
+    value: 0,
+    duration: 2,
+    cost: { mp: 5 },
+    text: '2 拍内每拍预读敌方未来 2 拍的招式与威胁',
+  },
+  {
+    action: '任务',
+    value: 3,
+    duration: 3,
+    cost: { mp: 5 },
+    text: '3 拍内累计打出 3 张卡 → 回复 15 HP（超时作废）',
+  },
+  { action: '分支', value: 12, duration: 0, text: '掷骰分支：d10 ≥ 6 → 行动值 +12；否则回复 8 HP' },
 ];
 
 /** 池查询：动作 → 池内定值条目（找不到 = 池外，门禁丢弃） */
@@ -354,7 +415,8 @@ export function coerceCardEffects(raw: unknown): CardEffects {
     const entry = poolEntryOf(e.action as EffectAction);
     if (!entry) continue; // 池外动作 → 丢弃
     if (!isTrigger(e.trigger) || !isTarget(e.target)) continue;
-    const value = typeof e.value === 'number' && Number.isFinite(e.value) ? Math.round(e.value) : -1;
+    const value =
+      typeof e.value === 'number' && Number.isFinite(e.value) ? Math.round(e.value) : -1;
     if (value !== entry.value) continue; // AI 改数 → 丢弃
     const duration = Math.max(0, Math.round(typeof e.duration === 'number' ? e.duration : 0));
     if (duration !== entry.duration) continue;

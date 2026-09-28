@@ -28,12 +28,7 @@ import {
 import { activateListOf, type ActivateInput, type CardInPlayEffect } from './entry-combat';
 import { duelSuppressesEffect, type DuelRules } from './battle-rules';
 import { ENTRY_STRENGTH_BASELINE } from './talent-entry';
-import {
-  conditionsMet,
-  deriveCardEffects,
-  effectLineOf,
-  type CardEffectDef,
-} from './card-effects';
+import { conditionsMet, effectLineOf, type CardEffectDef } from './card-effects';
 
 /** 会话终局态；null = 交锋中 */
 export type SkirmishFinish = null | '胜利' | '碾压' | '撤退' | '败北';
@@ -371,6 +366,10 @@ export interface TranslatedEffects {
   directDamage?: number;
   /** 打出时·斩杀线（% of 敌方上限；效果批二） */
   executePct?: number;
+  /** 打出时·窥探（效果批八）：本拍战报揭示敌方完整招式轮换 */
+  revealRotation?: boolean;
+  /** 打出时·分支（效果批八）：掷骰定路——骰成走伤害路，骰败走回复路 */
+  branch?: { successDamage: number; fallbackHeal: number };
   /** 拍结束·伤害（效果批五）：全部结算完成后直扣敌方 */
   endBeatDamage?: number;
   /** 拍结束·治疗（效果批五）：并入玩家 HP 链 */
@@ -399,7 +398,15 @@ export function translateCardEffects(
   enemyCount: number,
   ledger?: Partial<Record<import('./card-effects').BeatEvent, number>>,
 ): TranslatedEffects {
-  const out: TranslatedEffects = { powerBonus: 0, powerMult: 1, heal: 0, mpHeal: 0, guardDown: 0, activate: [], lines: [] };
+  const out: TranslatedEffects = {
+    powerBonus: 0,
+    powerMult: 1,
+    heal: 0,
+    mpHeal: 0,
+    guardDown: 0,
+    activate: [],
+    lines: [],
+  };
   if (!effects || effects.length === 0) return out;
   const mult = Math.max(1, Math.round(enemyCount));
   for (const e of effects) {
@@ -479,6 +486,16 @@ export function translateCardEffects(
         out.executePct = Math.max(out.executePct ?? 0, e.value);
         out.lines.push(`▸ 【效果】${e.action}线 ${e.value}%（当前气血低于此线直接击杀）`);
         break;
+      case '窥探':
+        // 信息效果（效果批八）：读侧-only，轮换正文在 playBeat 依敌方实体现拼
+        out.revealRotation = true;
+        out.lines.push(`▸ 【效果】窥探：敌方的招式轮换在你眼前摊开`);
+        break;
+      case '分支':
+        // 掷骰分支（效果批八）：骰子只有 playBeat 有——此处只登记两路口径
+        out.branch = { successDamage: scaled, fallbackHeal: 8 };
+        out.lines.push(`▸ 【效果】分支：命运掷骰，杀伐或回护各安一途`);
+        break;
       case '死亡倒计时': {
         const beats = Math.max(1, Math.round(e.duration ?? 3));
         out.activate.push({
@@ -523,11 +540,16 @@ export function translateCardEffects(
       case '退化':
       case '缴械':
       case '变异':
-      case '免疫': {
+      case '免疫':
+      case '洞悉':
+      case '任务': {
         const type =
           e.action === '易伤' || e.action === '诅咒'
             ? 'vulnerable'
-            : e.action === '护盾' || e.action === '格挡' || e.action === '圣盾' || e.action === '反伤'
+            : e.action === '护盾' ||
+                e.action === '格挡' ||
+                e.action === '圣盾' ||
+                e.action === '反伤'
               ? 'shield'
               : e.action === '剧毒'
                 ? 'poisonPct'
@@ -544,26 +566,31 @@ export function translateCardEffects(
                           : e.action === '变异'
                             ? 'mutation'
                             : e.action === '魅惑'
-                            ? 'charm'
-                            : e.action === '沉默'
-                              ? 'silence'
-                              : e.action === '招架'
-                                ? 'parry'
-                                : e.action === '先攻'
-                                  ? 'initiative'
-                                  : e.action === '寄生'
-                                    ? 'drain'
-                                    : e.action === '感染'
-                                      ? 'infest'
-                                      : e.action === '退化'
-                                        ? 'degrade'
-                                        : e.action === '缴械'
-                                          ? 'disarm'
-                                          : 'dot';
+                              ? 'charm'
+                              : e.action === '沉默'
+                                ? 'silence'
+                                : e.action === '招架'
+                                  ? 'parry'
+                                  : e.action === '先攻'
+                                    ? 'initiative'
+                                    : e.action === '寄生'
+                                      ? 'drain'
+                                      : e.action === '感染'
+                                        ? 'infest'
+                                        : e.action === '退化'
+                                          ? 'degrade'
+                                          : e.action === '缴械'
+                                            ? 'disarm'
+                                            : e.action === '洞悉'
+                                              ? 'insight'
+                                              : e.action === '任务'
+                                                ? 'quest'
+                                                : 'dot';
         const eff: CardInPlayEffect = {
           name: e.action,
           type: type as CardInPlayEffect['type'],
-          amount: scaled,
+          // 任务的目标张数是契约口径，不随敌全体倍化
+          amount: e.action === '任务' ? Math.max(1, Math.round(e.value)) : scaled,
           beatsLeft: Math.max(1, Math.round(e.duration ?? 1)),
         };
         const twin = out.activate.find((a) => a.name === eff.name && a.type === eff.type);
@@ -622,8 +649,7 @@ export function playBeat(
 
   // 在场战技：眩晕（敌方本拍放弃行动）/ 减速（威胁降低），只在剩余拍数内生效
   const live = s.activeEffects.filter((e) => e.beatsLeft === undefined || e.beatsLeft > 0);
-  const stunActive =
-    live.some((e) => e.type === 'stun') || live.some((e) => e.type === 'sleep');
+  const stunActive = live.some((e) => e.type === 'stun') || live.some((e) => e.type === 'sleep');
   const weakenTotal = live
     .filter((e) => e.type === 'weaken' || e.type === 'degrade')
     .reduce((sum, e) => sum + Math.max(0, e.amount), 0);
@@ -633,27 +659,30 @@ export function playBeat(
   const liveBind = live.some((e) => e.type === 'bind');
   const liveSilence = live.some((e) => e.type === 'silence');
   const liveDisarm = live.some((e) => e.type === 'disarm');
-  let effectiveIntent = stunActive
+  const effectiveIntent = stunActive
     ? { ...intent, threat: 0 }
     : liveFear
-      ? { ...intent, threat: Math.max(1, Math.round(intent.threat / 2)), counters: [] as typeof intent.counters }
+      ? {
+          ...intent,
+          threat: Math.max(1, Math.round(intent.threat / 2)),
+          counters: [] as typeof intent.counters,
+        }
       : liveDisarm
         ? { ...intent, threat: Math.max(1, Math.round(intent.threat * 0.6)) }
         : liveSilence
-        ? { ...intent, counters: [] as typeof intent.counters }
-        : liveBind
-        ? { ...intent, threat: 1 }
-        : weakenTotal > 0
-          ? { ...intent, threat: Math.max(0, intent.threat - weakenTotal) }
-          : intent;
+          ? { ...intent, counters: [] as typeof intent.counters }
+          : liveBind
+            ? { ...intent, threat: 1 }
+            : weakenTotal > 0
+              ? { ...intent, threat: Math.max(0, intent.threat - weakenTotal) }
+              : intent;
   const effectLines: string[] = [];
   if (stunActive) {
     const sleeping = live.some((e) => e.type === 'sleep');
     effectLines.push(
       sleeping ? `▸ 敌方【沉睡】——这几拍放弃行动` : `▸ 敌方被【眩晕】——本拍放弃行动`,
     );
-  }
-  else if (liveFear) effectLines.push(`▸ 【恐惧】攫住了它——威胁减半，反制面关闭`);
+  } else if (liveFear) effectLines.push(`▸ 【恐惧】攫住了它——威胁减半，反制面关闭`);
   else if (liveDisarm) effectLines.push(`▸ 【缴械】它的兵器脱手——威胁 −40%`);
   else if (liveSilence) effectLines.push(`▸ 【沉默】封了它的口——无法反制`);
   else if (liveBind) effectLines.push(`▸ 【束缚】缠住了它的手脚——威胁锁 1`);
@@ -668,7 +697,11 @@ export function playBeat(
     ...(s.beatEvents ?? {}),
   };
   // 效果池翻译（2026-09-25）：打出时动作层即时结算、状态层进在场登记
-  const fx = translateCardEffects(opts?.effects, opts?.enemyCount ?? s.enemyCount ?? 1, ledgerAtStart);
+  const fx = translateCardEffects(
+    opts?.effects,
+    opts?.enemyCount ?? s.enemyCount ?? 1,
+    ledgerAtStart,
+  );
 
   // 变异（效果批五）：live 时每拍按拍骰随机一项——威胁+3 / 敌承伤+8% / 敌自伤4
   const liveMutation = live.some((e) => e.type === 'mutation');
@@ -681,6 +714,49 @@ export function playBeat(
     else if (roll === 1) mutationVuln = 8;
     else mutationSelf = 4;
   }
+  // 分支（效果批八）：命运掷骰定路——d10 ≥ 6 行动值追加，骰败改走拍末回复
+  if (fx.branch) {
+    const br = (dice % 10) + 1;
+    if (br >= 6) {
+      fx.powerBonus += fx.branch.successDamage;
+      fx.lines.push(
+        `▸ 【分支】命运掷骰 d10=${br} ≥ 6——走向杀伐：行动值 +${fx.branch.successDamage}`,
+      );
+    } else {
+      fx.heal += fx.branch.fallbackHeal;
+      fx.lines.push(
+        `▸ 【分支】命运掷骰 d10=${br} < 6——走向回护：回复 ${fx.branch.fallbackHeal} HP`,
+      );
+    }
+  }
+
+  // 窥探（效果批八）：敌方招式轮换尽数展现（▶ 为本拍正在出的一式）
+  if (fx.revealRotation) {
+    const cur = s.beat % s.intents.length;
+    const fmt = s.intents
+      .map(
+        (it, i) =>
+          `${i === cur ? '▶' : i + 1}.${it.move} 威胁${it.threat}` +
+          (it.counters?.length ? `（反制:${it.counters.join('/')}）` : ''),
+      )
+      .join(' ｜ ');
+    fx.lines.push(`▸ 【窥探】共 ${s.intents.length} 式：${fmt}`);
+  }
+
+  // 洞悉（效果批八）：预读未来 2 拍的招式与威胁（读侧信息，不改敌方意图本体）
+  if (live.some((e) => e.type === 'insight')) {
+    const L = s.intents.length;
+    const peek = (k: number) => {
+      const it = s.intents[(s.beat + k) % L];
+      return it
+        ? `下${k === 1 ? '' : '下'}拍「${it.move}」威胁 ${it.threat}` +
+            (it.counters?.length ? `（反制:${it.counters.join('/')}）` : '')
+        : null;
+    };
+    const reveals = [peek(1), peek(2)].filter(Boolean);
+    if (reveals.length > 0) fx.lines.push(`▸ 【洞悉】预读：${reveals.join(' ｜ ')}`);
+  }
+
   const rawPower = Math.max(0, action.power) + fx.powerBonus;
   const effectiveAction = {
     ...action,
@@ -723,9 +799,7 @@ export function playBeat(
     enemyHp: s.enemyHp,
     guard: Math.max(0, s.guard - (s.guardDown ?? 0)),
     dice: dice + (liveInitiative ? 3 : 0),
-    ...(liveShield + responseShield > 0
-      ? { shield: liveShield + responseShield }
-      : {}),
+    ...(liveShield + responseShield > 0 ? { shield: liveShield + responseShield } : {}),
     ...(liveVuln + mutationVuln > 0 ? { vulnerable: liveVuln + mutationVuln } : {}),
   });
   const playerDamageBase = result.playerDamage ?? 0;
@@ -769,7 +843,9 @@ export function playBeat(
         .reduce((sum, e) => sum + Math.max(1, Math.round((result.enemyHp * e.amount) / 100)), 0);
   const markTotal = dotSuppressed
     ? 0
-    : s.activeEffects.filter((e) => e.type === 'mark').reduce((sum, e) => sum + Math.max(0, e.amount), 0);
+    : s.activeEffects
+        .filter((e) => e.type === 'mark')
+        .reduce((sum, e) => sum + Math.max(0, e.amount), 0);
   const confusionTotal = dotSuppressed
     ? 0
     : s.activeEffects
@@ -812,18 +888,16 @@ export function playBeat(
   // 反伤（效果批一）：受击时反弹——未被反制且实受了伤害才弹
   const liveThorns = dotSuppressed
     ? 0
-    : live
-        .filter((e) => e.type === 'thorns')
-        .reduce((sum, e) => sum + Math.max(0, e.amount), 0);
-  const thornsDamage =
-    !result.countered && playerDamageBase > 0 && liveThorns > 0 ? liveThorns : 0;
+    : live.filter((e) => e.type === 'thorns').reduce((sum, e) => sum + Math.max(0, e.amount), 0);
+  const thornsDamage = !result.countered && playerDamageBase > 0 && liveThorns > 0 ? liveThorns : 0;
   const enemyHpAfterThorns = Math.max(0, enemyHpAfterDot - thornsDamage);
   if (thornsDamage > 0) {
     lines.push(`▸ 【反伤】荆棘回敬：敌方 −${thornsDamage}`);
   }
 
   // 倒也可斩 nuke 伤害（拍末追加，可收人头）
-  const afterNuke = nukeDamage > 0 ? Math.max(0, enemyHpAfterThorns - nukeDamage) : enemyHpAfterThorns;
+  const afterNuke =
+    nukeDamage > 0 ? Math.max(0, enemyHpAfterThorns - nukeDamage) : enemyHpAfterThorns;
   if (nukeDamage > 0) {
     lines.push(`▸ 倒也可斩：敌方 −${nukeDamage}（${enemyHpAfterDot} → ${afterNuke}）`);
   }
@@ -916,8 +990,7 @@ export function playBeat(
   }
 
   // 圣盾（效果批一）：一次性免疫——被挡下的伤害原样补回 HP 链
-  const hpAfterBeat =
-    result.playerHp + (immuneBlocked || divineBlocked ? playerDamageBase : 0);
+  const hpAfterBeat = result.playerHp + (immuneBlocked || divineBlocked ? playerDamageBase : 0);
   if (immuneBlocked) {
     lines.push(`▸ 【免疫】本拍 ${playerDamageBase} 点伤害被完全挡下`);
   } else if (divineBlocked && liveDivine) {
@@ -958,7 +1031,9 @@ export function playBeat(
   const healedTotal = baseHealed + responseHeal;
   if (baseHealed > 0) bump('治疗');
   const playerHpAfterFxHeal =
-    healedTotal > 0 ? Math.min(s.playerMaxHp, playerHpAfterRegen + healedTotal) : playerHpAfterRegen;
+    healedTotal > 0
+      ? Math.min(s.playerMaxHp, playerHpAfterRegen + healedTotal)
+      : playerHpAfterRegen;
   if (fxHeal > 0 && playerHpAfterFxHeal > playerHpAfterRegen) {
     lines.push(`▸ 【效果】回复 ${playerHpAfterFxHeal - playerHpAfterRegen} HP`);
   }
@@ -968,11 +1043,8 @@ export function playBeat(
     );
   }
   if (endBeatHeal > 0 && playerHpAfterFxHeal > playerHpAfterRegen + fxHeal) {
-    lines.push(
-      `▸ 【效果】拍末回复 ${playerHpAfterFxHeal - playerHpAfterRegen - fxHeal} HP`,
-    );
+    lines.push(`▸ 【效果】拍末回复 ${playerHpAfterFxHeal - playerHpAfterRegen - fxHeal} HP`);
   }
-
 
   if (drainHealAmount > 0 && playerHpAfterFxHeal > playerHpAfterRegen + fxHeal) {
     lines.push(
@@ -1014,7 +1086,9 @@ export function playBeat(
   const tideAmount: number | null =
     opts?.beastTideAmount !== undefined && forbiddenGuard ? opts.beastTideAmount : null;
   // 同名同型叠层合并（效果池 2026-09-25：灼烧/流血等可叠层——量叠加、时长取长）
-  const mergedEffects = [...decremented.filter((e) => e.beatsLeft === undefined || e.beatsLeft > 0)];
+  const mergedEffects = [
+    ...decremented.filter((e) => e.beatsLeft === undefined || e.beatsLeft > 0),
+  ];
   for (const a of activateList) {
     const normalized = {
       name: a.name,
@@ -1113,9 +1187,7 @@ export function playBeat(
     ...(fx.mpHeal > 0 ? { mpGained: (s.mpGained ?? 0) + fx.mpHeal } : {}),
   };
   // 死亡倒计时到期（效果批三）：倒数走完 → 敌方直接倒下
-  const timerExpired = decremented.find(
-    (e) => e.type === 'deathTimer' && (e.beatsLeft ?? 1) <= 0,
-  );
+  const timerExpired = decremented.find((e) => e.type === 'deathTimer' && (e.beatsLeft ?? 1) <= 0);
   if (timerExpired) {
     lines.push(`▸ 【死亡倒计时】归零——【${s.enemyName}】的铭文走到了尽头`);
   }
@@ -1126,7 +1198,11 @@ export function playBeat(
     const threshold = Math.max(1, Math.round((s.enemyMaxHp * executePct) / 100));
     if (next.enemyHp <= threshold) {
       return withFinish(
-        { ...next, enemyHp: 0, log: [...next.log, `▸ 【斩杀】${s.enemyName} 的气血已坠过 ${executePct}% 之线——当场了结`] },
+        {
+          ...next,
+          enemyHp: 0,
+          log: [...next.log, `▸ 【斩杀】${s.enemyName} 的气血已坠过 ${executePct}% 之线——当场了结`],
+        },
         '胜利',
         [`▸ 【${s.enemyName}】倒下——胜利！`],
       );
@@ -1148,6 +1224,17 @@ export function playBeat(
   }
   if (next.playerHp <= 0) {
     return withFinish(next, '败北', [`▸ 玩家倒下——败北（经验照常结算，评价 C）`]);
+  }
+  // 任务（效果批八）：账本出卡数达标 → 奖励落袋、任务移除（终局拍不结算；超时由时长递减自然作废）
+  const quest = (next.activeEffects ?? []).find((e) => e.type === 'quest');
+  if (quest && (events['出卡'] ?? 0) >= Math.max(1, quest.amount)) {
+    const reward = 15;
+    next = {
+      ...next,
+      playerHp: Math.min(s.playerMaxHp, next.playerHp + reward),
+      activeEffects: (next.activeEffects ?? []).filter((e) => e !== quest),
+      log: [...next.log, `▸ 【任务】完成——出卡 ${quest.amount} 张如期兑现，回复 ${reward} HP`],
+    };
   }
   // ── 体力账（2026-09-25 访谈共识）：出卡 5 SP / 基础应对 3 SP，拍拍扣 ──
   // MP 只记账不拦人（拦截在 cardPlayPlan 的硬门槛）；SP 归零 = 力竭败北，
@@ -1222,12 +1309,40 @@ export function playMultiEnemyBeat(
   );
   const roll = dice + Math.max(0, Math.round(action.power)) + bonus;
   const countered = roll >= targetThreat;
-  const playerToTarget = Math.max(0, Math.round(action.power)) + (countered ? roll - targetThreat : 0);
+  const playerToTarget =
+    Math.max(0, Math.round(action.power)) + (countered ? roll - targetThreat : 0);
   lines.push(
     countered
       ? `▸ 反制【${target.name}】的 ${targetIntent?.move ?? '攻击'}：d20=${dice}+行动值${Math.max(0, Math.round(action.power))}+克制${bonus} = ${roll} ≥ 威胁${targetThreat} → 反制成功（余量 ${roll - targetThreat}）`
       : `▸ 反制失败（差 ${targetThreat - roll}）——行动值 ${Math.max(0, Math.round(action.power))} 仍造成等量伤害`,
   );
+
+  // 信息策略·读侧（效果批八）：窥探/洞悉在多敌分支作用于目标敌（纯战报，不改意图本体）
+  const fmtIntent = (it: EnemyIntent | undefined, tag: string) =>
+    it
+      ? `${tag}「${it.move}」威胁 ${it.threat}` +
+        (it.counters?.length ? `（反制:${it.counters.join('/')}）` : '')
+      : null;
+  if (opts?.effects?.some((e) => e.action === '窥探')) {
+    const cur = target.intentIndex % target.intents.length;
+    const fmt = target.intents
+      .map(
+        (it, i) =>
+          `${i === cur ? '▶' : i + 1}.${it.move} 威胁${it.threat}` +
+          (it.counters?.length ? `（反制:${it.counters.join('/')}）` : ''),
+      )
+      .join(' ｜ ');
+    lines.push(`▸ 【窥探】【${target.name}】共 ${target.intents.length} 式：${fmt}`);
+  }
+  if ((s.activeEffects ?? []).some((e) => e.type === 'insight' && (e.beatsLeft ?? 0) > 0)) {
+    const L = target.intents.length;
+    const reveals = [1, 2]
+      .map((k) =>
+        fmtIntent(target.intents[(target.intentIndex + k) % L], k === 1 ? '下拍' : '下下拍'),
+      )
+      .filter(Boolean);
+    if (reveals.length > 0) lines.push(`▸ 【洞悉】预读【${target.name}】：${reveals.join(' ｜ ')}`);
+  }
 
   // ── 其余存活敌：威胁直砸玩家（防护/护盾减免，不可反制） ──
   let incoming = 0;
@@ -1249,7 +1364,6 @@ export function playMultiEnemyBeat(
   const playerDamage = countered
     ? Math.max(attackerCount > 0 ? 1 : 0, incoming - Math.floor(s.guard / 2))
     : Math.max(1, targetThreat + incoming - Math.floor(s.guard / 2));
-  const playerHpAfter = Math.max(0, s.playerHp - playerDamage);
 
   // 目标承伤：玩家伤害（反制成功加余量），护卫减伤只保护首领
   const aliveMinions = alive.filter(({ e: en }) => en.role === '杂兵').length;
@@ -1285,9 +1399,10 @@ export function playMultiEnemyBeat(
     beatEvents: events,
     playerHp: Math.max(0, s.playerHp - playerDamage),
     enemies: nextEnemies,
-    playedCards: action.cardName && !s.playedCards.includes(action.cardName)
-      ? [...s.playedCards, action.cardName]
-      : s.playedCards,
+    playedCards:
+      action.cardName && !s.playedCards.includes(action.cardName)
+        ? [...s.playedCards, action.cardName]
+        : s.playedCards,
     counteredBeats: s.counteredBeats + (countered ? 1 : 0),
     log: [...s.log, ...lines, ...incomingLines, ...deaths],
   };
@@ -1322,6 +1437,30 @@ export function playMultiEnemyBeat(
   }
   if (next.playerHp <= 0) {
     return withFinish(next, '败北', ['▸ 玩家倒下——败北（经验照常结算，评价 C）']);
+  }
+  // ── 体力账（补齐：与单敌分支同口径——出卡 5 / 应对 3，招架返还 2，力竭败北） ──
+  if (s.playerSp !== undefined) {
+    const parryRefund =
+      countered && (s.activeEffects ?? []).some((e) => e.type === 'parry' && (e.beatsLeft ?? 0) > 0)
+        ? 2
+        : 0;
+    const spSpent = Math.max(0, (s.spSpent ?? 0) + spCost - parryRefund);
+    const lines2 = [
+      `▸ 体力 −${spCost}${parryRefund ? `（招架返还 2）` : ''}（剩 ${Math.max(0, s.playerSp - spSpent)}）`,
+      ...(mpCost > 0 ? [`▸ 精神 −${mpCost}`] : []),
+    ];
+    const withSpend: SkirmishSession = {
+      ...next,
+      spSpent,
+      ...(mpCost > 0 ? { mpSpent: (s.mpSpent ?? 0) + mpCost } : {}),
+      log: [...next.log, ...lines2],
+    };
+    if (s.playerSp - spSpent <= 0) {
+      return withFinish(withSpend, '败北', [
+        `▸ 体力耗尽——你扶着膝盖喘息，再抬不起手（力竭败北，经验照常结算，评价 C）`,
+      ]);
+    }
+    return withSpend;
   }
   return next;
 }

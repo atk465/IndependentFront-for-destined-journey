@@ -140,7 +140,10 @@ export interface CardInPlayEffect {
     | 'deathTimer'
     | 'disarm'
     | 'mutation'
-    | 'immune';
+    | 'immune'
+    // 信息策略类（效果批八）：insight = 预读敌方未来拍；quest = 出卡目标契约
+    | 'insight'
+    | 'quest';
   amount: number;
   /** 持续拍数（缺省 = 整场）；每拍结束递减，归零移除 */
   beatsLeft?: number;

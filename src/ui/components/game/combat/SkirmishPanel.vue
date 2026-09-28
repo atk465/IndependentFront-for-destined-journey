@@ -11,7 +11,7 @@ import type { CardItem } from '@engine/types';
 import { useGameStore } from '../../../stores/game-store';
 import type { BasicCounter } from '@engine/card-workshop/skirmish';
 import { BASIC_COUNTERS } from '@engine/card-workshop/skirmish';
-import { cardCombatTags, mpCostOf, CARD_MP_COST_BY_TIER } from '@engine/card-workshop/entry-combat';
+import { cardCombatTags, mpCostOf } from '@engine/card-workshop/entry-combat';
 import { SP_COST_PLAY, SP_COST_COUNTER } from '@engine/card-workshop/skirmish-session';
 import { cardAxisOf, AXIS_LABEL } from '@engine/card-workshop/derived-stats';
 import { recommendCards } from '@engine/card-workshop/free-card-play';
@@ -29,7 +29,6 @@ const effectiveMp = computed(() => {
 function costOf(c: Pick<CardItem, 'cardTier' | '词条'>): number {
   return mpCostOf(c);
 }
-const SP_PLAY = SP_COST_PLAY;
 const currentIntent = computed(() => {
   const s = session.value;
   if (!s || s.finished !== null || s.intents.length === 0) return null;
@@ -174,13 +173,29 @@ const STATUS_ICON: Record<string, string> = {
   initiative: '⚡',
   immune: '🌟',
 };
-const ENEMY_STATUS_TYPES = ['dot', 'weaken', 'vulnerable', 'stun', 'poisonPct', 'fear', 'confusion', 'sleep', 'bind', 'curse', 'mark', 'charm', 'silence'];
+const ENEMY_STATUS_TYPES = [
+  'dot',
+  'weaken',
+  'vulnerable',
+  'stun',
+  'poisonPct',
+  'fear',
+  'confusion',
+  'sleep',
+  'bind',
+  'curse',
+  'mark',
+  'charm',
+  'silence',
+];
 const enemyStatuses = computed(() =>
   (session.value?.activeEffects ?? []).filter((e) => ENEMY_STATUS_TYPES.includes(e.type)),
 );
 const playerStatuses = computed(() =>
   (session.value?.activeEffects ?? []).filter((e) =>
-    ['buff', 'shield', 'regen', 'divineShield', 'thorns', 'parry', 'initiative', 'immune'].includes(e.type),
+    ['buff', 'shield', 'regen', 'divineShield', 'thorns', 'parry', 'initiative', 'immune'].includes(
+      e.type,
+    ),
   ),
 );
 function statusText(e: { name: string; amount: number; beatsLeft?: number }): string {
@@ -354,7 +369,9 @@ function dismiss() {
           :title="`指定目标：${e.name}（威胁 ${e.intents[e.intentIndex % Math.max(1, e.intents.length)]?.threat ?? 0}）`"
           @click="selectTarget(i)"
         >
-          <span class="hp-name">{{ e.name }}<span v-if="e.role === '首领'" class="role-tag">首</span></span>
+          <span class="hp-name"
+            >{{ e.name }}<span v-if="e.role === '首领'" class="role-tag">首</span></span
+          >
           <span class="hp-text">{{ e.hp }}/{{ e.maxHp }}</span>
           <span
             v-for="st in e.statuses.filter((s) => s.beatsLeft === undefined || s.beatsLeft > 0)"
@@ -364,7 +381,9 @@ function dismiss() {
           >
             {{ STATUS_ENEMY_ICON[st.type] ?? '◌' }}{{ statusText(st) }}
           </span>
-          <span class="hp-bar foe"><span class="hp-fill" :style="{ width: `${(e.hp / Math.max(1, e.maxHp)) * 100}%` }" /></span>
+          <span class="hp-bar foe"
+            ><span class="hp-fill" :style="{ width: `${(e.hp / Math.max(1, e.maxHp)) * 100}%` }"
+          /></span>
         </button>
       </div>
       <div v-else class="hp-block">
@@ -394,12 +413,7 @@ function dismiss() {
       </div>
     </div>
 
-    <div
-      v-if="enemyStatuses.length > 0"
-      class="status-row"
-      role="list"
-      aria-label="敌方状态"
-    >
+    <div v-if="enemyStatuses.length > 0" class="status-row" role="list" aria-label="敌方状态">
       <span
         v-for="e in enemyStatuses"
         :key="e.name + e.type"
@@ -417,12 +431,7 @@ function dismiss() {
       }})
     </p>
 
-    <div
-      v-if="playerStatuses.length > 0"
-      class="status-row"
-      role="list"
-      aria-label="我方状态"
-    >
+    <div v-if="playerStatuses.length > 0" class="status-row" role="list" aria-label="我方状态">
       <span
         v-for="e in playerStatuses"
         :key="e.name + e.type"
@@ -536,12 +545,20 @@ function dismiss() {
 
     <!-- 应对宣言：与出卡宣言同权（2026-09-25 主人裁定），纯叙事素材 -->
     <div v-if="selectedCounter && !session.finished" class="note-box">
-      <p class="note-title">用【{{ selectedCounter }}】做什么？（可留空——终局 AI 记叙会参考这句话）</p>
+      <p class="note-title">
+        用【{{ selectedCounter }}】做什么？（可留空——终局 AI 记叙会参考这句话）
+      </p>
       <textarea
         v-model="counterIntentText"
         class="note-input"
         rows="2"
-        :placeholder="selectedCounter === '闪避' ? '如：侧身让过角尖，顺势卸掉它的冲势' : selectedCounter === '防御' ? '如：横刀固守，把它的锋头憋回去' : '如：踏中门直进，照它张开的左肋打'"
+        :placeholder="
+          selectedCounter === '闪避'
+            ? '如：侧身让过角尖，顺势卸掉它的冲势'
+            : selectedCounter === '防御'
+              ? '如：横刀固守，把它的锋头憋回去'
+              : '如：踏中门直进，照它张开的左肋打'
+        "
       ></textarea>
       <div class="note-actions">
         <button
@@ -616,7 +633,11 @@ function dismiss() {
         :key="c.name"
         type="button"
         class="strip-card"
-        :class="{ selected: selectedCard === c.name, spent: c.used, 'mp-short': costOf(c) > 0 && costOf(c) > effectiveMp }"
+        :class="{
+          selected: selectedCard === c.name,
+          spent: c.used,
+          'mp-short': costOf(c) > 0 && costOf(c) > effectiveMp,
+        }"
         role="listitem"
         :disabled="game.skirmishBusy || c.used"
         :title="
@@ -887,50 +908,15 @@ function dismiss() {
   color: var(--theme-text-muted, #967756);
 }
 </style>
-.status-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin: 2px 0 4px;
-}
-.status-badge {
-  font-size: 0.68rem;
-  padding: 1px 6px;
-  border-radius: 999px;
-  background: rgba(200, 60, 60, 0.15);
-  color: var(--theme-text-primary);
-  border: 1px solid rgba(200, 60, 60, 0.3);
-}
-.status-badge.mine {
-  background: rgba(90, 160, 90, 0.12);
-  border-color: rgba(90, 160, 90, 0.3);
-}
-.sp-badge {
-  font-size: 0.65rem;
-  margin-left: 4px;
-  padding: 0 4px;
-  border-radius: 4px;
-  background: rgba(90, 160, 90, 0.15);
-  color: var(--theme-text-secondary);
-}
-.counter-btn.selected {
-  border-color: var(--theme-primary);
-  color: var(--theme-primary);
-}
-.cost-badge {
-  font-size: 0.65rem;
-  padding: 0 4px;
-  border-radius: 4px;
-  background: rgba(80, 140, 255, 0.15);
-  color: var(--theme-text-secondary);
-}
-.cost-badge.short {
-  background: rgba(220, 60, 60, 0.2);
-  color: #d66;
-}
-.strip-card.mp-short {
-  opacity: 0.45;
-}
+.status-row { display: flex; flex-wrap: wrap; gap: 4px; margin: 2px 0 4px; } .status-badge {
+font-size: 0.68rem; padding: 1px 6px; border-radius: 999px; background: rgba(200, 60, 60, 0.15);
+color: var(--theme-text-primary); border: 1px solid rgba(200, 60, 60, 0.3); } .status-badge.mine {
+background: rgba(90, 160, 90, 0.12); border-color: rgba(90, 160, 90, 0.3); } .sp-badge { font-size:
+0.65rem; margin-left: 4px; padding: 0 4px; border-radius: 4px; background: rgba(90, 160, 90, 0.15);
+color: var(--theme-text-secondary); } .counter-btn.selected { border-color: var(--theme-primary);
+color: var(--theme-primary); } .cost-badge { font-size: 0.65rem; padding: 0 4px; border-radius: 4px;
+background: rgba(80, 140, 255, 0.15); color: var(--theme-text-secondary); } .cost-badge.short {
+background: rgba(220, 60, 60, 0.2); color: #d66; } .strip-card.mp-short { opacity: 0.45; }
 .rec-badge { font-size: 0.625rem; font-weight: 700; padding: 0 5px; border-radius: 999px; color:
 var(--theme-success); border: 1px solid color-mix(in srgb, var(--theme-success) 40%, transparent);
 background: color-mix(in srgb, var(--theme-success) 10%, transparent); } .contract-row { display:
