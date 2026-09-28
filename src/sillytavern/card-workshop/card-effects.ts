@@ -82,7 +82,14 @@ export type EffectAction =
   | '窥探'
   | '洞悉'
   | '任务'
-  | '分支';
+  | '分支'
+  // 特殊类（效果批九 2026-09-28）：禁忌卡六正本为样板——特殊机制直挂 session/在场实体
+  | '时之锚'
+  | '觉醒'
+  | '狂暴'
+  | '进化'
+  | '连携锚'
+  | '终结一击';
 
 /** 代价（首批只收三种资源；正数值） */
 export interface EffectCost {
@@ -272,6 +279,37 @@ export const EFFECT_POOL: readonly PoolEntry[] = [
     text: '3 拍内累计打出 3 张卡 → 回复 15 HP（超时作废）',
   },
   { action: '分支', value: 12, duration: 0, text: '掷骰分支：d10 ≥ 6 → 行动值 +12；否则回复 8 HP' },
+  // ── 特殊类（效果批九 2026-09-28：时间/觉醒/狂暴/进化/组合技接口/终结技） ──
+  {
+    action: '时之锚',
+    value: 0,
+    duration: 3,
+    cost: { mp: 12 },
+    text: '3 拍内气血跌破锚点 → 回溯至锚点（一次性）',
+  },
+  {
+    action: '觉醒',
+    value: 25,
+    duration: 0,
+    cost: { mp: 20 },
+    text: '本场行动值 +25%、每拍回复 2 HP（血祭开眼，整场）',
+  },
+  {
+    action: '狂暴',
+    value: 50,
+    duration: 3,
+    cost: { mp: 10 },
+    text: '3 拍行动值 +50%，但每拍自伤 5',
+  },
+  { action: '进化', value: 5, duration: 0, text: '行动值从 5 起每过 1 拍 +5，持续成长（整场）' },
+  { action: '连携锚', value: 4, duration: 4, text: '4 拍内每打出一张卡，拍末追加 4 伤害' },
+  {
+    action: '终结一击',
+    value: 20,
+    duration: 0,
+    cost: { mp: 10 },
+    text: '造成敌方已损失气血 20% 的真实伤害（斩得越深越痛）',
+  },
 ];
 
 /** 池查询：动作 → 池内定值条目（找不到 = 池外，门禁丢弃） */

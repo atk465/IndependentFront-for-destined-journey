@@ -143,7 +143,14 @@ export interface CardInPlayEffect {
     | 'immune'
     // 信息策略类（效果批八）：insight = 预读敌方未来拍；quest = 出卡目标契约
     | 'insight'
-    | 'quest';
+    | 'quest'
+    // 特殊类（效果批九）：timeAnchor = HP 回溯锚点；frenzy/berserk = 百分比行动值乘区
+    // （berserk 附带每拍自伤）；evolution = 逐拍成长加成；comboAnchor = 每出卡拍末追加伤
+    | 'timeAnchor'
+    | 'frenzy'
+    | 'berserk'
+    | 'evolution'
+    | 'comboAnchor';
   amount: number;
   /** 持续拍数（缺省 = 整场）；每拍结束递减，归零移除 */
   beatsLeft?: number;

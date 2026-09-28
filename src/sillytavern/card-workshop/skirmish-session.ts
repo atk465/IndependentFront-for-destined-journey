@@ -370,6 +370,8 @@ export interface TranslatedEffects {
   revealRotation?: boolean;
   /** 打出时·分支（效果批八）：掷骰定路——骰成走伤害路，骰败走回复路 */
   branch?: { successDamage: number; fallbackHeal: number };
+  /** 打出时·终结一击（效果批九）：按敌方已损失气血 % 计真实伤害 */
+  finisherPct?: number;
   /** 拍结束·伤害（效果批五）：全部结算完成后直扣敌方 */
   endBeatDamage?: number;
   /** 拍结束·治疗（效果批五）：并入玩家 HP 链 */
@@ -496,6 +498,11 @@ export function translateCardEffects(
         out.branch = { successDamage: scaled, fallbackHeal: 8 };
         out.lines.push(`▸ 【效果】分支：命运掷骰，杀伐或回护各安一途`);
         break;
+      case '终结一击':
+        // 特殊类（效果批九）：斩杀线同族——伤害侧按已损失气血 %，playBeat 依敌方实体现算
+        out.finisherPct = scaled;
+        out.lines.push(`▸ 【效果】终结一击：斩得越深越痛（已损失气血 ${scaled}% 计真伤）`);
+        break;
       case '死亡倒计时': {
         const beats = Math.max(1, Math.round(e.duration ?? 3));
         out.activate.push({
@@ -512,6 +519,15 @@ export function translateCardEffects(
         out.mpHeal += 8;
         out.lines.push(`▸ 【效果】净化：MP +8`);
         break;
+      case '觉醒': {
+        // 特殊类（效果批九）：血祭开眼——百分比乘区 + 每拍回复，双通道均整场（beatsLeft 缺省）
+        out.activate.push(
+          { name: '觉醒', type: 'frenzy', amount: scaled },
+          { name: '觉醒·回复', type: 'regen', amount: 2 },
+        );
+        out.lines.push(`▸ 【效果】${effectLineOf(e)}`);
+        break;
+      }
       case '中毒':
       case '灼烧':
       case '流血':
@@ -542,7 +558,11 @@ export function translateCardEffects(
       case '变异':
       case '免疫':
       case '洞悉':
-      case '任务': {
+      case '任务':
+      case '时之锚':
+      case '狂暴':
+      case '进化':
+      case '连携锚': {
         const type =
           e.action === '易伤' || e.action === '诅咒'
             ? 'vulnerable'
@@ -585,13 +605,27 @@ export function translateCardEffects(
                                               ? 'insight'
                                               : e.action === '任务'
                                                 ? 'quest'
-                                                : 'dot';
+                                                : e.action === '时之锚'
+                                                  ? 'timeAnchor'
+                                                  : e.action === '狂暴'
+                                                    ? 'berserk'
+                                                    : e.action === '进化'
+                                                      ? 'evolution'
+                                                      : e.action === '连携锚'
+                                                        ? 'comboAnchor'
+                                                        : 'dot';
         const eff: CardInPlayEffect = {
           name: e.action,
           type: type as CardInPlayEffect['type'],
-          // 任务的目标张数是契约口径，不随敌全体倍化
-          amount: e.action === '任务' ? Math.max(1, Math.round(e.value)) : scaled,
-          beatsLeft: Math.max(1, Math.round(e.duration ?? 1)),
+          // 任务的目标张数是契约口径，不随敌全体倍化；时之锚金额 0（锚点在 playBeat 落定）
+          amount:
+            e.action === '任务'
+              ? Math.max(1, Math.round(e.value))
+              : e.action === '时之锚'
+                ? 0
+                : scaled,
+          // duration 0 = 整场（批九：狂暴/连携锚外，进化成长不递减）
+          ...((e.duration ?? 0) > 0 ? { beatsLeft: Math.max(1, Math.round(e.duration ?? 1)) } : {}),
         };
         const twin = out.activate.find((a) => a.name === eff.name && a.type === eff.type);
         if (twin) {
@@ -690,7 +724,7 @@ export function playBeat(
 
   // 在场加成（此前打出的领域/装备/召唤…）：行动值先行叠加，审计单列一行可复算
   const buffTotal = s.activeEffects
-    .filter((e) => e.type === 'buff')
+    .filter((e) => e.type === 'buff' || e.type === 'evolution')
     .reduce((sum, e) => sum + Math.max(0, e.amount), 0);
   // 事件账本（效果批七·条件位）：本拍开始时快照供条件判定（本拍新事件不影响本拍条件）
   const ledgerAtStart: Partial<Record<import('./card-effects').BeatEvent, number>> = {
@@ -702,6 +736,28 @@ export function playBeat(
     opts?.enemyCount ?? s.enemyCount ?? 1,
     ledgerAtStart,
   );
+
+  // 终结一击（效果批九）：按敌方已损失气血 % 计真伤——走 directDamage 无视减免通道
+  if (fx.finisherPct) {
+    const missing = Math.max(0, s.enemyMaxHp - s.enemyHp);
+    const fin = Math.round((missing * fx.finisherPct) / 100);
+    if (fin > 0) {
+      fx.directDamage = (fx.directDamage ?? 0) + fin;
+      fx.lines.push(
+        `▸ 【终结一击】斩口深可见骨——已损失气血 ${missing} × ${fx.finisherPct}% = +${fin} 真伤`,
+      );
+    }
+  }
+  // 连携锚（效果批九）：本拍出了卡 → 拍末追加连携伤害（激活拍登记，次拍起计）
+  const comboDamage = action.cardName
+    ? live
+        .filter((e) => e.type === 'comboAnchor')
+        .reduce((sum, e) => sum + Math.max(0, e.amount), 0)
+    : 0;
+  if (comboDamage > 0) {
+    fx.endBeatDamage = (fx.endBeatDamage ?? 0) + comboDamage;
+    fx.lines.push(`▸ 【连携锚】连击成势——拍末追加 ${comboDamage} 伤害`);
+  }
 
   // 变异（效果批五）：live 时每拍按拍骰随机一项——威胁+3 / 敌承伤+8% / 敌自伤4
   const liveMutation = live.some((e) => e.type === 'mutation');
@@ -757,7 +813,11 @@ export function playBeat(
     if (reveals.length > 0) fx.lines.push(`▸ 【洞悉】预读：${reveals.join(' ｜ ')}`);
   }
 
-  const rawPower = Math.max(0, action.power) + fx.powerBonus;
+  // 觉醒/狂暴（效果批九）：百分比行动值乘区（frenzy 整场、berserk 窗口内）
+  const frenzyPct = live
+    .filter((e) => e.type === 'frenzy' || e.type === 'berserk')
+    .reduce((sum, e) => sum + Math.max(0, e.amount), 0);
+  const rawPower = (Math.max(0, action.power) + fx.powerBonus) * (1 + frenzyPct / 100);
   const effectiveAction = {
     ...action,
     power: Math.round(rawPower * fx.powerMult) + (buffTotal > 0 ? buffTotal : 0),
@@ -1114,6 +1174,8 @@ export function playBeat(
   // 本拍新激活的从下一拍才开始加深（首拍按池内定值结算）
   for (const e of mergedEffects) {
     if ((e.type === 'infest' || e.type === 'degrade') && decremented.includes(e)) e.amount += 1;
+    // 进化（效果批九）：在场每过 1 拍行动值加成 +5（池内定值步进，同感染/退化的成长式）
+    if (e.type === 'evolution' && decremented.includes(e)) e.amount += 5;
   }
   const nextEffects = [
     ...mergedEffects,
@@ -1186,6 +1248,39 @@ export function playBeat(
     ...(fx.guardDown > 0 ? { guardDown: (s.guardDown ?? 0) + fx.guardDown } : {}),
     ...(fx.mpHeal > 0 ? { mpGained: (s.mpGained ?? 0) + fx.mpHeal } : {}),
   };
+  // 狂暴（效果批九）：窗口内每拍自伤（amount/10，50→5）——置于终局判定前，可致死
+  const berserkSelf = live
+    .filter((e) => e.type === 'berserk')
+    .reduce((sum, e) => sum + Math.max(1, Math.round(e.amount / 10)), 0);
+  if (berserkSelf > 0 && next.playerHp > 0) {
+    next = {
+      ...next,
+      playerHp: Math.max(0, next.playerHp - berserkSelf),
+      log: [...next.log, `▸ 【狂暴】血脉贲张反噬己身——自伤 ${berserkSelf} HP`],
+    };
+  }
+  // 时之锚（效果批九）：激活拍末落锚 → 之后任一拍末跌破锚点回溯（一次性，不救致死拍）
+  const anchor = (next.activeEffects ?? []).find((e) => e.type === 'timeAnchor');
+  if (anchor && next.playerHp > 0) {
+    if ((anchor.amount ?? 0) <= 0) {
+      const effects2 = [...(next.activeEffects ?? [])];
+      effects2[effects2.indexOf(anchor)] = { ...anchor, amount: next.playerHp };
+      next = {
+        ...next,
+        activeEffects: effects2,
+        log: [...next.log, `▸ 【时之锚】锚点落定于 ${next.playerHp} HP`],
+      };
+    } else if (next.playerHp < anchor.amount) {
+      const effects2 = (next.activeEffects ?? []).filter((e) => e !== anchor);
+      next = {
+        ...next,
+        playerHp: anchor.amount,
+        activeEffects: effects2,
+        log: [...next.log, `▸ 【时之锚】时光倒流——气血回溯至锚点 ${anchor.amount} HP`],
+      };
+    }
+  }
+
   // 死亡倒计时到期（效果批三）：倒数走完 → 敌方直接倒下
   const timerExpired = decremented.find((e) => e.type === 'deathTimer' && (e.beatsLeft ?? 1) <= 0);
   if (timerExpired) {
@@ -1393,7 +1488,7 @@ export function playMultiEnemyBeat(
   const events: Partial<Record<import('./card-effects').BeatEvent, number>> = {
     ...(s.beatEvents ?? {}),
   };
-  const next: SkirmishSession = {
+  let next: SkirmishSession = {
     ...s,
     beat: s.beat + 1,
     beatEvents: events,
@@ -1425,6 +1520,38 @@ export function playMultiEnemyBeat(
   ).length;
   if ((s.enemies?.length ?? 0) > 1 && deadThisBeat > 0) bump('友方退场', deadThisBeat);
   next.beatEvents = events;
+
+  // 狂暴自伤 + 时之锚（效果批九·多敌同序：终局判定前，自伤可致死、锚不救致死拍）
+  const berserkSelfMulti = (s.activeEffects ?? [])
+    .filter((e) => e.type === 'berserk' && (e.beatsLeft === undefined || (e.beatsLeft ?? 0) > 0))
+    .reduce((sum, e) => sum + Math.max(1, Math.round(e.amount / 10)), 0);
+  if (berserkSelfMulti > 0 && next.playerHp > 0) {
+    next = {
+      ...next,
+      playerHp: Math.max(0, next.playerHp - berserkSelfMulti),
+      log: [...next.log, `▸ 【狂暴】血脉贲张反噬己身——自伤 ${berserkSelfMulti} HP`],
+    };
+  }
+  const anchorMulti = (next.activeEffects ?? []).find((e) => e.type === 'timeAnchor');
+  if (anchorMulti && next.playerHp > 0) {
+    if ((anchorMulti.amount ?? 0) <= 0) {
+      const effects3 = [...(next.activeEffects ?? [])];
+      effects3[effects3.indexOf(anchorMulti)] = { ...anchorMulti, amount: next.playerHp };
+      next = {
+        ...next,
+        activeEffects: effects3,
+        log: [...next.log, `▸ 【时之锚】锚点落定于 ${next.playerHp} HP`],
+      };
+    } else if (next.playerHp < anchorMulti.amount) {
+      const effects3 = (next.activeEffects ?? []).filter((e) => e !== anchorMulti);
+      next = {
+        ...next,
+        playerHp: anchorMulti.amount,
+        activeEffects: effects3,
+        log: [...next.log, `▸ 【时之锚】时光倒流——气血回溯至锚点 ${anchorMulti.amount} HP`],
+      };
+    }
+  }
 
   // 终局：首领倒下或全灭 → 胜利
   const leaderDead = nextEnemies.some((e) => e.role === '首领' && e.dead);

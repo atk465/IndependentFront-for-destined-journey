@@ -18,8 +18,8 @@ import { cardAxisOf, deriveCardAtk, CARD_ELEMENT_AXIS } from './derived-stats';
 import { conditionsMet, type CardEffectDef } from './card-effects';
 
 describe('效果池与元素映射（派生打底）', () => {
-  it('池 47 条（43 + 批八信息策略 4），九元素九映射', () => {
-    expect(EFFECT_POOL).toHaveLength(47);
+  it('池 53 条（47 + 批九特殊类 6），九元素九映射', () => {
+    expect(EFFECT_POOL).toHaveLength(53);
     expect(Object.keys(ELEMENT_DEFAULT_EFFECT)).toHaveLength(9);
     for (const action of Object.values(ELEMENT_DEFAULT_EFFECT)) {
       expect(poolEntryOf(action)).toBeDefined(); // 映射的动作都在池内
@@ -797,6 +797,135 @@ describe('效果批八（信息策略类：窥探/洞悉/任务/分支）', () =
     expect(peek).toContain('碎颅');
     const insight = after.log.find((l) => l.includes('【洞悉】预读'));
     expect(insight).toContain('窟主');
+  });
+});
+
+describe('效果批九（特殊类：时之锚/觉醒/狂暴/进化/连携锚/终结一击）', () => {
+  // threat 30 / dice 5 / power 10 → 反制必败（15 < 30）：敌方每拍吃行动值 10，玩家每拍承 30
+  const mk = (playerHp = 200, enemyHp = 600, enemyMaxHp?: number) =>
+    startSkirmish({
+      enemyName: '殊兽',
+      intents: [{ move: '重压', threat: 30, counters: [] }],
+      playerHp,
+      playerMaxHp: Math.max(playerHp, 120),
+      enemyHp,
+      ...(enemyMaxHp !== undefined ? { enemyMaxHp } : {}),
+      guard: 0,
+    });
+  const hit = { label: '打一拍', power: 10, tags: [] };
+
+  it('池门禁：六条新效果全在池内', () => {
+    for (const a of ['时之锚', '觉醒', '狂暴', '进化', '连携锚', '终结一击'] as const) {
+      expect(poolEntryOf(a)).toBeDefined();
+    }
+  });
+
+  it('觉醒：行动值 +25%、每拍回 2 HP，整场不递减', () => {
+    const act = {
+      trigger: '每拍' as const,
+      target: '自身' as const,
+      action: '觉醒' as const,
+      value: 25,
+      duration: 0,
+    };
+    const b1 = playBeat(mk(), hit, 5, {});
+    const b2 = playBeat(b1, hit, 5, {});
+    const w0 = playBeat(mk(), { ...hit, cardName: '觉醒卡' }, 5, { effects: [act] });
+    // 激活拍无乘区（状态自次拍生效）
+    expect(w0.enemyHp).toBe(b1.enemyHp);
+    const w1 = playBeat(w0, hit, 5, {});
+    // 次拍起乘区：10 → round(12.5)=13
+    expect(w1.enemyHp).toBe(600 - 10 - 13);
+    // 每拍回复 2：对照 170 → 觉醒 172（承 30、回 2）
+    expect(w1.playerHp).toBe(b2.playerHp + 2);
+    // 整场：beatsLeft 缺省
+    expect((w1.activeEffects ?? []).find((e) => e.type === 'frenzy')?.beatsLeft).toBeUndefined();
+  });
+
+  it('狂暴：行动值 +50%、每拍自伤 5，3 拍后过期', () => {
+    const act = {
+      trigger: '每拍' as const,
+      target: '自身' as const,
+      action: '狂暴' as const,
+      value: 50,
+      duration: 3,
+    };
+    const b1 = playBeat(mk(), hit, 5, {});
+    const w0 = playBeat(mk(), { ...hit, cardName: '狂暴卡' }, 5, { effects: [act] });
+    const w1 = playBeat(w0, hit, 5, {});
+    // 行动值 10 → 15（+50%）；自伤 5：对照 170 → 狂暴 165
+    expect(w1.enemyHp).toBe(600 - 10 - 15);
+    expect(w1.playerHp).toBe(b1.playerHp - 30 - 5);
+    expect(w1.log.slice(w0.log.length).some((l) => l.includes('自伤'))).toBe(true);
+    // 窗口 3 拍（w1-w3）走完，第 5 拍增量与对照同口径（无乘区无自伤）
+    const w3 = playBeat(playBeat(w1, hit, 5, {}), hit, 5, {});
+    const w4 = playBeat(w3, hit, 5, {});
+    expect(w3.enemyHp - w4.enemyHp).toBe(10);
+    expect(w3.playerHp - w4.playerHp).toBe(30);
+    expect(w4.log.slice(w3.log.length).some((l) => l.includes('自伤'))).toBe(false);
+  });
+
+  it('进化：行动值加成从 5 起逐拍 +5', () => {
+    const act = {
+      trigger: '每拍' as const,
+      target: '自身' as const,
+      action: '进化' as const,
+      value: 5,
+      duration: 0,
+    };
+    const w0 = playBeat(mk(), { ...hit, cardName: '进化卡' }, 5, { effects: [act] });
+    const w1 = playBeat(w0, hit, 5, {});
+    const w2 = playBeat(w1, hit, 5, {});
+    // 激活拍不加成；此后 +5 → +10
+    expect(w0.enemyHp).toBe(600 - 10);
+    expect(w1.enemyHp).toBe(600 - 10 - 15);
+    expect(w2.enemyHp).toBe(600 - 10 - 15 - 20);
+  });
+
+  it('连携锚：出卡的拍末追加连携伤害，应对拍不触发', () => {
+    const act = {
+      trigger: '每拍' as const,
+      target: '自身' as const,
+      action: '连携锚' as const,
+      value: 4,
+      duration: 4,
+    };
+    const w0 = playBeat(mk(), { ...hit, cardName: '锚卡' }, 5, { effects: [act] });
+    const w1 = playBeat(w0, { ...hit, cardName: '连打卡' }, 5, {});
+    const w1b = playBeat(w0, { label: '应对', power: 10, tags: [] }, 5, {});
+    expect(w1.enemyHp).toBe(600 - 10 - 10 - 4);
+    expect(w1b.enemyHp).toBe(600 - 10 - 10);
+  });
+
+  it('时之锚：激活拍末落锚，跌破回溯一次性', () => {
+    const act = {
+      trigger: '每拍' as const,
+      target: '自身' as const,
+      action: '时之锚' as const,
+      value: 0,
+      duration: 3,
+    };
+    const w0 = playBeat(mk(100), { ...hit, cardName: '锚卡' }, 5, { effects: [act] });
+    expect(w0.playerHp).toBe(70); // 落锚 = 激活拍末 HP
+    const w1 = playBeat(w0, hit, 5, {});
+    expect(w1.log.slice(w0.log.length).some((l) => l.includes('时光倒流'))).toBe(true);
+    expect(w1.playerHp).toBe(70); // 回溯
+    const w2 = playBeat(w1, hit, 5, {});
+    expect(w2.playerHp).toBe(40); // 一次性用尽，不再回溯
+    expect((w2.activeEffects ?? []).some((e) => e.type === 'timeAnchor')).toBe(false);
+  });
+
+  it('终结一击：已损失气血 20% 计真伤', () => {
+    const act = {
+      trigger: '打出时' as const,
+      target: '敌单体' as const,
+      action: '终结一击' as const,
+      value: 20,
+    };
+    const s = mk(200, 300, 600);
+    const w0 = playBeat(s, { ...hit, cardName: '终结卡' }, 5, { effects: [act] });
+    // 缺失 300 × 20% = 60 真伤 + 行动值 10（反制必败）
+    expect(w0.enemyHp).toBe(300 - 10 - 60);
   });
 });
 
