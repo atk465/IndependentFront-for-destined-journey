@@ -782,8 +782,12 @@ export async function runCraftGenChain(
       const aiEffects = coerceCardEffects(craftOutput.effects);
       if (aiEffects.length > 0) {
         cardProduct = { ...cardProduct, cardEffects: aiEffects } as typeof cardProduct;
-        craftOutput.narrative = [craftOutput.narrative,
-          `▸ 效果池：本卡登记 ${aiEffects.map((e) => e.action).join('、')}（AI 池内选择）`].filter(Boolean).join('\n');
+        craftOutput.narrative = [
+          craftOutput.narrative,
+          `▸ 效果池：本卡登记 ${aiEffects.map((e) => e.action).join('、')}（AI 池内选择）`,
+        ]
+          .filter(Boolean)
+          .join('\n');
       }
       // 天赋审计行并入制作叙事（让玩家看到天赋确实生效）
       if (notes.length > 0) {

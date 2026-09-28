@@ -9,7 +9,10 @@ describe('parseCatalogData：effects 字段保留（注册链前提）', () => {
     const raw = {
       cardPool: [
         {
-          id: 'e1', name: '带效果卡', cardTier: '星辉', formEntry: '技能',
+          id: 'e1',
+          name: '带效果卡',
+          cardTier: '星辉',
+          formEntry: '技能',
           effects: [{ trigger: '每拍', target: '敌单体', action: '灼烧', value: 4, duration: 2 }],
         },
       ],

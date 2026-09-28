@@ -151,7 +151,9 @@ const cMsg = ref('');
 const cErr = ref('');
 // 效果池选择（2026-09-25 效果批四）：购卡效果从池内选、数值池内定值（≤2 条）
 const EFFECT_POOL_LIST = EFFECT_POOL;
-const cEffects = ref<{ trigger: string; target: string; action: string; value: number; duration?: number }[]>([]);
+const cEffects = ref<
+  { trigger: string; target: string; action: string; value: number; duration?: number }[]
+>([]);
 const cEffectsErr = computed(() => {
   if (cEffects.value.length > 2) return '每卡最多登记 2 条效果';
   for (const e of cEffects.value) {
@@ -723,7 +725,9 @@ function removeCommission(item: { def: { name: string }; isSeed: boolean }) {
           >
             <option value="" disabled>+ 从效果池添加…</option>
             <option
-              v-for="e in EFFECT_POOL_LIST.filter((p) => !cEffects.some((c) => c.action === p.action))"
+              v-for="e in EFFECT_POOL_LIST.filter(
+                (p) => !cEffects.some((c) => c.action === p.action),
+              )"
               :key="e.action"
               :value="e.action"
             >
@@ -732,7 +736,9 @@ function removeCommission(item: { def: { name: string }; isSeed: boolean }) {
           </select>
         </div>
         <div v-for="(e, i) in cEffects" :key="e.action" class="entry-row">
-          <span class="chip">{{ e.action }} {{ e.value }}{{ e.duration ? `/${e.duration}拍` : '' }}</span>
+          <span class="chip"
+            >{{ e.action }} {{ e.value }}{{ e.duration ? `/${e.duration}拍` : '' }}</span
+          >
           <button type="button" class="remove-btn" @click="removeCardEffect(i)">✕</button>
         </div>
         <p v-if="cEffectsErr" class="warn">{{ cEffectsErr }}</p>

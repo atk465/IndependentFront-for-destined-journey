@@ -44,7 +44,12 @@ describe('renderOptionPolicy', () => {
   });
 
   it('{{user}} 替换为玩家名（大小写不敏感）；玩家名为空回落「你」', () => {
-    const scheme = { id: 'x', name: 'x', instruction: '{{user}} 的行动 / {{USER}} 的选择', builtin: false };
+    const scheme = {
+      id: 'x',
+      name: 'x',
+      instruction: '{{user}} 的行动 / {{USER}} 的选择',
+      builtin: false,
+    };
     expect(renderOptionPolicy(scheme, '黎晚')).toContain('黎晚 的行动 / 黎晚 的选择');
     expect(renderOptionPolicy(scheme, '')).toContain('你 的行动');
   });
@@ -63,7 +68,12 @@ describe('filterOptionsForScheme', () => {
 
 describe('BUILTIN_OPTION_SCHEMES', () => {
   it('四个内置：不生成/标准三选/情绪流/成人向，全部 builtin 标记', () => {
-    expect(BUILTIN_OPTION_SCHEMES.map((s) => s.id)).toEqual(['off', 'standard', 'emotive', 'adult']);
+    expect(BUILTIN_OPTION_SCHEMES.map((s) => s.id)).toEqual([
+      'off',
+      'standard',
+      'emotive',
+      'adult',
+    ]);
     expect(BUILTIN_OPTION_SCHEMES.every((s) => s.builtin)).toBe(true);
   });
   it('情绪流与成人向带 emoji 与 font color 要求；标准三选纯文本', () => {

@@ -62,7 +62,9 @@ describe('多敌实体化', () => {
       ...s,
       enemies: (s.enemies ?? []).map((e, i) => (i === 0 ? { ...e, hp: 10 } : e)),
     } as typeof s;
-    const after = playBeat(low, { label: '终结一击', power: 60, tags: ['强攻'] }, 18, { targetIndex: 0 });
+    const after = playBeat(low, { label: '终结一击', power: 60, tags: ['强攻'] }, 18, {
+      targetIndex: 0,
+    });
     expect(after.finished).toBe('胜利');
     // 杂兵仍存活也不影响——首领死即胜
   });

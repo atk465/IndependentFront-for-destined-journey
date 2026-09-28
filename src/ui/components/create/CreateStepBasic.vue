@@ -260,21 +260,29 @@ function applyBackground(bg: BackgroundTemplate | null) {
             </span>
           </div>
           <div class="purchase-attrs">
-            <div v-for="attr in ['力量', '敏捷', '体质', '智力', '精神']" :key="attr" class="purchase-attr">
+            <div
+              v-for="attr in ['力量', '敏捷', '体质', '智力', '精神']"
+              :key="attr"
+              class="purchase-attr"
+            >
               <span class="pa-name">{{ attr }}</span>
               <button
                 type="button"
                 class="pa-btn"
                 :disabled="store.remainingPoints < 100 || store.purchasedPerAttr(attr) >= 4"
                 @click="store.buyPurchasedPoint(attr)"
-              >+</button>
+              >
+                +
+              </button>
               <span class="pa-count">{{ store.purchasedPerAttr(attr) }}</span>
               <button
                 type="button"
                 class="pa-btn"
                 :disabled="store.purchasedPerAttr(attr) <= 0"
                 @click="store.refundPurchasedPoint(attr)"
-              >−</button>
+              >
+                −
+              </button>
             </div>
           </div>
         </div>

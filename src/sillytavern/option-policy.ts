@@ -65,7 +65,12 @@ const ADULT_INSTRUCTION = [
 /** 内置方案（顺序即 UI 展示顺序；自定义方案追加在内置之后） */
 export const BUILTIN_OPTION_SCHEMES: readonly OptionScheme[] = [
   { id: OPTION_SCHEME_OFF_ID, name: '不生成选项', instruction: OFF_INSTRUCTION, builtin: true },
-  { id: OPTION_SCHEME_STANDARD_ID, name: '标准三选', instruction: STANDARD_INSTRUCTION, builtin: true },
+  {
+    id: OPTION_SCHEME_STANDARD_ID,
+    name: '标准三选',
+    instruction: STANDARD_INSTRUCTION,
+    builtin: true,
+  },
   { id: 'emotive', name: '情绪流', instruction: EMOTIVE_INSTRUCTION, builtin: true },
   { id: 'adult', name: '成人向', instruction: ADULT_INSTRUCTION, builtin: true },
 ];

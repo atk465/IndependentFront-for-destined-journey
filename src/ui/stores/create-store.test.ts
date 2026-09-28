@@ -1134,7 +1134,8 @@ describe('出身天赋抽卡池', () => {
     expect(store.talentOffers.every((t) => poolNames.includes(t.name))).toBe(true);
     // 选中后重抽——选择列表是数组，rollTalentOffers 会清不在新一批里的选择
     store.selectedCreationTalents = [store.talentOffers[0].name];
-    for (let i = 0; i < 40 && store.selectedCreationTalents.length > 0; i++) store.rollTalentOffers();
+    for (let i = 0; i < 40 && store.selectedCreationTalents.length > 0; i++)
+      store.rollTalentOffers();
   });
 
   it('talentCost 按品级公式计价（天才卡师 C 级单条：(10×1.2)→5 取整 = 10 点），未选为 0', () => {

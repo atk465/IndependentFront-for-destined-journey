@@ -1122,8 +1122,7 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
    */
   OPTION_POLICY: (ctx, _config, _params) => {
     const scheme = resolveOptionScheme(ctx.optionSchemeId, ctx.customOptionSchemes);
-    const playerName =
-      (ctx.characters ?? []).find((c) => c.type === 'player')?.name ?? '';
+    const playerName = (ctx.characters ?? []).find((c) => c.type === 'player')?.name ?? '';
     return renderOptionPolicy(scheme, playerName);
   },
 

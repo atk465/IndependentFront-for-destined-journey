@@ -148,7 +148,10 @@ describe('resolveGatherDef / 中层覆写查表链', () => {
     });
     expect(full.danger).toBe(5);
     // 🔴 覆写按档位合并：4 档换成千年雪莲，0-3 档仍是冰原环境表（整表替换会滚出「未知素材」）
-    expect(full.materialTable).toEqual({ ...ENVIRONMENT_TABLE['冰原'].materialTable, 4: ['千年雪莲'] });
+    expect(full.materialTable).toEqual({
+      ...ENVIRONMENT_TABLE['冰原'].materialTable,
+      4: ['千年雪莲'],
+    });
   });
 
   it('稀疏覆写表缺档回退环境表，绝不产出「未知素材」（真机验收回归）', () => {

@@ -597,7 +597,13 @@ const enchantableCards = computed(() =>
 const enchantEffectOptions = computed(() =>
   EFFECT_POOL.map((e) => ({
     action: e.action,
-    label: `${e.action}——${e.text}${e.cost ? `［${Object.entries(e.cost).map(([k, v]) => `${k.toUpperCase()} ${v}`).join(' ')}］` : ''}`,
+    label: `${e.action}——${e.text}${
+      e.cost
+        ? `［${Object.entries(e.cost)
+            .map(([k, v]) => `${k.toUpperCase()} ${v}`)
+            .join(' ')}］`
+        : ''
+    }`,
     cost: ENCHANT_BASE_COST + e.value * 2,
   })),
 );
@@ -609,19 +615,17 @@ const enchantPreview = computed(() => {
   const card = enchantTarget.value;
   if (!opt || !card) return undefined;
   const entry = EFFECT_POOL.find((e) => e.action === opt.action)!;
-  return planEnchant(
-    {
-      card,
-      effect: {
-        trigger: entry.duration > 0 ? '每拍' : '打出时',
-        target: ['治疗', '护盾', '格挡'].includes(opt.action) ? '自身' : '敌单体',
-        action: opt.action,
-        value: entry.value,
-        duration: entry.duration,
-      },
-      money: player.value?.money ?? 0,
+  return planEnchant({
+    card,
+    effect: {
+      trigger: entry.duration > 0 ? '每拍' : '打出时',
+      target: ['治疗', '护盾', '格挡'].includes(opt.action) ? '自身' : '敌单体',
+      action: opt.action,
+      value: entry.value,
+      duration: entry.duration,
     },
-  );
+    money: player.value?.money ?? 0,
+  });
 });
 async function doEnchant() {
   const preview = enchantPreview.value;
@@ -1575,7 +1579,9 @@ const RATING_HINT: Record<string, string> = {
         <div class="slot-head">
           <select v-model="enchantCardName" class="slot-select" aria-label="选择附魔目标">
             <option value="" disabled>目标卡…</option>
-            <option v-for="c in enchantableCards" :key="c.name" :value="c.name">{{ c.name }}</option>
+            <option v-for="c in enchantableCards" :key="c.name" :value="c.name">
+              {{ c.name }}
+            </option>
           </select>
           <select v-model="enchantAction" class="slot-select" aria-label="选择效果">
             <option value="" disabled>效果…</option>

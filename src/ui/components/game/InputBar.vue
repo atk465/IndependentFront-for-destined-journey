@@ -114,7 +114,9 @@ function handleStop() {
         :key="i"
         class="option-item"
         role="option"
-        :style="parseOptionDisplay(opt).color ? { color: parseOptionDisplay(opt).color! } : undefined"
+        :style="
+          parseOptionDisplay(opt).color ? { color: parseOptionDisplay(opt).color! } : undefined
+        "
         @click="selectOption(parseOptionDisplay(opt).text)"
       >
         {{ parseOptionDisplay(opt).text }}

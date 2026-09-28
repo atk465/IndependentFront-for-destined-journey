@@ -300,7 +300,13 @@ export const useCreateStore = defineStore('create', () => {
   const experienceMode = ref<ExperienceMode>('normal');
   const basePoints = ref<Record<string, number>>({ 力量: 0, 敏捷: 0, 体质: 0, 智力: 0, 精神: 0 });
   /** 属性购买（转生点消费通道）：每维额外购买的点数（转生点 100/点） */
-  const purchasedPoints = ref<Record<string, number>>({ 力量: 0, 敏捷: 0, 体质: 0, 智力: 0, 精神: 0 });
+  const purchasedPoints = ref<Record<string, number>>({
+    力量: 0,
+    敏捷: 0,
+    体质: 0,
+    智力: 0,
+    精神: 0,
+  });
   const attributePoints = ref<Record<string, number>>({
     力量: 0,
     敏捷: 0,
@@ -1555,18 +1561,40 @@ export const useCreateStore = defineStore('create', () => {
         for (const e of tpl.entries) {
           const p = e.params;
           switch (e.kind) {
-            case '成功率加成': parts.push(`成功率+${p.bonus ?? 0}%`); break;
-            case '品质锁定': parts.push(`品质锁定${p.tier ?? ''}`); break;
-            case '品质突破': parts.push('品质越一级'); break;
-            case '启封加值': parts.push(`启封+${p.amount ?? 0}`); break;
-            case '行动值加成': parts.push(`行动值+${p.amount ?? 0}`); break;
-            case '防御加值': parts.push(`防御+${p.amount ?? 0}`); break;
-            case '体魄': parts.push(`HP上限+${p.percent ?? 0}%`); break;
-            case '威压': parts.push(`敌方属性−${p.percent ?? 0}%`); break;
-            case '暴击': parts.push(`暴击${p.chance ?? 0}%`); break;
-            case '经验倍率': parts.push(`经验倍率提升`); break;
-            case '鉴定': break; // 纯风味不入数值行
-            default: break;
+            case '成功率加成':
+              parts.push(`成功率+${p.bonus ?? 0}%`);
+              break;
+            case '品质锁定':
+              parts.push(`品质锁定${p.tier ?? ''}`);
+              break;
+            case '品质突破':
+              parts.push('品质越一级');
+              break;
+            case '启封加值':
+              parts.push(`启封+${p.amount ?? 0}`);
+              break;
+            case '行动值加成':
+              parts.push(`行动值+${p.amount ?? 0}`);
+              break;
+            case '防御加值':
+              parts.push(`防御+${p.amount ?? 0}`);
+              break;
+            case '体魄':
+              parts.push(`HP上限+${p.percent ?? 0}%`);
+              break;
+            case '威压':
+              parts.push(`敌方属性−${p.percent ?? 0}%`);
+              break;
+            case '暴击':
+              parts.push(`暴击${p.chance ?? 0}%`);
+              break;
+            case '经验倍率':
+              parts.push(`经验倍率提升`);
+              break;
+            case '鉴定':
+              break; // 纯风味不入数值行
+            default:
+              break;
           }
         }
         const suffix = parts.length > 0 ? `（${parts.join('，')}）` : '';

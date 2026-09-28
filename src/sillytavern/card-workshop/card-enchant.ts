@@ -53,7 +53,10 @@ export type EnchantPlan = {
 export function planEnchant(input: EnchantInput): EnchantPlan {
   const kind = cardKindOf(input.card.词条);
   if (kind === '物资' || kind === '素材') {
-    return { ok: false, reason: `【${input.card.name}】是${kind}卡——物资走道具通道，素材是制卡原料，都不能附魔` };
+    return {
+      ok: false,
+      reason: `【${input.card.name}】是${kind}卡——物资走道具通道，素材是制卡原料，都不能附魔`,
+    };
   }
 
   // 门禁：单条合法（池内动作 + 定值逐字）
@@ -65,7 +68,10 @@ export function planEnchant(input: EnchantInput): EnchantPlan {
 
   // 同名效果唯一：同一动作不重复登记
   if (existing.some((e) => e.action === gate.action)) {
-    return { ok: false, reason: `【${input.card.name}】已有「${gate.action}」效果——同名效果不叠加，换个效果试试` };
+    return {
+      ok: false,
+      reason: `【${input.card.name}】已有「${gate.action}」效果——同名效果不叠加，换个效果试试`,
+    };
   }
   if (existing.length >= 2) {
     return { ok: false, reason: '每张卡最多登记 2 条效果——先选一张空位多的卡' };
@@ -81,9 +87,14 @@ export function planEnchant(input: EnchantInput): EnchantPlan {
   return { ok: true, effect: gate, cost, nextEffects };
 }
 
-
 /** 单条门禁（复用 coerceCardEffects 的逐条口径：构造单条数组过筛） */
-function coerceSingle(raw: { trigger: string; target: string; action: string; value: number; duration?: number }): CardEffectDef | undefined {
+function coerceSingle(raw: {
+  trigger: string;
+  target: string;
+  action: string;
+  value: number;
+  duration?: number;
+}): CardEffectDef | undefined {
   const [one] = coerceCardEffects([raw]);
   return one;
 }

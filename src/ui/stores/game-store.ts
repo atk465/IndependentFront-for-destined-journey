@@ -149,10 +149,7 @@ import {
 import { planFootAlchemy } from '@engine/card-workshop/partner-alchemy';
 import { planCardCraft } from '@engine/card-workshop/card-craft-plan';
 import { coerceBlueprints, consumeBlueprint } from '@engine/card-workshop/opponent-blueprints';
-import {
-  deriveFallbackProductName,
-  fallbackCraftNarration,
-} from '@engine/card-craft-narrate';
+import { deriveFallbackProductName, fallbackCraftNarration } from '@engine/card-craft-narrate';
 import {
   coerceCustomTalents,
   coerceCustomCards,
@@ -647,9 +644,8 @@ export const useGameStore = defineStore('game', () => {
    */
   const optionSchemeId = computed(
     () =>
-      (saveProfile.value?.worldFlags as Record<string, unknown> | undefined)?.[
-        'optionSchemeId'
-      ] as string | undefined,
+      (saveProfile.value?.worldFlags as Record<string, unknown> | undefined)?.['optionSchemeId'] as
+        string | undefined,
   );
 
   /** 切换行动选项方案（写 worldFlags.optionSchemeId，走既有 set_variable 通道） */
@@ -1405,8 +1401,16 @@ export const useGameStore = defineStore('game', () => {
     const enchantedCard: CardItem = detach({ ...card, cardEffects: nextEffects }) as CardItem;
     const sm = createStateManager(activeSaveId.value);
     const result = await sm.commitChatState([
-      { op: 'remove_item', target: `characters.${playerChar.name}`, value: { name: cardName, quantity: 1 } },
-      { op: 'add_item', target: `characters.${playerChar.name}`, value: enchantedCard as unknown as Record<string, unknown> },
+      {
+        op: 'remove_item',
+        target: `characters.${playerChar.name}`,
+        value: { name: cardName, quantity: 1 },
+      },
+      {
+        op: 'add_item',
+        target: `characters.${playerChar.name}`,
+        value: enchantedCard as unknown as Record<string, unknown>,
+      },
       {
         op: 'update_character',
         target: `characters.${playerChar.name}`,

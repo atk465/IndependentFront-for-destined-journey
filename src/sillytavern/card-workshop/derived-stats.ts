@@ -91,7 +91,8 @@ export function deriveCardAtk(
   level: number,
 ): number {
   const axis = cardAxisOf(词条);
-  const lv = typeof level === 'number' && Number.isFinite(level) ? Math.max(1, Math.round(level)) : 1;
+  const lv =
+    typeof level === 'number' && Number.isFinite(level) ? Math.max(1, Math.round(level)) : 1;
   return 2 * attrOf(attributes, axis) + lv;
 }
 

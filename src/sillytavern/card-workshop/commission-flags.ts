@@ -331,13 +331,11 @@ export function planArrivalSync(input: ArrivalSyncInput): ArrivalSyncOutcome {
       : undefined;
 
   // ── 旅途 SP（2026-09-25）：每旅途日 4 点；人困马乏（<20%）抵达判定劣势 DC+2 ──
-  const travelDays = moved && input.routeDays !== null ? Math.max(0, Math.floor(input.routeDays)) : 0;
-  const travelSpCost =
-    input.playerSp !== undefined ? travelDays * TRAVEL_SP_PER_DAY : 0;
+  const travelDays =
+    moved && input.routeDays !== null ? Math.max(0, Math.floor(input.routeDays)) : 0;
+  const travelSpCost = input.playerSp !== undefined ? travelDays * TRAVEL_SP_PER_DAY : 0;
   const spAfterTravel =
-    input.playerSp !== undefined
-      ? Math.max(0, input.playerSp - travelSpCost)
-      : undefined;
+    input.playerSp !== undefined ? Math.max(0, input.playerSp - travelSpCost) : undefined;
   const spExhausted = spAfterTravel !== undefined && spAfterTravel < input.playerSp! * 0.2;
 
   // ── 抵达判定（中层变化 × 危险层 × 给了骰值） ──

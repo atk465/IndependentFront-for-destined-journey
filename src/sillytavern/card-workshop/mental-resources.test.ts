@@ -6,12 +6,7 @@ import { describe, it, expect } from 'vitest';
 import { insightModOf, deriveCombatStats } from './derived-stats';
 import { judgeUnseal } from './unsealing';
 import { cardPlayPlan, mpCostOf, CARD_MP_COST_BY_TIER } from './entry-combat';
-import {
-  startSkirmish,
-  playBeat,
-  SP_COST_PLAY,
-  SP_COST_COUNTER,
-} from './skirmish-session';
+import { startSkirmish, playBeat, SP_COST_PLAY, SP_COST_COUNTER } from './skirmish-session';
 import { planArrivalSync, TRAVEL_SP_PER_DAY } from './commission-flags';
 import { planCardCraft } from './card-craft-plan';
 
@@ -174,7 +169,10 @@ describe('旅途 SP（每旅途日 4 点；人困马乏 DC+2）', () => {
 
 describe('派生值行数据（面板展示口径）', () => {
   it('deriveCombatStats 与修正修正同源', () => {
-    const s = deriveCombatStats({ attributes: { str: 16, con: 14, dex: 12, int: 16, spi: 10 }, level: 12 });
+    const s = deriveCombatStats({
+      attributes: { str: 16, con: 14, dex: 12, int: 16, spi: 10 },
+      level: 12,
+    });
     expect(s.atk).toBe(2 * 16 + 12);
     expect(s.guard).toBe(2 * 14 + 6);
     expect(s.agi).toBe(2 * 12 + 6);

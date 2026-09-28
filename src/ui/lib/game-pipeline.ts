@@ -3520,7 +3520,8 @@ export class GamePipeline {
     if (!playerC || !this.ownsActiveSave) return;
     const today = this.currentGameDay();
     const flags = (this.game.saveProfile?.worldFlags ?? {}) as Record<string, unknown>;
-    const last = typeof flags['lastRegenDay'] === 'number' ? (flags['lastRegenDay'] as number) : null;
+    const last =
+      typeof flags['lastRegenDay'] === 'number' ? (flags['lastRegenDay'] as number) : null;
     if (last !== null && today <= last) return;
     const days = last === null ? 1 : Math.max(1, Math.min(30, today - last));
     const hpHeal = Math.ceil((playerC.maxHp || 0) / 2) * days;
@@ -3654,7 +3655,9 @@ export class GamePipeline {
             ...(consumeHeal > 0
               ? { hp: Math.min(playerC.maxHp, playerC.hp + consumeHeal) - playerC.hp }
               : {}),
-            ...(consumeMp > 0 ? { mp: Math.min(playerC.maxMp, playerC.mp + consumeMp) - playerC.mp } : {}),
+            ...(consumeMp > 0
+              ? { mp: Math.min(playerC.maxMp, playerC.mp + consumeMp) - playerC.mp }
+              : {}),
           },
         } as StatePatch);
       }
