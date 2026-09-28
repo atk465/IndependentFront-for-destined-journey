@@ -150,7 +150,10 @@ export interface CardInPlayEffect {
     | 'frenzy'
     | 'berserk'
     | 'evolution'
-    | 'comboAnchor';
+    | 'comboAnchor'
+    // 慎用清单（效果批十）：dominate = 威胁转嫁敌自伤；seal = 威胁锁 1 整场
+    | 'dominate'
+    | 'seal';
   amount: number;
   /** 持续拍数（缺省 = 整场）；每拍结束递减，归零移除 */
   beatsLeft?: number;

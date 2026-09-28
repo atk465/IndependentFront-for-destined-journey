@@ -372,6 +372,12 @@ export interface TranslatedEffects {
   branch?: { successDamage: number; fallbackHeal: number };
   /** 打出时·终结一击（效果批九）：按敌方已损失气血 % 计真实伤害 */
   finisherPct?: number;
+  /** 打出时·断章（效果批十）：本拍敌方随机换式（骰子驱动）且威胁减半 */
+  suddenShift?: boolean;
+  /** 打出时·夺式（效果批十）：窃取敌方最强一式之力（最高威胁一半，上限 12） */
+  stealForm?: boolean;
+  /** 打出时·连锁风暴（效果批十）：行动值 +base%，每层在场效果再 +perEffect% */
+  chainStorm?: { base: number; perEffect: number };
   /** 拍结束·伤害（效果批五）：全部结算完成后直扣敌方 */
   endBeatDamage?: number;
   /** 拍结束·治疗（效果批五）：并入玩家 HP 链 */
@@ -503,6 +509,21 @@ export function translateCardEffects(
         out.finisherPct = scaled;
         out.lines.push(`▸ 【效果】终结一击：斩得越深越痛（已损失气血 ${scaled}% 计真伤）`);
         break;
+      case '断章':
+        // 慎用（效果批十）：换式与骰子只在 playBeat——此处登记口径
+        out.suddenShift = true;
+        out.lines.push(`▸ 【效果】断章：撕掉它的下一页——敌方被迫变招（预警：扰乱位）`);
+        break;
+      case '夺式':
+        // 慎用（效果批十）：威胁表只有 playBeat 有——此处登记口径
+        out.stealForm = true;
+        out.lines.push(`▸ 【效果】夺式：它的最强一式易主了（预警：窃取位）`);
+        break;
+      case '连锁风暴':
+        // 慎用（效果批十）：无限连锁降级为有界连锁——放大倍率随在场层数
+        out.chainStorm = { base: scaled, perEffect: 3 };
+        out.lines.push(`▸ 【效果】连锁风暴：每层在场效果都在为它供能（预警：连锁位）`);
+        break;
       case '死亡倒计时': {
         const beats = Math.max(1, Math.round(e.duration ?? 3));
         out.activate.push({
@@ -524,6 +545,15 @@ export function translateCardEffects(
         out.activate.push(
           { name: '觉醒', type: 'frenzy', amount: scaled },
           { name: '觉醒·回复', type: 'regen', amount: 2 },
+        );
+        out.lines.push(`▸ 【效果】${effectLineOf(e)}`);
+        break;
+      }
+      case '时间裂缝': {
+        // 慎用（效果批十）：额外一拍 = 敌方不行动（stun 现成）+ 行动值乘区（frenzy 现成）
+        out.activate.push(
+          { name: '时间裂缝', type: 'stun', amount: 0, beatsLeft: 1 },
+          { name: '时间裂缝·加速', type: 'frenzy', amount: scaled, beatsLeft: 1 },
         );
         out.lines.push(`▸ 【效果】${effectLineOf(e)}`);
         break;
@@ -562,7 +592,9 @@ export function translateCardEffects(
       case '时之锚':
       case '狂暴':
       case '进化':
-      case '连携锚': {
+      case '连携锚':
+      case '支配':
+      case '封印': {
         const type =
           e.action === '易伤' || e.action === '诅咒'
             ? 'vulnerable'
@@ -613,7 +645,11 @@ export function translateCardEffects(
                                                       ? 'evolution'
                                                       : e.action === '连携锚'
                                                         ? 'comboAnchor'
-                                                        : 'dot';
+                                                        : e.action === '支配'
+                                                          ? 'dominate'
+                                                          : e.action === '封印'
+                                                            ? 'seal'
+                                                            : 'dot';
         const eff: CardInPlayEffect = {
           name: e.action,
           type: type as CardInPlayEffect['type'],
@@ -691,9 +727,11 @@ export function playBeat(
   // 束缚=威胁锁 1。多效果叠加取最强（恐惧 > 束缚 > 减速）。
   const liveFear = live.some((e) => e.type === 'fear');
   const liveBind = live.some((e) => e.type === 'bind');
+  // 封印（效果批十·慎用）：威胁锁 1 整场——束缚的整场加强版
+  const liveSeal = live.some((e) => e.type === 'seal');
   const liveSilence = live.some((e) => e.type === 'silence');
   const liveDisarm = live.some((e) => e.type === 'disarm');
-  const effectiveIntent = stunActive
+  let effectiveIntent = stunActive
     ? { ...intent, threat: 0 }
     : liveFear
       ? {
@@ -707,9 +745,11 @@ export function playBeat(
           ? { ...intent, counters: [] as typeof intent.counters }
           : liveBind
             ? { ...intent, threat: 1 }
-            : weakenTotal > 0
-              ? { ...intent, threat: Math.max(0, intent.threat - weakenTotal) }
-              : intent;
+            : liveSeal
+              ? { ...intent, threat: Math.min(intent.threat, 1) }
+              : weakenTotal > 0
+                ? { ...intent, threat: Math.max(0, intent.threat - weakenTotal) }
+                : intent;
   const effectLines: string[] = [];
   if (stunActive) {
     const sleeping = live.some((e) => e.type === 'sleep');
@@ -720,6 +760,7 @@ export function playBeat(
   else if (liveDisarm) effectLines.push(`▸ 【缴械】它的兵器脱手——威胁 −40%`);
   else if (liveSilence) effectLines.push(`▸ 【沉默】封了它的口——无法反制`);
   else if (liveBind) effectLines.push(`▸ 【束缚】缠住了它的手脚——威胁锁 1`);
+  else if (liveSeal) effectLines.push(`▸ 【封印】符咒贴死了它的每一式——威胁锁 1（整场）`);
   else if (weakenTotal > 0) effectLines.push(`▸ 减速战技：敌方威胁 −${weakenTotal}`);
 
   // 在场加成（此前打出的领域/装备/召唤…）：行动值先行叠加，审计单列一行可复算
@@ -757,6 +798,29 @@ export function playBeat(
   if (comboDamage > 0) {
     fx.endBeatDamage = (fx.endBeatDamage ?? 0) + comboDamage;
     fx.lines.push(`▸ 【连携锚】连击成势——拍末追加 ${comboDamage} 伤害`);
+  }
+
+  // 夺式（效果批十·慎用）：窃取最强一式之力——最高威胁的一半入行动值（上限 12）
+  if (fx.stealForm) {
+    const maxThreat = Math.max(...s.intents.map((it) => Math.max(0, Math.round(it.threat))));
+    const stolen = Math.min(12, Math.round(maxThreat / 2));
+    if (stolen > 0) {
+      fx.powerBonus += stolen;
+      fx.lines.push(`▸ 【夺式】它最强一式的力道到了你手上——行动值 +${stolen}（预警：窃取位）`);
+    }
+  }
+  // 断章（效果批十·慎用）：骰子驱动随机换式——轮换节奏作废，变招威胁减半（洞悉因此失准）
+  if (fx.suddenShift && s.intents.length > 1) {
+    const pick = s.intents[(s.beat + dice) % s.intents.length];
+    if (pick && pick !== intent) {
+      effectiveIntent = {
+        ...pick,
+        threat: Math.max(1, Math.round(pick.threat / 2)),
+      };
+      fx.lines.push(
+        `▸ 【断章】它的下一页被撕掉了——仓促变招为「${pick.move}」（威胁减半，预警：扰乱位）`,
+      );
+    }
   }
 
   // 变异（效果批五）：live 时每拍按拍骰随机一项——威胁+3 / 敌承伤+8% / 敌自伤4
@@ -817,11 +881,29 @@ export function playBeat(
   const frenzyPct = live
     .filter((e) => e.type === 'frenzy' || e.type === 'berserk')
     .reduce((sum, e) => sum + Math.max(0, e.amount), 0);
-  const rawPower = (Math.max(0, action.power) + fx.powerBonus) * (1 + frenzyPct / 100);
+  // 连锁风暴（效果批十·慎用）：无限连锁降级为有界——每层在场效果 +3%
+  const stormPct = fx.chainStorm ? fx.chainStorm.base + live.length * fx.chainStorm.perEffect : 0;
+  if (stormPct > 0) {
+    fx.lines.push(
+      `▸ 【连锁风暴】${live.length} 层在场连锁供能——行动值 +${stormPct}%（预警：连锁位）`,
+    );
+  }
+  const rawPower = (Math.max(0, action.power) + fx.powerBonus) * (1 + (frenzyPct + stormPct) / 100);
   const effectiveAction = {
     ...action,
     power: Math.round(rawPower * fx.powerMult) + (buffTotal > 0 ? buffTotal : 0),
   };
+  // 支配（效果批十·慎用）：控制权转移——它把自己的威胁尽数打在自己身上（真伤），你不受其击。
+  // 必须在 effectiveThreat 捕获前清零：DC/伤害基准都走这条变量
+  const pendingDominate = live.some((e) => e.type === 'dominate') ? effectiveIntent.threat : 0;
+  if (pendingDominate > 0) {
+    effectiveIntent = { ...effectiveIntent, threat: 0 };
+    fx.directDamage = (fx.directDamage ?? 0) + pendingDominate;
+    fx.lines.push(
+      `▸ 【支配】夺其心志——它的 ${pendingDominate} 点威胁将尽数落在自己身上（预警：控制位）`,
+    );
+  }
+
   // 变异威胁：仅影响本拍敌方威胁判定（resolveBeat 输入侧），不改敌方意图本体
   const effectiveThreat = effectiveIntent.threat + mutationThreat;
 

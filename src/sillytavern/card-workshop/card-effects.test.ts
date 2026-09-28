@@ -18,8 +18,8 @@ import { cardAxisOf, deriveCardAtk, CARD_ELEMENT_AXIS } from './derived-stats';
 import { conditionsMet, type CardEffectDef } from './card-effects';
 
 describe('效果池与元素映射（派生打底）', () => {
-  it('池 53 条（47 + 批九特殊类 6），九元素九映射', () => {
-    expect(EFFECT_POOL).toHaveLength(53);
+  it('池 59 条（53 + 批十慎用 6），九元素九映射', () => {
+    expect(EFFECT_POOL).toHaveLength(59);
     expect(Object.keys(ELEMENT_DEFAULT_EFFECT)).toHaveLength(9);
     for (const action of Object.values(ELEMENT_DEFAULT_EFFECT)) {
       expect(poolEntryOf(action)).toBeDefined(); // 映射的动作都在池内
@@ -926,6 +926,149 @@ describe('效果批九（特殊类：时之锚/觉醒/狂暴/进化/连携锚/�
     const w0 = playBeat(s, { ...hit, cardName: '终结卡' }, 5, { effects: [act] });
     // 缺失 300 × 20% = 60 真伤 + 行动值 10（反制必败）
     expect(w0.enemyHp).toBe(300 - 10 - 60);
+  });
+});
+
+describe('效果批十（慎用清单：支配/时间裂缝/夺式/封印/断章/连锁风暴）', () => {
+  // 同批九口径：threat 30 / dice 5 / power 10 → 反制必败（15 < 30）
+  const mk = (playerHp = 200) =>
+    startSkirmish({
+      enemyName: '忌兽',
+      intents: [{ move: '重压', threat: 30, counters: [] }],
+      playerHp,
+      playerMaxHp: Math.max(playerHp, 120),
+      enemyHp: 600,
+      guard: 0,
+    });
+  const hit = { label: '打一拍', power: 10, tags: [] };
+
+  it('池门禁：六条新效果全在池内', () => {
+    for (const a of ['支配', '时间裂缝', '夺式', '封印', '断章', '连锁风暴'] as const) {
+      expect(poolEntryOf(a)).toBeDefined();
+    }
+  });
+
+  it('支配：威胁转为对敌真伤，玩家只吃算不上反制的 1 点擦伤', () => {
+    const s = startSkirmish({
+      enemyName: '忌兽',
+      intents: [{ move: '重压', threat: 30, counters: [] }],
+      playerHp: 200,
+      playerMaxHp: 200,
+      enemyHp: 600,
+      guard: 0,
+      initialEffects: [{ name: '支配', type: 'dominate', amount: 0, beatsLeft: 1 }],
+    });
+    const after = playBeat(s, hit, 5, {});
+    // 威胁清零后 DC=1：反制必成余量 14 → 10+14=24 伤害 + 转嫁真伤 30
+    expect(after.enemyHp).toBe(600 - 24 - 30);
+    expect(after.playerHp).toBe(200);
+    expect(after.log.some((l) => l.includes('【支配】') && l.includes('预警'))).toBe(true);
+  });
+
+  it('时间裂缝：下一拍敌方不行动 + 行动值 +50%（复用 stun/frenzy 双通道）', () => {
+    const act = {
+      trigger: '每拍' as const,
+      target: '自身' as const,
+      action: '时间裂缝' as const,
+      value: 50,
+      duration: 1,
+    };
+    const w0 = playBeat(mk(), { ...hit, cardName: '裂缝卡' }, 5, { effects: [act] });
+    expect(w0.enemyHp).toBe(590);
+    const w1 = playBeat(w0, hit, 5, {});
+    // 威胁 0 → DC=1 反制必成余量 19 → 15+19=34；反制成功无伤
+    expect(w1.enemyHp).toBe(600 - 10 - 34);
+    expect(w1.playerHp).toBe(170);
+    // 一次性：第三拍恢复常态（威胁 30，反制失败承 30）
+    const w2 = playBeat(w1, hit, 5, {});
+    expect(w2.playerHp).toBe(140);
+  });
+
+  it('夺式：窃取最强一式一半威胁入行动值（上限 12）', () => {
+    const act = {
+      trigger: '打出时' as const,
+      target: '敌单体' as const,
+      action: '夺式' as const,
+      value: 0,
+    };
+    const after = playBeat(mk(), { ...hit, cardName: '夺式卡' }, 5, { effects: [act] });
+    // 30/2=15 → 上限 12 → 行动值 22，反制仍败（27 < 30）→ 敌吃 22
+    expect(after.enemyHp).toBe(600 - 22);
+    expect(after.playerHp).toBe(170);
+    expect(after.log.some((l) => l.includes('【夺式】'))).toBe(true);
+  });
+
+  it('封印：威胁锁 1 整场（束缚的整场加强版）', () => {
+    const s = startSkirmish({
+      enemyName: '忌兽',
+      intents: [{ move: '重压', threat: 30, counters: [] }],
+      playerHp: 200,
+      playerMaxHp: 200,
+      enemyHp: 600,
+      guard: 0,
+      initialEffects: [{ name: '封印', type: 'seal', amount: 0 }],
+    });
+    const after = playBeat(s, hit, 5, {});
+    expect(after.log.some((l) => l.includes('【封印】'))).toBe(true);
+    expect((after.activeEffects ?? []).find((e) => e.type === 'seal')?.beatsLeft).toBeUndefined();
+    // 威胁 1 → 反制必成余量 14 → 10+14=24；反制成功无伤
+    expect(after.enemyHp).toBe(600 - 24);
+    expect(after.playerHp).toBe(200);
+  });
+
+  it('断章：骰子驱动随机换式且威胁减半', () => {
+    const s = startSkirmish({
+      enemyName: '三式兽',
+      intents: [
+        { move: '扑咬', threat: 6, counters: [] },
+        { move: '重锤', threat: 14, counters: ['格挡'] },
+        { move: '蓄力', threat: 4, counters: [] },
+      ],
+      playerHp: 100,
+      playerMaxHp: 100,
+      enemyHp: 600,
+      guard: 10,
+    });
+    const act = {
+      trigger: '打出时' as const,
+      target: '敌单体' as const,
+      action: '断章' as const,
+      value: 0,
+    };
+    const after = playBeat(s, { ...hit, cardName: '断章卡' }, 5, { effects: [act] });
+    // 拍 0 游标=扑咬，(0+5)%3=2 → 变招蓄力（4→2）→ 反制必成余量 13 → 23
+    const line = after.log.find((l) => l.includes('【断章】'));
+    expect(line).toContain('蓄力');
+    expect(after.enemyHp).toBe(600 - 23);
+  });
+
+  it('连锁风暴：基础 +15%，每层在场效果再 +3%', () => {
+    const act = {
+      trigger: '打出时' as const,
+      target: '自身' as const,
+      action: '连锁风暴' as const,
+      value: 15,
+    };
+    const big = { label: '打一拍', power: 20, tags: [] };
+    const empty = playBeat(mk(), big, 5, { effects: [act] });
+    // 无在场：15% → 20*1.15=23，反制败 → 敌吃 23
+    expect(empty.enemyHp).toBe(600 - 23);
+    const seeded = startSkirmish({
+      enemyName: '忌兽',
+      intents: [{ move: '重压', threat: 30, counters: [] }],
+      playerHp: 200,
+      playerMaxHp: 200,
+      enemyHp: 600,
+      guard: 0,
+      initialEffects: [
+        { name: '幕', type: 'shield', amount: 6, beatsLeft: 5 },
+        { name: '愈', type: 'regen', amount: 2, beatsLeft: 5 },
+      ],
+    });
+    const two = playBeat(seeded, big, 5, { effects: [act] });
+    // 2 层在场（护盾/回复不加行动值）：15+6=21% → 20*1.21=24.2→24
+    expect(two.enemyHp).toBe(600 - 24);
+    expect(two.log.some((l) => l.includes('【连锁风暴】') && l.includes('2 层'))).toBe(true);
   });
 });
 
