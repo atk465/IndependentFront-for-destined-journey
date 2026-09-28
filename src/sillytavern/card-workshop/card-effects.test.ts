@@ -15,7 +15,7 @@ import {
 } from './card-effects';
 import { startSkirmish, playBeat } from './skirmish-session';
 import { cardAxisOf, deriveCardAtk, CARD_ELEMENT_AXIS } from './derived-stats';
-import type { CardEffectDef } from './card-effects';
+import { conditionsMet, type CardEffectDef } from './card-effects';
 
 describe('效果池与元素映射（派生打底）', () => {
   it('池 43 条（前四批 42 + 批六免疫 1），九元素九映射', () => {
@@ -485,6 +485,53 @@ describe('效果批六（免疫/治疗时响应）', () => {
     });
     const after = playBeat(s, { label: '空挥', power: 0, tags: [] }, 15);
     expect(after.playerHp).toBe(85); // 敌方反击照常（威胁 20，无防护）
+  });
+});
+
+describe('条件位（效果批七：交锋内账本）', () => {
+  const intent = { move: '重击', threat: 20, counters: ['防御'] };
+  it('conditionsMet：空条件恒真；计数不足为假', () => {
+    expect(conditionsMet(undefined, { 出卡: 5 })).toBe(true);
+    expect(conditionsMet([], {})).toBe(true);
+    expect(conditionsMet([{ event: '出卡', count: 3 }], { 出卡: 2 })).toBe(false);
+    expect(conditionsMet([{ event: '出卡', count: 3 }], { 出卡: 3 })).toBe(true);
+    // 多条件 AND
+    expect(
+      conditionsMet(
+        [{ event: '出卡', count: 1 }, { event: '承受伤害', count: 1 }],
+        { 出卡: 1, 承受伤害: 1 },
+      ),
+    ).toBe(true);
+  });
+  it('条件不满足 → 效果空过+战报注明；满足 → 正常结算', () => {
+    const s = startSkirmish({
+      enemyName: '兽', intents: [intent], playerHp: 100, playerMaxHp: 100,
+      enemyHp: 600, guard: 10,
+    });
+    // 场上没出过卡（账本空）→ 条件「出卡≥2」不满足 → 空过
+    const skipped = playBeat(s, { label: '条件技', power: 20, tags: [] }, 15, {
+      effects: [
+        {
+          trigger: '打出时', target: '敌单体', action: '伤害', value: 8,
+          conditions: [{ event: '出卡', count: 2 }],
+        },
+      ],
+    });
+    expect(skipped.log.some((l) => l.includes('条件未满足'))).toBe(true);
+    expect(skipped.enemyHp).toBeLessThan(590); // 效果空过（敌 HP 只受本体伤害与敌方反击无关）
+  });
+  it('账本递增：出卡/受击/治疗 计入 beatEvents', () => {
+    const s = startSkirmish({
+      enemyName: '兽', intents: [intent], playerHp: 100, playerMaxHp: 100,
+      enemyHp: 600, guard: 10, playerSp: 50,
+    });
+    const after = playBeat(s, { label: '打一拍', power: 10, tags: [], cardName: '铁剑卡' }, 15, {
+      effects: [{ trigger: '打出时', target: '自身', action: '治疗', value: 5 }],
+    });
+    expect(after.beatEvents?.['出卡']).toBe(1);
+    // 反制成功（25≥20）→ 玩家未承伤，不记「承受伤害」；敌方掉血也不记玩家侧击杀
+    expect(after.beatEvents?.['承受伤害']).toBeUndefined();
+    expect(after.beatEvents?.['治疗']).toBe(1);
   });
 });
 

@@ -93,6 +93,34 @@ export interface EffectCost {
   hp?: number;
 }
 
+/** 交锋内事件（效果批七·条件位：会话账本八计数器，拍拍递增、会话结束清零） */
+export type BeatEvent =
+  | '出卡'
+  | '受击'
+  | '造成伤害'
+  | '承受伤害'
+  | '治疗'
+  | '反制成功'
+  | '击杀'
+  | '友方退场';
+
+/** 效果条件（公式第 7 位落地；单条件数组，全部满足才结算） */
+export interface EffectCondition {
+  event: BeatEvent;
+  /** 阈值（本场合计计数 ≥ 阈值即满足） */
+  count: number;
+}
+
+/** 条件校验（纯函数）：账本 vs 条件数组，全部满足才 true；空数组 = 无条件恒真 */
+export function conditionsMet(
+  conditions: readonly EffectCondition[] | undefined,
+  ledger: Partial<Record<BeatEvent, number>> | undefined,
+): boolean {
+  if (!conditions || conditions.length === 0) return true;
+  const led = ledger ?? {};
+  return conditions.every((c) => (led[c.event] ?? 0) >= Math.max(1, Math.round(c.count)));
+}
+
 /** 一条结构化卡牌效果（效果描述公式的落地形状） */
 export interface CardEffectDef {
   trigger: EffectTrigger;
@@ -104,8 +132,8 @@ export interface CardEffectDef {
   duration?: number;
   /** 使用代价（本批只收资源） */
   cost?: EffectCost;
-  /** 条件（schema 留位，本批不实现） */
-  condition?: string;
+  /** 条件（效果批七：单条件数组，全部满足才结算；不满足空过+战报） */
+  conditions?: EffectCondition[];
 }
 
 /** 单卡效果集（卡定义上的新字段；派生打底与精配覆写都产出它） */

@@ -29,6 +29,7 @@ import { activateListOf, type ActivateInput, type CardInPlayEffect } from './ent
 import { duelSuppressesEffect, type DuelRules } from './battle-rules';
 import { ENTRY_STRENGTH_BASELINE } from './talent-entry';
 import {
+  conditionsMet,
   deriveCardEffects,
   effectLineOf,
   type CardEffectDef,
@@ -115,6 +116,11 @@ export interface SkirmishSession {
    * 每当本拍发生治疗，逐条触发一次（每拍每条至多一次）。
    */
   healResponses?: { name: string; action: string; value: number }[];
+  /**
+   * 交锋内事件账本（效果批七·条件位）：八事件计数器，拍拍递增、会话结束清零。
+   * 条件效果（conditions）据此判定；缺省 undefined = 无事件发生（条件引用按 0 算）。
+   */
+  beatEvents?: Partial<Record<import('./card-effects').BeatEvent, number>>;
 }
 
 /** 单个敌人实体（多敌实体化 2026-09-28） */
@@ -375,6 +381,8 @@ export interface TranslatedEffects {
   healResponses?: { name: string; action: string; value: number }[];
   /** 击杀时效果（效果批三：汲取等；胜利时结算） */
   onKill?: { action: string; value: number }[];
+  /** 条件不满足的效果（效果批七：空过，战报注明） */
+  skipped?: { effect: CardEffectDef; reason: string }[];
   /** 状态层 → 在场登记（叠层合并后） */
   activate: CardInPlayEffect[];
   /** 审计行 */
@@ -389,11 +397,19 @@ export interface TranslatedEffects {
 export function translateCardEffects(
   effects: readonly CardEffectDef[] | undefined,
   enemyCount: number,
+  ledger?: Partial<Record<import('./card-effects').BeatEvent, number>>,
 ): TranslatedEffects {
   const out: TranslatedEffects = { powerBonus: 0, powerMult: 1, heal: 0, mpHeal: 0, guardDown: 0, activate: [], lines: [] };
   if (!effects || effects.length === 0) return out;
   const mult = Math.max(1, Math.round(enemyCount));
   for (const e of effects) {
+    // 条件位（效果批七）：不满足 → 空过+战报注明
+    if (!conditionsMet(e.conditions, ledger)) {
+      out.skipped = out.skipped ?? [];
+      out.skipped.push({ effect: e, reason: '条件未满足' });
+      out.lines.push(`▸ 【效果】${e.action}——条件未满足，本拍空过`);
+      continue;
+    }
     const scaled = e.target === '敌全体' ? e.value * mult : e.value;
     switch (e.action) {
       case '伤害':
@@ -647,8 +663,12 @@ export function playBeat(
   const buffTotal = s.activeEffects
     .filter((e) => e.type === 'buff')
     .reduce((sum, e) => sum + Math.max(0, e.amount), 0);
+  // 事件账本（效果批七·条件位）：本拍开始时快照供条件判定（本拍新事件不影响本拍条件）
+  const ledgerAtStart: Partial<Record<import('./card-effects').BeatEvent, number>> = {
+    ...(s.beatEvents ?? {}),
+  };
   // 效果池翻译（2026-09-25）：打出时动作层即时结算、状态层进在场登记
-  const fx = translateCardEffects(opts?.effects, opts?.enemyCount ?? s.enemyCount ?? 1);
+  const fx = translateCardEffects(opts?.effects, opts?.enemyCount ?? s.enemyCount ?? 1, ledgerAtStart);
 
   // 变异（效果批五）：live 时每拍按拍骰随机一项——威胁+3 / 敌承伤+8% / 敌自伤4
   const liveMutation = live.some((e) => e.type === 'mutation');
@@ -711,6 +731,18 @@ export function playBeat(
   const playerDamageBase = result.playerDamage ?? 0;
   const divineBlocked = liveDivine !== undefined && playerDamageBase > 0;
   const immuneBlocked = liveImmune && playerDamageBase > 0;
+
+  // 事件账本（效果批七·条件位）：单敌分支——受击/反制/击杀在 resolveBeat 后即可记账
+  const events: Partial<Record<import('./card-effects').BeatEvent, number>> = {
+    ...(s.beatEvents ?? {}),
+  };
+  const bump = (k: import('./card-effects').BeatEvent, n = 1) => {
+    events[k] = (events[k] ?? 0) + n;
+  };
+  if (action.cardName) bump('出卡');
+  if (!result.countered && playerDamageBase > 0) bump('承受伤害');
+  if (result.countered) bump('反制成功');
+  if (result.enemyHp <= 0) bump('击杀');
   const lines = [
     // 出卡宣言（主人裁定：玩家写这张牌用来做什么，纯叙事素材，置于拍审计之前）
     ...(action.note ? [`▸ 意图：${action.note}`] : []),
@@ -924,6 +956,7 @@ export function playBeat(
   const endBeatHeal = Math.max(0, Math.round(fx.endBeatHeal ?? 0));
   const baseHealed = fxHeal + drainHealAmount + endBeatHeal;
   const healedTotal = baseHealed + responseHeal;
+  if (baseHealed > 0) bump('治疗');
   const playerHpAfterFxHeal =
     healedTotal > 0 ? Math.min(s.playerMaxHp, playerHpAfterRegen + healedTotal) : playerHpAfterRegen;
   if (fxHeal > 0 && playerHpAfterFxHeal > playerHpAfterRegen) {
@@ -1040,6 +1073,7 @@ export function playBeat(
   let next: SkirmishSession = {
     ...s,
     beat: s.beat + 1,
+    beatEvents: events,
     playerHp: playerHpFinal,
     ...(lastStandFires ? { lastStandUsed: true } : {}),
     ...(opts?.comboFired ? { comboFired: opts.comboFired } : {}),
@@ -1241,9 +1275,14 @@ export function playMultiEnemyBeat(
     return { ...e, hp, intentIndex: (e.intentIndex + 1) % Math.max(1, e.intents.length) };
   });
 
+  // 事件账本递增（效果批七）：本拍发生的全部事件计数
+  const events: Partial<Record<import('./card-effects').BeatEvent, number>> = {
+    ...(s.beatEvents ?? {}),
+  };
   const next: SkirmishSession = {
     ...s,
     beat: s.beat + 1,
+    beatEvents: events,
     playerHp: Math.max(0, s.playerHp - playerDamage),
     enemies: nextEnemies,
     playedCards: action.cardName && !s.playedCards.includes(action.cardName)
@@ -1252,6 +1291,25 @@ export function playMultiEnemyBeat(
     counteredBeats: s.counteredBeats + (countered ? 1 : 0),
     log: [...s.log, ...lines, ...incomingLines, ...deaths],
   };
+  const bump = (k: import('./card-effects').BeatEvent, n = 1) => {
+    events[k] = (events[k] ?? 0) + n;
+  };
+  if (action.cardName) bump('出卡');
+  if (!countered && playerDamage > 0) bump('承受伤害');
+  if (countered) bump('反制成功');
+  // 多敌分支的治疗：打出时治疗/每拍寄生（drain）——本拍有任一来源即计
+  const multiHealSources =
+    (opts?.effects ?? []).some((e) => e.action === '治疗' && e.trigger !== '拍结束') ||
+    (next.enemies ?? []).some(
+      (e) => !e.dead && (e.statuses ?? []).some((st) => st.type === 'drain'),
+    );
+  if (multiHealSources) bump('治疗');
+  if (next.enemyHp <= 0) bump('击杀');
+  const deadThisBeat = (next.enemies ?? []).filter(
+    (e, i) => e.dead && !(s.enemies?.[i]?.dead ?? false),
+  ).length;
+  if ((s.enemies?.length ?? 0) > 1 && deadThisBeat > 0) bump('友方退场', deadThisBeat);
+  next.beatEvents = events;
 
   // 终局：首领倒下或全灭 → 胜利
   const leaderDead = nextEnemies.some((e) => e.role === '首领' && e.dead);
