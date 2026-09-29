@@ -48,7 +48,9 @@ import { cardKindOf, isConsumableKind } from '@engine/card-workshop/card-kind';
 import { willModifierOf } from '@engine/card-workshop/unsealing';
 import { mpCostOf } from '@engine/card-workshop/entry-combat';
 import { deriveCardEffects } from '@engine/card-workshop/card-effects';
-import { deriveCardAtk, insightModOf } from '@engine/card-workshop/derived-stats';
+import { coerceSecondaryAxes } from '@engine/card-workshop/multiplier';
+import { coerceDifficulty } from '@engine/card-workshop/multiplier';
+import { cardAxisOf, deriveCardAtk, insightModOf } from '@engine/card-workshop/derived-stats';
 import { getCommissionDefs } from '@engine/commission-runtime';
 import { coerceCommissionsFlags } from '@engine/card-workshop/commission-flags';
 /** 蜡痕计数键（白蜡城代价；worldFlags.counters 段） */
@@ -2944,6 +2946,7 @@ export class GamePipeline {
         playerSp: playerC.sp,
         playerMaxHp: maxHp,
         enemyHp: assessment.enemyHp,
+        difficulty: assessment.difficulty,
         // 多敌实体（2026-09-28 效果批六后续）：逐敌档案透传（含角色/风格/轮换）
         ...(assessment.enemies && assessment.enemies.length > 0
           ? { enemies: assessment.enemies }
@@ -3038,6 +3041,35 @@ export class GamePipeline {
       console.warn('[GamePipeline] L2 意图解析失败，降级叙事:', err);
       return false;
     }
+  }
+
+  /**
+   * 技能公式上下文（v2 共识·替换制）：出卡=主轴派生+副轴项（cardSecondaryAxes 经门禁）；
+   * 基础应对=无元素力量轴（强攻注入基础强攻效果，防御/闪避伤害基数 0）。
+   * difficulty 取开战锁定的会话档；脏值兜底标准表。
+   */
+  private skillContextOf(
+    item: CardItem | undefined,
+    difficulty: unknown,
+  ): {
+    mainDerivation: number;
+    secondary: { axis: string; bonus: number; derivation: number }[];
+    difficulty: '爽战' | '标准' | '长战';
+  } {
+    const playerC = this.game.player;
+    const attrs = (playerC?.attributes ?? {}) as Record<string, number>;
+    const level = playerC?.level ?? 1;
+    const mainDerivation = deriveCardAtk(item?.词条 ?? [], attrs, level);
+    const secondary = item
+      ? coerceSecondaryAxes(item.cardSecondaryAxes, cardAxisOf(item.词条), item.cardTier).map(
+          (a) => ({
+            axis: a.axis as string,
+            bonus: a.bonus,
+            derivation: 2 * (attrs[a.axis] ?? 10) + level,
+          }),
+        )
+      : [];
+    return { mainDerivation, secondary, difficulty: coerceDifficulty(difficulty) };
   }
 
   private async submitSkirmishCounter(choice: SkirmishChoice): Promise<void> {
@@ -3391,6 +3423,10 @@ export class GamePipeline {
     const beatMpCost = beatCardItem ? mpCostOf(beatCardItem as CardItem) : 0;
     // 效果池（2026-09-25）：打出卡的结构化效果（派生打底/精配覆写/AI 池内选已经门禁）
     const beatEffects = beatCardItem ? deriveCardEffects(beatCardItem as CardItem) : [];
+    // v2 共识·替换制：常规拍一律走技能公式轨（出卡=卡 skill；基础应对=力量轴 skill；
+    // 强攻注入基础强攻效果=主轴派生×难度表；防御/闪避无效果=伤害基数 0、只吃碾压余量）。
+    // 特殊拍（真名/献祭/倒也可斩/禁忌回调）不传 skill = 直接伤害轨（power 即天赋伤害值）。
+    const skillCtx = this.skillContextOf(beatCardItem as CardItem | undefined, session.difficulty);
     const beatOpts = {
       activate,
       prepend,
@@ -3400,6 +3436,13 @@ export class GamePipeline {
       ...(beatMpCost > 0 ? { mpCost: beatMpCost } : {}),
       ...(beatEffects.length > 0 ? { effects: beatEffects } : {}),
       ...(session.enemyCount !== undefined ? { enemyCount: session.enemyCount } : {}),
+      skill: skillCtx,
+      // 基础强攻注入公式效果（主轴派生×难度表）；防御/闪避不注入 = 伤害基数 0，只吃碾压余量
+      ...(choice.kind === '应对' && choice.move === '强攻' && beatEffects.length === 0
+        ? {
+            effects: [{ trigger: '打出时', target: '敌单体', action: '伤害', value: 0 } as const],
+          }
+        : {}),
     };
     const next = playBeat(session, action, this.rollSkirmishD20(), beatOpts);
     // 技能冷却（战斗维度）：每拍 tick + 打出技能卡时启动冷却

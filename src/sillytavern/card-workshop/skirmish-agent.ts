@@ -65,6 +65,8 @@ export interface SkirmishAssessment {
   enemyName: string;
   enemyLevel: number;
   enemyHp: number;
+  /** 难度档（v2 共识：评估 AI 选定；缺省/非法由引擎兜底标准表） */
+  difficulty?: string;
   /** 敌方总战力（碾压速胜判定的敌方输入；AI 未给 = enemyLevel） */
   enemyPower: number;
   intents: EnemyIntent[];
@@ -98,10 +100,10 @@ export function buildAssessmentMessages(req: SkirmishAssessRequest): Array<{
     '你是铭刻纪元的战斗导演。请为一场即将开始的交锋预提交敌方战斗档案与招式序列。',
     '',
     '硬性规则：',
-    '1. 只输出一个 JSON 对象，不要任何其他文字：{"enemyName":"敌人名","enemyLevel":整数,"enemyHp":整数,"enemyPower":整数,"enemyCount":整数,"enemyScale":"体型","intents":[{"move":"招式名","threat":整数,"counters":["反制标签"],"hook":"敌方本拍行动钩子"}]}。enemyCount = 敌方数量（1~6，缺省 1）；enemyScale = 敌方体型（小巧/娇小/常人/巨躯/巨像，缺省常人）——只在遭遇明确为多敌或特殊体型时填写。',
+    '1. 只输出一个 JSON 对象，不要任何其他文字：{"enemyName":"敌人名","enemyLevel":整数,"enemyHp":整数,"enemyPower":整数,"enemyCount":整数,"enemyScale":"体型","difficulty":"难度档","intents":[{"move":"招式名","threat":整数,"counters":["反制标签"],"hook":"敌方本拍行动钩子"}]}。difficulty 从「爽战/标准/长战」三选一：玩家高 3+ 级或战力明显碾压→爽战；|Δ等级|≤2 势均力敌→标准；敌高 3+ 级或头目级→长战（多敌按整场体感选）。enemyCount = 敌方数量（1~6，缺省 1）；enemyScale = 敌方体型（小巧/娇小/常人/巨躯/巨像，缺省常人）——只在遭遇明确为多敌或特殊体型时填写。',
     `2. intents 输出 ${intentsCount} 条，代表这名敌人的**招式轮换**——战斗不限拍数，序列打完会按原序循环使用，开战后不可修改。`,
     '3. counters 只能从白名单里选：强攻 / 防御 / 闪避 / 打断（可多选）。含义：玩家的行动若带有其中任一标签，反制会获得加成——这是玩家的读招空间，务必让每式都有可反制面。',
-    `4. 威胁标定：玩家的典型行动值约为 ${power}（反制掷骰 = d20 + 行动值 + 克制加成，对上 threat 即反制成功）。请把 threat 设在这个量级：势均力敌 ≈ ${power + 10}，明显弱于玩家 ≈ ${Math.max(1, power - 5)}，头目级 ≈ ${power + 15}。enemyLevel 参考玩家等级 ${plLevel} 上下浮动。enemyHp 决定战斗节奏：这场战斗会打到一方 HP 清空为止，请把 HP 标定成势均力敌或略有压力的量级（约单拍伤害 × 4~8）。`,
+    `4. 威胁标定：玩家的典型行动值约为 ${power}（反制掷骰 = d20 + 行动值 + 克制加成，对上 threat 即反制成功）。请把 threat 设在这个量级：势均力敌 ≈ ${power + 10}，明显弱于玩家 ≈ ${Math.max(1, power - 5)}，头目级 ≈ ${power + 15}。enemyLevel 参考玩家等级 ${plLevel} 上下浮动。enemyHp 决定战斗节奏（导演时长锚）：整场时长应落在爽战 3~5 拍 / 标准 4~8 拍 / 长战 6~10 拍——多敌时杂兵约 1~2 拍清一只、首领吃剩余时长并按护卫减伤折算（单敌约单拍伤害 × 对应锚）。`,
     `5. enemyPower = 敌方总战力，玩家综合战力约为 ${Math.max(1, Math.round(req.playerTotalPower ?? power))}；远弱于玩家（≤ 一半）的遭遇会被跳拍碾压结算，请如实标定。`,
     '6. move/hook 用中文短句，hook 写敌方该式的动作画面，不写结果（结果由结算产生）。',
     '7. 多敌遭遇（2~3 敌）：逐敌输出 enemies 数组——每敌独立 hp/两式轮换/风格（拖时间=血厚威胁低、爆发=威胁高血脆、均衡居中）；敌 0 固定标 role「首领」，其余标「杂兵」。总威胁预算不变（各敌威胁相加 ≈ 单敌标定量），首领略高于杂兵。',
@@ -141,6 +143,7 @@ export function parseSkirmishAssessment(raw: string): SkirmishAssessment | null 
       enemyName: name,
       enemyLevel: level,
       enemyHp: hp,
+      difficulty: typeof o.difficulty === 'string' ? o.difficulty : undefined,
       // AI 未给/给了脏值 → 按 enemyLevel 估（碾压判定宁可保守，不误跳拍）
       enemyPower:
         typeof o.enemyPower === 'number' && Number.isFinite(o.enemyPower) && o.enemyPower > 0

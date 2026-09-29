@@ -29,7 +29,12 @@ import { activateListOf, type ActivateInput, type CardInPlayEffect } from './ent
 import { duelSuppressesEffect, type DuelRules } from './battle-rules';
 import { ENTRY_STRENGTH_BASELINE } from './talent-entry';
 import { conditionsMet, effectLineOf, type CardEffectDef } from './card-effects';
-import { aggregateDamage, resolveSkillAmount, type Difficulty } from './multiplier';
+import {
+  aggregateDamage,
+  coerceDifficulty,
+  resolveSkillAmount,
+  type Difficulty,
+} from './multiplier';
 
 /**
  * 技能公式上下文（v2 共识·替换制）：出卡拍由调用方组装传入。
@@ -109,6 +114,8 @@ export interface SkirmishSession {
   cooldowns?: Record<string, number>;
   /** 敌方数量（战斗维度：多敌；缺省 1） */
   enemyCount?: number;
+  /** 难度档（v2 共识：评估 AI 开战选定，整场锁定；脏值兜底标准表） */
+  difficulty?: Difficulty;
   /** 敌方体型（战斗维度：体格差压制；缺省「常人」） */
   enemyScale?: string;
   /** 禁忌卡本场已用卡名账（每张每场限一次；2026-09-19 禁忌卡七链） */
@@ -184,6 +191,8 @@ export interface StartSkirmishInput {
   duel?: DuelRules;
   /** 敌方数量（战斗维度：多敌；缺省 1） */
   enemyCount?: number;
+  /** 难度档（v2 共识：评估 AI 开战选定；脏值兜底标准表） */
+  difficulty?: unknown;
   /** 敌方体型（战斗维度：体格差压制；缺省「常人」） */
   enemyScale?: string;
   /** 禁忌卡本场已用卡名账（每张每场限一次；2026-09-19 禁忌卡七链） */
@@ -231,6 +240,7 @@ export function startSkirmish(input: StartSkirmishInput): SkirmishSession {
     playerMaxHp: clampHp(finiteOr(input.playerMaxHp, playerHp), playerHp),
     enemyHp,
     enemyMaxHp: clampHp(finiteOr(input.enemyMaxHp, enemyHp), enemyHp),
+    difficulty: coerceDifficulty(input.difficulty),
     guard: Math.max(0, Math.round(finiteOr(input.guard, 0))),
     log: [
       `◆ 战斗模式 · 交锋拍制 ◆`,

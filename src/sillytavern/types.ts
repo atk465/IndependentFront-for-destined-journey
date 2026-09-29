@@ -1163,6 +1163,12 @@ export interface CardItem extends InventoryItem {
    * 精配覆写（registerCardEffects）优先级最高。存原始形状，读侧门禁——存档健壮性口径。
    */
   cardEffects?: unknown;
+  /**
+   * 副属性加成轴（v2 共识 Q2-Q6）：伤害额外吃其他属性 X% 的离散档登记
+   * （{axis,bonus}[]；经 coerceSecondaryAxes 门禁后存储——条数随档位 0/1/1/2/2、
+   * 副轴≠主轴、bonus ∈ {20,40,60,100}）。存原始形状，读侧门禁——存档健壮性口径。
+   */
+  cardSecondaryAxes?: unknown;
 }
 
 /** 融合配方（确定性内核 card-fusion.ts 的输入/输出） */
