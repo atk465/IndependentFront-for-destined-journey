@@ -29,6 +29,35 @@ import { activateListOf, type ActivateInput, type CardInPlayEffect } from './ent
 import { duelSuppressesEffect, type DuelRules } from './battle-rules';
 import { ENTRY_STRENGTH_BASELINE } from './talent-entry';
 import { conditionsMet, effectLineOf, type CardEffectDef } from './card-effects';
+import { aggregateDamage, resolveSkillAmount, type Difficulty } from './multiplier';
+
+/**
+ * 技能公式上下文（v2 共识·替换制）：出卡拍由调用方组装传入。
+ * 缺省 = 旧定值轨（2026-09-25 池定值语义；过渡双轨，批次 3 接线后删除）。
+ */
+export interface SkillContext {
+  /** 主轴派生（deriveCardAtk：2×对应属性+等级） */
+  mainDerivation: number;
+  /** 副轴（门禁后的合法集，派生由调用方按面板算好） */
+  secondary: readonly { axis: string; bonus: number; derivation: number }[];
+  /** 难度档（敌情评估 AI 开战选定；脏值兜底标准表） */
+  difficulty: Difficulty;
+}
+
+/** A 类 dot/护盾群（skill 轨：每拍量按难度表出手快照，Q12；削减族与 % 状态保持定点） */
+const DOT_LIKE: ReadonlySet<string> = new Set([
+  '中毒',
+  '灼烧',
+  '流血',
+  '混乱',
+  '标记',
+  '寄生',
+  '感染',
+  '连携锚',
+  '反伤',
+  '护盾',
+  '格挡',
+]);
 
 /** 会话终局态；null = 交锋中 */
 export type SkirmishFinish = null | '胜利' | '碾压' | '撤退' | '败北';
@@ -300,6 +329,8 @@ export interface BeatOptions {
   effects?: readonly CardEffectDef[];
   /** 敌方数量（敌全体倍化用；缺省 1）——与 session.enemyCount 同源，避免再读会话 */
   enemyCount?: number;
+  /** 技能公式上下文（v2 共识·替换制）：出卡拍传 → A 类公式化+乘区链；缺省旧定值轨 */
+  skill?: SkillContext;
   /** 启封判定等前置审计行（置于意图行之后、拍审计之前） */
   prepend?: string[];
   /** 暴走/反噬反冲：拍末玩家 HP −n（clamp 0，可致死 → 败北） */
@@ -352,10 +383,15 @@ export const NUKE_PERCENT = 50;
 
 /** 翻译结果：动作层的即时结算值 + 状态层的在场登记 */
 export interface TranslatedEffects {
-  /** 打出时·伤害 → 行动值追加 */
+  /** 打出时·伤害 → 行动值追加（skill 轨：技能公式点数合计） */
   powerBonus: number;
-  /** 打出时·连击 → 行动值乘区（1.5 = +50%；与 powerBonus 相乘前先加） */
+  /** 打出时·连击 → 行动值乘区（1.5 = +50%；与 powerBonus 相乘前先加；skill 轨弃用） */
   powerMult: number;
+  /**
+   * Q7' 重定基：Σ「本拍伤害+%」（连击族/觉醒/狂暴/时间裂缝/连锁风暴/夺式/分支——
+   * 乘区链加算层 1；skill 轨专用，旧轨恒 0）
+   */
+  powerBonusPct: number;
   /** 打出时·治疗/吸血 → 拍末玩家 HP 回复（吸血按本拍对敌伤害折算在 playBeat 内补） */
   heal: number;
   /** 打出时·凝神 → 拍末 MP 回复（落库由结算层） */
@@ -407,10 +443,12 @@ export function translateCardEffects(
   effects: readonly CardEffectDef[] | undefined,
   enemyCount: number,
   ledger?: Partial<Record<import('./card-effects').BeatEvent, number>>,
+  skill?: SkillContext,
 ): TranslatedEffects {
   const out: TranslatedEffects = {
     powerBonus: 0,
     powerMult: 1,
+    powerBonusPct: 0,
     heal: 0,
     mpHeal: 0,
     guardDown: 0,
@@ -419,6 +457,31 @@ export function translateCardEffects(
   };
   if (!effects || effects.length === 0) return out;
   const mult = Math.max(1, Math.round(enemyCount));
+  // v2 共识·替换制（skill 轨）：A 类输出量按三套难度表换算成公式点数（出手快照），
+  // Q7' 重定基的 B 类「本拍伤害+%」进乘区加算层；旧轨维持池定值语义（批次 3 删）。
+  const skillify = (e: CardEffectDef): number => {
+    if (!skill) return e.value;
+    const r = resolveSkillAmount({
+      action: e.action,
+      difficulty: skill.difficulty,
+      mainDerivation: skill.mainDerivation,
+      secondary: skill.secondary,
+    });
+    const base = r.mainAmount + r.secondaryAmount;
+    return e.target === '敌全体' ? base * mult : base;
+  };
+  const formulaLine = (e: CardEffectDef, amt: number): string => {
+    if (!skill) return `${amt}`;
+    const r = resolveSkillAmount({
+      action: e.action,
+      difficulty: skill.difficulty,
+      mainDerivation: skill.mainDerivation,
+      secondary: skill.secondary,
+    });
+    return skill.secondary.length > 0
+      ? `${r.mainAmount}+副轴${r.secondaryAmount}`
+      : `${r.mainAmount}`;
+  };
   for (const e of effects) {
     // 条件位（效果批七）：不满足 → 空过+战报注明
     if (!conditionsMet(e.conditions, ledger)) {
@@ -428,26 +491,46 @@ export function translateCardEffects(
       continue;
     }
     const scaled = e.target === '敌全体' ? e.value * mult : e.value;
+    // skill 轨：A 类输出量按难度表换算（出手快照）；旧轨维持池定值
+    const scaledAmt = skill ? skillify(e) : scaled;
     switch (e.action) {
       case '伤害':
         // 拍结束触发（效果批五）：不进行动值，延迟到拍末全部结算后直扣敌方
         if (e.trigger === '拍结束') {
-          out.endBeatDamage = (out.endBeatDamage ?? 0) + scaled;
-          out.lines.push(`▸ 【效果】拍末追加 ${scaled} 伤害`);
+          out.endBeatDamage = (out.endBeatDamage ?? 0) + scaledAmt;
+          out.lines.push(`▸ 【效果】拍末追加 ${scaledAmt} 伤害`);
           break;
         }
-        out.powerBonus += scaled;
-        out.lines.push(`▸ 【效果】直接伤害 +${scaled}`);
+        out.powerBonus += scaledAmt;
+        out.lines.push(
+          `▸ 【效果】直接伤害 +${scaledAmt}${skill ? `（公式 ${formulaLine(e, scaledAmt)}）` : ''}`,
+        );
         break;
       case '连击':
       case '双击':
       case '风怒':
-        out.powerMult *= 1 + scaled / 100;
-        out.lines.push(`▸ 【效果】【${e.action}】本拍行动值 +${scaled}%`);
+        if (skill) {
+          // Q7' 重定基：本拍行动值+% → 本拍伤害+%（乘区链加算层 1）
+          out.powerBonusPct += scaled;
+          out.lines.push(`▸ 【效果】【${e.action}】本拍伤害 +${scaled}%`);
+        } else {
+          out.powerMult *= 1 + scaled / 100;
+          out.lines.push(`▸ 【效果】【${e.action}】本拍行动值 +${scaled}%`);
+        }
         break;
       case '穿透':
-        out.guardDown += scaled;
-        out.lines.push(`▸ 【效果】穿透：敌方防护 −${scaled}（本场）`);
+        if (skill) {
+          // Q22 归并威胁族：敌方防护轴取消 → 敌方威胁 −8（本场）
+          out.activate.push({
+            name: '穿透',
+            type: 'weaken',
+            amount: e.value,
+          });
+          out.lines.push(`▸ 【效果】穿透：敌方威胁 −${e.value}（本场）`);
+        } else {
+          out.guardDown += scaled;
+          out.lines.push(`▸ 【效果】穿透：敌方防护 −${scaled}（本场）`);
+        }
         break;
       case '治疗':
         // 每拍触发：持续回复 → regen 在场效果（领域/装备型持续治疗）
@@ -455,29 +538,35 @@ export function translateCardEffects(
           out.activate.push({
             name: e.action,
             type: 'regen',
-            amount: scaled,
+            amount: scaledAmt,
             beatsLeft: Math.max(1, Math.round(e.duration ?? 2)),
           });
-          out.lines.push(`▸ 【效果】持续回复：此后每拍 +${scaled} HP`);
+          out.lines.push(`▸ 【效果】持续回复：此后每拍 +${scaledAmt} HP`);
           break;
         }
         // 拍结束触发：治疗并入拍末 HP 链（与常规治疗同通道、时机在拍末）
         if (e.trigger === '拍结束') {
-          out.endBeatHeal = (out.endBeatHeal ?? 0) + scaled;
-          out.lines.push(`▸ 【效果】拍末回复 ${scaled} HP`);
+          out.endBeatHeal = (out.endBeatHeal ?? 0) + scaledAmt;
+          out.lines.push(`▸ 【效果】拍末回复 ${scaledAmt} HP`);
           break;
         }
-        out.heal += scaled;
-        out.lines.push(`▸ 【效果】回复 ${scaled} HP`);
+        out.heal += scaledAmt;
+        out.lines.push(`▸ 【效果】回复 ${scaledAmt} HP`);
         break;
       case '吸血':
-        out.heal += Math.round(scaled * 0.3);
-        out.powerBonus += scaled;
-        out.lines.push(`▸ 【效果】吸血：伤害 +${scaled}，并回复其三成`);
+        out.heal += Math.round(scaledAmt * 0.3);
+        out.powerBonus += scaledAmt;
+        out.lines.push(`▸ 【效果】吸血：伤害 +${scaledAmt}，并回复其三成`);
         break;
       case '破防':
-        out.guardDown += scaled;
-        out.lines.push(`▸ 【效果】破防：敌方防护 −${scaled}（本场）`);
+        if (skill) {
+          // Q22 归并威胁族：敌方防护轴取消 → 敌方威胁 −4（本场）
+          out.activate.push({ name: '破防', type: 'weaken', amount: e.value });
+          out.lines.push(`▸ 【效果】破防：敌方威胁 −${e.value}（本场）`);
+        } else {
+          out.guardDown += scaled;
+          out.lines.push(`▸ 【效果】破防：敌方防护 −${scaled}（本场）`);
+        }
         break;
       case '驱散':
         // 拍制下敌方无增益系统（2026-09-25 实现期替换：凝神）——保留类型位，结算走 mpHeal
@@ -666,13 +755,16 @@ export function translateCardEffects(
         const eff: CardInPlayEffect = {
           name: e.action,
           type: type as CardInPlayEffect['type'],
-          // 任务的目标张数是契约口径，不随敌全体倍化；时之锚金额 0（锚点在 playBeat 落定）
+          // 任务的目标张数是契约口径，不随敌全体倍化；时之锚金额 0（锚点在 playBeat 落定）；
+          // skill 轨：dot/护盾群的每拍量按难度表出手快照（Q12），削减族与 % 状态保持定点
           amount:
             e.action === '任务' || e.action === '契约·血誓' || e.action === '功业'
               ? Math.max(1, Math.round(e.value))
               : e.action === '时之锚'
                 ? 0
-                : scaled,
+                : DOT_LIKE.has(e.action)
+                  ? scaledAmt
+                  : scaled,
           // duration 0 = 整场（批九：狂暴/连携锚外，进化成长不递减）
           ...((e.duration ?? 0) > 0 ? { beatsLeft: Math.max(1, Math.round(e.duration ?? 1)) } : {}),
         };
@@ -777,6 +869,7 @@ export function playBeat(
   else if (weakenTotal > 0) effectLines.push(`▸ 减速战技：敌方威胁 −${weakenTotal}`);
 
   // 在场加成（此前打出的领域/装备/召唤…）：行动值先行叠加，审计单列一行可复算
+  // （skill 轨：buffTotal 并入伤害基数不再进行动值——Q11；evolution 重定基为伤害%）
   const buffTotal = s.activeEffects
     .filter((e) => e.type === 'buff' || e.type === 'evolution')
     .reduce((sum, e) => sum + Math.max(0, e.amount), 0);
@@ -789,6 +882,7 @@ export function playBeat(
     opts?.effects,
     opts?.enemyCount ?? s.enemyCount ?? 1,
     ledgerAtStart,
+    opts?.skill,
   );
 
   // 终结一击（效果批九）：按敌方已损失气血 % 计真伤——走 directDamage 无视减免通道
@@ -813,13 +907,18 @@ export function playBeat(
     fx.lines.push(`▸ 【连携锚】连击成势——拍末追加 ${comboDamage} 伤害`);
   }
 
-  // 夺式（效果批十·慎用）：窃取最强一式之力——最高威胁的一半入行动值（上限 12）
+  // 夺式（效果批十·慎用）：窃取最强一式之力——skill 轨重定基为伤害%（上限 12%），旧轨点数
   if (fx.stealForm) {
     const maxThreat = Math.max(...s.intents.map((it) => Math.max(0, Math.round(it.threat))));
     const stolen = Math.min(12, Math.round(maxThreat / 2));
     if (stolen > 0) {
-      fx.powerBonus += stolen;
-      fx.lines.push(`▸ 【夺式】它最强一式的力道到了你手上——行动值 +${stolen}（预警：窃取位）`);
+      if (opts?.skill) {
+        fx.powerBonusPct += stolen;
+        fx.lines.push(`▸ 【夺式】它最强一式的力道到了你手上——伤害 +${stolen}%（预警：窃取位）`);
+      } else {
+        fx.powerBonus += stolen;
+        fx.lines.push(`▸ 【夺式】它最强一式的力道到了你手上——行动值 +${stolen}（预警：窃取位）`);
+      }
     }
   }
   // 断章（效果批十·慎用）：骰子驱动随机换式——轮换节奏作废，变招威胁减半（洞悉因此失准）
@@ -847,14 +946,21 @@ export function playBeat(
     else if (roll === 1) mutationVuln = 8;
     else mutationSelf = 4;
   }
-  // 分支（效果批八）：命运掷骰定路——d10 ≥ 6 行动值追加，骰败改走拍末回复
+  // 分支（效果批八）：命运掷骰定路——skill 轨重定基：d10 ≥ 6 伤害 +12%，骰败回复 8 HP
   if (fx.branch) {
     const br = (dice % 10) + 1;
     if (br >= 6) {
-      fx.powerBonus += fx.branch.successDamage;
-      fx.lines.push(
-        `▸ 【分支】命运掷骰 d10=${br} ≥ 6——走向杀伐：行动值 +${fx.branch.successDamage}`,
-      );
+      if (opts?.skill) {
+        fx.powerBonusPct += fx.branch.successDamage;
+        fx.lines.push(
+          `▸ 【分支】命运掷骰 d10=${br} ≥ 6——走向杀伐：伤害 +${fx.branch.successDamage}%`,
+        );
+      } else {
+        fx.powerBonus += fx.branch.successDamage;
+        fx.lines.push(
+          `▸ 【分支】命运掷骰 d10=${br} ≥ 6——走向杀伐：行动值 +${fx.branch.successDamage}`,
+        );
+      }
     } else {
       fx.heal += fx.branch.fallbackHeal;
       fx.lines.push(
@@ -901,11 +1007,36 @@ export function playBeat(
       `▸ 【连锁风暴】${live.length} 层在场连锁供能——行动值 +${stormPct}%（预警：连锁位）`,
     );
   }
-  const rawPower = (Math.max(0, action.power) + fx.powerBonus) * (1 + (frenzyPct + stormPct) / 100);
-  const effectiveAction = {
-    ...action,
-    power: Math.round(rawPower * fx.powerMult) + (buffTotal > 0 ? buffTotal : 0),
-  };
+  // 双轨装配（v2 共识·替换制）：
+  // - skill 轨：伤害 = 技能公式点数（A 类合计+召唤压场）× 乘区链（aggregateDamage），
+  //   行动值退役为纯命中轴；碾压余量由 resolveBeat 在乘区外追加（Q13'）
+  // - 旧轨（过渡，批次 3 接线后删）：行动值伤害语义
+  let effectiveAction: SkirmishAction;
+  let beatDamage: number | undefined;
+  if (opts?.skill) {
+    const evoPct = live
+      .filter((e) => e.type === 'evolution')
+      .reduce((sum, e) => sum + Math.max(0, e.amount), 0);
+    const liveVulnPct = live
+      .filter((e) => e.type === 'vulnerable')
+      .reduce((sum, e) => sum + Math.max(0, e.amount), 0);
+    const agg = aggregateDamage(Math.max(0, fx.powerBonus) + buffTotal, {
+      powerBonusPct: fx.powerBonusPct + frenzyPct + stormPct + evoPct,
+      vulnerabilityPct: liveVulnPct + mutationVuln,
+    });
+    beatDamage = agg.total;
+    effectiveAction = { ...action };
+    fx.lines.push(
+      `▸ 【公式】伤害基数 ${agg.total}${agg.trace.length > 1 ? `（${agg.trace.join(' ')}）` : ''}`,
+    );
+  } else {
+    const rawPower =
+      (Math.max(0, action.power) + fx.powerBonus) * (1 + (frenzyPct + stormPct) / 100);
+    effectiveAction = {
+      ...action,
+      power: Math.round(rawPower * fx.powerMult) + (buffTotal > 0 ? buffTotal : 0),
+    };
+  }
   // 支配（效果批十·慎用）：控制权转移——它把自己的威胁尽数打在自己身上（真伤），你不受其击。
   // 必须在 effectiveThreat 捕获前清零：DC/伤害基准都走这条变量
   const pendingDominate = live.some((e) => e.type === 'dominate') ? effectiveIntent.threat : 0;
@@ -952,10 +1083,18 @@ export function playBeat(
     action: effectiveAction,
     playerHp: s.playerHp,
     enemyHp: s.enemyHp,
-    guard: Math.max(0, s.guard - (s.guardDown ?? 0)),
+    // Q22 止血：guardDown 曾被减到玩家防护上（破防卡反噬自己）；敌方防护轴已取消，
+    // 破防/穿透在 skill 轨走威胁族（weaken），此处不再削玩家防护
+    guard: Math.max(0, s.guard),
     dice: dice + (liveInitiative ? 3 : 0),
     ...(liveShield + responseShield > 0 ? { shield: liveShield + responseShield } : {}),
-    ...(liveVuln + mutationVuln > 0 ? { vulnerable: liveVuln + mutationVuln } : {}),
+    // skill 轨：易伤乘区已并入 aggregateDamage（Q13'，margin 在乘区外），不再传 resolveBeat
+    ...(opts?.skill
+      ? {}
+      : liveVuln + mutationVuln > 0
+        ? { vulnerable: liveVuln + mutationVuln }
+        : {}),
+    ...(beatDamage !== undefined ? { damage: beatDamage } : {}),
   });
   const playerDamageBase = result.playerDamage ?? 0;
   const divineBlocked = liveDivine !== undefined && playerDamageBase > 0;
@@ -1385,11 +1524,20 @@ export function playBeat(
       log: [...next.log, `▸ 【赌一手】押上 ${stake} HP 作注`],
     };
     if (result.countered) {
+      // skill 轨：兑现治疗按治疗表倍率（150% 主轴派生，Q8' 兑现类）；旧轨定值 20
+      const winHeal = opts?.skill
+        ? resolveSkillAmount({
+            action: '赌一手',
+            difficulty: opts.skill.difficulty,
+            mainDerivation: opts.skill.mainDerivation,
+            secondary: [],
+          }).amount
+        : fx.bet.winHeal;
       next = {
         ...next,
-        playerHp: Math.min(s.playerMaxHp, next.playerHp + fx.bet.winHeal),
+        playerHp: Math.min(s.playerMaxHp, next.playerHp + winHeal),
         mpGained: (s.mpGained ?? 0) + fx.bet.winMp,
-        log: [...next.log, `▸ 【赌一手】赌胜——赢回 ${fx.bet.winHeal} HP 与 ${fx.bet.winMp} MP`],
+        log: [...next.log, `▸ 【赌一手】赌胜——赢回 ${winHeal} HP 与 ${fx.bet.winMp} MP`],
       };
     } else {
       next = {
@@ -1441,7 +1589,15 @@ export function playBeat(
   // 任务（效果批八）：账本出卡数达标 → 奖励落袋、任务移除（终局拍不结算；超时由时长递减自然作废）
   const quest = (next.activeEffects ?? []).find((e) => e.type === 'quest');
   if (quest && (events['出卡'] ?? 0) >= Math.max(1, quest.amount)) {
-    const reward = 15;
+    // skill 轨：兑现治疗按治疗表倍率（Q8' 兑现类）；旧轨定值 15
+    const reward = opts?.skill
+      ? resolveSkillAmount({
+          action: '任务',
+          difficulty: opts.skill.difficulty,
+          mainDerivation: opts.skill.mainDerivation,
+          secondary: [],
+        }).amount
+      : 15;
     next = {
       ...next,
       playerHp: Math.min(s.playerMaxHp, next.playerHp + reward),
@@ -1453,11 +1609,19 @@ export function playBeat(
   const expiringPacts = s.activeEffects.filter((e) => e.type === 'pact' && (e.beatsLeft ?? 1) <= 1);
   for (const pact of expiringPacts) {
     const goal = Math.max(1, pact.amount);
+    const pactReward = opts?.skill
+      ? resolveSkillAmount({
+          action: '契约·血誓',
+          difficulty: opts.skill.difficulty,
+          mainDerivation: opts.skill.mainDerivation,
+          secondary: [],
+        }).amount
+      : 18;
     if ((events['出卡'] ?? 0) >= goal) {
       next = {
         ...next,
-        playerHp: Math.min(s.playerMaxHp, next.playerHp + 18),
-        log: [...next.log, `▸ 【契约·血誓】守约兑现——${goal} 张卡如期打出，回复 18 HP`],
+        playerHp: Math.min(s.playerMaxHp, next.playerHp + pactReward),
+        log: [...next.log, `▸ 【契约·血誓】守约兑现——${goal} 张卡如期打出，回复 ${pactReward} HP`],
       };
     } else {
       next = {
@@ -1473,13 +1637,19 @@ export function playBeat(
   // 功业（效果批十一）：成就达成——账本反制数达标即兑现嘉奖（一次性，buff 不涉生死）
   const feat = (next.activeEffects ?? []).find((e) => e.type === 'feat');
   if (feat && (events['反制成功'] ?? 0) >= Math.max(1, feat.amount)) {
+    // skill 轨：Q7' 重定基 +25% 伤害（frenzy 乘区加算层）；旧轨 +10 行动值
+    const featReward = opts?.skill
+      ? { name: '功业·嘉奖', type: 'frenzy' as const, amount: 25 }
+      : { name: '功业·嘉奖', type: 'buff' as const, amount: 10 };
     next = {
       ...next,
-      activeEffects: [
-        ...(next.activeEffects ?? []).filter((e) => e !== feat),
-        { name: '功业·嘉奖', type: 'buff', amount: 10 },
+      activeEffects: [...(next.activeEffects ?? []).filter((e) => e !== feat), featReward],
+      log: [
+        ...next.log,
+        opts?.skill
+          ? `▸ 【功业】达成——${feat.amount} 次反制如愿，伤害 +25%（整场）`
+          : `▸ 【功业】达成——${feat.amount} 次反制如愿，行动值 +10（整场）`,
       ],
-      log: [...next.log, `▸ 【功业】达成——${feat.amount} 次反制如愿，行动值 +10（整场）`],
     };
   }
   // ── 体力账（2026-09-25 访谈共识）：出卡 5 SP / 基础应对 3 SP，拍拍扣 ──

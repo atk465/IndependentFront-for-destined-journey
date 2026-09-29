@@ -124,6 +124,11 @@ export interface BeatInput {
   vulnerable?: number;
   /** 2026-09-25 效果池：破防累计（敌方防护减免被削）——留作防护轴扩展位，本批护盾走 shield */
   guardDown?: number;
+  /**
+   * 对敌伤害基数（v2 共识·替换制）：传入后 enemyDamage = damage + 碾压余量，
+   * power 只作命中轴（反制掷骰）。缺省 = power（旧定值轨向后兼容，批次 3 接线后删除双轨）。
+   */
+  damage?: number;
 }
 
 export interface BeatResult {
@@ -242,7 +247,8 @@ export function resolveBeat(input: BeatInput): BeatResult {
   const margin = roll - threat;
   const countered = margin >= 0;
 
-  let enemyDamage = power + (countered ? margin : 0);
+  const damageBase = Number.isFinite(input.damage) ? Math.max(0, Math.round(input.damage!)) : power;
+  let enemyDamage = damageBase + (countered ? margin : 0);
   // 易伤（效果池）：敌方承伤放大（乘区，向下取整）
   const vuln = Number.isFinite(input.vulnerable) ? Math.max(0, input.vulnerable!) : 0;
   if (vuln > 0) enemyDamage = Math.round(enemyDamage * (1 + vuln / 100));
@@ -261,11 +267,15 @@ export function resolveBeat(input: BeatInput): BeatResult {
     `▸ ${input.action.label}：d20=${dice} + 行动值${power} + 克制+${bonus} = ${roll} vs 威胁${threat}` +
       (countered ? ` → 反制成功（余量${margin}）` : ` → 反制失败（差${-margin}）`),
     countered
-      ? `▸ 敌方 HP ${enemyHp} → ${afterEnemy}（−${enemyDamage} = 行动值${power} + 碾压余量${margin}）`
+      ? `▸ 敌方 HP ${enemyHp} → ${afterEnemy}（−${enemyDamage} = ${
+          input.damage !== undefined ? `公式伤害${damageBase}` : `行动值${power}`
+        } + 碾压余量${margin}）`
       : `▸ 玩家 HP ${playerHp} → ${afterPlayer}（−${playerDamage} = 威胁${threat} − 防御减免${Math.floor(guard / 2)}）`,
     countered
       ? `▸ 玩家 HP ${playerHp} → ${afterPlayer}（无伤）`
-      : `▸ 敌方 HP ${enemyHp} → ${afterEnemy}（−${enemyDamage} = 行动值${power}）`,
+      : `▸ 敌方 HP ${enemyHp} → ${afterEnemy}（−${enemyDamage} = ${
+          input.damage !== undefined ? `公式伤害${damageBase}` : `行动值${power}`
+        }）`,
   ];
 
   return {
