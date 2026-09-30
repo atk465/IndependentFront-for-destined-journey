@@ -13,13 +13,13 @@ describe('parseCatalogData：effects 字段保留（注册链前提）', () => {
           name: '带效果卡',
           cardTier: '星辉',
           formEntry: '技能',
-          effects: [{ trigger: '每拍', target: '敌单体', action: '灼烧', value: 4, duration: 2 }],
+          effects: [{ trigger: '每拍', target: '敌单体', action: '灼烧', value: 65, duration: 2 }],
         },
       ],
     };
     const data = parseCatalogData(raw);
     expect(data.cardPool[0].effects).toEqual([
-      { trigger: '每拍', target: '敌单体', action: '灼烧', value: 4, duration: 2 },
+      { trigger: '每拍', target: '敌单体', action: '灼烧', value: 65, duration: 2 },
     ]);
   });
 });
@@ -34,10 +34,10 @@ describe('cardCatalogToItem：效果池登记贯通（效果批四）', () => {
       element: '火',
       description: '',
       cost: 10,
-      effects: [{ trigger: '每拍', target: '敌单体', action: '灼烧', value: 4, duration: 2 }],
+      effects: [{ trigger: '每拍', target: '敌单体', action: '灼烧', value: 65, duration: 2 }],
     });
     expect(item.cardEffects).toEqual([
-      { trigger: '每拍', target: '敌单体', action: '灼烧', value: 4, duration: 2 },
+      { trigger: '每拍', target: '敌单体', action: '灼烧', value: 65, duration: 2 },
     ]);
   });
   it('池外/改数条目整批丢弃（门禁）→ 无 cardEffects，出牌回落元素派生', () => {

@@ -29,7 +29,7 @@ describe('效果池与元素映射（派生打底）', () => {
     const fx = deriveCardEffects({ name: '火球术', 词条: ['技能', '火'], cardTier: '青铜' });
     expect(fx).toHaveLength(1);
     expect(fx[0].action).toBe('灼烧');
-    expect(fx[0].value).toBe(4);
+    expect(fx[0].value).toBe(65);
     expect(fx[0].duration).toBe(2);
     expect(fx[0].trigger).toBe('每拍');
     expect(fx[0].target).toBe('敌单体');
@@ -39,7 +39,7 @@ describe('效果池与元素映射（派生打底）', () => {
   });
   it('精配覆写优先；清空后回落派生', () => {
     registerCardEffects({
-      火球术: [{ trigger: '打出时', target: '敌单体', action: '伤害', value: 8 }],
+      火球术: [{ trigger: '打出时', target: '敌单体', action: '伤害', value: 120 }],
     });
     const fx = deriveCardEffects({ name: '火球术', 词条: ['技能', '火'], cardTier: '青铜' });
     expect(fx[0].action).toBe('伤害');
@@ -54,7 +54,7 @@ describe('coerceCardEffects（AI 池内选的门禁）', () => {
   beforeEach(() => clearCardEffectOverrides());
   it('池内选择（数值逐字照抄）→ 通过', () => {
     const ok = coerceCardEffects([
-      { trigger: '打出时', target: '敌单体', action: '灼烧', value: 4, duration: 2 },
+      { trigger: '打出时', target: '敌单体', action: '灼烧', value: 65, duration: 2 },
     ]);
     expect(ok).toHaveLength(1);
     expect(ok[0].action).toBe('灼烧');
@@ -62,12 +62,12 @@ describe('coerceCardEffects（AI 池内选的门禁）', () => {
   it('AI 改数 / 池外动作 / 持续不符 → 该条丢弃；合法条保留', () => {
     const mixed = coerceCardEffects([
       { trigger: '打出时', target: '敌单体', action: '伤害', value: 999 }, // 改数
-      { trigger: '每拍', target: '敌单体', action: '流血', value: 2, duration: 4 }, // 合法
+      { trigger: '每拍', target: '敌单体', action: '流血', value: 35, duration: 4 }, // 合法
     ]);
     expect(mixed).toHaveLength(1);
     expect(mixed[0].action).toBe('流血');
     const dirty = coerceCardEffects([
-      { trigger: '每拍', target: '敌单体', action: '灼烧', value: 4, duration: 9 }, // 持续不符
+      { trigger: '每拍', target: '敌单体', action: '灼烧', value: 65, duration: 9 }, // 持续不符
     ]);
     expect(dirty).toEqual([]);
   });
@@ -128,33 +128,33 @@ describe('拍内结算（翻译器 → playBeat）', () => {
   it('打出时·伤害：行动值追加（敌全体 ×enemyCount 倍化）', () => {
     const s = mk(2);
     const after = playBeat(s, { label: '火雨', power: 20, tags: [] }, 15, {
-      effects: [{ trigger: '打出时', target: '敌全体', action: '伤害', value: 8 }],
+      effects: [{ trigger: '打出时', target: '敌全体', action: '伤害', value: 120 }],
       enemyCount: 2,
     });
-    // 行动值 = 20 + 8×2 = 36（敌全体倍化）
-    expect(after.log.some((l) => l.includes('36'))).toBe(true);
+    // 行动值 = 20 + 120×2 = 260（敌全体倍化）
+    expect(after.log.some((l) => l.includes('260'))).toBe(true);
   });
   it('状态层：灼烧入在场、下拍起每拍掉血；同状态叠层', () => {
     const s = mk();
     const after1 = playBeat(s, { label: '火舌', power: 10, tags: [] }, 15, {
-      effects: [{ trigger: '每拍', target: '敌单体', action: '灼烧', value: 4, duration: 2 }],
+      effects: [{ trigger: '每拍', target: '敌单体', action: '灼烧', value: 65, duration: 2 }],
     });
     expect(after1.activeEffects.some((e) => e.name === '灼烧')).toBe(true);
     const after2 = playBeat(after1, { label: '再烧', power: 10, tags: [] }, 15, {
-      effects: [{ trigger: '每拍', target: '敌单体', action: '灼烧', value: 4, duration: 2 }],
+      effects: [{ trigger: '每拍', target: '敌单体', action: '灼烧', value: 65, duration: 2 }],
     });
     const burn = after2.activeEffects.find((e) => e.name === '灼烧');
-    expect(burn?.amount).toBe(8); // 叠层
+    expect(burn?.amount).toBe(130); // 叠层
   });
   it('治疗/吸血：拍末 HP 回复；凝神（驱散位）进 mpGained 账', () => {
     const hurt = { ...mk(), playerHp: 50 };
     const after = playBeat(hurt, { label: '圣水', power: 5, tags: [] }, 15, {
       effects: [
-        { trigger: '打出时', target: '自身', action: '治疗', value: 12 },
+        { trigger: '打出时', target: '自身', action: '治疗', value: 150 },
         { trigger: '打出时', target: '自身', action: '驱散', value: 0 },
       ],
     });
-    expect(after.playerHp).toBe(62);
+    expect(after.playerHp).toBe(100);
     expect(after.mpGained).toBe(10);
   });
   it('批一状态：恐惧威胁减半+反制面关、束缚威胁锁 1、圣盾免疫、反伤反弹、剧毒百分比', () => {
@@ -497,11 +497,11 @@ describe('planEnchant（附魔规划）', () => {
     词条: ['技能', '金'],
     cardEffects: [],
   };
-  const effect = { trigger: '打出时', target: '敌单体', action: '灼烧', value: 4, duration: 2 };
+  const effect = { trigger: '打出时', target: '敌单体', action: '灼烧', value: 65, duration: 2 };
   it('合法附魔：造价 = 60 + 定值×2，效果集追加', () => {
     const r = planEnchant({ card, effect, money: 200 });
     expect(r.ok).toBe(true);
-    expect(r.cost).toBe(ENCHANT_BASE_COST + 8);
+    expect(r.cost).toBe(ENCHANT_BASE_COST + 130);
     expect(r.nextEffects).toHaveLength(1);
   });
   it('物资/素材拒附魔', () => {
@@ -517,7 +517,7 @@ describe('planEnchant（附魔规划）', () => {
     expect(planEnchant({ card: withBurn, effect, money: 999 }).ok).toBe(false);
     const two = {
       ...card,
-      cardEffects: [effect, { trigger: '每拍', target: '自身', action: '治疗', value: 12 }],
+      cardEffects: [effect, { trigger: '每拍', target: '自身', action: '治疗', value: 150 }],
     };
     expect(planEnchant({ card: two, effect, money: 999 }).ok).toBe(false);
   });
@@ -1164,10 +1164,10 @@ describe('效果批十一（契约/赌注/成就）', () => {
 describe('effectLineOf（卡面展示）', () => {
   it('敌单体省前缀、自身省前缀、敌全体带「对每个敌人」；代价入行', () => {
     expect(
-      effectLineOf({ trigger: '每拍', target: '敌单体', action: '灼烧', value: 4, duration: 2 }),
+      effectLineOf({ trigger: '每拍', target: '敌单体', action: '灼烧', value: 65, duration: 2 }),
     ).toContain('灼烧');
     expect(
-      effectLineOf({ trigger: '打出时', target: '敌全体', action: '伤害', value: 8 }),
+      effectLineOf({ trigger: '打出时', target: '敌全体', action: '伤害', value: 120 }),
     ).toContain('对每个敌人');
     expect(
       effectLineOf({
