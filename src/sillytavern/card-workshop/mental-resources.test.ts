@@ -56,8 +56,8 @@ describe('启封双轴（意志+理解）', () => {
 
 describe('MP 硬门槛与档位扣费', () => {
   it('档位定价表；非主动形态免', () => {
-    expect(CARD_MP_COST_BY_TIER['星辉']).toBe(55);
-    expect(mpCostOf({ cardTier: '星辉', 词条: ['技能'] })).toBe(55);
+    expect(CARD_MP_COST_BY_TIER['星辉']).toBe(55);;
+    expect(mpCostOf({ cardTier: '星辉', 词条: ['技能'] })).toBe(54); // 档位微差 −1（Q20）
     expect(mpCostOf({ cardTier: '星辉', 词条: ['装备'] })).toBe(0);
     expect(mpCostOf({ cardTier: '白铁', 词条: ['物资'] })).toBe(0);
   });
@@ -71,7 +71,7 @@ describe('MP 硬门槛与档位扣费', () => {
     } as never as Parameters<typeof cardPlayPlan>[0];
     const short = cardPlayPlan(card, { atk: 30 }, { mp: 10 });
     expect(short.mode).toBe('禁打');
-    expect(short.mode === '禁打' && short.reason).toContain('55');
+    expect(short.mode === '禁打' && short.reason).toContain('54');
     const ok = cardPlayPlan(card, { atk: 30 }, { mp: 60 });
     expect(ok.mode).not.toBe('禁打');
     // 缺省 resources = 老调用零门槛
@@ -104,7 +104,7 @@ describe('SP 拍耗与力竭', () => {
     const after = playBeat(s, { label: '术', power: 20, tags: [], cardName: '烈焰术' }, 15, {
       mpCost: 55,
     });
-    expect(after.mpSpent).toBe(55);
+    expect(after.mpSpent).toBe(55);;
   });
   it('SP 归零 → 力竭败北（HP 还剩时）', () => {
     const s = mk(5);

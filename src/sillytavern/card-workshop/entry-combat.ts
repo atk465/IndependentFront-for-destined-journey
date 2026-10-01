@@ -18,6 +18,7 @@ import type { CardItem } from '../types';
 import type { CounterTag, SkirmishAction } from './skirmish';
 import { COUNTER_TAGS } from './skirmish';
 import { cardPower } from './deck-power';
+import { statModsOf } from './card-effects';
 import { cardKindOf, isPlayable } from './card-kind';
 import { cardStatusEffect } from './entry-status';
 
@@ -82,9 +83,11 @@ export function cardCounterAction(
   stats: { atk: number },
 ): SkirmishAction {
   const cardPart = 2 * cardPower(card);
+  // 微差轨（Q20 接线）：元素+档位 → 命中轴 ±1 手感差（不进伤害公式）
+  const mods = statModsOf(card.词条, card.cardTier);
   return {
     label: `打出 ${card.name}（攻${stats.atk}+卡${cardPart}）`,
-    power: stats.atk + cardPart,
+    power: Math.max(0, stats.atk + cardPart + mods.atk),
     tags: cardCombatTags(card.词条),
     cardName: card.name,
   };
@@ -233,9 +236,11 @@ const MP_COST_KINDS: ReadonlySet<string> = new Set(['技能', '领域', '召唤'
 
 /** 这张卡打出要扣的 MP（不扣费的形态返回 0；UI 成本标注共用） */
 export function mpCostOf(card: Pick<CardItem, 'cardTier' | '词条'>): number {
+  // 微差轨（Q20 接线）：元素/档位耗能微差（负值=更省），clamp ≥0
+  const mod = statModsOf(card.词条, card.cardTier).mp;
   const kind = cardKindOf(card.词条);
   if (!MP_COST_KINDS.has(kind)) return 0;
-  return CARD_MP_COST_BY_TIER[card.cardTier] ?? 0;
+  return Math.max(0, (CARD_MP_COST_BY_TIER[card.cardTier] ?? 0) + mod);
 }
 
 /** 八类 → 交锋拍出牌计划（纯函数；数值见矩阵注释） */

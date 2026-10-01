@@ -50,6 +50,7 @@ import { mpCostOf } from '@engine/card-workshop/entry-combat';
 import { deriveCardEffects } from '@engine/card-workshop/card-effects';
 import { coerceSecondaryAxes } from '@engine/card-workshop/multiplier';
 import { coerceDifficulty } from '@engine/card-workshop/multiplier';
+import { statModsOf } from '@engine/card-workshop/card-effects';
 import { cardAxisOf, deriveCardAtk, insightModOf } from '@engine/card-workshop/derived-stats';
 import { getCommissionDefs } from '@engine/commission-runtime';
 import { coerceCommissionsFlags } from '@engine/card-workshop/commission-flags';
@@ -2880,7 +2881,18 @@ export class GamePipeline {
         'assistant',
       );
     }
-    const deckGuard = stats.guard + deckGuardBonus(deck) + spiritGuard;
+    // 微差轨（Q20 接线）：卡组各卡的防护微差（土/水/冰轴 +1~2）累入开战防护
+    const deckGuard =
+      stats.guard +
+      deckGuardBonus(deck) +
+      spiritGuard +
+      playerC.inventory
+        .filter((i) => i.type === '卡牌')
+        .reduce(
+          (sum, i) =>
+            sum + statModsOf((i as CardItem).词条, (i as CardItem).cardTier).guard,
+          0,
+        );
     if (deck > 0) {
       this.emitMessage(`【卡组整备】战力 ${deck}，防护 +${deckGuardBonus(deck)}`, 'assistant');
     }

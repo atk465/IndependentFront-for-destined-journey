@@ -66,7 +66,7 @@ describe('cardCounterAction —— 出卡 = 基础攻击的增强（真机校准
   it('行动值 = 攻击 + 2×卡面战力；label 带拆解，审计可复算', () => {
     // 白银 3 + 复合词条 0 → 卡部分 6
     const got = cardCounterAction(卡({ name: '苍穹之翼' }), stats);
-    expect(got.power).toBe(50);
+    expect(got.power).toBe(50); // 无元素卡微差 0
     expect(got.label).toBe('打出 苍穹之翼（攻44+卡6）');
     expect(got.cardName).toBe('苍穹之翼');
   });
@@ -93,7 +93,7 @@ describe('cardPlayPlan —— 八类卡语义矩阵（真机裁定 2026-09-13）
     const plan = cardPlayPlan(卡({ 词条: ['技能', '火'] }), stats);
     expect(plan.mode).toBe('直击');
     if (plan.mode === '直击') {
-      expect(plan.action.power).toBe(50); // 44 + 2×白银3（火是元素词条，不计复合）
+      expect(plan.action.power).toBe(51); // 44 + 2×白银3 + 微差轨火+1（Q20）
       expect(plan.action.tags).toEqual(['强攻']);
     }
   });
