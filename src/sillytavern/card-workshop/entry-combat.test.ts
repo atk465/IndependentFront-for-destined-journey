@@ -101,9 +101,9 @@ describe('cardPlayPlan —— 八类卡语义矩阵（真机裁定 2026-09-13）
     const plan = cardPlayPlan(卡({ name: '灼热盆地', 词条: ['地景', '火'] }), stats);
     expect(plan.mode).toBe('在场');
     if (plan.mode === '在场') {
-      expect(plan.effect).toEqual({ name: '灼热盆地', type: 'dot', amount: 6 }); // 白银3 → 2×3
+      expect(plan.effect).toEqual({ name: '灼热盆地', type: 'dot', amount: 13 }); // Q11：主轴派生 44×30% ≈ 13
       expect(plan.action.power).toBe(44); // 场地不能直接打人
-      expect(plan.action.label).toContain('灼烧−6');
+      expect(plan.action.label).toContain('压场−13');
     }
   });
   it('领域（防系/风元素）→ 在场 buff 卡力', () => {
@@ -124,7 +124,7 @@ describe('cardPlayPlan —— 八类卡语义矩阵（真机裁定 2026-09-13）
     const equip = cardPlayPlan(卡({ name: '秘银长剑', 词条: ['装备', '金'] }), stats);
     expect(equip.mode).toBe('在场');
     if (equip.mode === '在场') {
-      expect(equip.effect).toEqual({ name: '秘银长剑', type: 'buff', amount: 6 }); // 2×白银3
+      expect(equip.effect).toEqual({ name: '秘银长剑', type: 'buff', amount: 13 }); // Q11：44×30% ≈ 13
     }
   });
   it('召唤 → 登场直击 + 助战 buff', () => {
@@ -135,7 +135,7 @@ describe('cardPlayPlan —— 八类卡语义矩阵（真机裁定 2026-09-13）
     expect(plan.mode).toBe('在场');
     if (plan.mode === '在场') {
       expect(plan.action.power).toBe(44 + 2 * 4); // 鎏金4，土防系不计直击加成? 直击 = 攻 + 2×卡力
-      expect(plan.effect).toEqual({ name: '远古巨兽', type: 'buff', amount: 8 });
+      expect(plan.effect).toEqual({ name: '远古巨兽', type: 'buff', amount: 13 });
     }
   });
   it('素材 → 禁打', () => {

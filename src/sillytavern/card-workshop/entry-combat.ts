@@ -277,16 +277,19 @@ export function cardPlayPlan(
   }
   const power = cardPower(card);
   const tags = cardCombatTags(card.词条);
+  // Q11 压场倍率化（v2 共识）：召唤/军团/领域攻系的每拍压场 = 主轴派生 × 30%
+  // （替换制后 2×卡力不再承担伤害语义；stats.atk 即出卡主轴派生 deriveCardAtk）
+  const pressAmount = Math.max(1, Math.round(stats.atk * 0.3));
   // 领域/场景卡建立环境（水系/冰系 → 水下）；环境随该效果的生命周期存续
   const env = environmentOfCard(card.词条, kind);
   let effect: CardInPlayEffect;
   if (kind === '装备' || kind === '召唤' || kind === '军团') {
-    effect = { name: card.name, type: 'buff', amount: 2 * power };
+    effect = { name: card.name, type: 'buff', amount: pressAmount };
   } else {
     // 领域/场景：攻系元素（强攻/打断标签）→ 持续伤害；防系/风/无战斗词条 → 玩家加成
     effect =
       tags.includes('强攻') || tags.includes('打断')
-        ? { name: card.name, type: 'dot', amount: 2 * power }
+        ? { name: card.name, type: 'dot', amount: pressAmount }
         : { name: card.name, type: 'buff', amount: power };
   }
   if (env) effect = { ...effect, env };
@@ -297,7 +300,7 @@ export function cardPlayPlan(
         ? `祭出 ${card.name}`
         : `展开 ${card.name}`;
   const action: SkirmishAction = {
-    label: `${verb}（${effect.type === 'dot' ? `此后每拍灼烧−${effect.amount}` : `此后每拍行动值+${effect.amount}`}）`,
+    label: `${verb}（${effect.type === 'dot' ? `此后每拍压场−${effect.amount}` : `此后每拍压场+${effect.amount}`}）`,
     power: kind === '召唤' || kind === '军团' ? stats.atk + 2 * power : stats.atk,
     tags,
     cardName: card.name,
