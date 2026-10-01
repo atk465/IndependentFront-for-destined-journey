@@ -1671,17 +1671,21 @@ export function playBeat(
     // 招架（效果批二）：反制成功返还 2 SP——在账内轧差，结算落库自然少扣
     const parryRefund = result.countered && live.some((e) => e.type === 'parry') ? 2 : 0;
     const spSpent = Math.max(0, (s.spSpent ?? 0) + spCost - parryRefund);
+    // B3 同步（2026-10-01）：playerSp 逐拍演进为「拍后剩余」，面板快照与内部记账同源；
+    // spSpent 仍是整场累计净消耗（结算落库口径不变），两者独立成立不双扣
+    const playerSpLeft = Math.max(0, s.playerSp - spCost + parryRefund);
     const lines2 = [
-      `▸ 体力 −${spCost}${parryRefund ? `（招架返还 2）` : ''}（剩 ${Math.max(0, s.playerSp - spSpent)}）`,
+      `▸ 体力 −${spCost}${parryRefund ? `（招架返还 2）` : ''}（剩 ${playerSpLeft}）`,
       ...(mpCost > 0 ? [`▸ 精神 −${mpCost}`] : []),
     ];
     const withSpend: SkirmishSession = {
       ...next,
       spSpent,
+      playerSp: playerSpLeft,
       ...(mpCost > 0 ? { mpSpent: (s.mpSpent ?? 0) + mpCost } : {}),
       log: [...next.log, ...lines2],
     };
-    if (s.playerSp - spSpent <= 0) {
+    if (playerSpLeft <= 0) {
       return withFinish(withSpend, '败北', [
         `▸ 体力耗尽——你扶着膝盖喘息，再抬不起手（力竭败北，经验照常结算，评价 C）`,
       ]);
@@ -1903,17 +1907,21 @@ export function playMultiEnemyBeat(
         ? 2
         : 0;
     const spSpent = Math.max(0, (s.spSpent ?? 0) + spCost - parryRefund);
+    // B3 同步（2026-10-01）：playerSp 逐拍演进为「拍后剩余」，面板快照与内部记账同源；
+    // spSpent 仍是整场累计净消耗（结算落库口径不变），两者独立成立不双扣
+    const playerSpLeft = Math.max(0, s.playerSp - spCost + parryRefund);
     const lines2 = [
-      `▸ 体力 −${spCost}${parryRefund ? `（招架返还 2）` : ''}（剩 ${Math.max(0, s.playerSp - spSpent)}）`,
+      `▸ 体力 −${spCost}${parryRefund ? `（招架返还 2）` : ''}（剩 ${playerSpLeft}）`,
       ...(mpCost > 0 ? [`▸ 精神 −${mpCost}`] : []),
     ];
     const withSpend: SkirmishSession = {
       ...next,
       spSpent,
+      playerSp: playerSpLeft,
       ...(mpCost > 0 ? { mpSpent: (s.mpSpent ?? 0) + mpCost } : {}),
       log: [...next.log, ...lines2],
     };
-    if (s.playerSp - spSpent <= 0) {
+    if (playerSpLeft <= 0) {
       return withFinish(withSpend, '败北', [
         `▸ 体力耗尽——你扶着膝盖喘息，再抬不起手（力竭败北，经验照常结算，评价 C）`,
       ]);

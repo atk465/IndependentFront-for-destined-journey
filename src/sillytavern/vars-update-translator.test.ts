@@ -167,6 +167,34 @@ describe('buildVarsUpdatePatches', () => {
     expect(patches).toEqual([]);
   });
 
+  it('🔴 资源脏值门禁：hp/mp/sp 的 replace 值非有限数 → 条目跳过（null 归零落库的根因）', () => {
+    const patches = buildVarsUpdatePatches({
+      characters: {
+        replace: [
+          { name: '黎晚', path: 'hp', value: null },
+          { name: '黎晚', path: 'mp', value: '' },
+          { name: '黎晚', path: 'sp' },
+          { name: '黎晚', path: 'hp', value: 88 },
+        ],
+      },
+    });
+    expect(patches).toHaveLength(1);
+    expect(patches[0]).toMatchObject({ op: 'set_hp', target: 'characters.黎晚', value: 88 });
+  });
+
+  it('🔴 资源脏值门禁：delta 的 amount 非有限数 → 条目跳过', () => {
+    const patches = buildVarsUpdatePatches({
+      characters: {
+        delta: [
+          { name: '黎晚', path: 'hp', amount: null },
+          { name: '黎晚', path: 'hp', amount: -12 },
+        ],
+      },
+    });
+    expect(patches).toHaveLength(1);
+    expect(patches[0]).toMatchObject({ op: 'delta_hp', amount: -12 });
+  });
+
   it('affections.set / delta → set_affection / delta_affection', () => {
     const patches = buildVarsUpdatePatches({
       affections: { set: [{ name: '莉娜', value: 40 }], delta: [{ name: '莉娜', amount: -5 }] },

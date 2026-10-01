@@ -61,8 +61,8 @@ function reroll() {
   <div class="step-talent">
     <h2>出身天赋</h2>
     <p class="step-desc">
-      每个在铭刻纪元启程的旅人，随身都带着底石写给他的第一行字。从下面抽到的天赋中选两件
-      （必选，按品级计价），日后还能在冒险中习得更多、甚至融合出独一无二的新天赋。
+      每个在铭刻纪元启程的旅人，随身都带着底石写给他的第一行字。从下面抽到的天赋中至少选一件
+      （按品级计价，至多两件），日后还能在冒险中习得更多、甚至融合出独一无二的新天赋。
     </p>
 
     <div class="talent-toolbar">
@@ -80,6 +80,14 @@ function reroll() {
         role="radio"
         :aria-checked="store.selectedCreationTalents.includes(t.name)"
         :data-grade="t.grade"
+        :disabled="
+          !store.canAffordTalent(t.name) && !store.selectedCreationTalents.includes(t.name)
+        "
+        :title="
+          store.canAffordTalent(t.name) || store.selectedCreationTalents.includes(t.name)
+            ? undefined
+            : `转生点不足——${offerPrice(t)} 点超出剩余预算`
+        "
         @click="pick(t.name)"
       >
         <span class="t-top">
@@ -133,6 +141,11 @@ function reroll() {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: 10px;
+}
+.talent-option:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: grayscale(0.6);
 }
 .talent-option {
   display: flex;

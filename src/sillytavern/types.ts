@@ -2315,6 +2315,10 @@ export type StatePatchOp =
   | 'delta_hp'
   | 'delta_mp'
   | 'delta_sp'
+  // 资源上限专线（2026-10-01）：update_character 禁写资源后，maxHp/maxMp/maxSp 的唯一写入口
+  | 'set_max_hp'
+  | 'set_max_mp'
+  | 'set_max_sp'
   | 'add_memory'
   | 'update_plot_event'
   // Phase 4.6: RFC 6902 JSON Patch ops

@@ -69,6 +69,28 @@ describe('startSkirmish —— 开战入账', () => {
 });
 
 describe('playBeat —— 拍推进与记账', () => {
+  it('B3 同步：playerSp 逐拍递减且与日志口径一致（spSpent 仍整场累计）', () => {
+    const withSp = startSkirmish({
+      enemyName: '岩爪兽',
+      enemyLevel: 12,
+      intents: [
+        { move: '蓄力·崩山击', threat: 18, counters: ['打断', '防御'] },
+        { move: '连环爪击', threat: 12, counters: ['闪避'] },
+      ],
+      playerHp: 155,
+      playerMaxHp: 155,
+      playerSp: 600,
+      enemyHp: 320,
+      enemyMaxHp: 320,
+      guard: 10,
+    });
+    const b1 = playBeat(withSp, 卡行动, 17);
+    expect(b1.playerSp).toBe(595);
+    const b2 = playBeat(b1, 应对, 32);
+    expect(b2.playerSp).toBe(592); // 出卡 5 SP + 应对 3 SP
+    expect(b2.spSpent).toBe(8); // 结算落库口径：整场净消耗
+  });
+
   it('反制成功拍：HP/审计/参战卡/反制计数入账', () => {
     const after = playBeat(开战(), 卡行动, 17);
     expect(after.beat).toBe(1);

@@ -2,6 +2,7 @@
 import { ref, shallowRef, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { useGameStore } from '../../stores/game-store';
 import { useUIStore } from '../../stores/ui-store';
+import { useCreateStore } from '../../stores/create-store';
 import { useSettingsStore } from '../../stores/settings-store';
 import { VERSION } from '@engine/index';
 import type { SessionBackup } from '@engine/session-backup';
@@ -159,6 +160,10 @@ function onHomeKeydown(event: KeyboardEvent) {
 }
 
 function newGame() {
+  // 二次创角重置（2026-10-01 探查 BUG-C）：create store 是内存态 setup store，不重置会
+  // 带着上一次的步骤与选择直接落在第 5 步。在「新建存档」这个显式新开意图上整仓重置；
+  // 创建失败后的同页重试不经这里，填写得以保留。
+  useCreateStore().resetAll();
   ui.navigate('create');
 }
 

@@ -63,6 +63,28 @@ const nextLabel = computed(() =>
   store.isCreating ? '正在创建…' : store.currentStep === 4 ? '✦ 开始命运之旅 ✦' : '下一步 →',
 );
 
+// 卡关原因（2026-10-01 探查 BUG-H）：「下一步」灰着时给一行可读解释，玩家不用猜。
+// 原因跟 stepValid 的判据一一对应，只读 store 的公开状态。
+const blockReason = computed(() => {
+  if (!ready.value || store.isCreating) return '';
+  if ((store.stepValid[store.currentStep] ?? true) === true) return '';
+  switch (store.currentStep) {
+    case 0:
+      return '请先选择难度';
+    case 1: {
+      const bits: string[] = [];
+      if (!store.name.trim()) bits.push('还没有名字');
+      if (store.remainingBP > 0) bits.push(`还需分配 ${store.remainingBP} 点基础属性`);
+      if (store.remainingAP > 0) bits.push(`还需分配 ${store.remainingAP} 点额外属性`);
+      return bits.join('；') || '基础信息尚未填写完整';
+    }
+    case 2:
+      return '至少选一件出身天赋才能继续';
+    default:
+      return '';
+  }
+});
+
 // Step 4（剧情规划，最后一步）特殊处理: 点击"下一步" → 执行 startJourney
 async function handleNext() {
   if (store.isCreating || !ready.value) return;
@@ -168,6 +190,7 @@ onMounted(() => {
       :busy="store.isCreating"
       :can-prev="!store.isCreating && store.currentStep > 0"
       :can-next="!store.isCreating && (store.stepValid[store.currentStep] ?? true)"
+      :block-reason="blockReason"
       :next-label="nextLabel"
       @prev="store.prevStep"
       @next="handleNext"

@@ -31,6 +31,9 @@ const mocks = vi.hoisted(() => ({
   settings: {
     settings: { activePresetId: null },
   },
+  create: {
+    resetAll: vi.fn(),
+  },
   database: {
     getSave: vi.fn(),
     getCharacters: vi.fn(),
@@ -44,6 +47,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../../stores/game-store', () => ({ useGameStore: () => mocks.game }));
 vi.mock('../../stores/ui-store', () => ({ useUIStore: () => mocks.ui }));
 vi.mock('../../stores/settings-store', () => ({ useSettingsStore: () => mocks.settings }));
+vi.mock('../../stores/create-store', () => ({ useCreateStore: () => mocks.create }));
 vi.mock('@engine/index', () => ({ VERSION: 'test' }));
 vi.mock('@engine/database', () => mocks.database);
 vi.mock('../../branding-defaults', async () => {

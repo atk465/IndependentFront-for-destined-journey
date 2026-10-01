@@ -467,14 +467,27 @@ export const useCreateStore = defineStore('create', () => {
   /** 出身天赋（天赋系统 T-S3 改造 2026-09-19）：12 抽选 2；名字 = TALENT_CATALOG 模板键 */
   const selectedCreationTalents = ref<string[]>([]);
 
-  /** 切换选择（12 抽选 2；已选取消，未选且未满 2 则加入） */
+  /**
+   * 切换选择（12 抽选 2；已选取消，未选且未满 2 且**预算足**则加入）。
+   * 预算校验（2026-10-01 探查 BUG-D）：此前零校验，1280 点的 SSS 在 1000 预算下
+   * 也能选中、点数变负还能继续创角——现在不可负担直接拒绝（UI 层同步禁用）。
+   */
   function toggleCreationTalent(name: string): void {
     const idx = selectedCreationTalents.value.indexOf(name);
     if (idx >= 0) {
       selectedCreationTalents.value.splice(idx, 1);
-    } else if (selectedCreationTalents.value.length < 2) {
-      selectedCreationTalents.value.push(name);
+      return;
     }
+    if (selectedCreationTalents.value.length >= 2) return;
+    if (!canAffordTalent(name)) return;
+    selectedCreationTalents.value.push(name);
+  }
+
+  /** 该天赋当前是否可选（已选的恒可取消；未选的须预算足）——天赋卡禁用态的数据源 */
+  function canAffordTalent(name: string): boolean {
+    if (selectedCreationTalents.value.includes(name)) return true;
+    const tpl = getCreationCatalog().find((t) => t.name === name);
+    return remainingPoints.value >= (tpl ? talentExchangePrice(tpl) : 0);
   }
   /** 随机天赋_offer（2026-09-19 改造）：抽 12 张，F→SSS 每品级保底 1 张，从中选 2 */
   const talentOffers = ref<TalentTemplate[]>([]);
@@ -1658,6 +1671,12 @@ export const useCreateStore = defineStore('create', () => {
       currentStep.value = 1;
       throw new Error('请先分配全部基础属性点和额外属性点');
     }
+    // 点数兜底（2026-10-01 探查 BUG-D）：预设加载等路径可能绕过逐步校验，带着负点数
+    // 走完创角会产出「欠债角色」——在持久化边界上拦死。
+    if (remainingPoints.value < 0) {
+      currentStep.value = 2;
+      throw new Error('转生点数不足——请取消一些天赋或卡牌再启程');
+    }
 
     const saveId = crypto.randomUUID();
     const charState = buildCharacterState(saveId);
@@ -1951,6 +1970,7 @@ export const useCreateStore = defineStore('create', () => {
     stepValid,
     selectedCreationTalents,
     toggleCreationTalent,
+    canAffordTalent,
     nextStep,
     prevStep,
     // 难度

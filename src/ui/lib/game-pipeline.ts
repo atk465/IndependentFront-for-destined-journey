@@ -2341,9 +2341,9 @@ export class GamePipeline {
       const cost = Math.max(0, entryStrength(talentList, '回溯', 'mpCost'));
       if (playerC && cost > 0) {
         patches.push({
-          op: 'update_character',
+          op: 'set_mp',
           target: `characters.${playerName}`,
-          value: { mp: Math.max(0, playerC.mp - cost) },
+          value: Math.max(0, playerC.mp - cost),
         } as StatePatch);
         this.emitMessage(`▸ 【时间回溯】精神力 −${cost}`, 'assistant');
       }
@@ -2791,10 +2791,11 @@ export class GamePipeline {
       const pct = tier === 'grand' ? 50 : tier === 'mid' ? 30 : 10;
       const newMax = Math.max(1, Math.round(playerC.maxHp * (1 - pct / 100)));
       await play({ forbiddenCard: cardName, wish: tier });
+      // 上限走 set_max_hp 专线：handler 自带「当前 HP 钳回新上限」（资源专线令 2026-10-01）
       costPatches.push({
-        op: 'update_character',
+        op: 'set_max_hp',
         target: `characters.${playerC.name}`,
-        value: { maxHp: newMax, hp: Math.min(playerC.hp, newMax) },
+        value: newMax,
       } as StatePatch);
       this.emitMessage(
         `▸ 【称心秤】代价兑现——愿望的分量称走了你 ${playerC.maxHp - newMax} 点气血上限（永久）`,
@@ -2889,8 +2890,7 @@ export class GamePipeline {
       playerC.inventory
         .filter((i) => i.type === '卡牌')
         .reduce(
-          (sum, i) =>
-            sum + statModsOf((i as CardItem).词条, (i as CardItem).cardTier).guard,
+          (sum, i) => sum + statModsOf((i as CardItem).词条, (i as CardItem).cardTier).guard,
           0,
         );
     if (deck > 0) {
@@ -3479,9 +3479,9 @@ export class GamePipeline {
         const sm = createStateManager(this.saveId);
         await sm.commitChatState([
           {
-            op: 'update_character',
+            op: 'set_mp',
             target: `characters.${playerC.name}`,
-            value: { mp: playerC.maxMp },
+            value: playerC.maxMp,
           } as StatePatch,
         ]);
         this.emitMessage('▸ 【绞刑架幸存者】满额 MP 瞬间涌回。', 'assistant');
@@ -3580,23 +3580,29 @@ export class GamePipeline {
     if (last !== null && today <= last) return;
     const days = last === null ? 1 : Math.max(1, Math.min(30, today - last));
     const hpHeal = Math.ceil((playerC.maxHp || 0) / 2) * days;
-    const sm = createStateManager(this.saveId);
-    const result = await sm.commitChatState([
-      {
-        op: 'update_character',
-        target: `characters.${playerC.name}`,
-        value: {
-          hp: Math.min(playerC.maxHp, playerC.hp + hpHeal) - playerC.hp,
-          mp: (playerC.maxMp ?? 0) - playerC.mp,
-          sp: (playerC.maxSp ?? 0) - playerC.sp,
-        },
-      } as StatePatch,
+    // 回复走 delta_* 专线（资源专线令 2026-10-01）：此前把「回复量差值」当绝对值发
+    // update_character——满血时差值恰为 0，赋值落库即 hp/mp/sp 全零（新档开局轮归零真凶）。
+    // delta handler 自带 [0,max] 钳制，正增量天然封顶。
+    const mpDelta = (playerC.maxMp ?? 0) - playerC.mp;
+    const spDelta = (playerC.maxSp ?? 0) - playerC.sp;
+    const regenPatches: StatePatch[] = [
+      ...(hpHeal > 0
+        ? [{ op: 'delta_hp', target: `characters.${playerC.name}`, amount: hpHeal } as StatePatch]
+        : []),
+      ...(mpDelta > 0
+        ? [{ op: 'delta_mp', target: `characters.${playerC.name}`, amount: mpDelta } as StatePatch]
+        : []),
+      ...(spDelta > 0
+        ? [{ op: 'delta_sp', target: `characters.${playerC.name}`, amount: spDelta } as StatePatch]
+        : []),
       {
         op: 'set_variable',
         target: 'worldFlags.lastRegenDay',
         value: today,
       } as StatePatch,
-    ]);
+    ];
+    const sm = createStateManager(this.saveId);
+    const result = await sm.commitChatState(regenPatches);
     if (result.success) {
       await this.game.refreshFromDb();
     } else {
@@ -3703,38 +3709,61 @@ export class GamePipeline {
         }
       }
       if (consumeHeal > 0 || consumeMp > 0) {
-        settlementPatches.push({
-          op: 'update_character',
-          target: `characters.${playerC.name}`,
-          value: {
-            ...(consumeHeal > 0
-              ? { hp: Math.min(playerC.maxHp, playerC.hp + consumeHeal) - playerC.hp }
-              : {}),
-            ...(consumeMp > 0
-              ? { mp: Math.min(playerC.maxMp, playerC.mp + consumeMp) - playerC.mp }
-              : {}),
-          },
-        } as StatePatch);
+        // 回复量走 delta 专线（资源专线令 2026-10-01）——此前把差值当绝对值发，
+        // hp 会被赋成「差值」本身（比如从 500 血喝药变成 100 血）。钳上限由 handler 自带。
+        settlementPatches.push(
+          ...(consumeHeal > 0
+            ? [
+                {
+                  op: 'delta_hp',
+                  target: `characters.${playerC.name}`,
+                  amount: consumeHeal,
+                } as StatePatch,
+              ]
+            : []),
+          ...(consumeMp > 0
+            ? [
+                {
+                  op: 'delta_mp',
+                  target: `characters.${playerC.name}`,
+                  amount: consumeMp,
+                } as StatePatch,
+              ]
+            : []),
+        );
       }
       if (consumeLines.length > 0) {
         this.emitMessage(consumeLines.join('\n'), 'assistant');
       }
 
       // 体力/精神账（2026-09-25 访谈共识）：会话内拍拍记账，结算同窗一次落库。
-      // 负数 = delta 口径（update_character 数值负值按减法，钳 0 在提交层统一做）。
+      // 增量走 delta_* 专线（资源专线令 2026-10-01：此前负值按赋值语义被钳成 0——
+      // 「消耗哪个资源哪个归零」的根因），钳 [0,max] 由 handler 自带。
       const spSpent = Math.max(0, Math.round(session.spSpent ?? 0));
       const mpSpent = Math.max(0, Math.round(session.mpSpent ?? 0));
       const mpGained = Math.max(0, Math.round(session.mpGained ?? 0));
       const mpNet = mpSpent - mpGained;
       if (spSpent > 0 || mpNet !== 0) {
-        settlementPatches.push({
-          op: 'update_character',
-          target: `characters.${playerC.name}`,
-          value: {
-            ...(spSpent > 0 ? { sp: -spSpent } : {}),
-            ...(mpNet !== 0 ? { mp: -mpNet } : {}),
-          },
-        } as StatePatch);
+        settlementPatches.push(
+          ...(spSpent > 0
+            ? [
+                {
+                  op: 'delta_sp',
+                  target: `characters.${playerC.name}`,
+                  amount: -spSpent,
+                } as StatePatch,
+              ]
+            : []),
+          ...(mpNet !== 0
+            ? [
+                {
+                  op: 'delta_mp',
+                  target: `characters.${playerC.name}`,
+                  amount: -mpNet,
+                } as StatePatch,
+              ]
+            : []),
+        );
       }
       // 禁忌仿卡使用惩罚（canon：黑市赝品，声望账本记得每一笔）
       const imitationUsed: string[] = [];
@@ -3950,9 +3979,9 @@ export class GamePipeline {
         if (reviveGate) {
           const floor = Math.max(1, entryStrength(combatTalents, '复生', 'hpFloor'));
           settlementPatches.push({
-            op: 'update_character',
+            op: 'set_hp',
             target: `characters.${playerC.name}`,
-            value: { hp: Math.max(floor, session.playerHp) },
+            value: Math.max(floor, session.playerHp),
           } as StatePatch);
           this.emitMessage(
             `▸ 【再生】肉身重新聚拢——战败，但没有真正死去（HP 保底 ${floor}）。`,

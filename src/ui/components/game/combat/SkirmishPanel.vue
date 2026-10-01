@@ -17,8 +17,10 @@ import { cardAxisOf, AXIS_LABEL } from '@engine/card-workshop/derived-stats';
 import { recommendCards } from '@engine/card-workshop/free-card-play';
 import { battleReadyCards } from '@engine/card-workshop/deck-power';
 import { cardTierVar } from '../../../lib/quality-colors';
+import { useUIStore } from '../../../stores/ui-store';
 
 const game = useGameStore();
+const ui = useUIStore();
 const session = computed(() => game.skirmishSession);
 /** MP/SP 成本（2026-09-25 访谈共识）：出卡标 MP 档位费 + 统一 SP 拍耗；MP 不足灰置 */
 const effectiveMp = computed(() => {
@@ -304,6 +306,15 @@ function cancelCounter() {
 function onCard(name: string) {
   selectedCard.value = name;
   cardIntentText.value = '';
+  // 出卡引导（2026-10-01 探查 BUG-I）：点卡只是选中，首次接触容易以为点卡就出招
+  ui.toast(`已选【${name}】——点「发动」打出（双击卡面可跳过宣言直接打出）`);
+}
+/** 双击直出：跳过宣言框（宣言留空，终局 AI 记叙自行参考战况） */
+function quickPlay(name: string) {
+  if (game.skirmishBusy) return;
+  selectedCard.value = name;
+  cardIntentText.value = '';
+  confirmCard();
 }
 function confirmCard() {
   if (!selectedCard.value) return;
@@ -585,7 +596,7 @@ function dismiss() {
       <div class="note-actions">
         <button
           type="button"
-          class="counter-btn primary"
+          class="counter-btn primary pulse"
           :disabled="game.skirmishBusy"
           @click="confirmCard"
         >
@@ -646,6 +657,7 @@ function dismiss() {
             : `${c.name}｜MP ${costOf(c)} · SP ${SP_COST_PLAY}${c.tags.length > 0 ? `｜反制：${c.tags.join('/')}` : ''}｜属性轴：${AXIS_LABEL[cardAxisOf(c.词条)]}`
         "
         @click="onCard(c.name)"
+        @dblclick="quickPlay(c.name)"
       >
         <span class="tier-dot" :style="{ background: cardTierVar(c.cardTier) }" />
         {{ c.name }}
@@ -855,6 +867,18 @@ function dismiss() {
 .note-actions {
   display: flex;
   gap: 6px;
+}
+.counter-btn.primary.pulse {
+  animation: pulse-glow 1.4s ease-in-out infinite;
+}
+@keyframes pulse-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(200, 162, 74, 0.55);
+  }
+  50% {
+    box-shadow: 0 0 10px 2px rgba(200, 162, 74, 0.75);
+  }
 }
 .counter-btn.primary {
   background: var(--theme-primary-bg, rgba(196, 140, 75, 0.15));

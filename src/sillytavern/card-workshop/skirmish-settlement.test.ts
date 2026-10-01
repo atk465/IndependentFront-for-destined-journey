@@ -77,13 +77,19 @@ describe('buildSkirmishSettlementPatches —— 主角补丁', () => {
       settlement,
       cardOf: () => undefined,
     });
+    // 资源专线令（2026-10-01）：经验走 update_character、战终 HP 走 set_hp 专线
     expect(patches[0]).toEqual({
       op: 'update_character',
       target: 'characters.妲丽安',
-      value: { totalExp: 412, hp: 155 },
+      value: { totalExp: 412 },
+    });
+    expect(patches[1]).toEqual({
+      op: 'set_hp',
+      target: 'characters.妲丽安',
+      value: 155,
     });
   });
-  it('受伤战局把账本终局 HP 落库（state-manager 侧自带 [0,max] 钳制）', () => {
+  it('受伤战局把账本终局 HP 落库（set_hp 专线自带 [0,max] 钳制）', () => {
     const session = playBeat(开战(), { label: '闪避', power: 1, tags: ['闪避'] }, 1);
     const settlement = fleeSkirmishAfter(session);
     const patches = buildSkirmishSettlementPatches({
@@ -93,9 +99,9 @@ describe('buildSkirmishSettlementPatches —— 主角补丁', () => {
       settlement: settlement!,
       cardOf: () => undefined,
     });
-    const char = patches[0] as { value: { hp: number } };
-    expect(char.value.hp).toBeLessThan(155);
-    expect(char.value.hp).toBeGreaterThanOrEqual(0);
+    const hpPatch = patches.find((p) => p.op === 'set_hp') as { value: number };
+    expect(hpPatch.value).toBeLessThan(155);
+    expect(hpPatch.value).toBeGreaterThanOrEqual(0);
   });
 });
 
@@ -113,13 +119,13 @@ describe('buildSkirmishSettlementPatches —— 参战卡补丁', () => {
       settlement: settle2,
       cardOf: (name) => cards.find((c) => c.name === name),
     });
-    expect(patches).toHaveLength(3);
-    expect(patches[1]).toEqual({
+    expect(patches).toHaveLength(4);
+    expect(patches[2]).toEqual({
       op: 'remove_item',
       target: 'characters.妲丽安',
       value: { name: '燎原符卡', quantity: 1 },
     });
-    expect(patches[2]).toEqual({
+    expect(patches[3]).toEqual({
       op: 'update_item',
       target: 'characters.妲丽安',
       value: { name: '苍穹之翼', changes: { cardExp: 346 - 200, cardPowerBonus: 1 } },
@@ -134,8 +140,9 @@ describe('buildSkirmishSettlementPatches —— 参战卡补丁', () => {
       settlement,
       cardOf: () => undefined,
     });
-    expect(patches).toHaveLength(1);
+    expect(patches).toHaveLength(2);
     expect(patches[0].op).toBe('update_character');
+    expect(patches[1].op).toBe('set_hp');
   });
 });
 

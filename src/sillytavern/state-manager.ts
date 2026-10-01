@@ -335,6 +335,9 @@ const UPDATE_CHAR_NUMERIC_FIELDS = new Set<string>([
 /** 五维属性键（英文，对齐 CharacterState.attributes；升层自动加点逐键遍历用） */
 const ATTRIBUTE_KEYS = ['str', 'dex', 'con', 'int', 'spi'] as const;
 
+/** 资源字段（含上限）—— set 路径也必须是有限数：null/"" 会经 Math.min 归零成 0 落库 */
+const UPDATE_CHAR_RESOURCE_FIELDS = new Set<string>(['hp', 'maxHp', 'mp', 'maxMp', 'sp', 'maxSp']);
+
 /** 保留段落，只统一跨平台换行并清掉字段外围空白。 */
 function normalizePersonaText(value: string): string {
   return value.replace(/\r\n?/g, '\n').trim();
@@ -1148,6 +1151,16 @@ export class StateManager {
             );
           }
         }
+        if (UPDATE_CHAR_RESOURCE_FIELDS.has(k)) {
+          // 🔴 资源专线令（2026-10-01 P0-1 根因修复）：update_character 一律禁写资源。
+          // 此前「直接赋值 + 钳 [0,max]」的语义吞掉了两种合法调用意图——把差值当值发的
+          // 隐性 delta（每日回复发 {hp:0} → 满血新档开局即清零；交锋结算发 {sp:-20} →
+          // 赋成 -20 钳成 0），以及正数物资回复被写成 hp=药量本身。资源只有一个语义家：
+          // set_*/delta_* 专线（绝对值/增量各归其位），max* 走 set_max_*。
+          throw new Error(
+            `update_character 禁止写资源字段 "${k}" — 资源请走 set_hp/set_mp/set_sp（绝对值）、delta_hp/delta_mp/delta_sp（增量）或 set_max_*（上限）专线`,
+          );
+        }
       }
 
       // ===== 天赋写入门禁（访谈共识 T1~T8：AI 零编数 + 同名唯一 + 容量 + 互斥组）=====
@@ -1183,20 +1196,9 @@ export class StateManager {
         }
       }
 
-      // ===== hp/mp/sp 钳制: 与 set_hp 语义一致 [0, 对应 max]（终审修复）=====
-      // 仅在本次 patch 涉及资源或其 max 时钳制（若本次也写了 max* 则以写后值为准）
-      // Q-19: 字段对由 RESOURCE_MAX_FIELD 给（`satisfies` 保证两侧都真的在
-      // CharacterState 上），不再靠字符串拼 `max${...}` + `as` 断言。
-      for (const res of RESOURCE_KEYS) {
-        const maxField = RESOURCE_MAX_FIELD[res];
-        if (keys.includes(res) || keys.includes(maxField)) {
-          const cur = char[res];
-          const max = char[maxField];
-          if (typeof cur === 'number' && typeof max === 'number') {
-            char[res] = Math.max(0, Math.min(cur, max));
-          }
-        }
-      }
+      // 🔴 旧的「hp/mp/sp 钳制」块已随资源专线令移除（2026-10-01）：资源键在上方
+      // 校验环就被原子拒绝，永远不会走到赋值——钳制语义由 set_*/delta_*/set_max_*
+      // 三个专线 handler 自带，这里不再有第二个资源写入口。
 
       // ===== 升级 / 升层自动加点（ADR-11：确定性数值规则归 Code，不交给 AI 算）=====
       // 只认主角：NPC/怪物/召唤物的等级由生成器一次性给定，没有「攒点数分配」这回事。
@@ -1302,7 +1304,16 @@ export class StateManager {
     const resource = patch.op.replace('set_', '') as ResourceKey;
     const maxField = RESOURCE_MAX_FIELD[resource];
 
-    const newValue = Math.max(0, Math.min(patch.value as number, char[maxField]));
+    // 资源脏值门禁：null/""/缺值经 Math.min(value, max) 会被规格化归零成 0
+    // （2026-10-01 实测把新档三资源清零落库的根因）——非有限数拒绝写入，不落库
+    if (typeof patch.value !== 'number' || !Number.isFinite(patch.value)) {
+      console.warn(
+        `[StateManager] ${patch.op} 收到非有限数值（${String(patch.value)}），拒绝写入——资源不接受脏值`,
+      );
+      return this.createEvent('character_action', patch);
+    }
+
+    const newValue = Math.max(0, Math.min(patch.value, char[maxField]));
     char[resource] = newValue;
     await this.persistCharacter(char);
 
@@ -1316,9 +1327,44 @@ export class StateManager {
     const maxField = RESOURCE_MAX_FIELD[resource];
 
     const current = char[resource];
-    const delta = patch.amount ?? 0;
+    // 脏增量（null 之外的字符串等）按 0 处理并留痕——delta 语义下无害，但要可观察
+    const rawAmount = patch.amount;
+    const delta = typeof rawAmount === 'number' && Number.isFinite(rawAmount) ? rawAmount : 0;
+    if (delta === 0 && rawAmount !== undefined && rawAmount !== 0) {
+      console.warn(`[StateManager] ${patch.op} 收到非有限增量（${String(rawAmount)}），按 0 处理`);
+    }
     const newValue = Math.max(0, Math.min(current + delta, char[maxField]));
     char[resource] = newValue;
+    await this.persistCharacter(char);
+
+    return this.createEvent('character_action', patch);
+  }
+
+  /**
+   * set_max_hp/set_max_mp/set_max_sp —— 资源上限专线（2026-10-01）。
+   * update_character 禁写资源后，上限的唯一写入口（称心秤永久扣上限等）。
+   * 写完把当前资源钳回 [0, 新上限]（降上限时当前值跟着收口，承接原
+   * update_character「写了 max 则以写后值为准」的钳制语义）。
+   */
+  private async applySetResourceMax(patch: StatePatch): Promise<GameEvent> {
+    const char = await this.resolveCharTarget(patch.target);
+
+    const resource = patch.op.replace('set_max_', '') as ResourceKey;
+    const maxField = RESOURCE_MAX_FIELD[resource];
+
+    if (typeof patch.value !== 'number' || !Number.isFinite(patch.value)) {
+      console.warn(
+        `[StateManager] ${patch.op} 收到非有限数值（${String(patch.value)}），拒绝写入——资源不接受脏值`,
+      );
+      return this.createEvent('character_action', patch);
+    }
+
+    const newMax = Math.max(0, Math.round(patch.value));
+    char[maxField] = newMax;
+    const cur = char[resource];
+    if (typeof cur === 'number') {
+      char[resource] = Math.max(0, Math.min(cur, newMax));
+    }
     await this.persistCharacter(char);
 
     return this.createEvent('character_action', patch);
@@ -2864,14 +2910,15 @@ export class StateManager {
         }
 
         await updateCommissionsFlags(profile, outcome.flags);
-        // 旅途 SP 落库（补足天数的体力消耗；锁外提交——角色行不在 profile 里）
+        // 旅途 SP 落库（补足天数的体力消耗；锁外提交——角色行不在 profile 里）。
+        // 负增量走 delta_sp 专线（资源专线令 2026-10-01：update_character 禁写资源）。
         if (outcome.travelSpCost > 0 && playerChar) {
           const spm = createStateManager(this.saveId);
           await spm.commitChatState([
             {
-              op: 'update_character',
+              op: 'delta_sp',
               target: `characters.${playerChar.name}`,
-              value: { sp: -outcome.travelSpCost },
+              amount: -outcome.travelSpCost,
             } as StatePatch,
           ]);
         }
@@ -3961,9 +4008,8 @@ async function convertScriptEffects(saveId: string, se: ScriptEffects): Promise<
 // 资源字段对（Q-19）
 // ═══════════════════════════════════════════════════════════
 
-/** 三种资源 */
-const RESOURCE_KEYS = ['hp', 'mp', 'sp'] as const;
-type ResourceKey = (typeof RESOURCE_KEYS)[number];
+/** 三种资源（运行时消费已随资源专线令移除，只余类型引用） */
+type ResourceKey = 'hp' | 'mp' | 'sp';
 
 /**
  * 资源 → 它的上限字段。
@@ -4016,6 +4062,10 @@ const PATCH_HANDLERS: Record<
   delta_hp: (sm, p) => sm['applyDeltaResource'](p),
   delta_mp: (sm, p) => sm['applyDeltaResource'](p),
   delta_sp: (sm, p) => sm['applyDeltaResource'](p),
+  // 资源上限专线（update_character 禁写资源后的唯一入口，称心秤等使用）
+  set_max_hp: (sm, p) => sm['applySetResourceMax'](p),
+  set_max_mp: (sm, p) => sm['applySetResourceMax'](p),
+  set_max_sp: (sm, p) => sm['applySetResourceMax'](p),
   // 状态效果
   add_status_effect: (sm, p) => sm['applyAddStatusEffect'](p),
   remove_status_effect: (sm, p) => sm['applyRemoveStatusEffect'](p),

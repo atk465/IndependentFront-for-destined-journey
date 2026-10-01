@@ -51,9 +51,16 @@ const categories = computed(() =>
         class="card-row"
         :class="{
           selected: store.isCardSelected(card),
-          disabled: !store.canSelectCard(card),
         }"
         :aria-pressed="store.isCardSelected(card)"
+        :disabled="!store.isCardSelected(card) && !store.canSelectCard(card)"
+        :title="
+          !store.isCardSelected(card) && !store.canSelectCard(card)
+            ? store.cardsAtLimit
+              ? '已达购卡上限——先取消一张再换购'
+              : '转生点不足——选件便宜的，或回上一步减天赋'
+            : undefined
+        "
         @click="store.toggleCard(card)"
       >
         <span class="card-check">{{ store.isCardSelected(card) ? '✓' : '' }}</span>
@@ -71,6 +78,9 @@ const categories = computed(() =>
     <div class="buy-summary">
       <span>已购 {{ store.selectedCards.length }} 张 · 计 {{ store.cardCost }} 点</span>
       <span>剩余转生点 {{ store.remainingPoints }}</span>
+      <span v-if="store.cardsAtLimit" class="limit-hint"
+        >已达购卡上限（6 张）——先取消一张再换购</span
+      >
     </div>
   </section>
 </template>
@@ -123,6 +133,11 @@ const categories = computed(() =>
   display: flex;
   flex-direction: column;
   gap: var(--theme-spacing-xs);
+}
+.card-row:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: grayscale(0.6);
 }
 .card-row {
   display: grid;
@@ -204,6 +219,10 @@ const categories = computed(() =>
   color: var(--theme-text-muted);
   padding: var(--theme-spacing-lg) 0;
   font-size: 0.85em;
+}
+.limit-hint {
+  color: var(--theme-accent, #c8a24a);
+  font-size: 12px;
 }
 .buy-summary {
   display: flex;

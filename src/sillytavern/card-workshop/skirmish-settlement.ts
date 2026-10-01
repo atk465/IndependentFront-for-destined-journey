@@ -51,8 +51,13 @@ export function buildSkirmishSettlementPatches(input: SkirmishPersistInput): Sta
         totalExp:
           Math.max(0, Math.round(input.playerTotalExp)) +
           Math.max(0, Math.round(input.settlement.exp.total)),
-        hp: Math.max(0, Math.round(input.session.playerHp)),
       },
+    },
+    // 战终 HP 绝对值走 set_hp 专线（资源专线令 2026-10-01：update_character 禁写资源）
+    {
+      op: 'set_hp',
+      target,
+      value: Math.max(0, Math.round(input.session.playerHp)),
     },
   ];
   // 本场破封的卡 → sealed:false 持久化（哑火不破不记；先于消耗/经验补丁执行）

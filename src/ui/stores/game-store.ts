@@ -1055,10 +1055,10 @@ export const useGameStore = defineStore('game', () => {
     const target = `characters.${playerChar.name}`;
     const patches: StatePatch[] = [
       {
-        op: 'update_character',
+        op: 'delta_sp',
         target,
-        value: { sp: -spCost },
-        metadata: { delta: true, source: 'exploration' },
+        amount: -spCost,
+        metadata: { source: 'exploration' },
       } as StatePatch,
       ...(kind === '采集'
         ? items.map(
@@ -1344,19 +1344,24 @@ export const useGameStore = defineStore('game', () => {
         metadata: { delta: true, source: 'supply_card' },
       } as StatePatch);
     }
-    // 使用即恢复（2026-09-25 访谈共识）：正数 = delta 加量，钳上限在提交层统一做
-    const recovery = {
-      ...(y.hp && y.hp > 0 ? { hp: Math.round(y.hp) } : {}),
-      ...(y.mp && y.mp > 0 ? { mp: Math.round(y.mp) } : {}),
-      ...(y.sp && y.sp > 0 ? { sp: Math.round(y.sp) } : {}),
-    };
-    if (Object.keys(recovery).length > 0) {
-      patches.push({
-        op: 'update_character',
-        target,
-        value: recovery,
-        metadata: { delta: true, source: 'supply_card' },
-      } as StatePatch);
+    // 使用即恢复（2026-09-25 访谈共识）：正数 = 加量，钳上限由 delta handler 统一做
+    // （资源专线令 2026-10-01：恢复量此前经 update_character delta 落地，现迁移 delta_* 专线）
+    const recovery = [
+      ...(y.hp && y.hp > 0
+        ? [{ op: 'delta_hp', target, amount: Math.round(y.hp) } as StatePatch]
+        : []),
+      ...(y.mp && y.mp > 0
+        ? [{ op: 'delta_mp', target, amount: Math.round(y.mp) } as StatePatch]
+        : []),
+      ...(y.sp && y.sp > 0
+        ? [{ op: 'delta_sp', target, amount: Math.round(y.sp) } as StatePatch]
+        : []),
+    ];
+    if (recovery.length > 0) {
+      for (const p of recovery) {
+        (p as StatePatch & { metadata?: unknown }).metadata = { source: 'supply_card' };
+      }
+      patches.push(...recovery);
     }
 
     const sm = createStateManager(activeSaveId.value);
@@ -2240,9 +2245,9 @@ export const useGameStore = defineStore('game', () => {
       ...(plan.rewindUsed
         ? [
             {
-              op: 'update_character',
+              op: 'set_mp',
               target: `characters.${playerChar.name}`,
-              value: { mp: Math.max(0, playerChar.mp - strengthOf('回溯', 'mpCost')) },
+              value: Math.max(0, playerChar.mp - strengthOf('回溯', 'mpCost')),
             } as StatePatch,
             { op: 'set_variable', target: 'worldFlags.pendingRewind', value: false } as StatePatch,
           ]
