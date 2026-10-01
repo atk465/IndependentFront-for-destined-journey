@@ -329,6 +329,55 @@ describe('coerceMapPack —— 整份认不出时退到空包', () => {
 // 缺节的包
 // ═══════════════════════════════════════════════════════════
 
+describe('coerceTravelRules.modes —— 内容仓字段别名双读（R2-1）', () => {
+  it('key/name/rateMult 别名条目被收下并映射为 id/label/factor', () => {
+    const pack = coerceMapPack(
+      raw({
+        travelRules: {
+          rates: { land: 30, nearSea: 60, farSea: 120 },
+          embarkCost: 12,
+          terrainFactor: {},
+          modes: [
+            { key: 'foot', name: '步行', rateMult: 1 },
+            { key: 'cart', name: '骡车', rateMult: 1.2, note: '官道专用' },
+            { key: 'ship', name: '海船', rateMult: 2, note: '仅海域' },
+          ],
+        },
+      }),
+    );
+    expect(pack.travelRules.modes).toEqual([
+      { id: 'foot', label: '步行', factor: 1 },
+      { id: 'cart', label: '骡车', factor: 1.2 },
+      { id: 'ship', label: '海船', factor: 2 },
+    ]);
+  });
+
+  it('规范字段（id/label/factor）优先；两代混排时规范读胜出、坏条目仍整条跳过', () => {
+    const pack = coerceMapPack(
+      raw({
+        travelRules: {
+          rates: { land: 30, nearSea: 60, farSea: 120 },
+          embarkCost: 12,
+          terrainFactor: {},
+          modes: [
+            {
+              id: 'airship',
+              label: '空艇',
+              factor: 0.25,
+              key: 'zeppelin',
+              name: '齐柏林',
+              rateMult: 9,
+            },
+            { key: 'bad', name: '无倍率' }, // rateMult 缺席 → factor 非法 → 整条跳过
+            { key: '', name: '无键', rateMult: 1 }, // 键空 → 跳过
+          ],
+        },
+      }),
+    );
+    expect(pack.travelRules.modes).toEqual([{ id: 'airship', label: '空艇', factor: 0.25 }]);
+  });
+});
+
 describe('coerceMapPack —— 缺节的包（每节各自回落，不连坐）', () => {
   it('只有 version 的包：全节空、规则恒等、判为空包', () => {
     const pack = coerceMapPack({ version: '0.1.0' });

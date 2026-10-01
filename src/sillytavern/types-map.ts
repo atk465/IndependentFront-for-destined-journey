@@ -96,6 +96,8 @@ export interface TravelRules {
 /**
  * 一种出行方式。`id` 是包内稳定键（ASCII），`label` 是显示文本 —— 引擎把两者都当
  * 不透明数据（结构闸门禁止引擎持有中文词汇，方式词汇随包走，§3.4）。
+ * 解析侧容忍内容仓的字段别名（`id←key`、`label←name`、`factor←rateMult`，
+ * 见 map-pack.coerceTravelRules 的 R2-1 修复）——本接口始终是引擎内的规范形状。
  */
 export interface TravelMode {
   id: string;

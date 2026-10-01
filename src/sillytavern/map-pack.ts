@@ -348,14 +348,19 @@ function coerceTravelRules(raw: unknown): TravelRules {
     }
   }
 
-  // 出行方式：坏条目整条跳过（半条方式没有意义），id 重复首见胜；缺席/全坏 → 空数组
+  // 出行方式：坏条目整条跳过（半条方式没有意义），id 重复首见胜；缺席/全坏 → 空数组。
+  // 字段别名双读（2026-10-01 R2-1）：内容仓 map-pack 实际发的是 key/name/rateMult
+  // （见 narrative-pack 2.9.x 的 travelRules.modes），与 types-map 的 id/label/factor
+  // 漂移且整条静默跳过——按「容忍字段增删」惯例两代字段都接，别名读不劣化严格读。
   if (Array.isArray(raw.modes)) {
     const seen = new Set<string>();
     for (const item of raw.modes) {
       if (!isRecord(item)) continue;
-      const id = typeof item.id === 'string' ? item.id.trim() : '';
-      const label = typeof item.label === 'string' ? item.label.trim() : '';
-      const factor = readNumber(item.factor);
+      const idRaw = item.id ?? item.key;
+      const labelRaw = item.label ?? item.name;
+      const id = typeof idRaw === 'string' ? idRaw.trim() : '';
+      const label = typeof labelRaw === 'string' ? labelRaw.trim() : '';
+      const factor = readNumber(item.factor ?? item.rateMult);
       if (id.length === 0 || label.length === 0) continue;
       if (factor === null || factor <= 0) continue;
       if (seen.has(id)) continue;
