@@ -360,6 +360,22 @@ export function validateIndustryCompatibility(
       '时装',
       '容器',
     ],
+    制卡: [
+      '卡',
+      '牌',
+      '绘',
+      '咒',
+      '纹',
+      '符',
+      '封',
+      '卷',
+      '契',
+      '素材',
+      '词条',
+      '融合',
+      '卡册',
+      '卡组',
+    ],
   };
 
   const kw = keywords[industry] ?? [];

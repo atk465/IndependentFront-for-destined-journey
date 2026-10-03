@@ -8,7 +8,7 @@
  * 设计：docs/superpowers/specs/2026-08-02-item-detail-summary-design.md §3.2
  */
 
-import type { EffectAutomatonDecl, EffectIntent, ModifierSlot, WindowKey } from './combat-v3/types';
+import type { EffectAutomatonDecl, EffectIntent, ModifierSlot, WindowKey } from './types';
 
 /** 18 窗口 → 中文（按 combat-v3/types.ts WindowKey 全量） */
 const WINDOW_CN: Record<WindowKey, string> = {
@@ -120,7 +120,7 @@ function translateTrigger(trigger: string): string {
 }
 
 /** 一个 automaton → 中文行数组（每 intent 一行，行首带窗口+条件） */
-export function describeAutomaton(a: EffectAutomatonDecl): string[] {
+function describeAutomaton(a: EffectAutomatonDecl): string[] {
   const windowCN = WINDOW_CN[a.subscribe] ?? a.subscribe;
   const cond = translateTrigger(a.trigger);
   const prefix = cond ? `${windowCN}[${cond}]：` : `${windowCN}：`;

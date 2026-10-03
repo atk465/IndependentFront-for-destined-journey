@@ -214,6 +214,16 @@ export function buildDispatcherPatches(parsed: Record<string, any>): {
   return { patches, deltaTime };
 }
 
+/**
+ * 资源值门禁：hp/mp/sp 的 set 值与 delta 增量必须是有限数。
+ * null/空串/缺值若放行，state-manager 的 `Math.min(value, max)` 会按 JS 规格把
+ * null/"" 归零成 0 —— 实测把新档 hp/mp/sp 三资源同时清零落库的根因（2026-10-01）。
+ * 翻译层源头上拦下，脏条目跳过并留 warn。
+ */
+function isFiniteResourceValue(v: unknown): boolean {
+  return typeof v === 'number' && Number.isFinite(v);
+}
+
 /** vars_update 的 `<json>` → 角色 / 物品 / 好感度补丁 */
 export function buildVarsUpdatePatches(parsed: Record<string, any>): StatePatch[] {
   const patches: StatePatch[] = [];
@@ -227,6 +237,12 @@ export function buildVarsUpdatePatches(parsed: Record<string, any>): StatePatch[
       continue;
     }
     const { path, value } = r;
+    if ((path === 'hp' || path === 'mp' || path === 'sp') && !isFiniteResourceValue(value)) {
+      console.warn(
+        `[Orchestrator] characters.replace "${key}" 的 ${path} 值不是有限数（${String(value)}），跳过——资源不接受脏值`,
+      );
+      continue;
+    }
     switch (path) {
       case 'hp':
         patches.push({
@@ -288,6 +304,12 @@ export function buildVarsUpdatePatches(parsed: Record<string, any>): StatePatch[
       continue;
     }
     const { path, amount } = d;
+    if ((path === 'hp' || path === 'mp' || path === 'sp') && !isFiniteResourceValue(amount)) {
+      console.warn(
+        `[Orchestrator] characters.delta "${key}" 的 ${path} 增量不是有限数（${String(amount)}），跳过——资源不接受脏值`,
+      );
+      continue;
+    }
     switch (path) {
       case 'hp':
         patches.push({

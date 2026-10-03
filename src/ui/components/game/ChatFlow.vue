@@ -1,19 +1,12 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import InputBar from './InputBar.vue';
-import type { AgentActivityRun, ChatMessage, SystemEvent } from '@engine/types';
+import type { ChatMessage, SystemEvent } from '@engine/types';
 import { escapeHtml } from '@engine/beautifier';
-import { splitSceneImageSegments } from '@engine/image-segments';
-import { useSettingsStore } from '../../stores/settings-store';
 import { useGameStore } from '../../stores/game-store';
 import { useUIStore } from '../../stores/ui-store';
-import { useSceneImageStore } from '../../stores/scene-image-store';
-import { useManualSceneImage } from '../../composables/useManualSceneImage';
 import { computeConversationalDepths } from '../../lib/chat-depth';
-import AppButton from '../shared/AppButton.vue';
-import AppModal from '../shared/AppModal.vue';
 import BeautifiedNarrative from './BeautifiedNarrative.vue';
-import TurnActivityLedger from './TurnActivityLedger.vue';
 import CraftSystemCard from './cards/CraftSystemCard.vue';
 import CharGenSystemCard from './cards/CharGenSystemCard.vue';
 import CombatSystemCard from './cards/CombatSystemCard.vue';
@@ -40,30 +33,15 @@ const emit = defineEmits<{
   send: [content: string];
   'select-option': [text: string];
   stop: [];
-  'retry-turn': [messageId: string];
 }>();
 
-const settings = useSettingsStore();
-const s = settings.settings;
 const game = useGameStore();
 const ui = useUIStore();
-const sceneImages = useSceneImageStore();
 
 const container = ref<HTMLDivElement>();
 const expandedIds = ref<Record<string, boolean>>({});
 const pinnedToBottom = ref(true);
 const messageDepths = computed(() => computeConversationalDepths(props.messages ?? []));
-const activityRunsByMessage = computed(() => {
-  const grouped = new Map<string, AgentActivityRun[]>();
-  for (const run of game.agentActivityRuns ?? []) {
-    if (!run.sourceMessageId) continue;
-    const runs = grouped.get(run.sourceMessageId);
-    if (runs) runs.push(run);
-    else grouped.set(run.sourceMessageId, [run]);
-  }
-  return grouped;
-});
-
 /** 滚到底部（进存档 / 新消息 / 快照回退时调用）。nextTick 等本轮 DOM 落定。 */
 function scrollToBottom() {
   nextTick(() => {
@@ -181,7 +159,6 @@ const ctxMenu = ref<{
   msgId: string;
   role: ChatMessage['role'];
   canRollback: boolean;
-  canImage: boolean;
 } | null>(null);
 
 /** 最新一条 assistant 消息（「回退本轮」仅对它生效） */
@@ -202,10 +179,6 @@ const latestUserMsg = computed<ChatMessage | undefined>(() => {
   return undefined;
 });
 
-function activityRunsForMessage(messageId: string) {
-  return activityRunsByMessage.value.get(messageId) ?? [];
-}
-
 /**
  * 🆕 「思考中」指示（2026-08-12）：生成期间显示当前 Agent 正在做什么。
  * 数据源：game.currentAgentActivityRun（running/stopping 的最新活动 run），
@@ -224,38 +197,24 @@ const thinkingText = computed(() => {
   return step.label;
 });
 
-function canRetryRun(run: AgentActivityRun): boolean {
-  const messageId = run.sourceMessageId;
-  if (!messageId || props.isGenerating || (run.status !== 'failed' && run.status !== 'cancelled')) {
-    return false;
-  }
-  const messageRuns = activityRunsForMessage(messageId);
-  return (
-    latestUserMsg.value?.id === messageId && messageRuns[messageRuns.length - 1]?.id === run.id
-  );
-}
-
 /** 「回退」项的文案：assistant = 回退本轮；user = 回退到这条输入 */
 function rollbackLabel(msg: ChatMessage): string {
   return msg.role === 'user' ? '回退到这条输入' : '回退本轮';
 }
 
-function menuFor(msg: ChatMessage): { canRollback: boolean; canImage: boolean } {
-  // user 消息：只有最新一条能回退；「为这一段配图」是给正文的，user 上不出现
-  if (msg.role === 'user') {
-    return { canRollback: latestUserMsg.value?.id === msg.id, canImage: false };
-  }
+function menuFor(msg: ChatMessage): { canRollback: boolean } {
   return {
-    canRollback: latestAssistantMsg.value?.id === msg.id,
-    canImage: s.imageGenMode !== 'off',
+    canRollback:
+      msg.role === 'user'
+        ? latestUserMsg.value?.id === msg.id
+        : latestAssistantMsg.value?.id === msg.id,
   };
 }
 
 /** 这条消息上右键有没有事可做（也决定要不要把美化框里的右键转发上来） */
 function canOpenMenu(msg: ChatMessage): boolean {
   if (game.isInCombat || props.isGenerating) return false;
-  const can = menuFor(msg);
-  return can.canRollback || can.canImage;
+  return menuFor(msg).canRollback;
 }
 
 /** 悬停提示照着实际能做的事写 —— 写「回退本轮」却点不动是最没必要的一种困惑 */
@@ -264,7 +223,6 @@ function ctxHint(msg: ChatMessage): string {
   const can = menuFor(msg);
   const items: string[] = [];
   if (can.canRollback) items.push(rollbackLabel(msg));
-  if (can.canImage) items.push('为这一段配图');
   items.push('复制');
   return `右键：${items.join(' / ')}`;
 }
@@ -304,65 +262,6 @@ async function ctxCopy() {
   } catch (e) {
     console.warn('[ChatFlow] 复制失败:', e);
   }
-}
-
-// ===== 「为这一段配图」（D33 / D34 / D24）=====
-
-/**
- * 手动开火那一条路。被限额拦下时**立起确认框而不是弹个 toast 就结束**（D24）——
- * 判定与正文按钮共用同一个 `checkQuota`（§5.3 不变式），出路也共用同一个 composable。
- */
-const {
-  busy: imageBusy,
-  pending: quotaPending,
-  request: requestImage,
-  confirm: confirmQuota,
-  dismiss: dismissQuota,
-} = useManualSceneImage({
-  generate: (input) => sceneImages.generate(input),
-  notify: (message) => ui.toast(message, 'warning'),
-});
-
-/** 整条消息正文，已剥掉全部插画标记 —— `message-end` 的 `intent` 就是它（§10.2b） */
-function strippedNarrativeOf(content: string): string {
-  return splitSceneImageSegments(content)
-    .filter(
-      (segment): segment is Extract<typeof segment, { kind: 'text' }> => segment.kind === 'text',
-    )
-    .map((segment) => segment.text)
-    .join('')
-    .trim();
-}
-
-async function ctxSceneImage() {
-  const msgId = ctxMenu.value?.msgId;
-  closeCtxMenu();
-  const msg = (props.messages ?? []).find((m) => m.id === msgId);
-  if (!msg) return;
-  const saveId = sceneImages.activeSaveId;
-  if (saveId === null) {
-    ui.toast('还没有载入存档，暂时画不了', 'warning');
-    return;
-  }
-  const turn = msg.turn ?? 0;
-  const narrative = strippedNarrativeOf(msg.content);
-  await requestImage({
-    saveId,
-    messageId: msg.id,
-    turn,
-    // 🔴 message-end（D34）：渲染在该消息正文之后，occurrence 由 store 在同 anchorKind
-    //    内顺延 —— 与标记那一路各自独立计数，互不干扰
-    anchorKind: 'message-end',
-    // 不做选中文本锚定：那是这套东西里最脆弱的一半（原文一改锚点就丢）
-    intent: narrative,
-    // 这里没有 story 写的标题，侧链跑完之前先用回合号占位（desc 之后会兼任说明）
-    title: `第 ${turn} 回合的插画`,
-    // 没有标记就没有出场角色名单 —— 侧链自己从正文里看
-    characters: [],
-    // 没有标记可钳，rating 上限就是这一张的 rating（D38）
-    rating: s.imageMaxRating,
-    narrative,
-  });
 }
 
 function handleGlobalClick() {
@@ -415,15 +314,6 @@ onUnmounted(() => {
               <span v-if="msg.timestamp" class="bubble-time">{{ formatTime(msg.timestamp) }}</span>
             </div>
           </div>
-
-          <TurnActivityLedger
-            v-for="run in activityRunsForMessage(msg.id)"
-            :key="run.id"
-            :run="run"
-            :can-retry="canRetryRun(run)"
-            @retry="emit('retry-turn', msg.id)"
-            @resize="handleNarrativeResize"
-          />
         </template>
 
         <!-- AI 叙事消息 — 只渲染美化正文 -->
@@ -443,10 +333,6 @@ onUnmounted(() => {
               :forward-context-menu="canOpenMenu(msg)"
               :message-id="msg.id"
               :turn="msg.turn ?? 0"
-              :image-mode="s.imageGenMode"
-              :image-max-rating="s.imageMaxRating"
-              :image-blur-by-default="s.imageBlurByDefault"
-              :image-dialect-id="s.imageDialectId"
               @resize="handleNarrativeResize"
             />
             <span v-if="msg.timestamp" class="bubble-time">{{ formatTime(msg.timestamp) }}</span>
@@ -548,30 +434,10 @@ onUnmounted(() => {
           <i class="fa-solid fa-rotate-left" />
           {{ ctxMenu.role === 'user' ? '回退到这条输入' : '回退本轮' }}
         </button>
-        <button v-if="ctxMenu.canImage" class="ctx-item" @click.stop="ctxSceneImage">
-          <i class="fa-solid fa-image" /> 为这一段配图
-        </button>
+
         <button class="ctx-item" @click.stop="ctxCopy"><i class="fa-solid fa-copy" /> 复制</button>
       </div>
     </Teleport>
-
-    <!--
-      限额确认（D24）—— 手动**永不被拦死**，最多是要确认一下。
-      🔴 显示的是 checkQuota 原样给的那句中文：它已经按「还能继续、只是要确认」的
-         口吻写好了，在这里改写会让人以为功能坏了。
-    -->
-    <AppModal
-      :open="quotaPending !== null"
-      title="继续生成这张插画？"
-      size="sm"
-      @update:open="dismissQuota"
-    >
-      <p class="quota-msg">{{ quotaPending?.message }}</p>
-      <template #footer>
-        <AppButton variant="ghost" @click="dismissQuota">算了</AppButton>
-        <AppButton variant="primary" :loading="imageBusy" @click="confirmQuota">仍然生成</AppButton>
-      </template>
-    </AppModal>
   </div>
 </template>
 

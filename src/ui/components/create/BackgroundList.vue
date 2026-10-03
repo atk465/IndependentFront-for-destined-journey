@@ -22,8 +22,6 @@ const props = defineProps<{
   characterIdentity: string;
   /** 角色出生地 (用于条件检查, 前缀匹配) */
   characterLocation: string;
-  /** 命运核心名称 (用于条件检查, 前缀匹配) */
-  destinyCoreName: string;
 }>();
 
 const emit = defineEmits<{
@@ -43,12 +41,6 @@ function checkConditions(bg: BackgroundTemplate): { valid: boolean; missing: str
     const loc = props.characterLocation;
     if (loc !== bg.requiredLocation && !loc.includes(bg.requiredLocation)) {
       missing.push(`出生地需在「${bg.requiredLocation}」`);
-    }
-  }
-  if (bg.requiredDestinyCore) {
-    const dc = props.destinyCoreName;
-    if (!dc || !dc.includes(bg.requiredDestinyCore)) {
-      missing.push(`命定核心需为「${bg.requiredDestinyCore}」(当前: ${dc || '未选择'})`);
     }
   }
   return { valid: missing.length === 0, missing };
@@ -85,14 +77,6 @@ function getRequirementTags(bg: BackgroundTemplate) {
     tags.push({
       label: '出生地',
       value: bg.requiredLocation,
-      met,
-    });
-  }
-  if (bg.requiredDestinyCore) {
-    const met = props.destinyCoreName.includes(bg.requiredDestinyCore);
-    tags.push({
-      label: '命运核心',
-      value: bg.requiredDestinyCore,
       met,
     });
   }

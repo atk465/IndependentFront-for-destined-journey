@@ -16,6 +16,8 @@ import {
   preprocessPresetForPreview,
   hasSTMacros,
   DEFAULT_STORY_CONTEXT_BLOCK,
+  orderPresetPrompts,
+  DEFAULT_INJECTION_ORDER,
 } from './preset-loader';
 import type { AgentPreset } from './types';
 
@@ -610,5 +612,84 @@ describe('assemblePresetContent (Phase 10 extended)', () => {
     expect(result).not.toContain(DEFAULT_STORY_CONTEXT_BLOCK);
     expect(result).not.toContain('{{NARRATIVE}}');
     expect(result).not.toContain('{{USER_INPUT}}');
+  });
+});
+
+describe('orderPresetPrompts —— 列表顺序真源（2026-09-17）', () => {
+  const A = { identifier: 'a', name: 'A' };
+  const B = { identifier: 'b', name: 'B' };
+  const C = { identifier: 'c', name: 'C' };
+
+  it('prompt_order 优先：按 identifier 序列重排（与数组顺序无关）', () => {
+    const out = orderPresetPrompts(
+      [A, B, C],
+      [{ identifier: 'c' }, { identifier: 'a' }, { identifier: 'b' }],
+    );
+    expect(out.map((x) => x.name)).toEqual(['C', 'A', 'B']);
+  });
+
+  it('未列入 prompt_order 的条目按原数组顺序附于末尾（不丢条目）', () => {
+    const out = orderPresetPrompts([A, B, C], [{ identifier: 'c' }]);
+    expect(out.map((x) => x.name)).toEqual(['C', 'A', 'B']);
+    expect(out).toHaveLength(3);
+  });
+
+  it('无 prompt_order → 退回 injection_order，缺省 100（不是 0）', () => {
+    const p1 = { identifier: 'x', name: 'X' }; // 无 injection_order = 100
+    const p2 = { identifier: 'y', name: 'Y', injection_order: 10 };
+    const p3 = { identifier: 'z', name: 'Z', injection_order: 100 };
+    const out = orderPresetPrompts([p1, p2, p3], null);
+    // Y(10) < X(100, 缺省) == Z(100) —— 缺省值必须与 100 同级而非 0
+    expect(out.map((x) => x.name)).toEqual(['Y', 'X', 'Z']);
+    expect(DEFAULT_INJECTION_ORDER).toBe(100);
+  });
+
+  it('纯函数：不 mutate 入参', () => {
+    const arr = [A, B];
+    orderPresetPrompts(arr, [{ identifier: 'b' }, { identifier: 'a' }]);
+    expect(arr.map((x) => x.name)).toEqual(['A', 'B']);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// 引擎占位符剥离白名单（2026-10-02 B-2 根因修复）
+// ═══════════════════════════════════════════════════════════
+
+describe('preprocessEntry —— 引擎占位符不被 ST 宏剥离吃掉（B-2）', () => {
+  it('后占位符时代的引擎占位符（TALENT/CARD_DECK/MAP_CONTEXT/RANDOM_EVENTS/QUEST_STATE）原样放行', () => {
+    const out = preprocessEntry(
+      '<天赋>{{TALENT}}</天赋>\n{{CARD_DECK}}\n{{MAP_CONTEXT}}\n{{RANDOM_EVENTS}}\n{{QUEST_STATE}}',
+      {},
+    );
+    expect(out).toContain('{{TALENT}}');
+    expect(out).toContain('{{CARD_DECK}}');
+    expect(out).toContain('{{MAP_CONTEXT}}');
+    expect(out).toContain('{{RANDOM_EVENTS}}');
+    expect(out).toContain('{{QUEST_STATE}}');
+  });
+
+  it('AGENT.* 与既有个别名（USER_NAME/CHARACTER_NAME）照旧放行；真未知宏照旧剥离', () => {
+    const out = preprocessEntry(
+      '{{AGENT.MEMORY_RECALL}} {{USER_NAME}} {{CHARACTER_NAME}} {{NOT_A_THING}}',
+      {},
+    );
+    expect(out).toContain('{{AGENT.MEMORY_RECALL}}');
+    expect(out).toContain('{{USER_NAME}}');
+    expect(out).toContain('{{CHARACTER_NAME}}');
+    expect(out).not.toContain('NOT_A_THING');
+  });
+
+  it('ST 宏语义不变：getvar/random/char/user 照常处理', () => {
+    const vars = { 预算: '4096' };
+    const out = preprocessEntry(
+      '{{char}}对{{user}}说预算{{getvar::预算}}，随机{{random::甲,乙}}',
+      vars,
+      {
+        characterName: '霜',
+        userName: '玩家',
+      },
+    );
+    expect(out).toContain('霜对玩家说预算4096');
+    expect(out).toMatch(/甲|乙/);
   });
 });

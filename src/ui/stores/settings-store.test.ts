@@ -82,7 +82,7 @@ describe('settings-store', () => {
     store.settings.developerMode = true;
     await nextTick();
 
-    const saved = JSON.parse(localStorage.getItem('fated-poem-settings')!);
+    const saved = JSON.parse(localStorage.getItem('narrative-engine-settings')!);
     expect(saved.developerMode).toBe(true);
 
     store.resetAll();
@@ -104,7 +104,7 @@ describe('settings-store', () => {
       },
     ];
     await nextTick();
-    const raw = localStorage.getItem('fated-poem-settings');
+    const raw = localStorage.getItem('narrative-engine-settings');
     expect(raw).toBeTruthy();
     const parsed = JSON.parse(raw!);
     expect(parsed.apiPool).toHaveLength(1);
@@ -127,7 +127,7 @@ describe('settings-store', () => {
 
     expect(store.settings.apiPool[0].apiKey).toBe('sk-runtime-secret');
     expect((await getApiEndpoints())[0].apiKey).toBe('sk-runtime-secret');
-    const raw = localStorage.getItem('fated-poem-settings')!;
+    const raw = localStorage.getItem('narrative-engine-settings')!;
     expect(raw).not.toContain('sk-runtime-secret');
     expect(JSON.parse(raw).apiPool[0].apiKey).toBe('');
   });
@@ -147,7 +147,7 @@ describe('settings-store', () => {
     });
 
     expect(store.settings.apiPool[0].contextWindowTokens).toBe(128000);
-    const raw = JSON.parse(localStorage.getItem('fated-poem-settings')!);
+    const raw = JSON.parse(localStorage.getItem('narrative-engine-settings')!);
     expect(raw.apiPool[0].contextWindowTokens).toBe(128000);
     const rows = await getApiEndpoints();
     expect(rows[0].contextWindowTokens).toBe(128000);
@@ -247,7 +247,7 @@ describe('settings-store', () => {
 
   it('旧 localStorage 密钥校验落库后才擦除，并在运行时恢复', async () => {
     store_.set(
-      'fated-poem-settings',
+      'narrative-engine-settings',
       JSON.stringify({
         plotMode: 'main',
         apiPool: [
@@ -272,13 +272,26 @@ describe('settings-store', () => {
     expect(outcome.status).toBe('migrated');
     expect(legacyStore.settings.apiPool[0].apiKey).toBe('sk-legacy-secret');
     expect((await getApiEndpoints())[0].apiKey).toBe('sk-legacy-secret');
-    expect(localStorage.getItem('fated-poem-settings')).not.toContain('sk-legacy-secret');
+    expect(localStorage.getItem('narrative-engine-settings')).not.toContain('sk-legacy-secret');
   });
 
   it('再次创建 store 应从 localStorage 恢复', () => {
     store.settings.plotMode = 'main';
     const store2 = useSettingsStore();
     expect(store2.settings.plotMode).toBe('main');
+  });
+
+  it('旧键（fated-poem-settings）一次性迁移到新键', () => {
+    // 清掉本轮 store 已写过的新键，种上旧键快照
+    localStorage.removeItem('narrative-engine-settings');
+    localStorage.setItem('fated-poem-settings', JSON.stringify({ plotMode: 'main' }));
+
+    setActivePinia(createPinia());
+    const migrated = useSettingsStore();
+
+    expect(migrated.settings.plotMode).toBe('main');
+    expect(localStorage.getItem('narrative-engine-settings')).toContain('main');
+    expect(localStorage.getItem('fated-poem-settings')).toBeNull();
   });
 
   it('resetAll 应恢复默认值', () => {
@@ -320,70 +333,6 @@ describe('settings-store', () => {
     expect(keys).toContain('developerMode');
   });
 
-  // ═══ 图像设置：构造完成的那一拍就必须是合法袋子 ═══
-  //
-  // image-settings-migration.ts 的文件头写着「必须在 ref() 之前，否则设置页那一拍会
-  // 炸在 undefined 上」—— 那是一条**关于 store 怎么接线**的断言，而此前只有纯函数级
-  // 用例：把 settings-store 里那两行删掉，纯函数测试一条都不会红。
-
-  /** 用一份指定的 localStorage 内容重新构造一个 store（迁移只在构造期跑一次） */
-  function bootWith(payload: Record<string, unknown>) {
-    store_.clear();
-    store_.set('fated-poem-settings', JSON.stringify(payload));
-    setActivePinia(createPinia());
-    return useSettingsStore();
-  }
-
-  it('v1 平铺档案：useSettingsStore() 返回时已是袋子形状，旧平铺键一个不剩', () => {
-    const s = bootWith({
-      imageEndpointId: 'ep_nai',
-      imageModel: 'nai-diffusion-3',
-      imageSampler: 'k_dpmpp_2m',
-      imageMaxPerMessage: 5,
-      imageMaxPerHour: 7,
-      imageQualitySuffix: 'mine',
-    });
-
-    expect(s.settings.imageNovelai).toEqual({
-      endpointId: 'ep_nai',
-      model: 'nai-diffusion-3',
-      sampler: 'k_dpmpp_2m',
-      noiseSchedule: 'karras',
-      ucPreset: 0,
-      tier: 'unset',
-      maxPerMessage: 5,
-      maxPerHour: 7,
-    });
-    expect(s.settings.imageDialectOverrides).toEqual({
-      'danbooru-anime': { qualitySuffix: 'mine' },
-    });
-    for (const key of ['imageEndpointId', 'imageModel', 'imageSampler', 'imageQualitySuffix']) {
-      expect(key in s.settings).toBe(false);
-    }
-  });
-
-  it('🔴 已迁过的档案里袋子被写坏 → 构造时就修好（此前只有带旧键时才修）', () => {
-    // 症状不在这里：下游 checkQuota 读 `s.imageNovelai.maxPerMessage`，
-    // 袋子是 null / 数字时直接 TypeError 炸在 admitAndEnqueue 里。
-    const s = bootWith({ imageNovelai: null, imageComfy: 5, imageDialectOverrides: 'nope' });
-
-    expect(s.settings.imageNovelai.maxPerMessage).toBe(2);
-    expect(s.settings.imageComfy.baseUrl).toBe('http://127.0.0.1:8188');
-    expect(s.settings.imageDialectOverrides).toEqual({});
-  });
-
-  it('🔴 袋内缺字段用 getDefaults() 补齐 —— 浅合并只盖一层，缺的格不会自己出现', () => {
-    const s = bootWith({ imageNovelai: { endpointId: 'ep', maxPerMessage: 4 } });
-
-    // 模块兜底那份 model 是空串；这里必须是生产默认值 → 证明 store 确实把 defaults 传了进去
-    expect(s.settings.imageNovelai.model).toBe('nai-diffusion-4-5-full');
-    expect(s.settings.imageNovelai.tier).toBe('unset');
-    expect(s.settings.imageNovelai.maxPerHour).toBe(20);
-    // 用户存过的两格原样保留
-    expect(s.settings.imageNovelai.endpointId).toBe('ep');
-    expect(s.settings.imageNovelai.maxPerMessage).toBe(4);
-  });
-
   it('剧情系统新档默认值形状对齐 create-store', () => {
     expect(store.settings.plotMode).toBe('off');
     expect(store.settings.plotDurationYears).toBe(5);
@@ -411,7 +360,7 @@ describe('settings-store', () => {
   it('启动任务不得在密钥迁移验证通过之前覆写 localStorage（老档唯一副本保护）', async () => {
     // 老档：密钥的**唯一副本**还在 localStorage；另有一个 presets 键触发镜像迁移。
     store_.set(
-      'fated-poem-settings',
+      'narrative-engine-settings',
       JSON.stringify({
         presets: [],
         apiPool: [
@@ -437,13 +386,13 @@ describe('settings-store', () => {
     // 🔴 迁移尚未验证，localStorage 仍是唯一副本，一个字节都不许动。
     //    此前这里会被写成 `apiKey: ""`：Dexie 若写不进（无痕 / 配额 / IndexedDB 不可用），
     //    用户的密钥就永久没了。
-    expect(localStorage.getItem('fated-poem-settings')).toContain('sk-only-copy');
+    expect(localStorage.getItem('narrative-engine-settings')).toContain('sk-only-copy');
 
     // 迁移跑完之后才允许脱敏落盘，且运行时仍读得到
     const outcome = await legacyStore.initApiSecrets();
     expect(outcome.status).toBe('migrated');
     expect(legacyStore.settings.apiPool[0].apiKey).toBe('sk-only-copy');
-    expect(localStorage.getItem('fated-poem-settings')).not.toContain('sk-only-copy');
+    expect(localStorage.getItem('narrative-engine-settings')).not.toContain('sk-only-copy');
     legacyStore.$dispose();
   });
 

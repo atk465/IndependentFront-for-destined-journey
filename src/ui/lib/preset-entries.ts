@@ -6,14 +6,15 @@
  * 返回**新的** `ChatPreset`（深克隆 + 盖 `updatedAt`），失败 / 越界时返回原引用。
  * 组件只负责拿返回值去 `usePresets().upsertPreset()`。
  *
- * 🔴 排序真源是 `injection_order`，不是数组下标：引擎侧 `assemblePresetContent`
- *    （preset-loader.ts:205-207）按 `(a.injection_order ?? 0) - (b.injection_order ?? 0)`
- *    排序后再拼接。所以本模块**所有**操作都先按 `injection_order` 取标准顺序，
- *    改完再按数组位置统一重编号（步长 10），让「数组顺序 = 生效顺序」在每次改动后成立。
+ * 🔴 排序真源是**引擎的 `orderPresetPrompts`**（2026-09-17 改）：ST 语义下
+ *    `prompt_order` 才是提示词管理器的列表顺序，`injection_order` 只是深度注入字段
+ *    （缺省 100）。本模块**所有**操作先取该规范顺序，改完再按数组位置统一重编号
+ *    （步长 10）并同步 `prompt_order`，让「数组顺序 = 列表顺序 = 生效顺序」在每次改动后成立。
  *
  * 🔴 纯函数、无 I/O、无 Pinia：可直接单测（见 preset-entries.test.ts）。
  */
 import type { ChatPreset } from '@engine/types';
+import { orderPresetPrompts } from '@engine/preset-loader';
 
 /** `ChatPreset.settings.prompts` 里单条目的形状（SillyTavern 兼容，字段全可选）。 */
 export interface PresetPromptEntry {
@@ -34,23 +35,44 @@ function rawPrompts(preset: ChatPreset): PresetPromptEntry[] {
   return Array.isArray(prompts) ? (prompts as PresetPromptEntry[]) : [];
 }
 
-/** 按 `injection_order`（缺省 0）稳定排序，得到与引擎一致的「生效顺序」。 */
+/** 规范顺序（与引擎装配同一实现）：prompt_order 优先 → 退回 injection_order(缺省 100)。 */
 export function canonicalPresetEntries(preset: ChatPreset): PresetPromptEntry[] {
-  return [...rawPrompts(preset)].sort(
-    (a, b) => (a.injection_order ?? 0) - (b.injection_order ?? 0),
-  );
+  return orderPresetPrompts(rawPrompts(preset), rawPromptOrder(preset));
 }
 
-/** 按数组位置重编号（步长 10），返回新预设（深克隆 + 盖 updatedAt）。 */
+/** 预设里记录的 ST 列表顺序（`settings.prompt_order`）。 */
+function rawPromptOrder(preset: ChatPreset): { identifier?: string }[] {
+  const order = (preset.settings as Record<string, unknown> | undefined)?.prompt_order;
+  return Array.isArray(order) ? (order as { identifier?: string }[]) : [];
+}
+
+/**
+ * 按数组位置重编号（步长 10）**并同步 `prompt_order`**，返回新预设（深克隆 + 盖 updatedAt）。
+ *
+ * 🔴 两处都要写：`prompt_order` 是列表顺序真源、`injection_order` 是深度注入字段。
+ * 只改其一会让「列表顺序」与「生效顺序」在下次读取时再次分叉。
+ * `prompt_order` 里原有的、不属于 `prompts` 的 ST 内置 identifier（jailbreak/nsfw 等）
+ * 按原相对顺序附于末尾 —— 不丢数据，便于回导 ST。
+ */
 function withEntries(preset: ChatPreset, entries: PresetPromptEntry[]): ChatPreset {
   const prompts = entries.map((entry, index) => ({
     ...entry,
     injection_order: (index + 1) * ORDER_STEP,
   }));
+  const ownIds = new Set(prompts.map((p) => p.identifier).filter(Boolean) as string[]);
+  const builtIns = rawPromptOrder(preset).filter(
+    (o) => typeof o.identifier === 'string' && !ownIds.has(o.identifier),
+  );
+  const prompt_order = [
+    ...prompts
+      .filter((p) => typeof p.identifier === 'string')
+      .map((p) => ({ identifier: p.identifier as string, enabled: p.enabled !== false })),
+    ...builtIns,
+  ];
   return JSON.parse(
     JSON.stringify({
       ...preset,
-      settings: { ...preset.settings, prompts },
+      settings: { ...preset.settings, prompts, prompt_order },
       updatedAt: Date.now(),
     }),
   ) as ChatPreset;

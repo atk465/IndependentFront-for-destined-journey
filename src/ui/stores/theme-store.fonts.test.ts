@@ -89,12 +89,25 @@ describe('持久化（bug 的另一半：写了没人读）', () => {
   });
 
   it('localStorage 里的垃圾值退回默认，不抛', () => {
-    localStorage.setItem('fated-poem-font-body', 'comic-sans');
-    localStorage.setItem('fated-poem-font-title', '');
+    localStorage.setItem('narrative-engine-font-body', 'comic-sans');
+    localStorage.setItem('narrative-engine-font-title', '');
     const theme = useThemeStore();
     expect(() => theme.initFonts()).not.toThrow();
     expect(theme.fontBody).toBe('sans');
     expect(theme.fontTitle).toBe('serif');
+  });
+
+  it('旧键（fated-poem-* 前缀）一次性迁移到新键', () => {
+    localStorage.setItem('fated-poem-font-body', 'serif');
+    localStorage.setItem('fated-poem-font-title', 'sans');
+    const theme = useThemeStore();
+    theme.initFonts();
+    expect(theme.fontBody).toBe('serif');
+    expect(theme.fontTitle).toBe('sans');
+    expect(localStorage.getItem('narrative-engine-font-body')).toBe('serif');
+    expect(localStorage.getItem('narrative-engine-font-title')).toBe('sans');
+    expect(localStorage.getItem('fated-poem-font-body')).toBeNull();
+    expect(localStorage.getItem('fated-poem-font-title')).toBeNull();
   });
 });
 

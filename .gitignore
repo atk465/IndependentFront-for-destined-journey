@@ -77,3 +77,4 @@ public/audio/**/*.ogg
 public/audio/**/*.wav
 public/audio/**/*.m4a
 public/audio/**/*.flac
+*.log

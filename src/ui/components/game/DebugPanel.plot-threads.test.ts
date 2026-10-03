@@ -41,6 +41,7 @@ function buildProfile(flags?: PlotThreadFlags): SaveProfile {
     experienceMode: 'normal',
     fp: 0,
     fpHistory: [],
+    reputation: 0,
     contracts: [],
     achievements: [],
     news: [],

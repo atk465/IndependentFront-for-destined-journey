@@ -14,6 +14,7 @@
  */
 
 import type { AgentPreset } from './types';
+import { isEnginePlaceholder } from './placeholder-names';
 
 // 🪦 D28（波 1 T2）: `PRESET_BASE = '/data/presets/'` 常量已删（死路径，见文件尾注释）。
 
@@ -145,15 +146,18 @@ export function preprocessEntry(
   // 6. 剥离 {{roll ...}}
   result = result.replace(/\{\{roll\s+[^}]*\}\}/gi, '');
 
-  // 7. 剥离其他非系统 {{...}} 占位符
-  const SYSTEM_RE =
-    /\{\{(?:SYS_PROMPT|NARRATIVE|USER_INPUT|LORE_BOOK|LORE_BOOK_STATIC|LORE_BOOK_DYNAMIC|CHARACTER_STATE|AGENT\.\w+|INVENTORY|GAME_TIME|ACTIVE_EFFECTS|MEMORY_ENTRIES|PLOT_EVENTS|CRAFT_REQUEST|CHAR_DETECT|CHAR_GEN_RESULT|CRAFT_RESULT|ITEM_REQUEST|USER_NAME|CHARACTER_NAME)\}\}/;
-  result = result.replace(/\{\{([^}]+)\}\}/g, (match) => {
-    if (SYSTEM_RE.test(match)) return match;
+  // 7. 剥离其他非系统 {{...}} 占位符。
+  //    白名单唯一真源 = ENGINE_PLACEHOLDER_NAMES（placeholder-names.ts，2026-10-02 B-2）：
+  //    原先这份手写字面量停在旧占位符时代，{{TALENT}}/{{CARD_DECK}}/{{MAP_CONTEXT}} 等
+  //    被当未知宏静默剥掉、引擎 resolver 永远收不到（story prompt <天赋> 空壳实测）。
+  //    USER_NAME/CHARACTER_NAME 是 ST 侧名字宏（replaceCharUser 的中间形态），照旧放行。
+  const result2 = result.replace(/\{\{([^}]+)\}\}/g, (match, token: string) => {
+    if (isEnginePlaceholder(token)) return match;
+    if (token === 'USER_NAME' || token === 'CHARACTER_NAME') return match;
     return '';
   });
 
-  return result;
+  return result2;
 }
 
 /** 检查内容是否包含任何需要预处理的 ST 宏 */
@@ -191,6 +195,57 @@ export function getPreset(id: string, presets: AgentPreset[]): AgentPreset | und
  *
  * If the resulting content lacks our placeholder syntax, auto-append the default context block.
  */
+/** 预设条目（SillyTavern 兼容；只约束排序用到的两个字段，其余字段透传） */
+export interface PresetPromptLike {
+  identifier?: string;
+  injection_order?: number;
+}
+
+/** ST 的 `injection_order` 缺省值（不是 0 —— 0 会把未标注的条目全部顶到最前） */
+export const DEFAULT_INJECTION_ORDER = 100;
+
+/**
+ * 预设条目的规范顺序（**ST 语义的单一真源**，UI 与引擎共用）。
+ *
+ * SillyTavern 里两套顺序各司其职：
+ * - `prompt_order`：**提示词管理器的列表顺序**（拖拽排序的结果，按 identifier 序列）——
+ *   这才是「预设管理」该显示的顺序；
+ * - `injection_order`：仅用于深度注入条目，缺省 **100**。
+ *
+ * 规则：
+ * 1. `promptOrder` 非空 → 命中 identifier 的条目按它的序列排在前；
+ *    未列入 `promptOrder` 的条目（ST 里属于「未启用池」，本仓照常显示）按原数组顺序附于末尾 —— **不丢条目**。
+ * 2. `promptOrder` 缺失/为空 → 退回 `injection_order` 稳定排序，缺省 100。
+ *
+ * 纯函数、不 mutate：返回新数组。
+ */
+export function orderPresetPrompts<T extends PresetPromptLike>(
+  prompts: readonly T[],
+  promptOrder?: readonly { identifier?: string }[] | null,
+): T[] {
+  const order = Array.isArray(promptOrder) ? promptOrder : [];
+  const ranked = order
+    .map((o) => o?.identifier)
+    .filter((id): id is string => typeof id === 'string' && id.length > 0);
+  if (ranked.length === 0) {
+    return [...prompts].sort(
+      (a, b) =>
+        (a.injection_order ?? DEFAULT_INJECTION_ORDER) -
+        (b.injection_order ?? DEFAULT_INJECTION_ORDER),
+    );
+  }
+  const rank = new Map(ranked.map((id, i) => [id, i]));
+  const MISSING = ranked.length; // 未列入的统一排在最后，彼此保持原数组顺序（稳定排序）
+  return [...prompts]
+    .map((p, i) => ({ p, i }))
+    .sort((x, y) => {
+      const rx = rank.has(x.p.identifier ?? '') ? rank.get(x.p.identifier ?? '')! : MISSING;
+      const ry = rank.has(y.p.identifier ?? '') ? rank.get(y.p.identifier ?? '')! : MISSING;
+      return rx - ry || x.i - y.i;
+    })
+    .map((x) => x.p);
+}
+
 export function assemblePresetContent(
   preset: AgentPreset,
   defaultContextBlock?: string,
@@ -201,10 +256,11 @@ export function assemblePresetContent(
     return [preset.fixedSystem, preset.fixedExamples].filter(Boolean).join('\n\n');
   }
 
-  // Sort by injection_order, filter enabled
-  const sorted = [...prompts]
-    .filter((p: any) => p.enabled !== false)
-    .sort((a: any, b: any) => (a.injection_order ?? 0) - (b.injection_order ?? 0));
+  // 规范顺序（prompt_order 优先，退回 injection_order 缺省 100），再过滤 enabled
+  const sorted: any[] = orderPresetPrompts<any>(
+    prompts as any[],
+    (preset as any).settings?.prompt_order,
+  ).filter((p: any) => p.enabled !== false);
 
   // 快速检查：是否有任何条目需要预处理
   const needsPreprocessing = sorted.some((p: any) => hasSTMacros(p.content || ''));
@@ -321,12 +377,12 @@ export function preprocessPresetForPreview(
     content = content.replace(/\{\{roll\s+[^}]*\}\}/gi, '');
 
     // 7. 剥离未知占位符，但保留已知系统占位符 + random + char + user
-    const SYSTEM_RE =
-      /\{\{(?:SYS_PROMPT|NARRATIVE|USER_INPUT|LORE_BOOK|LORE_BOOK_STATIC|LORE_BOOK_DYNAMIC|CHARACTER_STATE|AGENT\.\w+|INVENTORY|GAME_TIME|ACTIVE_EFFECTS|MEMORY_ENTRIES|PLOT_EVENTS|CRAFT_REQUEST|CHAR_DETECT|CHAR_GEN_RESULT|CRAFT_RESULT|ITEM_REQUEST|USER_NAME|CHARACTER_NAME)\}\}/;
+    //    （白名单唯一真源 = ENGINE_PLACEHOLDER_NAMES，与 preprocessEntry 同源，B-2）
     const PRESERVE_RE = /\{\{(?:random::|char\}\}|user\}\})/i;
-    content = content.replace(/\{\{([^}]+)\}\}/g, (match: string) => {
-      if (SYSTEM_RE.test(match)) return match;
+    content = content.replace(/\{\{([^}]+)\}\}/g, (match: string, token: string) => {
+      if (isEnginePlaceholder(token)) return match;
       if (PRESERVE_RE.test(match)) return match;
+      if (token === 'USER_NAME' || token === 'CHARACTER_NAME') return match;
       return '';
     });
 

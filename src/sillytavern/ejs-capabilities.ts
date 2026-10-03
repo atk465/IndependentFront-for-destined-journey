@@ -783,7 +783,7 @@ export const EJS_SURFACE = {
     ],
     rng: ['roll', 'rollDetail', 'int', 'float', 'pick', 'pickN', 'shuffle', 'chance'],
     ui: ['notify', 'log'],
-    engine: ['name', 'version', 'has'],
+    engine: ['name', 'legacyName', 'version', 'has'],
   },
   /**
    * 顶层符号里**没有成员**的那些。
@@ -827,7 +827,6 @@ export const EJS_SURFACE = {
     'stats.主角.装备',
     'stats.主角.技能',
     'stats.主角.状态效果',
-    'stats.主角.登神长阶',
     'stats.主角.金钱',
     'stats.队伍',
     'stats.世界.回合',
@@ -865,6 +864,12 @@ const CAPABILITY_PATHS: ReadonlySet<string> = new Set<string>([
  */
 export interface EjsEngine {
   name: string;
+  /**
+   * 2026-09-20 去 fated-poem 化前的旧引擎名（`poem-of-destiny`），**永久保留**。
+   * 供改名前写的模板探测/兼容用；新模板一律用 `name`。
+   * @deprecated 旧名，仅兼容用途
+   */
+  legacyName: string;
   version: string;
   /** 能力探测。创作者据此写「有就用、没有就退」 */
   has(path: string): boolean;
@@ -872,7 +877,8 @@ export interface EjsEngine {
 
 function buildEngine(input: EjsCapabilityInput): EjsEngine {
   return {
-    name: 'poem-of-destiny',
+    name: 'narrative-engine',
+    legacyName: 'poem-of-destiny',
     version: input.engineVersion ?? EJS_SURFACE_VERSION,
     /**
      * 能力探测。创作者据此写「有就用、没有就退」——

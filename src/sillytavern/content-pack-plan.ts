@@ -39,6 +39,7 @@ import type {
   PackInstallPlan,
   PackSaveUidMigration,
   PackSectionPlan,
+  WorkshopNote,
 } from './types-content';
 import type {
   BeautifierRule,
@@ -48,7 +49,6 @@ import type {
   MapMarker,
   WorldBook,
   WorldBookPartition,
-  WorkshopNote,
 } from './types';
 
 // ═══════════════════════════════════════════════════════════
@@ -59,7 +59,7 @@ import type {
  * planner 第二参数 —— 当前库里各分节的状态 + 存档级 uid 允许清单。
  *
  * 🔴 `enabledWorldBookEntries` 是 D43 迁移的唯一信号源：占位期建的存档把单选钉选分区
- * （system_core/character）的 uid 钉进这个清单，装包后占位 uid 失配 → 触发按名配对 /
+ * （character）的 uid 钉进这个清单，装包后占位 uid 失配 → 触发按名配对 /
  * needs_selection 判定。它从存档的 SaveProfile 读出来交给调用方（content-store）传入。
  *
  * 与 content-source.ts 的 planPackInstall 签名兼容：那边的 `current` 类型是这里的子集
@@ -80,13 +80,13 @@ export interface CurrentLibrary {
  * 单选钉选分区（D43）：建档时单选写入 enabledWorldBookEntries 的分区。
  *
  * 🔴 裸删这些分区的失配键 = 该分区「整本原样通过」（worldbook-loader.ts:190 的
- * partition 未收录 → 整本通过），把玩家单选的一个命定核心炸成全书注入（内容通胀回归）。
+ * partition 未收录 → 整本通过），把玩家单选的伙伴炸成全书注入（内容通胀回归）。
  * 故失配时标记 needs_selection，不许裸删。多选分区的失配键允许清除 + note。
+ *
+ * system_core（命定核心）已随捏人精简下线（2026-09-16）：新档不再写入该分区，
+ * 但老档 metadata 里的存量 `system_core:uid` 键仍按多选失配键的宽路径清除。
  */
-export const SINGLE_SELECT_PINNED_PARTITIONS: readonly WorldBookPartition[] = [
-  'system_core',
-  'character',
-];
+export const SINGLE_SELECT_PINNED_PARTITIONS: readonly WorldBookPartition[] = ['character'];
 
 // ═══════════════════════════════════════════════════════════
 // 主入口：planPackInstall
@@ -197,6 +197,16 @@ export function planPackInstall(
     // 逐项键只能是事件名，而「同名后装覆盖」的判定已经在 `coerceRandomEventPack` 里做过；
     // planner 再做一遍就是两处口径，而不一致时先出错的那一处永远没人手工验。
     sections.randomEvents = planOpaqueSection(pack.randomEvents);
+  }
+  if (pack.commissions !== undefined) {
+    // commissions（第 15 面）照 randomEvents 同档：整块替换、planner 不解释结构——
+    // 「坏定义逐条丢」的容错在 coerceCommissions（content-store 装缝之前过一遍）。
+    sections.commissions = planOpaqueSection(pack.commissions);
+  }
+  if (pack.talents !== undefined) {
+    // talents（第 16 面）照 commissions 同档：整块替换——planner 不解释 TalentTemplate 结构，
+    // validateTalentEntries 在读取时已做过一次了。
+    sections.talents = planOpaqueSection(pack.talents.data);
   }
 
   // ── agentDefaults / branding 名册/键集（透传，无四态）──
@@ -409,7 +419,7 @@ function planOpaqueSection<T>(packPayload: T): PackSectionPlan<T> {
  * 2. **按名配对**（D43 v1.2，工坊先例 `workshop-install-plan.ts`）: 对每个分区，把
  *    占位书条目名 ↔ pack 书条目名配对，产 `partition:oldUid → partition:newUid` 重写映射。
  * 3. **配不上的键分两类**:
- *    - **单选钉选分区**（system_core / character）失配 → 标记 `needsSelectionPartitions`
+ *    - **单选钉选分区**（character）失配 → 标记 `needsSelectionPartitions`
  *      （裸删 = 该分区「整本原样通过」= 内容通胀，D43）
  *    - **多选分区**失配 → 允许清除 + `WorkshopNote sideEffect`
  *

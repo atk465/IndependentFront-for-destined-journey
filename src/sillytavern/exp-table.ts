@@ -7,32 +7,17 @@
  *
  * 升级循环（`resolveLevelUps`，照脚本 services/experience.ts 的 `processExperienceAndLevel`）：
  *   while (totalExp >= 门槛 && !isMaxLevel) { level+1; expToNext=新门槛; 每级+1 属性点;
- *   里程碑(5/9/13/17/21/25) 全属性+1 且 tier 提升；关键等级(12/16/20/24) 登神条件不满足时
- *   把 totalExp 截断到当前级门槛 }。totalExp 永不清空（累计语义）。
- *
- * 登神飞升（`resolveAscensionFlyup`，主人裁定放宽版，2026-08-24）：只要角色**持有**对应
- * 登神物就**立即飞升**到下一层（不卡经验），硬性限制为「当前层级必须 = 目标层级-1」：
- *   elements>0 → T4(Lv13)；authority>0 → T5(Lv17)；law>0 → T6(Lv21)；deityPosition → T7(Lv25)。
+ *   里程碑(5/9/13/17/21/25) 全属性+1 且 tier 提升 }。totalExp 永不清空（累计语义）。
  *
  * 战斗经验系数表（`EXPERIENCE_COEFFICIENTS`）：normal = 世界书 [经验值获取规则] 的层级战斗
  * 系数（一层~六层）；easy = 主人裁定的方案 B 系数（简单模式，T6=500 保持与普通持平）。
  *
- * ADR-11：确定性数值规则归 Code —— 升级/登神由 Code 判定，不交给 AI。
+ * ADR-11：确定性数值规则归 Code —— 升级由 Code 判定，不交给 AI。
  * 🔴 本模块**不 import tier-constants**（tier-constants 反过来委托本模块，避免 ESM 环）；
  *   层级名自持一份 `TIER_NAMES`，与 `TIER_CONFIGS[i].name` 对齐（tier-constants.test.ts 已钉死）。
  */
 
 import type { CharacterState, ExperienceMode } from './types';
-
-/** 登神长阶的宽松只读形状（对齐 CharacterState.ascension，字段全可选便于测试/脏数据容错） */
-export interface AscensionLike {
-  enabled?: boolean;
-  elements?: ReadonlyArray<{ name?: string; description?: string }>;
-  authority?: ReadonlyArray<{ name?: string; description?: string }>;
-  law?: ReadonlyArray<{ name?: string; description?: string }>;
-  deityPosition?: string;
-  divineKingdom?: { name?: string; description?: string };
-}
 
 // ========== 累计经验值表 ==========
 
@@ -137,7 +122,6 @@ export interface LevelUpInput {
   attributes: CharacterState['attributes'];
   tier: number;
   tierName: string;
-  ascension?: AscensionLike;
 }
 
 /** 升级循环的结果（resolveLevelUps 的纯函数返回） */
@@ -149,29 +133,8 @@ export interface LevelUpResolution {
   attributes: CharacterState['attributes'];
   tier: number;
   tierName: string;
-  /** 关键等级（12/16/20/24）登神条件不满足 → totalExp 被截断到当前级门槛 */
-  ascensionBlocked: boolean;
-  /** 本次净升了几级（纯升级循环的增量，不含登神飞升） */
+  /** 本次净升了几级 */
   levelsGained: number;
-}
-
-/**
- * 关键等级（12/16/20/24）的登神门槛 —— 升级循环与登神飞升共用同一判据（放宽版，2026-08-24）。
- *   Lv12 升 13 需持有要素；Lv16 升 17 需持有权能；Lv20 升 21 需持有法则；Lv24 升 25 需持有神位。
- */
-export function canPassAscensionGate(level: number, ascension: AscensionLike): boolean {
-  switch (level) {
-    case 12:
-      return (ascension.elements?.length ?? 0) > 0;
-    case 16:
-      return (ascension.authority?.length ?? 0) > 0;
-    case 20:
-      return (ascension.law?.length ?? 0) > 0;
-    case 24:
-      return ((ascension.deityPosition ?? '') + '').length > 0;
-    default:
-      return true;
-  }
 }
 
 /** 五维全属性 +n（副本，不改原对象） */
@@ -190,29 +153,19 @@ function bumpAttributes(
  * 升级循环（纯函数，照参考脚本 processExperienceAndLevel）。
  *
  * while (totalExp >= 当前级累计门槛 && !isMaxLevel)：
- *   - 关键等级（12/16/20/24）登神条件不满足 → `ascensionBlocked=true`，把 totalExp 截断到
- *     当前级门槛并停止（角色攒的经验被封顶，等拿到登神物才继续）。
- *   - 否则 level+1、expToNext=新级门槛、每级 +1 自由属性点、里程碑全属性+1 且 tier/tierName 提升。
+ *   - level+1、expToNext=新级门槛、每级 +1 自由属性点、里程碑全属性+1 且 tier/tierName 提升。
  *
  * **totalExp 永不清空**（累计语义，升级只改门槛与等级，不清零已获经验）。
  */
 export function resolveLevelUps(input: LevelUpInput): LevelUpResolution {
-  let { level, totalExp, expToNext, freeAttrPoints, attributes, tier, tierName } = input;
-  const ascension = input.ascension ?? {};
-  let ascensionBlocked = false;
+  let { level, expToNext, freeAttrPoints, attributes, tier, tierName } = input;
+  const { totalExp } = input;
   let levelsGained = 0;
 
   while (!isMaxLevel(level)) {
     const required = getRequiredXpForLevel(level);
     if (typeof required !== 'number') break; // 'MAX'（防御：isMaxLevel 已排除 level>=25，理论到不了）
     if (totalExp < required) break;
-
-    if (!canPassAscensionGate(level, ascension)) {
-      // 登神长阶未开启：经验封顶于当前级门槛，等拿到对应登神物再突破
-      ascensionBlocked = true;
-      totalExp = required;
-      break;
-    }
 
     level += 1;
     levelsGained += 1;
@@ -235,64 +188,8 @@ export function resolveLevelUps(input: LevelUpInput): LevelUpResolution {
     attributes,
     tier,
     tierName,
-    ascensionBlocked,
     levelsGained,
   };
-}
-
-// ========== 登神长阶放宽版（主人裁定 2026-08-24） ==========
-
-/** resolveAscensionFlyup 的宽松输入 */
-export interface AscensionFlyupInput {
-  level: number;
-  ascension?: AscensionLike;
-}
-
-/** 登神飞升判定结果 */
-export interface AscensionFlyupResult {
-  flyup: boolean;
-  /** 不满足「当前层级 = 目标层级-1」硬性限制时的提示 */
-  reason?: '层级不足';
-  nextLevel?: number;
-  nextTier?: number;
-}
-
-/**
- * 登神飞升判定（纯函数，放宽版）：只要角色**持有**对应登神物就**立即飞升**到下一层
- * （不卡经验），硬性限制为「当前层级必须 = 目标层级-1」：
- *   elements>0 → T4（等级升到 13）；authority>0 → T5（升 17）；
- *   law>0 → T6（升 21）；deityPosition → T7（升 25）。
- *
- * 角色同时持有多个登神物时取**最高目标**（判定顺序从神位到要素）。
- * 层级不足（如 T2 有要素）返回 `{ flyup:false, reason:'层级不足' }` —— 等级不够时不触发。
- */
-export function resolveAscensionFlyup(input: AscensionFlyupInput): AscensionFlyupResult {
-  const ascension = input.ascension ?? {};
-  const currentTier = getTierForLevel(input.level);
-
-  const tryFly = (
-    targetTier: number,
-    has: boolean,
-    nextLevel: number,
-  ): AscensionFlyupResult | null => {
-    if (!has) return null;
-    if (currentTier === targetTier - 1) {
-      return { flyup: true, nextLevel, nextTier: targetTier };
-    }
-    return { flyup: false, reason: '层级不足' };
-  };
-
-  const hasDeity = ((ascension.deityPosition ?? '') + '').length > 0;
-  const hasLaw = (ascension.law?.length ?? 0) > 0;
-  const hasAuthority = (ascension.authority?.length ?? 0) > 0;
-  const hasElements = (ascension.elements?.length ?? 0) > 0;
-
-  return (
-    tryFly(7, hasDeity, 25) ??
-    tryFly(6, hasLaw, 21) ??
-    tryFly(5, hasAuthority, 17) ??
-    tryFly(4, hasElements, 13) ?? { flyup: false }
-  );
 }
 
 // ========== 战斗经验系数表（简单/普通模式分档，2026-08-24） ==========

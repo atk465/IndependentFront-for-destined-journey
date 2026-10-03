@@ -77,7 +77,6 @@ describe('buildStatData — 完整映射', () => {
         装备: {},
         技能: [],
         状态效果: [],
-        登神长阶: { 已开启: false, 要素: [], 权能: [], 法则: [], 神位: '', 神国: '' },
       },
       命运点数: 7,
       世界: { 时间: formatGameTime(TIME), 时段: getTimeOfDay(TIME) },
@@ -304,7 +303,7 @@ describe('buildStatData — 深拷贝隔离', () => {
 });
 
 describe('buildStatData — 范围栅栏（能力面 §3.1 T3 扩面口径）', () => {
-  it('主角 只含约定的 17 个键；任务/关系/位置 仍不在 stats 内', () => {
+  it('主角 只含约定的 16 个键；任务/关系/位置 仍不在 stats 内', () => {
     const player = makePlayer({
       inventory: [{ id: 'i1', name: '铁剑' } as never],
       skills: [{ id: 's1', name: '斩击' } as never],
@@ -331,7 +330,6 @@ describe('buildStatData — 范围栅栏（能力面 §3.1 T3 扩面口径）', 
         '装备',
         '技能',
         '状态效果',
-        '登神长阶',
       ].sort(),
     );
     // 仍然不投的：任务/关系走 quest / char 命名空间；位置在 世界.地点

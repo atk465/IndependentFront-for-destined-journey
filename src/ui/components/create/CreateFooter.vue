@@ -6,6 +6,8 @@ defineProps<{
   canPrev?: boolean;
   canNext?: boolean;
   nextLabel?: string;
+  /** 「下一步」不可用的一行可读原因（2026-10-01 探查 BUG-H：卡关零解释） */
+  blockReason?: string;
 }>();
 
 defineEmits<{
@@ -21,13 +23,23 @@ defineEmits<{
       <i class="btn-icon fa-solid fa-bookmark" aria-hidden="true"></i>角色预设
     </AppButton>
 
-    <div class="footer-nav">
-      <AppButton variant="secondary" size="md" :disabled="canPrev === false" @click="$emit('prev')">
-        ← 上一步
-      </AppButton>
-      <AppButton variant="primary" size="md" :disabled="canNext === false" @click="$emit('next')">
-        {{ nextLabel || '下一步 →' }}
-      </AppButton>
+    <div class="footer-right">
+      <span v-if="canNext === false && blockReason" class="block-reason" role="status">{{
+        blockReason
+      }}</span>
+      <div class="footer-nav">
+        <AppButton
+          variant="secondary"
+          size="md"
+          :disabled="canNext === false"
+          @click="$emit('prev')"
+        >
+          ← 上一步
+        </AppButton>
+        <AppButton variant="primary" size="md" :disabled="canNext === false" @click="$emit('next')">
+          {{ nextLabel || '下一步 →' }}
+        </AppButton>
+      </div>
     </div>
   </footer>
 </template>
@@ -42,6 +54,15 @@ defineEmits<{
   background: var(--theme-card-bg);
   border-top: 1px solid var(--theme-card-border);
   flex-shrink: 0;
+}
+.footer-right {
+  display: flex;
+  align-items: center;
+  gap: var(--theme-spacing-md);
+}
+.block-reason {
+  color: var(--theme-accent, #c8a24a);
+  font-size: 13px;
 }
 .footer-nav {
   display: flex;

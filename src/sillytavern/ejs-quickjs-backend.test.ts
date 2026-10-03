@@ -380,7 +380,7 @@ describe('QuickJS 后端 · 能力面', () => {
       expect((await render('<%= stats.主角.生命值 %>', ctx)).text).toBe('71');
       expect((await render('<%= vars.事件.阶段 %>', ctx)).text).toBe('2');
       expect((await render('<%= world.回合 %>', ctx)).text).toBe('9');
-      expect((await render('<%= engine.name %>', ctx)).text).toBe('poem-of-destiny');
+      expect((await render('<%= engine.name %>', ctx)).text).toBe('narrative-engine');
       expect((await render('<%= engine.has("lore.get") %>', ctx)).text).toBe('true');
     },
     SLOW,

@@ -5,7 +5,7 @@
  * ADR-22: FP 是存档级元货币，独立于 CharacterState
  */
 
-import type { SaveProfile, FPTransaction, FateContract, Achievement, NewsItem } from './types';
+import type { SaveProfile, FPTransaction, Achievement, NewsItem } from './types';
 import { getSaveProfile, saveSaveProfile, createDefaultSaveProfile } from './database';
 import { withSaveWriteLock } from './state-write-queue';
 
@@ -97,32 +97,6 @@ export async function spendFP(
 
 export function canAffordFP(profile: SaveProfile, amount: number): boolean {
   return profile.fp >= amount;
-}
-
-// ========== Contracts ==========
-
-export async function addContract(
-  profile: SaveProfile,
-  contract: Omit<FateContract, 'id' | 'createdAt'>,
-): Promise<SaveProfile> {
-  profile.contracts.push({
-    ...contract,
-    id: crypto.randomUUID(),
-    createdAt: Date.now(),
-  });
-  await updateProfile(profile);
-  return profile;
-}
-
-export function getContracts(profile: SaveProfile): FateContract[] {
-  return profile.contracts;
-}
-
-export function getContractByTarget(
-  profile: SaveProfile,
-  targetId: string,
-): FateContract | undefined {
-  return profile.contracts.find((c) => c.targetId === targetId);
 }
 
 // ========== Achievements ==========
@@ -271,7 +245,7 @@ export async function persistRemoveQuest(saveId: string, questName: string): Pro
 // ═══════════════════════════════════════════════════════════
 
 import type { Quest } from './types';
-import { createDefaultQuest } from './types';
+import { createDefaultQuest, type NarrativeIntent } from './types';
 
 /** 获取所有任务 */
 export function getQuests(profile: SaveProfile): Record<string, Quest> {
@@ -502,6 +476,42 @@ export function setRandomEventFlagsInPlace(
 }
 
 // ═══════════════════════════════════════════════════════════
+// 委托×地图闭环状态（worldFlags.commissions，2026-09-19）
+// ═══════════════════════════════════════════════════════════
+
+import type { CommissionsFlags } from './card-workshop/commission-flags';
+
+/** `worldFlags.commissions` 在 profile 里的键 —— 只在本节出现，读写两侧共用一处 */
+const COMMISSIONS_FLAGS_KEY = 'commissions';
+
+/**
+ * 读委托闭环状态（`worldFlags.commissions`）。
+ * 缺席返回**空袋子**（同 `getRandomEventFlags` 口径）；返回的是新对象，写它不落库。
+ */
+export function getCommissionsFlags(profile: SaveProfile): CommissionsFlags {
+  const raw = profile.worldFlags?.[COMMISSIONS_FLAGS_KEY];
+  return raw !== null && typeof raw === 'object' ? (raw as CommissionsFlags) : {};
+}
+
+/**
+ * 整份覆盖委托闭环状态 —— **只改内存不落库**。落库走 `updateCommissionsFlags`。
+ */
+function setCommissionsFlagsInPlace(profile: SaveProfile, flags: CommissionsFlags): void {
+  if (profile.worldFlags === undefined || profile.worldFlags === null) profile.worldFlags = {};
+  profile.worldFlags[COMMISSIONS_FLAGS_KEY] = flags;
+}
+
+/** 整份覆盖委托闭环状态（命名写入口，形状照 `updateRandomEventFlags`） */
+export async function updateCommissionsFlags(
+  profile: SaveProfile,
+  flags: CommissionsFlags,
+): Promise<SaveProfile> {
+  setCommissionsFlagsInPlace(profile, flags);
+  await updateProfile(profile);
+  return profile;
+}
+
+// ═══════════════════════════════════════════════════════════
 // 地块事实态（地图 v1.2 / ADR-33 §3）
 // ═══════════════════════════════════════════════════════════
 
@@ -667,4 +677,149 @@ export async function commitPlotThreadTurn(
       revealedCount: afterRevealed.revealed.length,
     };
   });
+}
+
+// ========== 委托声望（卡牌工坊 委托接线，2026-09-14） ==========
+
+/** 读委托声望 —— 旧存档缺 `reputation` 时兜底 0。唯一读取辅助 */
+export function getReputation(profile: SaveProfile): number {
+  return typeof profile.reputation === 'number' && Number.isFinite(profile.reputation)
+    ? profile.reputation
+    : 0;
+}
+
+/**
+ * 声望 delta（可正可负，clamp ≥ 0——声望不为负）。
+ * 🔴 调用方只有**委托结算**（state-manager 的 delta_variable profile.reputation
+ *    分支，metadata.source='commission' 门禁在那一侧）——AI 零写路径由该门禁保证。
+ */
+export function addReputation(profile: SaveProfile, amount: number): SaveProfile {
+  const base = getReputation(profile);
+  const next = Number.isFinite(amount) ? amount : 0;
+  profile.reputation = Math.max(0, base + next);
+  return profile;
+}
+
+/**
+ * 叙事意图（2026-09-17 纯记不向路线）：玩家在制卡/世界书等节点输入的
+ * 「只记不向」指令，落到 `SaveProfile.narrativeIntents`，由 {{NARRATIVE_INTENTS}}
+ * 注入给 AI 作剧作指令（引擎**不作数值反哺**）。
+ *
+ * 语义：**每个天赋保留一条当前意图**（再声明即替换）——「世界规则干预」这类
+ * 声明本质是持续有效的规则，不该一次性消费；每天赋一条同时保证注入块有界。
+ */
+export function getNarrativeIntents(profile: SaveProfile): NarrativeIntent[] {
+  return profile.narrativeIntents ?? [];
+}
+
+/** 声明（或替换）某天赋的当前叙事意图，返回刷新后的 profile。 */
+export async function setNarrativeIntent(
+  saveId: string,
+  intent: NarrativeIntent,
+): Promise<SaveProfile> {
+  return withSaveWriteLock(saveId, async () => {
+    const fresh = await getProfile(saveId);
+    const list = (fresh.narrativeIntents ?? []).filter((i) => i.talent !== intent.talent);
+    list.push(intent);
+    fresh.narrativeIntents = list;
+    await updateProfile(fresh);
+    return fresh;
+  }) as Promise<SaveProfile>;
+}
+
+/** 清空一条意图（天赋面板的「撤回」）。 */
+export async function clearNarrativeIntent(saveId: string, talent: string): Promise<SaveProfile> {
+  return withSaveWriteLock(saveId, async () => {
+    const fresh = await getProfile(saveId);
+    fresh.narrativeIntents = (fresh.narrativeIntents ?? []).filter((i) => i.talent !== talent);
+    await updateProfile(fresh);
+    return fresh;
+  }) as Promise<SaveProfile>;
+}
+
+// ═══════════════════════════════════════════════════════════
+// 自定义内容（开发者模式：自定义天赋 / 自定义购卡）
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * `worldFlags.customTalents` / `worldFlags.customCards` 在 profile 里的键
+ * —— 只在本节出现，读写两侧共用一处。
+ */
+const CUSTOM_TALENTS_KEY = 'customTalents';
+const CUSTOM_CARDS_KEY = 'customCards';
+const CUSTOM_COMMISSIONS_KEY = 'customCommissions';
+const CUSTOM_EVENTS_KEY = 'customExplorationEvents';
+
+/**
+ * 读自定义内容（开发者模式编辑器写的那两份列表）。
+ *
+ * 🔴 返回**原样**的未知值：形状校验在 `custom-content.ts` 的宽读函数里（那里才认得
+ *    `TalentTemplate` / `CardCatalogItem`），本文件不引内容层类型 —— 免得引擎基础
+ *    数据层反向依赖卡牌工坊。
+ *
+ * 🔴 为什么需要这一节（2026-09-18 真机修）：此前这两个袋子是通过
+ *    `commitChatState([{op:'set_variable', target:'worldFlags.customCards'}])` 写的 ——
+ *    那条路会把内容落到 **`variables.sys.worldFlags`**，而读档读的是
+ *    `profile.worldFlags`（本节与地图/随机事件那几节同一处）。写入与读取压根不是
+ *    同一个袋子：同一局里看不出问题（运行时注册表还在内存里），一刷新就全没了。
+ */
+export function getCustomTalentFlags(profile: SaveProfile): unknown {
+  return profile.worldFlags?.[CUSTOM_TALENTS_KEY];
+}
+
+/** 读自定义购卡列表（原样，见 `getCustomTalentFlags` 的说明） */
+export function getCustomCardFlags(profile: SaveProfile): unknown {
+  return profile.worldFlags?.[CUSTOM_CARDS_KEY];
+}
+
+/** 读自定义委托列表（委托编写器，2026-09-19；原样，同 `getCustomTalentFlags`） */
+export function getCustomCommissionFlags(profile: SaveProfile): unknown {
+  return profile.worldFlags?.[CUSTOM_COMMISSIONS_KEY];
+}
+
+/** 读自定义链节探索事件列表（原样，同 `getCustomTalentFlags`） */
+export function getCustomEventFlags(profile: SaveProfile): unknown {
+  return profile.worldFlags?.[CUSTOM_EVENTS_KEY];
+}
+
+/**
+ * 整份覆盖自定义内容（**命名写入口**，先例 `updateMapFlags` / `setMapFlagsInPlace`）。
+ *
+ * 只写传入的键：传 `cards` 不传 `talents` 时天赋那袋原样不动（编辑器是两个页签，
+ * 各存各的）。整份覆盖而不是合并 —— 编辑器每次提交的都是完整列表，删除要能生效。
+ */
+export async function updateCustomContentFlags(
+  profile: SaveProfile,
+  content: {
+    talents?: readonly unknown[];
+    cards?: readonly unknown[];
+    commissions?: readonly unknown[];
+    events?: readonly unknown[];
+  },
+): Promise<SaveProfile> {
+  setCustomContentFlagsInPlace(profile, content);
+  await updateProfile(profile);
+  return profile;
+}
+
+/** 整份覆盖自定义内容 —— **只改内存不落库**（`updateCustomContentFlags` 的纯变更那一半） */
+export function setCustomContentFlagsInPlace(
+  profile: SaveProfile,
+  content: {
+    talents?: readonly unknown[];
+    cards?: readonly unknown[];
+    commissions?: readonly unknown[];
+    events?: readonly unknown[];
+  },
+): void {
+  // 存量记录（与手搓的测试 profile）可能整个缺 worldFlags；缺了就补一个空袋子
+  if (profile.worldFlags === undefined || profile.worldFlags === null) profile.worldFlags = {};
+  if (content.talents !== undefined) profile.worldFlags[CUSTOM_TALENTS_KEY] = [...content.talents];
+  if (content.cards !== undefined) profile.worldFlags[CUSTOM_CARDS_KEY] = [...content.cards];
+  if (content.commissions !== undefined) {
+    profile.worldFlags[CUSTOM_COMMISSIONS_KEY] = [...content.commissions];
+  }
+  if (content.events !== undefined) {
+    profile.worldFlags[CUSTOM_EVENTS_KEY] = [...content.events];
+  }
 }

@@ -101,16 +101,6 @@ function makeCharGenOutputSimple(): CharGenOutput {
     personality:
       '直爽、豪迈，嗓门大且爱笑。干活时全神贯注，休息时最爱大口喝酒大口吃肉。对矿石和金属有着近乎偏执的热爱，能对着锻造炉看一整天火焰的颜色变化。',
     likes: '好酒、矿石标本、锻造、赌石、矿工歌谣',
-    ascension: {
-      enabled: false,
-      path: '',
-      description: '',
-      elements: [],
-      authorities: [],
-      laws: [],
-      deityPosition: '',
-      divineKingdom: { name: '', description: '' },
-    },
     skills: [
       {
         name: '重锤猛击',

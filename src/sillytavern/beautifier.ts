@@ -161,11 +161,13 @@ export function resetPresetRulesCache(): void {
 // ========== Auto-Enable Resolution ==========
 
 /**
- * 从存档的 enabledWorldBookEntries（格式 'system_core:413'）提取 autoEnable 信号。
+ * 从存档的 enabledWorldBookEntries（格式 'partition:uid'）提取 autoEnable 信号。
  *
- * 这是 autoEnable 的正确信号源 —— 命定核心/启用角色是**存档级**选择
- * （存于 save.metadata.enabledWorldBookEntries），不等于 worldBooks 条目的 enabled
- * （后者是「是否注入 prompt」的开关，核心书里几乎全 enabled，用它会让所有绑核心的规则恒亮）。
+ * 这是 autoEnable 的正确信号源 —— 存档级世界书条目选择（存于
+ * save.metadata.enabledWorldBookEntries），不等于 worldBooks 条目的 enabled
+ * （后者是「是否注入 prompt」的开关，书里条目几乎全 enabled，用它会让所有绑条目的规则恒亮）。
+ * ⚠️ 捏人页现已不再写入该清单（「启用角色」步已删、命定核心轴已下线），新档恒为空数组；
+ *    本函数保留是为兼容存量存档与将来可能恢复的存档级收窄。
  *
  * @param enabledEntries 存档启用的条目 ID 列表（partition:uid）
  */

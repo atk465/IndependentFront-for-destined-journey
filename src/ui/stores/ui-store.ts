@@ -9,7 +9,7 @@ export interface Toast {
 }
 
 /** 所有页面视图 */
-export type AppView = 'home' | 'create' | 'game' | 'settings' | 'extensions' | 'workshop';
+export type AppView = 'home' | 'create' | 'game' | 'settings';
 
 /** 设置页主分区；首页“关于”等跨页面入口通过这一类型传递目标。 */
 export type SettingsSection =

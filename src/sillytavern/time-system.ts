@@ -195,6 +195,9 @@ export function advanceDays(time: GameTime, days: number): GameTime {
  * weekday 也不参与（派生量，非独立时间维度）。
  * 负值合法（纪元前/回拨），同 Unix time_t 允许负数。
  */
+/** 一个游戏日的分钟数（= 1440；gameDay = floor(toEpochMinutes / 本值)）。全仓唯一真源 */
+export const MINUTES_PER_GAME_DAY = 1440;
+
 export function toEpochMinutes(time: GameTime): number {
   return (
     (time.year - GAME_EPOCH_YEAR) * MINUTES_PER_YEAR +

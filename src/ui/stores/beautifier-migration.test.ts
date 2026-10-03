@@ -44,7 +44,7 @@ function makeFatPresetRule(id: string): BeautifierRule {
   return makeRule(id, { isBuiltin: true, replacement: 'x'.repeat(20_000) });
 }
 
-const STORAGE_KEY = 'fated-poem-settings';
+const STORAGE_KEY = 'narrative-engine-settings';
 const lsBacking = new Map<string, string>();
 vi.stubGlobal('localStorage', {
   getItem: (k: string) => lsBacking.get(k) ?? null,

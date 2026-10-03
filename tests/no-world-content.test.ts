@@ -132,8 +132,8 @@ describe('② 体量轴：占位内容阈值（§6 / D32）', () => {
   const wbDir = join(REPO_ROOT, 'public', 'data', 'worldbooks');
   const bookFiles = existsSync(wbDir) ? readdirSync(wbDir).filter((f) => f.endsWith('.json')) : [];
 
-  it('15 本占位世界书', () => {
-    expect(bookFiles).toHaveLength(15);
+  it('14 本占位世界书', () => {
+    expect(bookFiles).toHaveLength(14);
   });
 
   it('单本 ≤10 条 / 全集 ≤150 条', () => {
@@ -181,8 +181,8 @@ describe('② 体量轴：占位 agent-config 规格（§6 / D32）', () => {
     >;
   };
 
-  it('13 个 agent id 齐', () => {
-    expect(Object.keys(agentConfig.agents)).toHaveLength(13);
+  it('12 个 agent id 齐', () => {
+    expect(Object.keys(agentConfig.agents)).toHaveLength(12);
   });
 
   it('各 agent systemPrompt 非空（image_prompt 除外 —— 它那份归方言，C5）', () => {

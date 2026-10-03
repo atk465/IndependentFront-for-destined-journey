@@ -52,6 +52,8 @@ const {
   hashTextDeterministic,
   EMBEDDING_PREPROCESSING_VERSION,
   MAX_EMBEDDING_DIMENSIONS,
+  backfillMissingMemories,
+  LAZY_BACKFILL_MAX_PER_RECALL,
 } = await import('./memory-store');
 
 // ═══════════════════════════════════════════════════════════════
@@ -1219,5 +1221,91 @@ describe('saveMemoryWithEmbedding', () => {
     expect(mockFetch.mock.calls[0][0]).toBe('/api/embeddings');
     const headers = (mockFetch.mock.calls[0][1] as any).headers;
     expect(headers['X-Target-Base-URL']).toBe('https://custom.api.com/v2');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// 惰性回填（backfillMissingMemories）—— 旧存档历史记忆补向量
+// ═══════════════════════════════════════════════════════════════
+
+describe('backfillMissingMemories', () => {
+  beforeEach(() => {
+    mockGetMemories.mockReset();
+    mockSaveMemory.mockReset();
+    mockFetch.mockReset();
+    mockSaveMemory.mockResolvedValue(undefined);
+  });
+
+  it('全部有向量 → 扫描 0 条、不写库（零开销快路）', async () => {
+    const vec = [0.1, 0.2, 0.3];
+    mockGetMemories.mockResolvedValue([
+      makeMemory({ id: 'MEM000001', embedding: vec, embeddingMeta: metaFor(vec) }),
+    ]);
+    const res = await backfillMissingMemories('save_test', 5, makeEndpoint());
+    expect(res).toEqual({ scanned: 0, refilled: 0, failed: 0 });
+    expect(mockSaveMemory).not.toHaveBeenCalled();
+  });
+
+  it('缺失条按上限批次重嵌并落库（embedding + meta 成对写）', async () => {
+    const missing = makeMemories(3, 'save_test'); // 无 embedding
+    mockGetMemories.mockResolvedValue(missing);
+    mockFetch.mockResolvedValue(makeEmbeddingResponse([0.5, 0.5, 0.5]));
+
+    const res = await backfillMissingMemories('save_test', 5, makeEndpoint());
+
+    expect(res.scanned).toBe(3);
+    expect(res.refilled).toBe(3);
+    expect(res.failed).toBe(0);
+    expect(mockSaveMemory).toHaveBeenCalledTimes(3);
+    const saved = mockSaveMemory.mock.calls[0][0] as MemoryRecord;
+    expect(saved.embedding).toEqual([0.5, 0.5, 0.5]);
+    expect(saved.embeddingMeta).toBeDefined();
+  });
+
+  it('上限生效：10 条缺失、上限 5 → 只回填 5 条（防历史债一次性爆发）', async () => {
+    mockGetMemories.mockResolvedValue(makeMemories(10, 'save_test'));
+    mockFetch.mockResolvedValue(makeEmbeddingResponse([0.1, 0.2]));
+
+    const res = await backfillMissingMemories('save_test', 5, makeEndpoint());
+
+    expect(res.scanned).toBe(5);
+    expect(res.refilled).toBe(5);
+    expect(mockSaveMemory).toHaveBeenCalledTimes(5);
+  });
+
+  it('缺省上限是常量 LAZY_BACKFILL_MAX_PER_RECALL 的语义（调用方传它就是那个数）', () => {
+    expect(LAZY_BACKFILL_MAX_PER_RECALL).toBeGreaterThan(0);
+    expect(Number.isInteger(LAZY_BACKFILL_MAX_PER_RECALL)).toBe(true);
+  });
+
+  it('嵌入失败 → 记 failed、不写库、不抛（下一轮自动再试）', async () => {
+    mockGetMemories.mockResolvedValue(makeMemories(2, 'save_test'));
+    mockFetch.mockResolvedValue({ ok: false, status: 500, json: async () => ({}) });
+
+    const res = await backfillMissingMemories('save_test', 5, makeEndpoint());
+
+    expect(res.scanned).toBe(2);
+    expect(res.refilled).toBe(0);
+    expect(res.failed).toBe(2);
+  });
+
+  it('单条坏数据不拖垮整批（第 1 条失败、第 2 条照样回填）', async () => {
+    mockGetMemories.mockResolvedValue(makeMemories(2, 'save_test'));
+    mockFetch
+      .mockRejectedValueOnce(new Error('network down'))
+      .mockResolvedValueOnce(makeEmbeddingResponse([0.7, 0.7]));
+
+    const res = await backfillMissingMemories('save_test', 5, makeEndpoint());
+
+    expect(res.scanned).toBe(2);
+    expect(res.refilled).toBe(1);
+    expect(res.failed).toBe(1);
+  });
+
+  it('无记忆 → 全 0（空存档不触发网络）', async () => {
+    mockGetMemories.mockResolvedValue([]);
+    const res = await backfillMissingMemories('save_test', 5, makeEndpoint());
+    expect(res).toEqual({ scanned: 0, refilled: 0, failed: 0 });
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 });

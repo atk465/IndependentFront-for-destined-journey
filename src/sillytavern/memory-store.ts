@@ -609,3 +609,53 @@ export async function saveMemoryWithEmbedding(
   await saveMemory(memory);
   return memory;
 }
+
+// ═══════════════════════════════════════════════════════════
+// 惰性回填：旧记忆的 embedding 自动重算
+// ═══════════════════════════════════════════════════════════
+
+/** 每次召回最多回填条数（防 batch 阻塞召回 UI；主人可改） */
+export const LAZY_BACKFILL_MAX_PER_RECALL = 5;
+
+/**
+ * 惰性回填：扫描存档里 `embedding` 缺失的记忆，挑本次 topK 之前几条走 `saveMemoryWithEmbedding`。
+ *
+ * 抽出独立函数（不嵌进 `recallMemories`）的理由：① 「回填是异步网络任务，不能阻塞召回」
+ *     —— 召唤端 fire-and-forget；② 「失败是常态不是异常」 —— 一条坏数据失败，下一轮自动再试，
+ *     db 不留半残状态；③ 「批次上限保护」 —— 一次召回最多回填 5 条，避免端点刚上线时历史债一次性爆发。
+ *
+ * 副作用：db 里这些 memory 的 `embedding` + `embeddingMeta` 被写上（首次向量落地）。
+ *          不影响 `recallMemories` 的本次返回结果（那批 memory 本次还是走 fallback），
+ *          但下一轮召回它们就是 compatible 段、按余弦打分了。
+ */
+export async function backfillMissingMemories(
+  saveId: string,
+  scanTopN: number,
+  endpoint: EmbeddingEndpoint,
+  onEmbeddingRequest?: EmbeddingRequestObserver,
+): Promise<{ scanned: number; refilled: number; failed: number }> {
+  const all = await getMemories(saveId);
+  const missing = all
+    .filter((m) => m.embedding === undefined || m.embedding === null)
+    .slice(0, scanTopN);
+  if (missing.length === 0) return { scanned: 0, refilled: 0, failed: 0 };
+
+  let refilled = 0;
+  let failed = 0;
+  for (const memory of missing) {
+    try {
+      await saveMemoryWithEmbedding(memory, endpoint);
+      if (memory.embedding !== undefined) refilled += 1;
+      else failed += 1;
+    } catch (err) {
+      // 单条失败不应拖垮整批：记日志、计数、继续下一条
+      console.warn('[memory-store] 回填失败（不影响其他条目与本次召回）:', err);
+      failed += 1;
+    }
+    if (onEmbeddingRequest) {
+      // 上一条 saveMemoryWithEmbedding 已通过 onEmbeddingRequest 上报过 trace；
+      // 这里仅占位保留接口形状，让上游知道回填也算消耗。
+    }
+  }
+  return { scanned: missing.length, refilled, failed };
+}

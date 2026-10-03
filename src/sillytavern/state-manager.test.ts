@@ -215,6 +215,7 @@ describe('StateManager', () => {
           saveId,
           fp: 0,
           fpHistory: [],
+          reputation: 0,
           contracts: [],
           achievements: [],
           news: [],
@@ -596,7 +597,8 @@ describe('StateManager', () => {
         {
           op: 'update_character',
           target: 'characters.Test Hero',
-          value: { hp: 90 },
+          // 资源专线令（2026-10-01）：update_character 禁写资源，这里用 money 驱动同样的落地路径
+          value: { money: 90 },
           metadata: { action: 'new_action' },
         },
       ]);
@@ -610,7 +612,7 @@ describe('StateManager', () => {
 
       const sm = new StateManager({ saveId: 'save-001' });
       await sm.commitChatState([
-        { op: 'update_character', target: 'characters.Test Hero', value: { hp: 90 } },
+        { op: 'update_character', target: 'characters.Test Hero', value: { money: 90 } },
       ]);
 
       expect(char.currentAction).toBe('existing_action');
@@ -785,13 +787,13 @@ describe('StateManager', () => {
 
     // ===== 终审修复: hp/mp/sp 钳制 + attributes 深合并 =====
 
-    it('⑤ 钳制: {hp: 9999} 在 maxHp=100 时落地为 100（与 set_hp 语义一致）', async () => {
+    it('⑤ 钳制: set_hp {9999} 在 maxHp=100 时落地为 100（绝对值语义归 set_* 专线）', async () => {
       const char = buildMockCharacter({ id: 'char-001', hp: 50, maxHp: 100 });
       vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
       const sm = new StateManager({ saveId: 'save-001' });
       const result = await sm.commitChatState([
-        { op: 'update_character', target: 'characters.Test Hero', value: { hp: 9999 } },
+        { op: 'set_hp', target: 'characters.Test Hero', value: 9999 },
       ]);
 
       expect(result.success).toBe(true);
@@ -804,18 +806,8 @@ describe('StateManager', () => {
 
       const sm = new StateManager({ saveId: 'save-001' });
       const result = await sm.commitChatState([
-        {
-          op: 'update_character',
-          target: 'characters.Test Hero',
-          value: { hp: 50 },
-          metadata: { delta: true },
-        },
-        {
-          op: 'update_character',
-          target: 'characters.Test Hero',
-          value: { mp: -999 },
-          metadata: { delta: true },
-        },
+        { op: 'delta_hp', target: 'characters.Test Hero', amount: 50 },
+        { op: 'delta_mp', target: 'characters.Test Hero', amount: -999 },
       ]);
 
       expect(result.success).toBe(true);
@@ -823,13 +815,14 @@ describe('StateManager', () => {
       expect(char.mp).toBe(0); // 10-999 → 钳 0
     });
 
-    it('钳制: 同 patch 写 hp+maxHp 时以写后 maxHp 为准', async () => {
+    it('钳制: set_max_hp 抬上限后 set_hp 落在新上限内（资源专线令迁移）', async () => {
       const char = buildMockCharacter({ id: 'char-001', hp: 100, maxHp: 100 });
       vi.mocked(db.getCharacters).mockResolvedValue([char]);
 
       const sm = new StateManager({ saveId: 'save-001' });
       const result = await sm.commitChatState([
-        { op: 'update_character', target: 'characters.Test Hero', value: { hp: 180, maxHp: 200 } },
+        { op: 'set_max_hp', target: 'characters.Test Hero', value: 200 },
+        { op: 'set_hp', target: 'characters.Test Hero', value: 180 },
       ]);
 
       expect(result.success).toBe(true);

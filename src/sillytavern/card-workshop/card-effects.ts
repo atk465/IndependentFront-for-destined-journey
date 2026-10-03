@@ -1,0 +1,654 @@
+/**
+ * card-effects.ts — 卡牌战斗效果池（2026-09-25 访谈共识实施）
+ *
+ * 两层架构（主人效果池文档）：
+ * - 状态层：常驻/可叠层，带层数与剩余拍数（中毒/灼烧/流血/虚弱/易伤/迟缓/眩晕/冰冻/护盾/格挡）
+ * - 动作层：一次性结算（伤害/治疗/吸血/连击/破防/驱散）
+ * 效果描述公式：触发时机+目标+动作+数值+持续时间+代价（条件位留扩展，本批不实现）。
+ *
+ * 作者ship（访谈共识）：
+ * - 元素→默认效果映射打底：所有战斗卡自动有保底区分（火→灼烧、暗→吸血…）
+ * - 内容包 catalog.effects 可扩展池、可逐卡精配覆写（高阶 27 张精配表另批入库）
+ * - 制卡：AI 从池内选（类型/目标/时机，数值池内定值），配 coerceCardEffects 门禁——
+ *   池外选择丢弃、回落素材派生；AI 只写名字与描述
+ *
+ * 纯度约束：无 I/O、无 Vue；池注册是模块级 Map（与自定义天赋同款缝）。
+ */
+
+import type { CardTier } from '../field-enums';
+import { CARD_ELEMENT_AXIS } from './derived-stats';
+
+/** 触发时机（首批三种 + 击杀时 + 效果批五：拍结束/消耗时。「拍开始」与「每拍」同源合并——见 backlog） */
+export type EffectTrigger =
+  '打出时' | '每拍' | '受击时' | '击杀时' | '拍结束' | '消耗时' | '治疗时' | '施法时';
+/** 目标三值：单血池下「敌全体」按 enemyCount 倍化 */
+export type EffectTarget = '敌单体' | '敌全体' | '自身';
+/** 动作层六动作 + 状态层十状态 */
+export type EffectAction =
+  // 动作层（一次性）
+  | '伤害'
+  | '治疗'
+  | '吸血'
+  | '连击'
+  | '破防'
+  | '驱散'
+  | '真实伤害'
+  | '净化'
+  // 状态层（持续/叠层）
+  | '中毒'
+  | '灼烧'
+  | '流血'
+  | '虚弱'
+  | '易伤'
+  | '迟缓'
+  | '眩晕'
+  | '冰冻'
+  | '护盾'
+  | '格挡'
+  // 状态层第二批（2026-09-25 效果批一）
+  | '剧毒'
+  | '恐惧'
+  | '混乱'
+  | '沉睡'
+  | '束缚'
+  | '诅咒'
+  | '标记'
+  | '圣盾'
+  | '反伤'
+  | '变异'
+  // 状态层第三批（效果批二）
+  | '魅惑'
+  | '沉默'
+  | '招架'
+  | '先攻'
+  // 动作层第三批
+  | '斩杀'
+  // 状态层第四批（效果批三 2026-09-25）
+  | '寄生'
+  | '感染'
+  | '退化'
+  | '死亡倒计时'
+  | '缴械'
+  // 状态层第五批（效果批六 2026-09-28）
+  | '免疫'
+  // 动作层第四批
+  | '汲取'
+  // 强化档（效果批四 2026-09-25）：既有机制的池内定值高档
+  | '双击'
+  | '风怒'
+  | '超杀'
+  | '穿透'
+  | '处决'
+  // 信息策略类（效果批八 2026-09-28）：敌方无手牌系统——「查看手牌」重诠释为招式轮换读侧
+  | '窥探'
+  | '洞悉'
+  | '任务'
+  | '分支'
+  // 特殊类（效果批九 2026-09-28）：禁忌卡六正本为样板——特殊机制直挂 session/在场实体
+  | '时之锚'
+  | '觉醒'
+  | '狂暴'
+  | '进化'
+  | '连携锚'
+  | '终结一击'
+  // 慎用清单（效果批十 2026-09-28）：高费+预警原则——四条原语义依赖手牌/回合，已重诠释
+  | '支配'
+  | '时间裂缝'
+  | '夺式'
+  | '封印'
+  | '断章'
+  | '连锁风暴'
+  // 契约/赌注/成就（效果批十一 2026-09-28）：策略与信息类收官——窗口契约/反制赌注/账本成就
+  | '契约·血誓'
+  | '赌一手'
+  | '功业';
+
+/** 代价（首批只收三种资源；正数值） */
+export interface EffectCost {
+  mp?: number;
+  sp?: number;
+  hp?: number;
+}
+
+/** 交锋内事件（效果批七·条件位：会话账本八计数器，拍拍递增、会话结束清零） */
+export type BeatEvent =
+  '出卡' | '受击' | '造成伤害' | '承受伤害' | '治疗' | '反制成功' | '击杀' | '友方退场';
+
+/** 效果条件（公式第 7 位落地；单条件数组，全部满足才结算） */
+export interface EffectCondition {
+  event: BeatEvent;
+  /** 阈值（本场合计计数 ≥ 阈值即满足） */
+  count: number;
+}
+
+/** 条件校验（纯函数）：账本 vs 条件数组，全部满足才 true；空数组 = 无条件恒真 */
+export function conditionsMet(
+  conditions: readonly EffectCondition[] | undefined,
+  ledger: Partial<Record<BeatEvent, number>> | undefined,
+): boolean {
+  if (!conditions || conditions.length === 0) return true;
+  const led = ledger ?? {};
+  return conditions.every((c) => (led[c.event] ?? 0) >= Math.max(1, Math.round(c.count)));
+}
+
+/** 一条结构化卡牌效果（效果描述公式的落地形状） */
+export interface CardEffectDef {
+  trigger: EffectTrigger;
+  target: EffectTarget;
+  action: EffectAction;
+  /** 数值（动作层=伤害/治疗量或倍率百分数；状态层=每拍量/层数强度） */
+  value: number;
+  /** 持续拍数（状态层；动作层缺省 0 = 即时） */
+  duration?: number;
+  /** 使用代价（本批只收资源） */
+  cost?: EffectCost;
+  /** 条件（效果批七：单条件数组，全部满足才结算；不满足空过+战报） */
+  conditions?: EffectCondition[];
+  /**
+   * 效果元素轴（伙伴实体化 D15，批⑤ B5.4/B5.5）：混合元素技能轨——
+   * 必须 ⊆ 卡词条元素集（coerceCardEffects 门禁校验，违规整条丢弃）；
+   * 结算时该效果的技能轨主轴派生 = max(各元素对应五维派生)，不叠加。
+   */
+  element?: string[];
+}
+
+/** 单卡效果集（卡定义上的新字段；派生打底与精配覆写都产出它） */
+export type CardEffects = readonly CardEffectDef[];
+
+/** 内建效果池：动作/状态的池内定值（AI 池内选的合法集；数值 = 初稿，终审对象） */
+export interface PoolEntry {
+  action: EffectAction;
+  /** 池内定值（AI 不得改数） */
+  value: number;
+  /** 池内缺省持续拍数（状态层） */
+  duration: number;
+  /** 池内缺省代价 */
+  cost?: EffectCost;
+  /** 白话说明（AI 提示词与卡面展示共用） */
+  text: string;
+}
+
+export const EFFECT_POOL: readonly PoolEntry[] = [
+  // ── 动作层（打出时一次性） ──
+  { action: '伤害', value: 120, duration: 0, text: '造成 120% 主属性伤害' },
+  { action: '治疗', value: 150, duration: 0, text: '回复 150% 主属性' },
+  {
+    action: '吸血',
+    value: 100,
+    duration: 0,
+    cost: { mp: 5 },
+    text: '造成 100% 主属性伤害并回复其三成',
+  },
+  { action: '连击', value: 50, duration: 0, cost: { sp: 3 }, text: '本拍伤害 +50%' },
+  { action: '破防', value: 4, duration: 0, text: '敌方威胁 −4（本场）' },
+  { action: '驱散', value: 0, duration: 0, text: '驱散敌方全部增益状态' },
+  // ── 状态层（持续/叠层） ──
+  { action: '中毒', value: 40, duration: 3, text: '每拍 40% 主属性伤害，可叠层（3 拍）' },
+  { action: '灼烧', value: 65, duration: 2, text: '每拍 65% 主属性伤害（2 拍）' },
+  { action: '流血', value: 35, duration: 4, text: '每拍 35% 主属性伤害，可叠层（4 拍）' },
+  { action: '虚弱', value: 3, duration: 2, text: '敌方威胁 −3（2 拍）' },
+  { action: '易伤', value: 25, duration: 2, text: '敌方受到的伤害 +25%（2 拍）' },
+  { action: '迟缓', value: 3, duration: 2, text: '敌方行动值 −3（2 拍）' },
+  { action: '眩晕', value: 0, duration: 1, cost: { mp: 10 }, text: '敌方一拍放弃行动（稀有）' },
+  { action: '冰冻', value: 2, duration: 2, cost: { mp: 8 }, text: '敌方跳过攻击且威胁 −2（2 拍）' },
+  { action: '护盾', value: 25, duration: 3, text: '每拍抵挡 25% 主属性的伤害（3 拍）' },
+  { action: '格挡', value: 30, duration: 1, text: '本拍抵挡 30% 主属性的伤害，可叠层' },
+  // ── 状态层第二批（效果批一 2026-09-25） ──
+  { action: '剧毒', value: 5, duration: 3, text: '每拍敌方损失当前气血的 5%，可叠层（3 拍）' },
+  { action: '恐惧', value: 0, duration: 2, text: '敌方威胁减半且无法反制（2 拍）' },
+  { action: '混乱', value: 60, duration: 2, text: '敌方每拍自伤 60% 主属性（2 拍）' },
+  { action: '沉睡', value: 0, duration: 2, text: '敌方沉睡两拍放弃行动' },
+  { action: '束缚', value: 0, duration: 2, text: '敌方威胁锁 1（2 拍）' },
+  { action: '诅咒', value: 20, duration: 4, text: '敌方受到的伤害 +20%（4 拍）' },
+  { action: '标记', value: 45, duration: 3, text: '每拍额外 45% 主属性伤害（3 拍）' },
+  {
+    action: '圣盾',
+    value: 0,
+    duration: 1,
+    cost: { mp: 12 },
+    text: '免疫下一拍的全部伤害（一次性）',
+  },
+  { action: '反伤', value: 5, duration: 2, text: '受击时敌方反弹 5 HP（2 拍）' },
+  // ── 状态层第三批（效果批二 2026-09-25） ──
+  {
+    action: '魅惑',
+    value: 0,
+    duration: 1,
+    cost: { mp: 10 },
+    text: '敌方本拍为你说話——它的攻击转嫁为对你的伤害减免（1 拍）',
+  },
+  { action: '沉默', value: 0, duration: 2, text: '敌方无法反制（威胁不变，2 拍）' },
+  { action: '招架', value: 5, duration: 2, text: '反制成功时返还 2 SP（2 拍）' },
+  { action: '先攻', value: 3, duration: 2, text: '反制掷骰 +3（2 拍）' },
+  // ── 动作层第三批 ──
+  {
+    action: '斩杀',
+    value: 15,
+    duration: 0,
+    cost: { mp: 20 },
+    text: '敌方当前气血低于 15% 时直接击杀（未达线则本条空过）',
+  },
+  // ── 状态/动作第四批（效果批三 2026-09-25） ──
+  { action: '寄生', value: 40, duration: 3, text: '每拍敌方 −40% 主属性、你回复等量（3 拍）' },
+  { action: '感染', value: 30, duration: 3, text: '每拍 30% 主属性伤害且逐拍加深 +10%（3 拍）' },
+  { action: '退化', value: 1, duration: 3, text: '敌方威胁每拍 −1 且逐拍加深（3 拍）' },
+  {
+    action: '死亡倒计时',
+    value: 3,
+    duration: 3,
+    cost: { mp: 15 },
+    text: '3 拍后敌方直接倒下（延迟处决，期间不叠层）',
+  },
+  { action: '缴械', value: 40, duration: 2, text: '敌方威胁 −40%（2 拍）' },
+  // ── 状态层第五批（效果批六 2026-09-28） ──
+  { action: '免疫', value: 0, duration: 2, cost: { mp: 18 }, text: '免疫一切伤害（2 拍）' },
+  { action: '汲取', value: 20, duration: 0, text: '击杀时回复最大气血的 20%' },
+  // ── 强化档（效果批四：连击/斩杀/破防的池内定值高档） ──
+  {
+    action: '双击',
+    value: 100,
+    duration: 0,
+    cost: { sp: 4 },
+    text: '本拍伤害 +100%（两段连出）',
+  },
+  {
+    action: '风怒',
+    value: 150,
+    duration: 0,
+    cost: { sp: 6 },
+    text: '本拍伤害 +150%（三段连出）',
+  },
+  {
+    action: '超杀',
+    value: 30,
+    duration: 0,
+    cost: { mp: 25 },
+    text: '敌方当前气血低于 30% 时直接击杀',
+  },
+  { action: '穿透', value: 8, duration: 0, text: '敌方威胁 −8（本场）' },
+  {
+    action: '处决',
+    value: 40,
+    duration: 0,
+    cost: { mp: 30 },
+    text: '敌方当前气血低于 40% 时直接击杀',
+  },
+  // ── 状态层第五批（效果批五 2026-09-28） ──
+  {
+    action: '变异',
+    value: 4,
+    duration: 2,
+    text: '每拍敌方随机变异：威胁+3 / 承伤+8% / 自伤4（2 拍）',
+  },
+  // ── 信息策略类（效果批八 2026-09-28：读侧信息 + 目标契约 + 掷骰分支） ──
+  { action: '窥探', value: 0, duration: 0, text: '揭示敌方完整招式轮换（全部招式·威胁·反制面）' },
+  {
+    action: '洞悉',
+    value: 0,
+    duration: 2,
+    cost: { mp: 5 },
+    text: '2 拍内每拍预读敌方未来 2 拍的招式与威胁',
+  },
+  {
+    action: '任务',
+    value: 3,
+    duration: 3,
+    cost: { mp: 5 },
+    text: '3 拍内累计打出 3 张卡 → 回复 120% 主属性（超时作废）',
+  },
+  {
+    action: '分支',
+    value: 12,
+    duration: 0,
+    text: '掷骰分支：d10 ≥ 6 → 本拍伤害 +12%；否则回复 8 HP',
+  },
+  // ── 特殊类（效果批九 2026-09-28：时间/觉醒/狂暴/进化/组合技接口/终结技） ──
+  {
+    action: '时之锚',
+    value: 0,
+    duration: 3,
+    cost: { mp: 12 },
+    text: '3 拍内气血跌破锚点 → 回溯至锚点（一次性）',
+  },
+  {
+    action: '觉醒',
+    value: 25,
+    duration: 0,
+    cost: { mp: 20 },
+    text: '本场伤害 +25%、每拍回复 2 HP（血祭开眼，整场）',
+  },
+  {
+    action: '狂暴',
+    value: 50,
+    duration: 3,
+    cost: { mp: 10 },
+    text: '3 拍伤害 +50%，但每拍自伤 5',
+  },
+  { action: '进化', value: 5, duration: 0, text: '伤害每过 1 拍 +5%，持续成长（整场）' },
+  { action: '连携锚', value: 35, duration: 4, text: '4 拍内每打出一张卡，拍末追加 35% 主属性伤害' },
+  {
+    action: '终结一击',
+    value: 20,
+    duration: 0,
+    cost: { mp: 10 },
+    text: '造成敌方已损失气血 20% 的真实伤害（斩得越深越痛）',
+  },
+  // ── 慎用清单（效果批十 2026-09-28：高费+预警——全池最贵的六条） ──
+  {
+    action: '支配',
+    value: 0,
+    duration: 1,
+    cost: { mp: 25 },
+    text: '【预警·控制】敌方本拍以己之刃攻己：它的威胁尽数转为对己真伤，你不受其击',
+  },
+  {
+    action: '时间裂缝',
+    value: 50,
+    duration: 1,
+    cost: { mp: 25 },
+    text: '【预警·额外行动】下一拍敌方不行动，且你的伤害 +50%（凭空多出一拍）',
+  },
+  {
+    action: '夺式',
+    value: 0,
+    duration: 0,
+    cost: { mp: 15 },
+    text: '【预警·窃取】窃取敌方最强一式之力：本拍伤害 +其最高威胁的一半%（上限 12%）',
+  },
+  {
+    action: '封印',
+    value: 0,
+    duration: 0,
+    cost: { mp: 35 },
+    text: '【预警·封锁】敌方全部招式威胁锁 1（整场）——全池最贵，封锁至战斗结束',
+  },
+  {
+    action: '断章',
+    value: 0,
+    duration: 0,
+    cost: { mp: 10 },
+    text: '【预警·扰乱】敌方随机换式且变招威胁减半——轮换节奏作废，洞悉失准',
+  },
+  {
+    action: '连锁风暴',
+    value: 15,
+    duration: 0,
+    cost: { mp: 15 },
+    text: '【预警·连锁】伤害 +15%，你的每层在场效果再 +3%（连锁有界放大）',
+  },
+  // ── 契约/赌注/成就（效果批十一：窗口契约 / 反制赌注 / 账本成就） ──
+  {
+    action: '契约·血誓',
+    value: 2,
+    duration: 3,
+    cost: { mp: 8 },
+    text: '立约：3 拍内出满 2 张卡 → 兑现 140% 主属性治疗；违约自伤 8',
+  },
+  {
+    action: '赌一手',
+    value: 0,
+    duration: 0,
+    text: '押 10 HP 作注：本拍反制成功 → 回复 150% 主属性与 5 MP；失手再伤 10',
+  },
+  {
+    action: '功业',
+    value: 3,
+    duration: 0,
+    text: '成就：本场累计反制成功 3 次 → 伤害 +25%（整场，一次兑现）',
+  },
+];
+
+/** 池查询：动作 → 池内定值条目（找不到 = 池外，门禁丢弃） */
+export function poolEntryOf(action: EffectAction): PoolEntry | undefined {
+  return EFFECT_POOL.find((e) => e.action === action);
+}
+
+// ── 元素→默认效果映射（派生打底；2026-09-25 访谈共识九映射） ──
+
+/** 九元素 → 默认效果动作（素材决定效果的保底口径） */
+export const ELEMENT_DEFAULT_EFFECT: Readonly<Record<string, EffectAction>> = Object.freeze({
+  火: '灼烧',
+  水: '治疗',
+  风: '迟缓',
+  土: '护盾',
+  雷: '连击',
+  光: '伤害',
+  暗: '吸血',
+  冰: '冰冻',
+  金: '破防',
+});
+
+// ── 数值微差轨（攻击/耗能/防护修正；元素+档位派生） ──
+
+/** 元素 → 三条微差（初稿：火攻/水护/风耗能，其余中性） */
+const ELEMENT_STAT_MODS: Readonly<Record<string, { atk?: number; mp?: number; guard?: number }>> =
+  Object.freeze({
+    火: { atk: 1 },
+    雷: { atk: 1 },
+    水: { guard: 1 },
+    冰: { guard: 1 },
+    风: { mp: -1 },
+    土: { guard: 2, mp: 1 },
+    金: { atk: 1, mp: 1 },
+    光: { mp: 1 },
+    暗: { atk: 1 },
+  });
+
+/** 卡牌战斗数值微差（双轨之二；程序化派生，玩家感知的「手感差」） */
+export interface CardStatMods {
+  /** 出卡行动值修正 */
+  atk: number;
+  /** MP 消耗修正（负 = 更省） */
+  mp: number;
+  /** 开战防护修正 */
+  guard: number;
+}
+
+/** 从词条中的元素与档位派生微差（无元素词条全零） */
+export function statModsOf(
+  词条: readonly string[] | null | undefined,
+  cardTier: CardTier,
+): CardStatMods {
+  const words = Array.isArray(词条) ? 词条 : [];
+  const mods: CardStatMods = { atk: 0, mp: 0, guard: 0 };
+  for (const w of words) {
+    const m = ELEMENT_STAT_MODS[w];
+    if (!m) continue;
+    mods.atk += m.atk ?? 0;
+    mods.mp += m.mp ?? 0;
+    mods.guard += m.guard ?? 0;
+  }
+  // 档位微差：高阶卡略省 MP（星辉 −1，鎏金 0，其余 0）——高阶卡已经很贵
+  if (cardTier === '星辉') mods.mp -= 1;
+  return mods;
+}
+
+// ── 派生与覆写 ──
+
+/** 模块级精配覆写表（卡名 → 效果集；内容包逐卡精配经 registerCardEffects 灌入） */
+const cardEffectOverrides = new Map<string, CardEffects>();
+
+/** 登记精配覆写（同名覆盖；内容包 catalog.cardEffects 通道灌入） */
+export function registerCardEffects(map: Record<string, unknown> | undefined): void {
+  if (!map) return;
+  for (const [name, effects] of Object.entries(map)) {
+    const coerced = coerceCardEffects(effects);
+    if (coerced.length > 0) cardEffectOverrides.set(name.trim(), coerced);
+  }
+}
+
+/** 测试用清空 */
+export function clearCardEffectOverrides(): void {
+  cardEffectOverrides.clear();
+}
+
+/**
+ * 派生一张卡的完整效果集：精配覆写优先，否则元素映射打底（主元素取词条中首个
+ * 命中九元素的）。无元素词条 → 空集（卡仍有力/MP/SP 的基础语义，不硬造）。
+ */
+export function deriveCardEffects(
+  card: Pick<CardItemLike, 'name' | '词条' | 'cardTier'>,
+): CardEffects {
+  const override = cardEffectOverrides.get(card.name);
+  if (override) return override;
+  // 卡面登记效果（AI 池内选）次优先——存的是原始形状，读侧再门禁一次
+  const stored = coerceCardEffects(
+    (card as { cardEffects?: unknown }).cardEffects,
+    (card.词条 ?? []).filter((w) => CARD_ELEMENT_AXIS[w]),
+  );
+  if (stored.length > 0) return stored;
+  const words = Array.isArray(card.词条) ? card.词条 : [];
+  const element = words.find((w) => ELEMENT_DEFAULT_EFFECT[w] !== undefined);
+  if (!element) return [];
+  const action = ELEMENT_DEFAULT_EFFECT[element];
+  const entry = poolEntryOf(action);
+  if (!entry) return [];
+  const def: CardEffectDef = {
+    trigger: entry.duration > 0 ? '每拍' : '打出时',
+    target: action === '治疗' || action === '护盾' || action === '格挡' ? '自身' : '敌单体',
+    action,
+    value: entry.value,
+    ...(entry.duration > 0 ? { duration: entry.duration } : {}),
+    ...(entry.cost ? { cost: entry.cost } : {}),
+  };
+  return [def];
+}
+
+/** 卡形状（避免引入 types 全量依赖） */
+export interface CardItemLike {
+  name: string;
+  词条: readonly string[] | null | undefined;
+  cardTier: CardTier;
+  /** 卡面登记效果（AI 池内选经门禁存储；读侧再门禁——存档健壮性口径） */
+  cardEffects?: unknown;
+}
+
+// ── 门禁（AI 池内选的越权防线） ──
+
+// ── 槽位（2026-10-02 批次E：分槽扩容）──
+
+/** 效果槽位：主动（一次性发动）与被动（持续在场） */
+export type EffectSlot = '主动' | '被动';
+
+/** 主动槽触发时机——其余（每拍/受击时）归被动槽 */
+const ACTIVE_TRIGGERS: ReadonlySet<EffectTrigger> = new Set([
+  '打出时',
+  '击杀时',
+  '拍结束',
+  '消耗时',
+  '治疗时',
+  '施法时',
+]);
+
+export function slotOfTrigger(trigger: EffectTrigger): EffectSlot {
+  return ACTIVE_TRIGGERS.has(trigger) ? '主动' : '被动';
+}
+
+/**
+ * 槽位上限（批次E：主动 ≤2 为原口径不动；被动（每拍/受击时）新增 ≤2；合计 ≤4）。
+ * 🔴 对旧门禁（合计 ≤2）是**严格超集**——旧 2 条任意组合（含双「每拍」）全部仍合法，
+ *    存档零回归。新增「常驻被动」型动作条目属 session 结算域，随 values-table 线
+ *    批次 6 验收后另批，本批只扩容量不改池。
+ */
+export const EFFECT_SLOT_CAPS: Readonly<Record<EffectSlot, number>> = Object.freeze({
+  主动: 2,
+  被动: 2,
+});
+export const EFFECT_TOTAL_CAP = EFFECT_SLOT_CAPS.主动 + EFFECT_SLOT_CAPS.被动;
+
+/**
+ * AI 效果选择 → 合法效果集（门禁）：
+ * - 非数组/超量（合计 >4）→ 整批丢弃（返回 []，调用方回落派生打底）
+ * - 槽位超限（主动 >2 或 被动 >2）→ 整批丢弃（防滥用口径不变）
+ * - 单条：动作必须在池内，且 value/duration/cost 与池内定值一致（AI 只选不改数）
+ * - 触发时机/目标不在白名单 → 丢弃该条
+ * 全部非法时返回 []（派生打底兜底）；部分合法保留合法条。
+ */
+export function coerceCardEffects(raw: unknown, allowedElements?: readonly string[]): CardEffects {
+  if (!Array.isArray(raw)) return [];
+  if (raw.length > EFFECT_TOTAL_CAP) return []; // 超量整批丢弃（防滥用；合计上限 4）
+  const out: CardEffectDef[] = [];
+  const slotCount: Record<EffectSlot, number> = { 主动: 0, 被动: 0 };
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const e = item as Partial<CardEffectDef>;
+    const entry = poolEntryOf(e.action as EffectAction);
+    if (!entry) continue; // 池外动作 → 丢弃
+    if (!isTrigger(e.trigger) || !isTarget(e.target)) continue;
+    const value =
+      typeof e.value === 'number' && Number.isFinite(e.value) ? Math.round(e.value) : -1;
+    if (value !== entry.value) continue; // AI 改数 → 丢弃
+    const duration = Math.max(0, Math.round(typeof e.duration === 'number' ? e.duration : 0));
+    if (duration !== entry.duration) continue;
+    const cost = sanitizeCost(e.cost, entry.cost);
+    if (JSON.stringify(cost ?? {}) !== JSON.stringify(entry.cost ?? {})) continue;
+    // 效果元素轴（批⑤ B5.4）：带 element 必须非空数组；给了 allowedElements 还须 ⊆，
+    // 违规整条丢弃（不剪裁、不救）。无 element 字段行为与现状完全一致。
+    let element: string[] | undefined;
+    if (e.element !== undefined) {
+      const els = Array.isArray(e.element) ? e.element.filter((x) => typeof x === 'string') : [];
+      if (els.length === 0) continue;
+      if (allowedElements && !els.every((el) => allowedElements.includes(el))) continue;
+      element = els;
+    }
+    slotCount[slotOfTrigger(e.trigger)] += 1;
+    out.push({
+      trigger: e.trigger,
+      target: e.target,
+      action: entry.action,
+      value,
+      ...(duration > 0 ? { duration } : {}),
+      ...(cost ? { cost } : {}),
+      ...(element ? { element } : {}),
+    });
+  }
+  if (slotCount.主动 > EFFECT_SLOT_CAPS.主动 || slotCount.被动 > EFFECT_SLOT_CAPS.被动) {
+    return []; // 槽位超限整批丢弃（对旧 ≤2 存档是严格超集，零回归）
+  }
+  return out;
+}
+
+function isTrigger(v: unknown): v is EffectTrigger {
+  return (
+    v === '打出时' ||
+    v === '每拍' ||
+    v === '受击时' ||
+    v === '击杀时' ||
+    v === '拍结束' ||
+    v === '消耗时' ||
+    v === '治疗时' ||
+    v === '施法时'
+  );
+}
+function isTarget(v: unknown): v is EffectTarget {
+  return v === '敌单体' || v === '敌全体' || v === '自身';
+}
+function sanitizeCost(raw: unknown, pool: EffectCost | undefined): EffectCost | undefined {
+  if (!pool) return raw === undefined || raw === null ? undefined : { mp: -1 }; // 池内无代价而 AI 给了 → 非法
+  if (!raw || typeof raw !== 'object') return undefined;
+  const c = raw as Partial<EffectCost>;
+  const clean: EffectCost = {};
+  if (pool.mp !== undefined) clean.mp = typeof c.mp === 'number' ? Math.round(c.mp) : pool.mp;
+  if (pool.sp !== undefined) clean.sp = typeof c.sp === 'number' ? Math.round(c.sp) : pool.sp;
+  if (pool.hp !== undefined) clean.hp = typeof c.hp === 'number' ? Math.round(c.hp) : pool.hp;
+  return clean;
+}
+
+/** 效果的卡面展示行（UI 与 AI 提示词共用措辞） */
+export function effectLineOf(e: CardEffectDef): string {
+  const entry = poolEntryOf(e.action);
+  const text = entry ? entry.text : e.action;
+  // 动作名置前（状态名即识别符）；「自身」省目标前缀；敌全体带「对每个敌人」；
+  // 持续时长池内 text 自带，此处不重复追加
+  const prefix = e.target === '敌全体' ? '对每个敌人：' : '';
+  const cost = e.cost
+    ? `［代价 ${[
+        e.cost.mp ? `${e.cost.mp}MP` : '',
+        e.cost.sp ? `${e.cost.sp}SP` : '',
+        e.cost.hp ? `${e.cost.hp}HP` : '',
+      ]
+        .filter(Boolean)
+        .join('/')}］`
+    : '';
+  return `${prefix}【${e.action}】${text}${cost}`;
+}

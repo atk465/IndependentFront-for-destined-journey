@@ -24,6 +24,8 @@ import {
 } from './content-store';
 import { getDatabase } from '@engine/database';
 import { hashWorldBook } from '@engine/content-source';
+import { getContentRegistry } from '@engine/content-registry-runtime';
+import { getBloodlineSet } from '@engine/bloodlines';
 import type { WorldBook, WorldBookEntry } from '@engine/types';
 import type { ContentPack } from '@engine/types-content';
 
@@ -71,16 +73,30 @@ const PLACEHOLDER_WORLD: WorldBook = book('world_setting', 'world_setting', [
   entry(900003, '背景常识', '占位背景'),
 ]);
 
+/** 占位 character 书（单选钉选分区，装包失配 → needs_selection） */
+const PLACEHOLDER_CHARACTER: WorldBook = book('character', 'character', [
+  entry(900004, '同伴甲', '占位同伴'),
+]);
+
 /** 装包用的真实内容包（与占位书共用 id，真实 uid 空间 < 900001） */
 function makePack(version = '1.0.0'): ContentPack {
   return {
     formatVersion: 1,
-    packId: 'fated-poem-official',
+    packId: 'test-pack-001',
     packVersion: version,
     name: '测试内容包',
+    // 🔴 bloodlines 是带壳分节（PackBloodlinesSection）—— 装包后必须剥壳供注册表，
+    //    否则 getBloodlineSet() 遍历到外壳那层就全跳过 → 捏人页种族下拉只剩「自定义」
+    bloodlines: {
+      bloodlines: {
+        human: { name: '人类', description: '真实人类', statModifiers: { con: 1 } },
+        elf: { name: '精灵', description: '真实精灵' },
+      },
+    },
     worldBooks: [
       book('system_core', 'system_core', [entry(1, '核心A', '真实A'), entry(2, '核心B', '真实B')]),
       book('world_setting', 'world_setting', [entry(3, '背景常识', '真实背景')]),
+      book('character', 'character', [entry(4, '同伴甲', '真实同伴')]),
     ],
     agentDefaults: {
       version: 1,
@@ -140,7 +156,12 @@ function installContentFetchMock(opts: { version?: string; extraBooks?: WorldBoo
   manifest: { version: string; byBook: Record<string, string> };
   restore: () => void;
 } {
-  const placeholderBooks = [PLACEHOLDER_SYSTEM_CORE, PLACEHOLDER_WORLD, ...(opts.extraBooks ?? [])];
+  const placeholderBooks = [
+    PLACEHOLDER_SYSTEM_CORE,
+    PLACEHOLDER_WORLD,
+    PLACEHOLDER_CHARACTER,
+    ...(opts.extraBooks ?? []),
+  ];
   const byBook: Record<string, string> = {};
   for (const b of placeholderBooks) byBook[b.id] = hashWorldBook(b);
   const manifest = { version: opts.version ?? '1', byBook };
@@ -164,7 +185,7 @@ function installContentFetchMock(opts: { version?: string; extraBooks?: WorldBoo
 /** 预置占位库（占位期的初始状态：同 id 同分区同 builtIn，uid 保留段） */
 async function seedPlaceholderLibrary(): Promise<void> {
   const db = getDatabase();
-  await db.worldBooks.bulkPut([PLACEHOLDER_SYSTEM_CORE, PLACEHOLDER_WORLD]);
+  await db.worldBooks.bulkPut([PLACEHOLDER_SYSTEM_CORE, PLACEHOLDER_WORLD, PLACEHOLDER_CHARACTER]);
   // 占位默认层（含 story 的占位预设 id）
   await db.contentPacks.clear();
   await db.presets.clear();
@@ -198,19 +219,19 @@ describe('content-store 执行器 —— 1. 安装（含冲突确认路径）', 
     const outcome = await c.installPack(makePack());
     expect(outcome.ok).toBe(true);
     expect(outcome.status).toBe('installed');
-    expect(outcome.plan?.sections.worldBooks?.added).toHaveLength(2);
+    expect(outcome.plan?.sections.worldBooks?.added).toHaveLength(3);
     expect(outcome.plan?.sections.worldBooks?.updated).toHaveLength(0);
     // 内容态
     expect(c.contentStatus).toBe('pack');
-    expect(c.activePackId).toBe('fated-poem-official');
+    expect(c.activePackId).toBe('test-pack-001');
     expect(c.activePackVersion).toBe('1.0.0');
     // 库里有 pack 书
     const books = await getDatabase().worldBooks.toArray();
-    expect(books.map((b) => b.id).sort()).toEqual(['system_core', 'world_setting']);
+    expect(books.map((b) => b.id).sort()).toEqual(['character', 'system_core', 'world_setting']);
     // pack 书 builtIn 必须 true（loadBuiltInWorldBooks 真值门）
     expect(books.every((b) => b.builtIn === true)).toBe(true);
     // 存档重写 + agent 写 contentPacks（不写 settings.agents 是另一测）
-    const rec = await getDatabase().contentPacks.get('fated-poem-official');
+    const rec = await getDatabase().contentPacks.get('test-pack-001');
     expect(rec?.payload.packVersion).toBe('1.0.0');
     // 预设已落库
     const presets = await getDatabase().presets.toArray();
@@ -222,7 +243,7 @@ describe('content-store 执行器 —— 1. 安装（含冲突确认路径）', 
     const c = useContentStore();
     const outcome = await c.installPack(makePack());
     expect(outcome.ok).toBe(true);
-    expect(outcome.plan?.sections.worldBooks?.updated).toHaveLength(2);
+    expect(outcome.plan?.sections.worldBooks?.updated).toHaveLength(3);
     expect(outcome.plan?.sections.worldBooks?.conflicted).toHaveLength(0);
     // 库里现在是 pack 内容
     const sc = await getDatabase().worldBooks.get('system_core');
@@ -314,7 +335,7 @@ describe('content-store 执行器 —— 2. 升级 diff', () => {
       const done = await c.installPack(v2, { confirmConflicts: true });
       expect(done.ok).toBe(true);
     }
-    const rec = await getDatabase().contentPacks.get('fated-poem-official');
+    const rec = await getDatabase().contentPacks.get('test-pack-001');
     expect(rec?.packVersion).toBe('2.0.0');
   });
 });
@@ -342,9 +363,9 @@ describe('content-store 执行器 —— 3. 卸载（快照回滚）', () => {
     expect(outcome.status).toBe('uninstalled');
     expect(c.contentStatus).toBe('placeholder');
     expect(c.activePackId).toBeNull();
-    // 占位书（保留段 uid）回来了
-    const sc = await getDatabase().worldBooks.get('system_core');
-    expect(sc?.entries.map((e) => e.uid)).toEqual([900001, 900002]);
+    // 占位书（保留段 uid）回来了（world_setting 仍在内置清单；system_core 已下线不再回滚）
+    const ws = await getDatabase().worldBooks.get('world_setting');
+    expect(ws?.entries.map((e) => e.uid)).toEqual([900003]);
     // contentPacks 已删
     expect(await getDatabase().contentPacks.count()).toBe(0);
   });
@@ -457,7 +478,7 @@ describe('content-store 执行器 —— 4. 占位建档 → 装包 → 存档�
         userName: '玩家',
         gameStartTime: '1',
         totalTurns: 0,
-        enabledWorldBookEntries: ['system_core:999999'], // 占位里不存在的条目名 → 配不上
+        enabledWorldBookEntries: ['character:999999'], // 占位里不存在的条目名 → 配不上
       },
     });
     // 占位书里没有 uid 999999 → 名字查不到 → 无法配对 → needs_selection
@@ -466,7 +487,7 @@ describe('content-store 执行器 —— 4. 占位建档 → 装包 → 存档�
     const save = await db.saves.get('save1');
     const smeta = save?.metadata as Record<string, unknown> | undefined;
     // 键保留原样（不裸删），标 needs_selection
-    expect(save?.metadata?.enabledWorldBookEntries).toContain('system_core:999999');
+    expect(save?.metadata?.enabledWorldBookEntries).toContain('character:999999');
     expect(smeta?.needsPackWorldBookSelection).toBe(true);
   });
 });
@@ -525,6 +546,55 @@ describe('content-store 执行器 —— 5. 装包后 boot 时序（D44 默认�
   });
 });
 
+describe('content-store 执行器 —— 旧官方包 packId 迁移（2026-09-20 去 fated-poem 化）', () => {
+  beforeEach(async () => {
+    setActivePinia(createPinia());
+    await cleanDb();
+    // 🔴 等前面用例 settings-store 构造期埋的 setTimeout(0) 启动任务全部落地：
+    //    它会经 loadProjectDefaults → hydrate 把「空库 hydrate」缓存到本 pinia 的
+    //    实例上，导致后续 put 进来的记录错过本次 boot 的迁移窗口。
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  afterEach(() => {
+    setActivePackRecord(null);
+    resetPlaceholderHashesCache();
+    vi.restoreAllMocks();
+  });
+
+  it('hydrate 时把旧 id 记录改名为 narrative-official（键与载荷同步）', async () => {
+    const pack: ContentPack = { ...makePack(), packId: 'fated-poem-official' };
+    await getDatabase().contentPacks.put({
+      packId: 'fated-poem-official',
+      packVersion: '1.0.0',
+      installedAt: Date.now(),
+      payload: pack,
+    });
+
+    // flush 之后开 fresh pinia：本用例的 hydrate 一定走完整的装载路径（迁移 + 装载）
+    setActivePinia(createPinia());
+    const c = useContentStore();
+    await c.hydratePackState();
+
+    const legacy = await getDatabase().contentPacks.get('fated-poem-official');
+    const rec = await getDatabase().contentPacks.get('narrative-official');
+    expect(legacy).toBeUndefined();
+    expect(rec?.packId).toBe('narrative-official');
+    expect(rec?.payload?.packId).toBe('narrative-official');
+    expect(c.activePackId).toBe('narrative-official');
+    expect(c.contentStatus).toBe('pack');
+  });
+
+  it('新 id 记录不受迁移影响（幂等空转）', async () => {
+    const c = useContentStore();
+    await c.installPack(makePack());
+    await c.hydratePackState();
+    const rec = await getDatabase().contentPacks.get('test-pack-001');
+    expect(rec?.packId).toBe('test-pack-001');
+    expect(rec?.payload?.packId).toBe('test-pack-001');
+    expect(c.activePackId).toBe('test-pack-001');
+  });
+});
+
 describe('content-store 执行器 —— 6. D42 重播种', () => {
   beforeEach(async () => {
     setActivePinia(createPinia());
@@ -541,7 +611,7 @@ describe('content-store 执行器 —— 6. D42 重播种', () => {
   it('占位版本前进：hash 仍等于占位基线的书重播种；动过的不覆盖', async () => {
     // 先种两本占位书，一本保持原样、一本被用户编辑过
     const db = getDatabase();
-    await db.worldBooks.put({ ...PLACEHOLDER_SYSTEM_CORE, id: 'system_core' });
+    await db.worldBooks.put({ ...PLACEHOLDER_CHARACTER, id: 'character' });
     await db.worldBooks.put({
       ...PLACEHOLDER_WORLD,
       id: 'world_setting',
@@ -555,14 +625,46 @@ describe('content-store 执行器 —— 6. D42 重播种', () => {
     cfg.settings.placeholderVersion = '1';
 
     const result = await c.reseedPlaceholder();
-    // system_core 被重播（hash 命中占位基线 → 从占位文件重灌）；world_setting 用户编辑被保留
-    expect(result.reseeded).toContain('system_core');
+    // character 被重播（hash 命中占位基线 → 从占位文件重灌）；world_setting 用户编辑被保留
+    expect(result.reseeded).toContain('character');
     expect(result.reseeded).not.toContain('world_setting');
-    const sc = await db.worldBooks.get('system_core');
-    expect(sc?.entries[0].content).toBe('占位A');
+    const sc = await db.worldBooks.get('character');
+    expect(sc?.entries[0].content).toBe('占位同伴');
     const ws = await db.worldBooks.get('world_setting');
     expect(ws?.entries[0].content).toBe('用户自己改过的内容');
     // 戳已更新
     expect(cfg.settings.placeholderVersion).toBe('2');
+  });
+});
+
+// ===== bloodlines 分节剥壳（2026-09-18 真机回归：种族下拉只剩「自定义」）=====
+
+describe('content-store 执行器 —— bloodlines 供注册表前必须剥壳', () => {
+  beforeEach(async () => {
+    setActivePinia(createPinia());
+    await cleanDb();
+    await seedPlaceholderLibrary();
+    installContentFetchMock();
+  });
+  afterEach(() => {
+    setActivePackRecord(null);
+    resetPlaceholderHashesCache();
+    vi.restoreAllMocks();
+  });
+
+  it('装包后 getBloodlineSet() 拿到真实血脉（不是空表）', async () => {
+    const c = useContentStore();
+    await c.installPack(makePack());
+
+    // 注册表这一面必须是**裸的** raceKey → 血脉 映射
+    const face = getContentRegistry().bloodlines as Record<string, unknown>;
+    expect(face).not.toHaveProperty('bloodlines');
+    expect(face).toHaveProperty('human');
+
+    // 消费方视角：血脉集非空且含 name/description（getBloodlineSet 的准入条件）
+    const set = getBloodlineSet();
+    expect(Object.keys(set).length).toBeGreaterThanOrEqual(2);
+    expect(set['human']?.name).toBe('人类');
+    expect(set['elf']?.description).toBe('真实精灵');
   });
 });

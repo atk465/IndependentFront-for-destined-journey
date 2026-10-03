@@ -24,7 +24,7 @@
  * `PlannedSkip.reason: 'unknown-extension'`，只是不用为它们的字节付钱。
  *
  * 浏览器全局惰性引用: `crypto` / `Blob` / `setTimeout` 全部写在函数体内，仅
- * import 本模块不触碰任何全局 —— 对齐 audio-folder.ts / audio-singleton.ts 的
+ * import 本模块不触碰任何全局 —— 对齐引擎其它网络/IO 壳的
  * 做法，vitest `environment:'node'` 下可直接导入。
  *
  * ─────────────────────────────────────────────────────────────
@@ -59,7 +59,6 @@
 import { AsyncUnzipInflate, Unzip, zip, type UnzipFile } from 'fflate';
 import { clampAssetFraming, isAssetExtension } from '@engine/asset-types';
 import { basenameOf, normalizeSlashes, normalizedExtensionOf } from '@engine/asset-path';
-import { AUDIO_MIME_BY_EXTENSION } from '@engine/audio-names';
 import type {
   DecodedEntry,
   ImportManifest,
@@ -73,7 +72,7 @@ import { hashMediaBytes, isMediaHashAvailable } from './media-hash';
 // ═══════════════════════════════════════════════════════════
 
 /** 单条目解压后上限 —— 10 MB（§5.1）。**不含音频**，音频走下面那条 */
-export const ASSET_ZIP_MAX_ENTRY_BYTES = 10 * 1024 * 1024;
+const ASSET_ZIP_MAX_ENTRY_BYTES = 10 * 1024 * 1024;
 
 /**
  * 单条**音频**解压后上限 —— 128 MB。
@@ -87,13 +86,12 @@ export const ASSET_ZIP_MAX_ENTRY_BYTES = 10 * 1024 * 1024;
  * 的炸弹最多能把 128 MB 塞进内存才被拦下（而不是 10 MB）。仍然是**中途终止**，
  * 不是读完再判；整包 2 GB 的总量上限也一个字没动，所以最坏情况仍然有界。
  */
-export const ASSET_ZIP_MAX_AUDIO_ENTRY_BYTES = 128 * 1024 * 1024;
 
 /** 整包解压后上限 —— 2 GB（§5.1） */
 export const ASSET_ZIP_MAX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024;
 
 /** 清单文件名，仅认 zip 根目录那一份（§5.2） */
-export const ASSET_ZIP_MANIFEST_NAME = 'manifest.json';
+const ASSET_ZIP_MANIFEST_NAME = 'manifest.json';
 
 /**
  * 每次 push 给 fflate 的压缩字节数。
@@ -109,7 +107,6 @@ const PUSH_CHUNK_BYTES = 128 * 1024;
 const DEFAULT_STALL_TIMEOUT_MS = 15_000;
 
 /** 音频路由表的扩展名集合（素材那半边直接用引擎的 `isAssetExtension`） */
-const AUDIO_EXTENSIONS = new Set<string>(Object.keys(AUDIO_MIME_BY_EXTENSION));
 
 // ═══════════════════════════════════════════════════════════
 // 类型
@@ -132,10 +129,7 @@ export type { DecodedEntry };
  * 炸掉（取值写错了会得到 `never`）；平行声明两份字符串联合则会静默走偏。
  * 缺的那个 `'suspect-missing-type'` 属于解析层，本模块判不出来。
  */
-export type AssetZipWarning = Extract<
-  ImportWarning,
-  'hash-unavailable' | 'suspect-filename-encoding'
->;
+type AssetZipWarning = Extract<ImportWarning, 'hash-unavailable' | 'suspect-filename-encoding'>;
 
 /** 清单元数据 —— 与引擎同一个类型；清单只能**追加**元数据，永不改名改类型（§5.2） */
 export type AssetZipManifestMeta = ImportManifestMeta;
@@ -169,18 +163,9 @@ export interface ReadAssetZipResult {
 
 export interface ReadAssetZipOptions {
   /**
-   * 单条目解压上限，默认 {@link ASSET_ZIP_MAX_ENTRY_BYTES}。只作用于可导入条目，
-   * 且**不含音频** —— 音频看 {@link maxAudioEntryBytes}。
+   * 单条目解压上限，默认 {@link ASSET_ZIP_MAX_ENTRY_BYTES}。只作用于可导入条目。
    */
   maxEntryBytes?: number;
-  /**
-   * 单条**音频**解压上限，默认 {@link ASSET_ZIP_MAX_AUDIO_ENTRY_BYTES}。
-   *
-   * 🔴 与 {@link maxEntryBytes} **互相独立**: 只传 `maxEntryBytes` 不会连带收紧音频。
-   * 刻意不做「取两者较小值」之类的联动 —— 那样一来两条线里到底哪条在生效就得靠推
-   * 而不是靠读，而这是个会让整包导入失败的判定。要卡全部，两条都传。
-   */
-  maxAudioEntryBytes?: number;
   /** 整包解压上限，默认 {@link ASSET_ZIP_MAX_TOTAL_BYTES}。只作用于可导入条目 */
   maxTotalBytes?: number;
   /**
@@ -272,21 +257,12 @@ export class AssetZipError extends Error {
 function isImportableName(basename: string): boolean {
   const ext = normalizedExtensionOf(basename);
   if (!ext) return false;
-  return isAssetExtension(ext) || AUDIO_EXTENSIONS.has(ext);
+  return isAssetExtension(ext);
 }
 
 /**
  * 这条目走不走音频那条上限。
  *
- * 判据**只有扩展名在音频表里**，且与 `asset-import-plan.ts` 的路由同序 ——
- * 那边也是音频表先查（D8: `webm` 归 `audio/webm`）。两处必须同一个口径，否则会出现
- * 「按素材的 10 MB 拦下来、可它最后本来要落成一条音轨」这种解释不通的失败。
- */
-function isAudioEntryName(basename: string): boolean {
-  const ext = normalizedExtensionOf(basename);
-  return ext !== '' && AUDIO_EXTENSIONS.has(ext);
-}
-
 /**
  * 该条目是否为可静默忽略的噪音（§5.1）:
  * 目录条目（尾斜杠）/ `__MACOSX` 任一路径段 / dotfile（含 AppleDouble `._x`）。
@@ -452,7 +428,7 @@ function sanitizeSection(raw: unknown): Record<string, ImportManifestMeta> {
  * 不该毁掉一整包素材。清单能做的只有"追加元数据"，改名与改类型无从表达:
  * 输出形状里根本没有 name / type 字段。
  */
-export function parseAssetZipManifest(bytes: Uint8Array): AssetZipManifest | undefined {
+function parseAssetZipManifest(bytes: Uint8Array): AssetZipManifest | undefined {
   let parsed: unknown;
   try {
     parsed = JSON.parse(decodeUtf8(bytes));
@@ -463,7 +439,6 @@ export function parseAssetZipManifest(bytes: Uint8Array): AssetZipManifest | und
   const src = parsed as Record<string, unknown>;
   return {
     assets: sanitizeSection(src.assets),
-    audio: sanitizeSection(src.audio),
   };
 }
 
@@ -485,7 +460,6 @@ interface InflateResult {
 
 interface InflateConfig {
   maxEntryBytes: number;
-  maxAudioEntryBytes: number;
   maxTotalBytes: number;
   stallTimeoutMs: number;
   signal?: AbortSignal;
@@ -538,8 +512,7 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
  * 丢缓冲 → 停止 push → reject，只是错误码不同。
  */
 function inflateStreaming(source: Uint8Array, cfg: InflateConfig): Promise<InflateResult> {
-  const { maxEntryBytes, maxAudioEntryBytes, maxTotalBytes, stallTimeoutMs, signal, onProgress } =
-    cfg;
+  const { maxEntryBytes, maxTotalBytes, stallTimeoutMs, signal, onProgress } = cfg;
   return new Promise<InflateResult>((resolve, reject) => {
     const entries: RawEntry[] = [];
     const skippedNoise: string[] = [];
@@ -640,11 +613,8 @@ function inflateStreaming(source: Uint8Array, cfg: InflateConfig): Promise<Infla
         return;
       }
 
-      // 音频与素材各有一条线（音频高一个量级，见 ASSET_ZIP_MAX_AUDIO_ENTRY_BYTES）。
-      // 根 manifest.json 不是音频，照素材那条算 —— 一份清单不该有几十兆。
-      const entryLimit = isAudioEntryName(basenameOf(file.name))
-        ? maxAudioEntryBytes
-        : maxEntryBytes;
+      // 根 manifest.json 也是可导入条目之外的例外 —— 一份清单不该有几十兆。
+      const entryLimit = maxEntryBytes;
 
       if (typeof file.originalSize === 'number' && file.originalSize > entryLimit) {
         abort(
@@ -795,7 +765,6 @@ export async function readAssetZip(
 
   const raw = await inflateStreaming(source, {
     maxEntryBytes: options.maxEntryBytes ?? ASSET_ZIP_MAX_ENTRY_BYTES,
-    maxAudioEntryBytes: options.maxAudioEntryBytes ?? ASSET_ZIP_MAX_AUDIO_ENTRY_BYTES,
     maxTotalBytes: options.maxTotalBytes ?? ASSET_ZIP_MAX_TOTAL_BYTES,
     stallTimeoutMs: options.stallTimeoutMs ?? DEFAULT_STALL_TIMEOUT_MS,
     signal,
@@ -946,7 +915,6 @@ export async function writeAssetZip(
     }
     const normalized: AssetZipManifest = {
       assets: manifest.assets ?? {},
-      audio: manifest.audio ?? {},
     };
     payload[ASSET_ZIP_MANIFEST_NAME] = [
       encodeUtf8(JSON.stringify(normalized, null, 2)),

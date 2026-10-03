@@ -22,7 +22,7 @@ import AppButton from '../../shared/AppButton.vue';
 import AssetCharacterDrawer from './AssetCharacterDrawer.vue';
 import { assetDialogsKey } from './dialogs';
 import { useAssetThumbs } from './thumbs';
-import { fmtBytes } from '../audio/format';
+import { fmtBytes } from '../../../lib/format-bytes';
 
 const emit = defineEmits<{
   /** 一次性事件的无障碍播报，由外层写进唯一的 aria-live 区 */

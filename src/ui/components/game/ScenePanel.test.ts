@@ -88,6 +88,7 @@ beforeEach(() => {
     saveId: 'save_1',
     fp: 0,
     fpHistory: [],
+    reputation: 0,
     contracts: [],
     achievements: [],
     news: [makeNews('n1', false), makeNews('n2', true)],

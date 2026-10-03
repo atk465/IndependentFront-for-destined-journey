@@ -22,7 +22,6 @@ import {
   getAttribute,
   getTier,
   getLevel,
-  getAdventurerRank,
   expToLevel,
   totalExpForLevel,
   expFromMonster,
@@ -390,18 +389,6 @@ describe('getLevel', () => {
   });
 });
 
-describe('getAdventurerRank', () => {
-  it('应返回冒险者等级字符串', () => {
-    const c = makeChar({ adventurerRank: 'B' });
-    expect(getAdventurerRank(c)).toBe('B');
-  });
-
-  it('默认应为 未评级', () => {
-    const c = makeChar();
-    expect(getAdventurerRank(c)).toBe('未评级');
-  });
-});
-
 // ========== 经验值计算 ==========
 
 describe('expToLevel', () => {
@@ -679,14 +666,13 @@ describe('$resource namespace', () => {
     'getAttribute',
     'getTier',
     'getLevel',
-    'getAdventurerRank',
     'expToLevel',
     'totalExpForLevel',
     'expFromMonster',
     'queryResource',
   ];
 
-  it('应包含所有 24 个方法', () => {
+  it('应包含所有 23 个方法', () => {
     expect(Object.keys($resource)).toHaveLength(expectedMethods.length);
   });
 

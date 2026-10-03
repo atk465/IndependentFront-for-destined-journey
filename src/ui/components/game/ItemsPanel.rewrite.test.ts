@@ -2,7 +2,7 @@
  * ItemsPanel — 单条目重铸 UI（2026-08-24）
  *
  * 覆盖：
- * - 背包/装备/技能条目都出现「重铸」按钮
+ * - 战斗卡/道具卡/素材条目都出现「重铸」按钮（2026-09-18 三栏重构后）
  * - 点击展开描述输入 + 确认
  * - 确认后调 game.rewriteLoadoutItem（角色名 = 玩家名，target 含当前条目完整数据，含玩家描述）
  * - 成功/失败 toast
@@ -74,8 +74,12 @@ function mountPanel() {
 }
 
 describe('ItemsPanel — 重铸', () => {
-  it('背包条目：重铸按钮出现，展开描述输入，确认后调 rewriteLoadoutItem（inventory target）', async () => {
+  it('道具卡条目（消耗品）：重铸按钮出现，展开描述输入，确认后调 rewriteLoadoutItem（inventory target）', async () => {
     const wrapper = mountPanel();
+    await flushPromises();
+
+    // 消耗品归「道具卡」栏（2026-09-18 三栏：战斗卡 / 道具卡 / 素材）
+    await wrapper.findAll('.cat-tabs button')[1].trigger('click');
     await flushPromises();
 
     // 默认背包 tab；列表按品质排序（精铁长剑 稀有 在 生命药水 普通 之前），点中生命药水那一行
@@ -106,14 +110,13 @@ describe('ItemsPanel — 重铸', () => {
     expect(mockUi.toast).toHaveBeenCalledWith(expect.stringContaining('生命药水'), 'success');
   });
 
-  it('装备条目：切到装备 tab，重铸 target 是 equipment（含 slot/stats）', async () => {
+  it('战斗卡条目（传统装备）：默认栏即为战斗卡，重铸 target 是 equipment（含 slot/stats）', async () => {
     const wrapper = mountPanel();
     await flushPromises();
 
-    // 切到装备 tab
-    const catBtns = wrapper.findAll('.cat-tabs button');
-    await catBtns[1].trigger('click');
-    await flushPromises();
+    // 装备物品归「战斗卡」栏，且品质最高（稀有）排首位 —— 默认选中即它
+    const rows = wrapper.findAll('.item-row');
+    expect(rows[0].text()).toContain('精铁长剑');
 
     const btn = wrapper.find('.rewrite-btn');
     expect(btn.exists()).toBe(true);
@@ -128,12 +131,12 @@ describe('ItemsPanel — 重铸', () => {
     expect(target.entry.stats).toEqual({ 攻击力: 30 });
   });
 
-  it('技能条目：切到技能 tab，重铸 target 是 skill', async () => {
+  it('战斗卡条目（技能）：与装备同栏，选第二项后重铸 target 是 skill', async () => {
     const wrapper = mountPanel();
     await flushPromises();
 
-    const catBtns = wrapper.findAll('.cat-tabs button');
-    await catBtns[2].trigger('click');
+    // 技能与装备同在「战斗卡」栏；装备（稀有）排首位，技能（无 rarity=普通）第二
+    await wrapper.findAll('.item-row')[1].trigger('click');
     await flushPromises();
 
     const btn = wrapper.find('.rewrite-btn');

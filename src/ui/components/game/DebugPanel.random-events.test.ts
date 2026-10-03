@@ -37,6 +37,7 @@ function buildProfile(flags?: RandomEventSaveFlags): SaveProfile {
     experienceMode: 'normal',
     fp: 0,
     fpHistory: [],
+    reputation: 0,
     contracts: [],
     achievements: [],
     news: [],

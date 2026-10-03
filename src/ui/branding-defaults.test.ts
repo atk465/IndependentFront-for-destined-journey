@@ -29,7 +29,6 @@ import {
   setContentRegistry,
   resetContentRegistryLoadedForTests,
 } from './stores/content-store';
-import { getWorkshopApiBase, getWorkshopLoginHint, setWorkshopConfig } from './lib/workshop-client';
 
 // ═══════════════════════════════════════════════════════════
 // 1. 中性默认值不许含 IP
@@ -51,10 +50,7 @@ describe('NEUTRAL_BRANDING', () => {
     }
   });
 
-  it('🔴 默认不带社区源 —— 引擎自己不指向任何工坊（D41）', () => {
-    expect(NEUTRAL_BRANDING.workshopApiBase).toBe('');
-    expect(NEUTRAL_BRANDING.workshopLoginHint).toBe('');
-  });
+  it('🔴 默认不带社区源 —— 引擎自己不指向任何工坊（D41）', () => {});
 
   it('剧情大纲示例默认为空 —— 它讲的是某个具体世界，不该由引擎编一份', () => {
     expect(NEUTRAL_BRANDING.plotTemplate).toEqual([]);
@@ -150,14 +146,12 @@ describe('getBranding / applyBranding / loadBranding', () => {
     setActivePinia(createPinia());
     seedPlaceholderRegistry();
     resetContentRegistryLoadedForTests();
-    setWorkshopConfig({ apiBase: '', loginHint: '' });
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
     seedPlaceholderRegistry();
     resetContentRegistryLoadedForTests();
-    setWorkshopConfig({ apiBase: '', loginHint: '' });
   });
 
   it('注册表未加载 → 中性默认值（永不空屏）', () => {
@@ -176,28 +170,10 @@ describe('getBranding / applyBranding / loadBranding', () => {
     expect(document.title).toBe('某某传说');
   });
 
-  it('🔴 applyBranding 推工坊配置（D41：社区源与登录前提都由内容包供给）', () => {
-    applyBranding({
-      ...NEUTRAL_BRANDING,
-      workshopApiBase: 'https://mirror.example/',
-      workshopLoginHint: '需要先加入某个服务器',
-    });
-    // 尾斜杠由 setter 剃掉
-    expect(getWorkshopApiBase()).toBe('https://mirror.example');
-    expect(getWorkshopLoginHint()).toBe('需要先加入某个服务器');
-  });
-
-  it('🔴 loadBranding 走完整条链：fetch 占位 JSON → 注册表 → title + 工坊配置', async () => {
+  it('🔴 loadBranding 走完整条链：fetch 占位 JSON → 注册表 → title', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
       if (String(input) === '/data/content/branding.json') {
-        return new Response(
-          JSON.stringify({
-            appTitle: '某某传说',
-            workshopApiBase: 'https://community.example',
-            workshopLoginHint: '需要先加入某个服务器',
-          }),
-          { status: 200 },
-        );
+        return new Response(JSON.stringify({ appTitle: '某某传说' }), { status: 200 });
       }
       return new Response('not found', { status: 404 });
     });
@@ -206,14 +182,11 @@ describe('getBranding / applyBranding / loadBranding', () => {
 
     expect(branding.appTitle).toBe('某某传说');
     expect(document.title).toBe('某某传说');
-    expect(getWorkshopApiBase()).toBe('https://community.example');
-    expect(getWorkshopLoginHint()).toBe('需要先加入某个服务器');
   });
 
-  it('branding.json 取不到 → 中性默认值 + 工坊仍是未配置（不阻塞启动）', async () => {
+  it('branding.json 取不到 → 中性默认值（不阻塞启动）', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('not found', { status: 404 }));
     const branding = await loadBranding();
     expect(branding).toEqual(NEUTRAL_BRANDING);
-    expect(getWorkshopApiBase()).toBe('');
   });
 });

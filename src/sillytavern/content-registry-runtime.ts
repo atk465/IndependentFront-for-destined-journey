@@ -33,7 +33,7 @@
  */
 
 /**
- * 内容注册表的各面（D16 / §5.1；第 7 面 imageDialects 由图像 v2 追加，
+ * 内容注册表的各面（D16 / §5.1；
  * 第 8 面 mapPack 由地图系统 v1 追加，`randomEvents` 由随机事件系统 v1 追加、
  * `remoteAssets` 由远程素材 v1 追加 —— 后两者在 `ContentPack` 里分别是**第 13 / 第 14
  * 分节**，两套编号各数各的，别混着读）。
@@ -64,7 +64,6 @@ export interface ContentRegistry {
   /** 品牌面（D26：应用名/副标题/era/credits 等） */
   branding: unknown;
   /** 提示词方言（图像 v2 / C4）：`{ dialects: [...] }`。缺席 → 内置兜底方言 */
-  imageDialects: unknown;
   /**
    * 地图内容包（地图系统 v1 / §3.3）：`map-pack.json` 的原始 JSON。
    *
@@ -80,6 +79,13 @@ export interface ContentRegistry {
    * 不是这一面。
    */
   randomEvents: unknown;
+  /**
+   * 委托板（卡牌工坊）：`commissions.json` 的原始 JSON（`{ defs }` 整节）。
+   *
+   * 🔴 与 `mapPack` / `randomEvents` 同款：消费方读的是 `commission-runtime`
+   *    的 coerce 派生包，不是这一面原值。
+   */
+  commissions: unknown;
   /**
    * 远程素材声明（远程素材 v1）：`remote-assets.json` 的原始 JSON（裸数组）。
    *
@@ -111,9 +117,9 @@ export function createEmptyContentRegistry(): ContentRegistry {
     namePools: undefined,
     markers: undefined,
     branding: undefined,
-    imageDialects: undefined,
     mapPack: undefined,
     randomEvents: undefined,
+    commissions: undefined,
     remoteAssets: undefined,
   };
 }

@@ -29,6 +29,7 @@
  * 设计全文: `docs/planning/2026-08-15-random-event-system-design.md`。
  */
 
+import { coerceCommissions } from './card-workshop/commission';
 import type {
   EventCondition,
   RandomEventConfig,
@@ -113,6 +114,23 @@ function coerceTrigger(raw: unknown, name: string): RandomEventTrigger | null {
       return null;
     }
     return { type: 'first_visit', scope: { anyOf } };
+  }
+
+  if (raw.type === 'exploration') {
+    // scope 可缺省（= 任何中层都算），给了就必须能收出非空 anyOf
+    const scope = isRecord(raw.scope) ? raw.scope : null;
+    const anyOf = collectNonEmptyTexts(scope?.anyOf);
+    const chanceRaw = readNumber(raw.chancePct);
+    const chancePct = chanceRaw === null ? undefined : Math.max(0, Math.min(100, chanceRaw));
+    if (scope && anyOf.length === 0) {
+      warn(`${LOG_TAG} def "${name}": exploration trigger has an empty scope.anyOf, skipped.`);
+      return null;
+    }
+    return {
+      type: 'exploration',
+      ...(anyOf.length > 0 ? { scope: { anyOf } } : {}),
+      ...(chancePct !== undefined ? { chancePct } : {}),
+    };
   }
 
   warn(`${LOG_TAG} def "${name}": unknown trigger.type, skipped.`);
@@ -267,6 +285,21 @@ function coerceDef(raw: unknown, index: number): RandomEventDef | null {
 
   const slots = coerceSlots(raw.slots, name);
   if (Object.keys(slots).length > 0) def.slots = slots;
+
+  // 事件委托（随机事件 × 委托板融合）：复用委托引擎的容错解析（单条包数组取一）。
+  // 解析失败只 warn 不拒绝整条事件 —— 事件本身照常可触发，只是不带委托。
+  if (isRecord(raw.commission)) {
+    const [tpl] = coerceCommissions([raw.commission]);
+    if (tpl) {
+      const ttl = readNumber(raw.commission.ttlDays);
+      def.commission = {
+        ...tpl,
+        ...(ttl !== null && ttl > 0 ? { ttlDays: Math.floor(ttl) } : {}),
+      };
+    } else {
+      warn(`${LOG_TAG} def "${name}": commission is unusable, ignored.`);
+    }
+  }
 
   return def;
 }

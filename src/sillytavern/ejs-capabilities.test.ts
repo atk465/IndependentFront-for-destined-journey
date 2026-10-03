@@ -553,7 +553,7 @@ describe('ui（§3.11）', () => {
 describe('engine（§3.12）', () => {
   it('version / name / has', () => {
     const { caps } = build({});
-    expect(caps.engine.name).toBe('poem-of-destiny');
+    expect(caps.engine.name).toBe('narrative-engine');
     expect(caps.engine.version).toBe(EJS_SURFACE_VERSION);
     expect(caps.engine.has('lore.get')).toBe(true);
     expect(caps.engine.has('stats.主角.背包')).toBe(true);

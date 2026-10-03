@@ -25,26 +25,14 @@ import type {
   PlotOutline,
   SaveProfile,
   ChatMessage,
-  AudioTrack,
-  AudioBlobRecord,
-  AudioPlaylist,
-  AudioHandleRecord,
   AssetMetaRecord,
   AssetBlobRecord,
   WorldBook,
-  WorkshopProject,
   BeautifierRule,
   RegexStorageRecord,
   CreatePreset,
   DebugTurnRecord,
 } from './types';
-import type {
-  SceneImageRecord,
-  SceneImageBlobRecord,
-  CharacterSessionAppearance,
-  SceneImageUsage,
-  ImagePreset,
-} from './types-image';
 import type { ContentPack } from './types-content';
 import { hashWorldBook } from './content-source';
 import { applyExpFloor } from './exp-table';
@@ -104,7 +92,7 @@ const DB_NAME = 'SillyTavernWebDB';
  * 而 `database.test.ts` 里那条断言跟着写了 17，于是漂移被测试**固定**下来而不是拦下来。
  * 升版时这两处一起改。
  */
-export const DB_VERSION = 24;
+export const DB_VERSION = 26;
 
 // ═══════════════════════════════════════════════════════════
 // Schema 声明（Q-26）
@@ -161,7 +149,6 @@ const SCHEMA_V13: SchemaSpec = withSchema(SCHEMA_V12, {
 
 const SCHEMA_V14: SchemaSpec = withSchema(SCHEMA_V13, {
   worldBooks: 'id, partition, updatedAt',
-  workshopProjects: 'id, installedAt, updatedAt',
 });
 
 const SCHEMA_V15: SchemaSpec = withSchema(SCHEMA_V14, {
@@ -204,23 +191,13 @@ class AppDatabase extends Dexie {
   // v8 new table (Phase 10h)
   messages!: Table<ChatMessage>;
 
-  // v11 new tables (Audio System) — 元数据 / 字节 分表存储（设计 §3.2）
-  audioTracks!: Table<AudioTrack>;
-  audioBlobs!: Table<AudioBlobRecord>;
-  audioPlaylists!: Table<AudioPlaylist>;
-
-  // v12 new table (Audio 本地文件夹) — File System Access 目录句柄（结构化克隆存储）
-  audioHandles!: Table<AudioHandleRecord>;
-
   // v13 new tables (Asset System) — 元数据 / 字节 分表存储（设计 §4.1）
   assetMeta!: Table<AssetMetaRecord>;
   assetBlobs!: Table<AssetBlobRecord>;
 
-  // v14 new tables (创意工坊 / 世界书迁出 localStorage) — 设计 D3
-  //   worldBooks: 全部世界书（内置 / 导入 / 工坊）唯一一张表
-  //   workshopProjects: 仅项目生命周期元数据（WorldBook 没有字段位的那些）
+  // v14 new table (世界书迁出 localStorage) — 设计 D3
+  //   worldBooks: 全部世界书（内置 / 导入）唯一一张表
   worldBooks!: Table<WorldBook>;
-  workshopProjects!: Table<WorkshopProject>;
 
   // v15 new table (美化规则迁出 localStorage) — Phase 0b
   //   仅**用户规则**。内置 22 条预设规则（~378 KB）是 loadPresetRules() 从
@@ -230,18 +207,6 @@ class AppDatabase extends Dexie {
   // v16 new table — untrusted regex persistent KV. The table itself is the
   // single shared namespace; iframe callers never select an application table.
   regexStorage!: Table<RegexStorageRecord>;
-
-  // v17 new tables (图像生成 v1 / 情景插画) — 设计 §7.1
-  //   sceneImages:      元数据 = **配方**（prompt/seed/model/标题说明），随存档隔离
-  //   sceneImageBlobs:  字节，与 assetBlobs 同形状（id 对应元数据 id）
-  //   imagePresets:     角色 + 地点视觉预设，**全局**（不随存档删除，D40 / D2）
-  sceneImages!: Table<SceneImageRecord>;
-  sceneImageBlobs!: Table<SceneImageBlobRecord>;
-  imagePresets!: Table<ImagePreset>;
-
-  // v19 (D56): 角色外貌的**会话副本** —— 随存档隔离，删存档连带删。
-  // 基线在 imagePresets.appearance（全局、干净、用户可编辑），这一份由出图 AI 自动写。
-  characterAppearances!: Table<CharacterSessionAppearance>;
 
   // v20 (内容-引擎分离波 1 / D18): 内容包安装持久化。
   //   payload = 整包 ContentPack；恢复默认/卸载/升级 diff 都从这里还原，无需重拿文件。
@@ -259,7 +224,7 @@ class AppDatabase extends Dexie {
   // v22 (2026-08-17): 快照重载荷分表 —— 与 `snapshots` 的行 **id 相同**，一对一。
   //   拆表的理由是读放大：快照行整份内嵌对话历史，于是「列快照」「淘汰旧快照」
   //   这两个只需要 turn/createdAt 的动作，每次都要把 ~30 份整档历史反序列化到主线程。
-  //   索引 `saveId` 供 deleteSaveSlot / 单存档导出按存档整批取删（照 characterAppearances 的先例）。
+  //   索引 `saveId` 供 deleteSaveSlot / 单存档导出按存档整批取删。
   snapshotPayloads!: Table<SnapshotPayload>;
 
   // v24: 每存档最近 10 回合的完整 Agent 调试历史；不进日常备份。
@@ -543,22 +508,19 @@ class AppDatabase extends Dexie {
       }),
     );
 
-    // v14: 世界书迁出 localStorage + 创意工坊 — 新增 worldBooks / workshopProjects 两表
+    // v14: 世界书迁出 localStorage — 新增 worldBooks 表
     //      （纯增量，无 upgrade 回调；迁移例程在 UI 层单独跑，见设计 D4）
     //
-    // 照本文件惯例重述全部 19 张旧表（约定，非 Dexie 硬要求，见 v13 注释）。
+    // 照本文件惯例重述全部旧表（约定，非 Dexie 硬要求，见 v13 注释）。
     //
     // 🔴 刻意**不写** `lorebooks: null` / `settings: null`（设计 D3）:
     //    这两张是 v1–v3 遗留死表、生产零读写，但删表会永久抹掉长期用户可能仍存有的旧行。
     //    放着不花钱，导出也只是空数组。删除是独立的、需要明确决定的动作，不是本次迁移的附带损伤。
     //
-    // 索引取舍:
-    //   · worldBooks.partition —— 工坊过滤（按分区整体识别/开关/排除）是一等访问模式，保留。
-    //   · workshopProjects 不建 rootProjectId / installState 索引 —— 项目量级是几十条，全表扫即可。
+    // 索引取舍: worldBooks.partition —— 按分区整体识别/开关/排除是一等访问模式，保留。
     this.version(14).stores(
       withSchema(SCHEMA_V13, {
         worldBooks: 'id, partition, updatedAt',
-        workshopProjects: 'id, installedAt, updatedAt',
       }),
     );
 
@@ -666,6 +628,28 @@ class AppDatabase extends Dexie {
 
     this.version(23).stores({ apiRateLimitPolicies: 'credentialId, updatedAt' });
     this.version(24).stores({ debugTurns: 'id, saveId, [saveId+startedAt]' });
+
+    // v25: 创意工坊下线 —— 显式删表（`表名: null`，Dexie 官方删表语法）。
+    //      社交工坊（浏览/安装社区项目）已从产品里移除，workshopProjects 表随之无人读写；
+    //      项目装进来的世界书仍留在 worldBooks 里（普通数据，用户可在设置页自行删）。
+    //      同一版删掉音频子系统四张表（音轨/字节/播放列表/目录句柄）——
+    //      音频播放系统整个下线，这些表再无读写方。
+    this.version(25).stores({
+      workshopProjects: null,
+      audioTracks: null,
+      audioBlobs: null,
+      audioPlaylists: null,
+      audioHandles: null,
+    });
+
+    // v26: AI 图像生成下线 —— 情景插画两张表与角色外貌会话副本、视觉预设表一并删除。
+    //      外貌链的唯一读者是出图 prompt、唯一写者是出图侧链 AI，随图像生成一起下线。
+    this.version(26).stores({
+      sceneImages: null,
+      sceneImageBlobs: null,
+      imagePresets: null,
+      characterAppearances: null,
+    });
   }
 }
 
@@ -742,28 +726,13 @@ export interface FullBackup {
   createPresets: CreatePresetRecord[];
   // v8 Phase 10h
   messages: ChatMessage[];
-  // v14 创意工坊 / 世界书迁出 localStorage（设计 D5）—— 旧备份缺这两个字段，导入侧必须容忍
+  // v14 世界书迁出 localStorage（设计 D5）—— 旧备份缺这个字段，导入侧必须容忍
   worldBooks: WorldBook[];
-  workshopProjects: WorkshopProject[];
   // v15 美化规则迁出 localStorage（Phase 0b）—— 同样是「旧备份缺字段」的三态语义。
   // 只含**用户规则**；内置预设规则是派生缓存，不进备份（导入方启动时自己从磁盘算）。
   beautifierRules: BeautifierRule[];
   // v16 隔离正则持久 KV。旧备份缺字段时，导入侧保留现有表。
   regexStorage: RegexStorageRecord[];
-  // v17 图像生成（设计 §7.3）—— 同样是「旧备份缺字段」的三态语义。
-  //
-  // 🔴 `sceneImageBlobs` **刻意不在这里**：FullBackup 是一份 JSON，字节进 JSON 就得
-  //    base64，与 audioBlobs / assetBlobs 同口径排除。进备份的只有元数据，而元数据
-  //    是**配方**（prompt + seed + model + 标题说明）—— 恢复出来是一份读得通的图鉴
-  //    目录，随时可一键重画。图片字节走「导出本存档插画」那条独立 zip 路径。
-  sceneImages: SceneImageRecord[];
-  imagePresets: ImagePreset[];
-  // v19 角色外貌会话副本（D56）。**与 sceneImages 同为「每存档」数据，必须同进同出** ——
-  // 少了它，导出再导入之后每个角色的本档变化（换了衣服 / 留了疤）会静默退回基线，
-  // 而存档的其余部分完好，于是症状看起来像「AI 忘了她换过装」而不是「备份没收这张表」。
-  // 纯文本 patch，体积与 imagePresets 同量级。
-  characterAppearances: CharacterSessionAppearance[];
-
   // 🔴 **contentPacks 不在这个列表里，也不会被加进来**（D18 / §5.7）：
   //    payload 进备份 = 每份日常备份都是可自由转发的完整内容包 + 体积翻倍。
   //    备份/恢复一致性由 `reconcilePackState()` 解决 —— 它挂在 `importAllData` 收尾，
@@ -788,12 +757,8 @@ export async function exportAllData(): Promise<FullBackup> {
     createPresets,
     messages,
     worldBooks,
-    workshopProjects,
     beautifierRules,
     regexStorage,
-    sceneImages,
-    imagePresets,
-    characterAppearances,
   ] = await Promise.all([
     db.lorebooks.toArray(),
     db.presets.toArray(),
@@ -809,12 +774,8 @@ export async function exportAllData(): Promise<FullBackup> {
     db.createPresets.toArray(),
     db.messages.toArray(),
     db.worldBooks.toArray(),
-    db.workshopProjects.toArray(),
     db.beautifierRules.toArray(),
     db.regexStorage.toArray(),
-    db.sceneImages.toArray(),
-    db.imagePresets.toArray(),
-    db.characterAppearances.toArray(),
   ]);
   return {
     version: DB_VERSION,
@@ -833,12 +794,8 @@ export async function exportAllData(): Promise<FullBackup> {
     createPresets,
     messages,
     worldBooks,
-    workshopProjects,
     beautifierRules,
     regexStorage,
-    sceneImages,
-    imagePresets,
-    characterAppearances,
   };
 }
 
@@ -893,14 +850,10 @@ function validateBackupOrThrow(backup: any): asserts backup is FullBackup {
     'saveProfiles',
     'createPresets',
     'messages',
-    // v14 新增 —— 此循环只在字段**存在且非数组**时报错，旧备份缺这两个字段照常通过
+    // v14 新增 —— 此循环只在字段**存在且非数组**时报错，旧备份缺这个字段照常通过
     'worldBooks',
-    'workshopProjects',
     'beautifierRules',
     'regexStorage',
-    'sceneImages',
-    'imagePresets',
-    'characterAppearances',
   ];
   for (const f of arrayFields) {
     const v = backup[f];
@@ -1043,15 +996,10 @@ async function doImportAllData(
   // 因此按字段**存在与否**分流，两者必须区分，不可用 `?? []` 把 undefined 抹平成 []:
   //   · undefined（字段缺席，pre-v14 备份）→ 整张表原样不动，连 clear 都不执行
   //   · []（字段存在但为空，v14+ 备份）    → 合法的「用户确实没有世界书」，照常 clear
-  await db.transaction('rw', db.worldBooks, db.workshopProjects, async () => {
+  await db.transaction('rw', db.worldBooks, async () => {
     if (backup.worldBooks !== undefined) {
       await db.worldBooks.clear();
       if (Array.isArray(backup.worldBooks)) await db.worldBooks.bulkPut(backup.worldBooks);
-    }
-    if (backup.workshopProjects !== undefined) {
-      await db.workshopProjects.clear();
-      if (Array.isArray(backup.workshopProjects))
-        await db.workshopProjects.bulkPut(backup.workshopProjects);
     }
   });
 
@@ -1077,38 +1025,6 @@ async function doImportAllData(
       await db.regexStorage.clear();
       if (Array.isArray(backup.regexStorage)) {
         await db.regexStorage.bulkPut(backup.regexStorage);
-      }
-    }
-  });
-
-  // v17 transaction — 与 v14/v15/v16 同一套三态语义（设计 §7.3）:
-  //   · undefined（pre-v17 备份）→ 整张表原样不动，连 clear 都不执行
-  //   · []                       → 合法的「确实没有插画 / 没有预设」，照常 clear
-  //   · 有数据                   → 清空后整表覆盖
-  //
-  // 🔴 `sceneImageBlobs` **不在这个事务里，也不该被 clear**：备份里根本没有字节
-  //    （§7.3 明确排除），照 v14 那条理由 —— 一份对某张表**无话可说**的备份，
-  //    就不该有权删它。恢复旧备份后本地已有的图片字节必须原样活着。
-  await db.transaction('rw', db.sceneImages, db.imagePresets, async () => {
-    if (backup.sceneImages !== undefined) {
-      await db.sceneImages.clear();
-      if (Array.isArray(backup.sceneImages)) await db.sceneImages.bulkPut(backup.sceneImages);
-    }
-    if (backup.imagePresets !== undefined) {
-      await db.imagePresets.clear();
-      if (Array.isArray(backup.imagePresets)) await db.imagePresets.bulkPut(backup.imagePresets);
-    }
-  });
-
-  // v19 角色外貌会话副本（D56）—— 同一套三态语义。
-  //
-  // 🔴 它与 `sceneImages` 一样是**每存档**数据，所以必须与存档一起往返：漏掉它的症状
-  //    不是报错，而是导入后每个角色的本档变化静默退回基线（看起来像 AI 失忆）。
-  await db.transaction('rw', db.characterAppearances, async () => {
-    if (backup.characterAppearances !== undefined) {
-      await db.characterAppearances.clear();
-      if (Array.isArray(backup.characterAppearances)) {
-        await db.characterAppearances.bulkPut(backup.characterAppearances);
       }
     }
   });
@@ -1792,9 +1708,6 @@ export async function deleteSaveSlot(id: string): Promise<void> {
       db.characters,
       db.saveProfiles,
       db.saves,
-      db.sceneImages,
-      db.sceneImageBlobs,
-      db.characterAppearances,
       db.debugTurns,
     ],
     async () => {
@@ -1807,49 +1720,12 @@ export async function deleteSaveSlot(id: string): Promise<void> {
       await db.messages.where('saveId').equals(id).delete();
       await db.characters.where('saveId').equals(id).delete();
       await db.saveProfiles.where('saveId').equals(id).delete();
-      // v17 插画（设计 §7.2）：元数据按 saveId 删，字节按查出来的 id 批删 ——
-      // 字节表没有 saveId 索引（它与 assetBlobs 同形状，只有主键），所以必须先查 id。
-      //
-      // 🔴 `imagePresets` **不删** —— 它是全局的（D40 / D2），与素材库同口径：
-      //    删一个存档不该带走用户为全部角色写过的外观预设。
-      const imageIds = await db.sceneImages.where('saveId').equals(id).primaryKeys();
-      if (imageIds.length > 0) await db.sceneImageBlobs.bulkDelete(imageIds);
-      await db.sceneImages.where('saveId').equals(id).delete();
-      // v19 (D56): 会话外貌随存档走 —— 与 imagePresets（全局基线）刻意相反
-      await db.characterAppearances.where('saveId').equals(id).delete();
       await db.debugTurns.where('saveId').equals(id).delete();
       await db.saves.delete(id);
     },
   );
   const { unwireEffectSystem } = await import('./effect-wiring');
   unwireEffectSystem(id);
-}
-
-// --- 角色外貌会话副本 (v19, D56) ---
-
-/** 主键 —— **唯一**一处拼法。名字原样，不归一化（铁律 1） */
-export function characterAppearanceKey(saveId: string, name: string): string {
-  return `${saveId}:${name}`;
-}
-
-export async function getCharacterAppearances(
-  saveId: string,
-): Promise<CharacterSessionAppearance[]> {
-  return getDatabase().characterAppearances.where('saveId').equals(saveId).toArray();
-}
-
-export async function saveCharacterAppearance(row: CharacterSessionAppearance): Promise<void> {
-  await getDatabase().characterAppearances.put(row);
-}
-
-/** 单个角色重置 —— 删掉会话覆盖，出图即刻回到基线 */
-export async function deleteCharacterAppearance(key: string): Promise<void> {
-  await getDatabase().characterAppearances.delete(key);
-}
-
-/** 整档重置（D56 的第二个重置口）—— 这一周目所有角色回到基线 */
-export async function clearCharacterAppearances(saveId: string): Promise<void> {
-  await getDatabase().characterAppearances.where('saveId').equals(saveId).delete();
 }
 
 // --- API Endpoints ---
@@ -1959,7 +1835,7 @@ export function createDefaultSaveProfile(saveId: string, era?: string): SaveProf
     experienceMode: 'normal',
     fp: 0,
     fpHistory: [],
-    contracts: [],
+    reputation: 0,
     achievements: [],
     news: [],
     quests: {},
@@ -1976,16 +1852,35 @@ export function createDefaultSaveProfile(saveId: string, era?: string): SaveProf
 // Phase 7d — 捏人预设 CRUD
 // ═══════════════════════════════════════════════════════════
 
+/**
+ * 捏人预设旧字段归一化：`character.destinyPoints` → `character.startingPoints`
+ * （2026-09-20 改名）。读写边界统一走这里，旧记录在下次保存时自愈。
+ */
+function normalizeCreatePresetData(data: CreatePreset): CreatePreset {
+  const ch = data?.character as
+    (CreatePreset['character'] & { destinyPoints?: number }) | undefined;
+  if (ch && typeof ch.destinyPoints === 'number') {
+    if (typeof ch.startingPoints !== 'number') ch.startingPoints = ch.destinyPoints;
+    delete ch.destinyPoints;
+  }
+  return data;
+}
+
 export async function getCreatePresets(): Promise<CreatePresetRecord[]> {
-  return getDatabase().createPresets.orderBy('updatedAt').reverse().toArray();
+  const rows = await getDatabase().createPresets.orderBy('updatedAt').reverse().toArray();
+  return rows.map((row) => ({ ...row, data: normalizeCreatePresetData(row.data) }));
 }
 
 export async function getCreatePreset(id: string): Promise<CreatePresetRecord | undefined> {
-  return getDatabase().createPresets.get(id);
+  const row = await getDatabase().createPresets.get(id);
+  return row ? { ...row, data: normalizeCreatePresetData(row.data) } : undefined;
 }
 
 export async function saveCreatePreset(preset: CreatePresetRecord): Promise<string> {
-  return getDatabase().createPresets.put(preset);
+  return getDatabase().createPresets.put({
+    ...preset,
+    data: normalizeCreatePresetData(preset.data),
+  });
 }
 
 export async function deleteCreatePreset(id: string): Promise<void> {
@@ -2062,105 +1957,6 @@ export async function saveDebugTurn(record: DebugTurnRecord): Promise<void> {
   });
 }
 
-// ========== Audio (v11) ==========
-// 音频库全局共享，不随存档隔离（设计 §3.3）；音频表不进 FullBackup（设计 §12）。
-
-/** 获取全部音轨元数据（不含音频字节 — 字节在 audioBlobs 表，仅播放时读取） */
-export async function getAudioTracks(): Promise<AudioTrack[]> {
-  const tracks = await getDatabase().audioTracks.toArray();
-  return tracks;
-}
-
-export async function getAudioTrack(id: string): Promise<AudioTrack | undefined> {
-  const track = await getDatabase().audioTracks.get(id);
-  return track;
-}
-
-/**
- * 保存音轨；传入 blob 时同时写入音频字节。
- *
- * 偏离本文件"单行 CRUD"惯例改用显式事务：元数据与字节分表存储，
- * 两写必须原子 —— 半成功会留下有元数据却无字节（播放即哑）或孤儿 blob 的记录。
- */
-export async function saveAudioTrack(track: AudioTrack, blob?: Blob): Promise<string> {
-  const db = getDatabase();
-  track.updatedAt = Date.now();
-  if (blob) {
-    await db.transaction('rw', db.audioTracks, db.audioBlobs, async () => {
-      await db.audioTracks.put(track);
-      await db.audioBlobs.put({ id: track.id, blob });
-    });
-  } else {
-    await db.audioTracks.put(track);
-  }
-  return track.id;
-}
-
-/**
- * 删除音轨：元数据 + 孤儿字节一并清理，并从所有播放列表的 trackIds 中剔除该 id
- * （设计 §2 "dangling ids pruned on track delete"）。三表同事务。
- */
-export async function deleteAudioTrack(id: string): Promise<void> {
-  const db = getDatabase();
-  await db.transaction('rw', db.audioTracks, db.audioBlobs, db.audioPlaylists, async () => {
-    await db.audioTracks.delete(id);
-    await db.audioBlobs.delete(id);
-    const lists = await db.audioPlaylists.toArray();
-    const pruned = lists
-      .filter((l) => l.trackIds.includes(id))
-      .map((l) => ({ ...l, trackIds: l.trackIds.filter((t) => t !== id), updatedAt: Date.now() }));
-    if (pruned.length > 0) await db.audioPlaylists.bulkPut(pruned);
-  });
-}
-
-/** 读取音频字节 — 仅播放时调用 */
-export async function getAudioBlob(id: string): Promise<Blob | undefined> {
-  const record = await getDatabase().audioBlobs.get(id);
-  return record?.blob;
-}
-
-export async function getAudioPlaylists(): Promise<AudioPlaylist[]> {
-  const lists = await getDatabase().audioPlaylists.toArray();
-  return lists;
-}
-
-export async function getAudioPlaylist(id: string): Promise<AudioPlaylist | undefined> {
-  const list = await getDatabase().audioPlaylists.get(id);
-  return list;
-}
-
-export async function saveAudioPlaylist(list: AudioPlaylist): Promise<string> {
-  list.updatedAt = Date.now();
-  await getDatabase().audioPlaylists.put(list);
-  return list.id;
-}
-
-/** 删除播放列表 — 不级联删除音轨（列表只是音轨的有序引用） */
-export async function deleteAudioPlaylist(id: string): Promise<void> {
-  await getDatabase().audioPlaylists.delete(id);
-}
-
-// ========== Audio 本地文件夹句柄 (v12) ==========
-// 目录句柄只对本机有意义，因此同样不进 FullBackup（附录见 addendum "Storage"）。
-
-/** 读取已持久化的目录句柄（当前仅 'library-root' 一行） */
-export async function getAudioHandle(id: string): Promise<AudioHandleRecord | undefined> {
-  const record = await getDatabase().audioHandles.get(id);
-  return record;
-}
-
-/** 保存目录句柄；未带 addedAt 时补当前时间戳 */
-export async function saveAudioHandle(record: AudioHandleRecord): Promise<string> {
-  if (!record.addedAt) record.addedAt = Date.now();
-  await getDatabase().audioHandles.put(record);
-  return record.id;
-}
-
-/** 取消关联音乐文件夹 — 只删句柄，音轨目录保留（missing 由重扫标记） */
-export async function deleteAudioHandle(id: string): Promise<void> {
-  await getDatabase().audioHandles.delete(id);
-}
-
 // ========== Asset (v13) ==========
 // 素材库全局共享，不随存档隔离；素材表不进 FullBackup（设计 §4.5）。
 // FullBackup 是一份 JSON，字节进 JSON 就得 base64 —— 严格劣于 Blob（§4.2）。
@@ -2221,185 +2017,4 @@ export async function deleteAssets(ids: string[]): Promise<void> {
 export async function getAssetBlob(id: string): Promise<Blob | undefined> {
   const record = await getDatabase().assetBlobs.get(id);
   return record?.blob;
-}
-
-// ========== Scene Images (v17) ==========
-// 图像生成 v1 / 情景插画，设计 §7。
-//
-// 元数据随存档隔离（deleteSaveSlot 连带删），字节分表（与 assetBlobs 同形状）。
-// 元数据进 FullBackup、字节不进（§7.3）。这一层只做单行 CRUD 与索引查询 ——
-// take 编号 / occurrence 计数 / 队列 / 清理这些**决策**全在
-// `src/ui/stores/scene-image-store.ts`，本层不判断任何事。
-
-/** 一个存档的全部插画记录（图鉴整取；排序归调用方） */
-export async function getSceneImages(saveId: string): Promise<SceneImageRecord[]> {
-  return getDatabase().sceneImages.where('saveId').equals(saveId).toArray();
-}
-
-/** 一条消息上的插画记录 —— 正文渲染那条路径，走 `[saveId+messageId]` 复合索引 */
-export async function getSceneImagesByMessage(
-  saveId: string,
-  messageId: string,
-): Promise<SceneImageRecord[]> {
-  return getDatabase()
-    .sceneImages.where('[saveId+messageId]')
-    .equals([saveId, messageId])
-    .toArray();
-}
-
-export async function getSceneImage(id: string): Promise<SceneImageRecord | undefined> {
-  return getDatabase().sceneImages.get(id);
-}
-
-/**
- * 保存一条插画记录；传入 blob 时同时写入字节。
- *
- * 照 `saveAsset` 的先例用显式事务：元数据与字节分表，两写必须原子 ——
- * 半成功会留下「status 是 done 却没有字节」的记录，渲染即破图。
- */
-export async function saveSceneImage(record: SceneImageRecord, blob?: Blob): Promise<string> {
-  const db = getDatabase();
-  if (blob) {
-    await db.transaction('rw', db.sceneImages, db.sceneImageBlobs, async () => {
-      await db.sceneImages.put(record);
-      await db.sceneImageBlobs.put({ id: record.id, blob });
-    });
-  } else {
-    await db.sceneImages.put(record);
-  }
-  return record.id;
-}
-
-/** 删除一条插画：元数据 + 字节一并清理，两表同事务 */
-export async function deleteSceneImage(id: string): Promise<void> {
-  const db = getDatabase();
-  await db.transaction('rw', db.sceneImages, db.sceneImageBlobs, async () => {
-    await db.sceneImages.delete(id);
-    await db.sceneImageBlobs.delete(id);
-  });
-}
-
-/** 读取插画字节 — 仅渲染/导出时调用 */
-export async function getSceneImageBlob(id: string): Promise<Blob | undefined> {
-  const record = await getDatabase().sceneImageBlobs.get(id);
-  return record?.blob;
-}
-
-/**
- * 「清理」：删字节、**留记录**（D47 / §7.5）。
- *
- * 🔴 `sceneImages` 的行数一条都不变 —— 只删 `sceneImageBlobs` 的行并给记录打上
- * `blobDropped`。理由是 §7.3 那条：元数据是**配方**（prompt + seed + model 齐全，
- * 同参数可复现），于是清理之后图鉴目录还是完整的、随时能重画 —— 这正是用户说
- * 「清理」时想要的那件事。把记录一起删掉的那种操作叫**删除**，是另一个按钮。
- *
- * `status` 也不动：这张图**画出来过**，那是历史事实，不因为腾空间而改写。
- */
-export async function dropSceneImageBlobs(ids: readonly string[]): Promise<number> {
-  if (ids.length === 0) return 0;
-  const db = getDatabase();
-  let dropped = 0;
-  await db.transaction('rw', db.sceneImages, db.sceneImageBlobs, async () => {
-    await db.sceneImageBlobs.bulkDelete([...ids]);
-    const rows = await db.sceneImages.bulkGet([...ids]);
-    const next: SceneImageRecord[] = [];
-    for (const row of rows) {
-      if (!row) continue;
-      next.push({ ...row, blobDropped: true });
-      dropped += 1;
-    }
-    if (next.length > 0) await db.sceneImages.bulkPut(next);
-  });
-  return dropped;
-}
-
-/**
- * 一条记录此刻是否**占着字节**。
- *
- * `getSceneImageUsage` 与 `listCleanableSceneImageIds` 共用这一个判据，两者才不会
- * 各算各的 —— 「显示 12 张可清理、点下去只清了 8 张」是这类界面最容易长出来的裂缝。
- *
- * `status === 'done'` 是必要条件：只有走完 `saveSceneImage(record, blob)` 那条路的
- * 记录才有字节。给 `failed`/`queued` 打 `blobDropped` 会让图鉴对着一条从没画出来的
- * 记录说「字节已清理」。
- */
-function hasStoredSceneImageBytes(row: SceneImageRecord): boolean {
-  return row.status === 'done' && row.blobDropped !== true;
-}
-
-/**
- * 本存档的插画用量（只读，§7.5）。
- *
- * 一张图都没有时返回全 0 —— 调用方照常渲染「0 张 / 0 B」，**不要**把这一行藏起来：
- * 这行字同时在回答「我这存档到底有没有在攒图」。
- */
-export async function getSceneImageUsage(saveId: string): Promise<SceneImageUsage> {
-  const usage: SceneImageUsage = {
-    records: 0,
-    storedCount: 0,
-    storedBytes: 0,
-    favoriteCount: 0,
-    favoriteBytes: 0,
-  };
-  // 走 saveId 索引逐行累加，不 toArray —— 统计不需要把整份记录数组留在内存里
-  await getDatabase()
-    .sceneImages.where('saveId')
-    .equals(saveId)
-    .each((row) => {
-      usage.records += 1;
-      if (!hasStoredSceneImageBytes(row)) return;
-      const bytes = typeof row.bytes === 'number' && Number.isFinite(row.bytes) ? row.bytes : 0;
-      usage.storedCount += 1;
-      usage.storedBytes += bytes;
-      if (row.favorite === true) {
-        usage.favoriteCount += 1;
-        usage.favoriteBytes += bytes;
-      }
-    });
-  return usage;
-}
-
-/**
- * 本存档中「清理」会动到的那些记录 id —— 喂给 `dropSceneImageBlobs`。
- *
- * 默认排除 `favorite`（D6 的豁免位 / §7.5）；`includeFavorite` 留给将来那个措辞更重的
- * 入口，v1 的设置页不传它。
- *
- * 只读；真正删字节的是 `dropSceneImageBlobs`，本函数一个字节都不动。
- */
-export async function listCleanableSceneImageIds(
-  saveId: string,
-  opts: { includeFavorite?: boolean } = {},
-): Promise<string[]> {
-  const ids: string[] = [];
-  await getDatabase()
-    .sceneImages.where('saveId')
-    .equals(saveId)
-    .each((row) => {
-      if (!hasStoredSceneImageBytes(row)) return;
-      if (row.favorite === true && opts.includeFavorite !== true) return;
-      ids.push(row.id);
-    });
-  return ids;
-}
-
-// ========== Image Presets (v17) ==========
-// 角色 + 地点视觉预设同一张表（D40），**全局**：不随存档隔离、删存档不动它。
-// 主键 = `${kind}:${name}`；`name` 保留原始字符串供 `===` 匹配（铁律 1）。
-
-export async function getImagePresets(): Promise<ImagePreset[]> {
-  return getDatabase().imagePresets.toArray();
-}
-
-export async function getImagePreset(key: string): Promise<ImagePreset | undefined> {
-  return getDatabase().imagePresets.get(key);
-}
-
-export async function saveImagePreset(preset: ImagePreset): Promise<string> {
-  await getDatabase().imagePresets.put(preset);
-  return preset.key;
-}
-
-export async function deleteImagePreset(key: string): Promise<void> {
-  await getDatabase().imagePresets.delete(key);
 }

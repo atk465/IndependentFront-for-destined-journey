@@ -95,7 +95,7 @@ describe('BeautifierFrame persistent storage bridge', () => {
       new MessageEvent('message', {
         source: element.contentWindow,
         data: {
-          source: 'fated-poem-beautifier',
+          source: 'narrative-beautifier',
           bridgeId: id,
           type: 'storage-mutate',
           sequence: 1,

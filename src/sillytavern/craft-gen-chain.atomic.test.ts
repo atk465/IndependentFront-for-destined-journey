@@ -85,7 +85,7 @@ it('commits the material, product and canonical rewards exactly once', async () 
   expect((await getProfile(saveId)).fp).toBe(1);
 });
 
-it('ordinary chat fallback still grants its accepted parsed rewards when no tool settlement exists', async () => {
+it('普通 chat 回退（无工具、无结算）→ 产物照落，但**不发放** AI 编的奖励（第三档门禁）', async () => {
   const output =
     '<craft_result><success>true</success><product_name>Product</product_name><quality>普通</quality><rating>成功</rating><narrative>Test result</narrative><craft_params><quantity>1</quantity><exp_gained>50</exp_gained><fp_gained>1</fp_gained></craft_params></craft_result>';
   await runCraftGenChain(
@@ -105,7 +105,10 @@ it('ordinary chat fallback still grants its accepted parsed rewards when no tool
     } as any,
   );
   const stored = (await getCharacters(saveId))[0];
+  // 产物照落（制品本身是 Code 侧的 add_item，不依赖结算）
   expect(stored.inventory.some((item) => item.name === 'Product')).toBe(true);
-  expect(stored.totalExp).toBe(50);
-  expect((await getProfile(saveId)).fp).toBe(1);
+  // 🔒 第三档门禁：`<exp_gained>` 是 AI 在 XML 里写的数，而这条路径**没有工具**、
+  //    没有结算补丁 —— 那个数只能是编的。现在一分不发。
+  expect(stored.totalExp).toBe(0);
+  expect((await getProfile(saveId)).fp).toBe(0);
 });

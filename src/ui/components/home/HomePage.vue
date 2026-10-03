@@ -2,6 +2,7 @@
 import { ref, shallowRef, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { useGameStore } from '../../stores/game-store';
 import { useUIStore } from '../../stores/ui-store';
+import { useCreateStore } from '../../stores/create-store';
 import { useSettingsStore } from '../../stores/settings-store';
 import { VERSION } from '@engine/index';
 import type { SessionBackup } from '@engine/session-backup';
@@ -31,7 +32,6 @@ const backdropReady = ref(false);
  * fail-closed。网络开启意味着规则仍可发送该命中的 replacement/capture，
  * 详见 `docs/reviews/2026-08-02-workshop-regex-compatibility.md`。
  */
-const EXTENSION_ENTRY_ENABLED = true;
 
 // === 存档管理 ===
 const showSaveModal = ref(false);
@@ -160,6 +160,10 @@ function onHomeKeydown(event: KeyboardEvent) {
 }
 
 function newGame() {
+  // 二次创角重置（2026-10-01 探查 BUG-C）：create store 是内存态 setup store，不重置会
+  // 带着上一次的步骤与选择直接落在第 5 步。在「新建存档」这个显式新开意图上整仓重置；
+  // 创建失败后的同页重试不经这里，填写得以保留。
+  useCreateStore().resetAll();
   ui.navigate('create');
 }
 
@@ -315,7 +319,7 @@ async function exportSave(saveId: string) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `fated-poem-save-${name}-${Date.now()}.json`;
+    a.download = `narrative-save-${name}-${Date.now()}.json`;
     a.click();
     URL.revokeObjectURL(url);
     ui.toast('存档已导出', 'success');
@@ -541,17 +545,6 @@ function formatTime(ts: number) {
           >
             <i class="btn-icon fa-solid fa-folder-tree" aria-hidden="true"></i>存 档 管 理
           </AppButton>
-          <!-- 入口开关：见 script 里的 EXTENSION_ENTRY_ENABLED -->
-          <AppButton
-            v-if="EXTENSION_ENTRY_ENABLED"
-            variant="secondary"
-            size="lg"
-            block
-            class="btn-extensions"
-            @click="ui.navigate('extensions')"
-          >
-            <i class="btn-icon fa-solid fa-puzzle-piece" aria-hidden="true"></i>扩 展 管 理
-          </AppButton>
           <AppButton
             variant="secondary"
             size="lg"
@@ -605,7 +598,7 @@ function formatTime(ts: number) {
     <footer class="home-footer">
       <span class="footer-version">v{{ VERSION }}</span>
       <span class="footer-dot" aria-hidden="true">·</span>
-      <span class="footer-era">复兴纪元</span>
+      <span class="footer-era">{{ branding.era }}</span>
     </footer>
 
     <!-- 存档管理 — 全屏界面 -->
@@ -1227,7 +1220,6 @@ function formatTime(ts: number) {
 }
 
 .btn-load,
-.btn-extensions,
 .btn-settings {
   background: color-mix(in srgb, var(--theme-card-bg) 82%, transparent);
   border-color: var(--theme-card-border);
@@ -1238,7 +1230,6 @@ function formatTime(ts: number) {
     box-shadow 0.2s ease;
 }
 .btn-load:hover,
-.btn-extensions:hover,
 .btn-settings:hover {
   transform: translateY(-2px);
   box-shadow: 0 4px 16px color-mix(in srgb, #000 25%, transparent);
@@ -1822,14 +1813,12 @@ function formatTime(ts: number) {
   }
   .btn-new-game,
   .btn-load,
-  .btn-extensions,
   .btn-settings,
   .btn-ghost {
     transition: none;
   }
   .btn-new-game:hover,
   .btn-load:hover,
-  .btn-extensions:hover,
   .btn-settings:hover,
   .btn-ghost:hover {
     transform: none;

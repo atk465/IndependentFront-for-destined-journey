@@ -694,13 +694,24 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   └── *.test.ts                ← AttributeEditor / PointsBar / SelectableCard / CreateSteps /
 │   │                                   CreateStepDestinyCore / CreateStepConfirm.assets
 │   ├── game/
-│   │   ├── GamePage.vue             ← 游戏页主布局（三栏 + **10 个页面级弹窗**；持有 --rail-w）
-│   │   │                               `game.activeModal` 是**单选位**，十个取值：items / characters /
-│   │   │                               quests / plot / memory / snapshots / gallery / workshop / map /
-│   │   │                               debug（最后一个还要 `s.developerMode`）
+│   │   ├── GamePage.vue             ← 游戏页主布局（三栏 + **11 个页面级弹窗**；持有 --rail-w）
+│   │   │                               `game.activeModal` 是**单选位**，十一个取值：items / characters /
+│   │   │                               quests / plot / memory / snapshots / gallery / map /
+│   │   │                               debug / cardAlbum / craftBench（debug 还要 `s.developerMode`；
+│   │   │                               📌 2026-09-12 实测：workshop 不是 GamePage 的弹窗取值，旧条目列多了）
 │   │   │                               🔴 不占这个位的两类东西别顺手塞进来：迷你播放器是**浮动卡片**
 │   │   │                                  （§6.2，必须先于 showModal 拦下），CharacterViewerModal 是
 │   │   │                                  **场景栏自己的一层**
+│   │   ├── cards/
+│   │   │   ├── CardAlbumPanel.vue   ← [卡牌工坊 MVP] 卡册面板（卡组/卡包/详情三栏）：规则判定全在
+│   │   │   │                           引擎 `card-workshop/album.ts` 纯函数（同名≤2 / 容量），落库走
+│   │   │   │                           `game.updateCardAlbum`（update_character.cardAlbum 唯一写入口）；
+│   │   │   │                           卡牌实物以背包为真源，卡册 owned 只是种类收录账
+│   │   │   ├── CraftBench.vue       ← [卡牌工坊 MVP] 制卡工作台**只做确定性实时预览**（素材选位 +
+│   │   │   │                           元素标签 → `material.ts` 映射 → `card-fusion.fuse()`），
+│   │   │   │                           🔴 绝不在这里直接造卡 —— 实际炼制走 `<craft_request>` 叙事流程；
+│   │   │   │                           元素标签可手动增删（推导只是缺省，玩家认知优先）
+│   │   │   └── *.vue（Craft/Combat/Item/CharGen SystemCard 等）  ← 系统事件卡（样式见 cards-shared.css）
 │   │   ├── MapPanel.vue / TopBar.vue / SideToolbar.vue / ScenePanel.vue / ChatFlow.vue / InputBar.vue
 │   │   │                               [地图 v1] MapPanel 加页签「标记地图 / 势力地图」：两个都靠
 │   │   │                               `v-show` 切（标记页签用 v-if 会拆掉 OSD 的挂载容器 ——

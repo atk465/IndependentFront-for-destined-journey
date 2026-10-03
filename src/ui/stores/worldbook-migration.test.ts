@@ -45,7 +45,7 @@ function makeBook(id: string, entryCount: number): WorldBook {
 }
 
 /** 模拟 settings-store：一个普通对象 + 一个把它序列化进 localStorage 的 saveNow */
-const STORAGE_KEY = 'fated-poem-settings';
+const STORAGE_KEY = 'narrative-engine-settings';
 function makeSettingsHarness(books: WorldBook[] | undefined) {
   const settings: Record<string, unknown> = { plotMode: 'off' };
   if (books !== undefined) settings[LEGACY_BOOKS_KEY] = books;

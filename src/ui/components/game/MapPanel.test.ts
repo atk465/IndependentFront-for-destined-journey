@@ -120,6 +120,7 @@ function emptyRegistry() {
     mapPack: undefined,
     randomEvents: undefined,
     remoteAssets: undefined,
+    commissions: undefined,
   };
 }
 

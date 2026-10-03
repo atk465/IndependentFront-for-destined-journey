@@ -279,17 +279,17 @@ describe('filterBooksByEnabledEntries', () => {
     expect(active[0].content).toBe('妲丽安世界书正文');
   });
 
-  it('不覆盖工坊或用户书自身的 enabled=false', () => {
+  it('不覆盖用户书自身的 enabled=false', () => {
     const books = [
       makeBook({
-        id: 'workshop:test',
-        partition: 'creative_workshop',
+        id: 'user:test',
+        partition: 'dlc',
         builtIn: false,
         entries: [makeEntry({ uid: 900, enabled: false })],
       }),
     ];
 
-    const filtered = filterBooksByEnabledEntries(books, ['creative_workshop:900']);
+    const filtered = filterBooksByEnabledEntries(books, ['dlc:900']);
 
     expect(filtered[0].entries).toHaveLength(1);
     expect(filtered[0].entries[0].enabled).toBe(false);

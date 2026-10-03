@@ -118,8 +118,15 @@ export async function forward(c: Context, suffix: string): Promise<Response> {
 
   let upstream: Response;
   try {
-    const reqBody = c.req.raw.body;
-    const streaming = !!reqBody && c.req.method !== 'GET' && c.req.method !== 'HEAD';
+    // 🔴 2026-09-13 真机（卡牌工坊验证期）：**必须缓冲请求体，不能直接转发 c.req.raw.body**。
+    //   直接转发会把请求体当流式上传送出（`duplex:'half'` ⇒ Transfer-Encoding: chunked），
+    //   而部分上游明确拒绝 chunked 的 POST —— 实测 MiniMax CN（api.minimax.cn）会因此让
+    //   Node 侧 fetch 抛 `expected non-null body source`，代理回 502，前端表现为「整轮卡住」。
+    //   同一个请求体改成字符串/ArrayBuffer（带 Content-Length）实测返回 401（上游正常应答）。
+    //   本代理承载的都是 JSON 请求体（LLM 对话/embedding/出图，量级 MB 内），缓冲代价可忽略；
+    //   顺带让「同一次请求被重试」成为可能（流式 body 一次性消费，无法重放）。
+    const hasBody = c.req.method !== 'GET' && c.req.method !== 'HEAD';
+    const reqBody = hasBody ? await c.req.arrayBuffer() : undefined;
     // F11：默认拒绝上游 3xx。fetch 的 redirect:'follow' 会在无策略复核的情况下跟去
     // 任意 Location —— 黑名单只在初始目的地验过一次，跟随后的目标可绕过 SSRF 防护。
     // 明确要求 final provider base URL 本身，而不是透传一个会引走请求的 3xx。
@@ -127,7 +134,7 @@ export async function forward(c: Context, suffix: string): Promise<Response> {
       method: c.req.method,
       headers,
       redirect: 'manual',
-      ...(streaming ? { body: reqBody, duplex: 'half' as const } : {}),
+      ...(reqBody && reqBody.byteLength > 0 ? { body: reqBody } : {}),
     });
   } catch (e) {
     // undici 的 fetch 失败时抛 TypeError("fetch failed")，真因（ECONNRESET /

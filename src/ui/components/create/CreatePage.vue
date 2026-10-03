@@ -38,11 +38,7 @@ async function checkReadiness() {
   try {
     const result = await settings.initApiSecrets();
     if (result.status === 'failed') throw new Error('API 配置未能加载，请到 API 设置重试。');
-    await Promise.all([
-      store.initContent(true),
-      settings.loadAgentProjectDefaults(),
-      store.loadWorldBookEntries(),
-    ]);
+    await Promise.all([store.initContent(true), settings.loadAgentProjectDefaults()]);
   } catch {
     checkError.value = '配置未能加载，请重新检查；若仍失败，请打开 API 设置。';
   } finally {
@@ -50,29 +46,50 @@ async function checkReadiness() {
   }
 }
 
-// 懒加载步骤组件
+// 懒加载步骤组件（2026-09-16 精简：9 步 → 6 步；2026-09-17：删除「启用角色」步 → 5 步。
+// 该步实际语义是「排除」而非「启用」（引擎已废弃关键词激活，enabled=true 即注入），
+// UI 文案与行为相反且收窄能力已由设置页世界书编辑器承担）
 const Step0 = defineAsyncComponent(() => import('./CreateStepDifficulty.vue'));
 const Step1 = defineAsyncComponent(() => import('./CreateStepBasic.vue'));
-const Step2 = defineAsyncComponent(() => import('./CreateStepDestinyCore.vue'));
-const Step3 = defineAsyncComponent(() => import('./CreateStepCharacters.vue'));
-const Step4 = defineAsyncComponent(() => import('./CreateStepSelections.vue'));
-const Step5 = defineAsyncComponent(() => import('./CreateStepBackground.vue'));
-const Step6 = defineAsyncComponent(() => import('./CreateStepPlot.vue'));
-const Step7 = defineAsyncComponent(() => import('./CreateStepConfirm.vue'));
+const Step2 = defineAsyncComponent(() => import('./CreateStepTalent.vue'));
+const Step3 = defineAsyncComponent(() => import('./CreateStepSelections.vue'));
+const Step4 = defineAsyncComponent(() => import('./CreateStepPlot.vue'));
 
-const stepComponents = [Step0, Step1, Step2, Step3, Step4, Step5, Step6, Step7] as const;
+const stepComponents = [Step0, Step1, Step2, Step3, Step4] as const;
 
 const currentComponent = computed(() => stepComponents[store.currentStep]);
 
 const nextLabel = computed(() =>
-  store.isCreating ? '正在创建…' : store.currentStep === 7 ? '✦ 开始命运之旅 ✦' : '下一步 →',
+  store.isCreating ? '正在创建…' : store.currentStep === 4 ? '✦ 开始命运之旅 ✦' : '下一步 →',
 );
 
-// Step 7 特殊处理: 点击"下一步" → 执行 startJourney
+// 卡关原因（2026-10-01 探查 BUG-H）：「下一步」灰着时给一行可读解释，玩家不用猜。
+// 原因跟 stepValid 的判据一一对应，只读 store 的公开状态。
+const blockReason = computed(() => {
+  if (!ready.value || store.isCreating) return '';
+  if ((store.stepValid[store.currentStep] ?? true) === true) return '';
+  switch (store.currentStep) {
+    case 0:
+      return '请先选择难度';
+    case 1: {
+      const bits: string[] = [];
+      if (!store.name.trim()) bits.push('还没有名字');
+      if (store.remainingBP > 0) bits.push(`还需分配 ${store.remainingBP} 点基础属性`);
+      if (store.remainingAP > 0) bits.push(`还需分配 ${store.remainingAP} 点额外属性`);
+      return bits.join('；') || '基础信息尚未填写完整';
+    }
+    case 2:
+      return '至少选一件出身天赋才能继续';
+    default:
+      return '';
+  }
+});
+
+// Step 4（剧情规划，最后一步）特殊处理: 点击"下一步" → 执行 startJourney
 async function handleNext() {
   if (store.isCreating || !ready.value) return;
   creationError.value = '';
-  if (store.currentStep === 7) {
+  if (store.currentStep === 4) {
     try {
       const saveId = await store.startJourney();
       ui.navigate('game', saveId);
@@ -101,7 +118,7 @@ onMounted(() => {
       ← 首页
     </button>
 
-    <CreateSteps v-if="ready" :current="store.currentStep" :total="8" />
+    <CreateSteps v-if="ready" :current="store.currentStep" :total="5" />
 
     <PointsBar
       v-if="ready"
@@ -173,6 +190,7 @@ onMounted(() => {
       :busy="store.isCreating"
       :can-prev="!store.isCreating && store.currentStep > 0"
       :can-next="!store.isCreating && (store.stepValid[store.currentStep] ?? true)"
+      :block-reason="blockReason"
       :next-label="nextLabel"
       @prev="store.prevStep"
       @next="handleNext"

@@ -28,43 +28,6 @@ describe('CharGenSystemCard', () => {
       appearance: '银白长发及腰，冰蓝色瞳孔，皮肤苍白如雪，身材纤细修长',
       clothing: '身着冰蓝色法师长袍，腰间挂满符文水晶，胸前佩戴霜语氏族徽章',
       likes: '冰霜魔法、古老符文、极寒荒原的风雪',
-      ascension: {
-        enabled: true,
-        path: '冰霜之道 — 极寒主宰',
-        description: '掌控绝对零度之力',
-        deityPosition: '冰霜之神',
-        divineKingdom: {
-          name: '永冻圣域',
-          description:
-            '一片永远冰封的极寒领域，寒风中回荡着古老的霜语，冰晶构筑的宫殿在极光下熠熠生辉',
-        },
-        elements: [
-          // 要素/权能的 effects 是 string[]（char-gen-agent 按行切 <element> 正文），不是 name→desc 表
-          {
-            name: '极寒元素',
-            description: '纯粹的冰霜之力凝聚体，可冻结万物',
-            effects: ['冰霜伤害+30%', '冻结概率+15%'],
-          },
-          { name: '凛冬之风', description: '来自极北荒原的刺骨寒风', effects: ['速度降低20%'] },
-        ],
-        authorities: [
-          {
-            name: '冰封纪元',
-            description: '将一片区域瞬间冻结，进入冰河时代',
-            effects: ['范围冻结100m', '持续时间30s'],
-            costDescription: '消耗100 MP，冷却60秒',
-          },
-        ],
-        laws: [
-          {
-            name: '绝对零度法则',
-            description: '触及绝对零度边界的禁忌之力',
-            passiveEffects: ['冰霜抗性+50%', '冻结免疫'],
-            activeEffects: ['绝对零度爆发'],
-            costDescription: '每次触发消耗10% MP',
-          },
-        ],
-      },
       skills: [
         {
           name: '冰霜箭矢',
@@ -123,16 +86,6 @@ describe('CharGenSystemCard', () => {
       clothing: '',
       personality: '',
       likes: '',
-      ascension: {
-        enabled: false,
-        path: '',
-        description: '',
-        elements: [],
-        authorities: [],
-        laws: [],
-        deityPosition: '',
-        divineKingdom: { name: '', description: '' },
-      },
       skills: [],
       equipment: [],
       inventory: [],
@@ -159,16 +112,6 @@ describe('CharGenSystemCard', () => {
       appearance: '高大魁梧',
       clothing: '',
       likes: '',
-      ascension: {
-        enabled: false,
-        path: '',
-        description: '',
-        elements: [],
-        authorities: [],
-        laws: [],
-        deityPosition: '',
-        divineKingdom: { name: '', description: '' },
-      },
       skills: [],
       equipment: [],
       inventory: [],
@@ -231,12 +174,6 @@ describe('CharGenSystemCard', () => {
     expect(w.text()).toContain('主手');
     expect(w.text()).toContain('霜语法杖');
   });
-  it('renders ascension when enabled', async () => {
-    const w = mount(CharGenSystemCard, { props: { event: mockFull } });
-    expect(w.text()).toContain('登神长阶');
-    expect(w.text()).toContain('冰霜之道');
-  });
-
   // ── 防御性渲染 ──
   it('hides background when empty', async () => {
     const w = mount(CharGenSystemCard, { props: { event: mockMinimal } });
@@ -247,11 +184,6 @@ describe('CharGenSystemCard', () => {
     const w = mount(CharGenSystemCard, { props: { event: mockMinimal } });
     expect(w.text()).not.toContain('技能');
   });
-  it('hides ascension when disabled', async () => {
-    const w = mount(CharGenSystemCard, { props: { event: mockMinimal } });
-    expect(w.text()).not.toContain('登神长阶');
-  });
-
   // ── Profile grid ──
   it('renders personality in profile grid', async () => {
     const w = mount(CharGenSystemCard, { props: { event: mockFull } });
@@ -305,43 +237,7 @@ describe('CharGenSystemCard', () => {
   });
 
   // ── Ascension full ──
-  it('renders ascension deity position', async () => {
-    const w = mount(CharGenSystemCard, { props: { event: mockFull } });
-    expect(w.text()).toContain('冰霜之神');
-  });
-  it('renders ascension divine kingdom', async () => {
-    const w = mount(CharGenSystemCard, { props: { event: mockFull } });
-    expect(w.text()).toContain('永冻圣域');
-    expect(w.text()).toContain('永远冰封');
-  });
-  it('renders ascension elements', async () => {
-    const w = mount(CharGenSystemCard, { props: { event: mockFull } });
-    expect(w.text()).toContain('要素');
-    expect(w.text()).toContain('极寒元素');
-    expect(w.text()).toContain('凛冬之风');
-  });
   // 回归：effects 是 string[]，逐条渲染原文；旧模板按 (v, k) 遍历，会把数组下标 0/1 当词条名画出来
-  it('renders element effects as plain lines, not indexed pairs', async () => {
-    const w = mount(CharGenSystemCard, { props: { event: mockFull } });
-    const pills = w.findAll('.ci-effect-pill').map((p) => p.text());
-    expect(pills).toContain('冰霜伤害+30%');
-    expect(pills.some((t) => /^\d+\s/.test(t))).toBe(false);
-  });
-  it('renders ascension authorities', async () => {
-    const w = mount(CharGenSystemCard, { props: { event: mockFull } });
-    expect(w.text()).toContain('权能');
-    expect(w.text()).toContain('冰封纪元');
-    expect(w.text()).toContain('消耗100 MP');
-    expect(w.findAll('.ci-effect-pill').map((p) => p.text())).toContain('范围冻结100m');
-  });
-  it('renders ascension laws with passive and active effects', async () => {
-    const w = mount(CharGenSystemCard, { props: { event: mockFull } });
-    expect(w.text()).toContain('法则');
-    expect(w.text()).toContain('绝对零度法则');
-    expect(w.text()).toContain('冰霜抗性+50%');
-    expect(w.text()).toContain('绝对零度爆发');
-  });
-
   // ── Skill effects ──
   it('renders skill effects', async () => {
     const w = mount(CharGenSystemCard, { props: { event: mockFull } });

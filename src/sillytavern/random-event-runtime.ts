@@ -28,6 +28,7 @@
  */
 
 import type { RandomEventPack } from './random-event-pack';
+import type { RandomEventDef } from './types-random-events';
 import { DEFAULT_RANDOM_EVENT_CONFIG } from './types-random-events';
 
 /**
@@ -43,6 +44,34 @@ function createEmptyPack(): RandomEventPack {
 
 /** 现行包。没人装过时是空包（兜底合同，见文件头） */
 let installedPack: RandomEventPack = createEmptyPack();
+
+/**
+ * 开发者自定义探索事件的**独立槽**（委托×地图闭环 2026-09-19：链节终点事件）。
+ *
+ * 🔴 为什么是独立槽而不是让调用方重装整份包：包由内容注册表第 13 面在换包/读档时装，
+ *    而自定义事件随存档走 —— 两条生命周期，塞进同一个安装动作就会出现「装包时自定义
+ *    还没灌回 / 灌回后换包把自定义冲掉」的时序赛。两个槽各装各的，读取时合并。
+ */
+let customDefs: RandomEventDef[] = [];
+
+/**
+ * 装上开发者自定义探索事件（调用方先过 `coerceCustomEvents` 容错）。
+ * `null` = 清空（读档/清存档时调用）。每次换包/清空注册表都必须重装。
+ */
+export function installCustomEventDefs(defs: readonly RandomEventDef[] | null): void {
+  customDefs = Array.isArray(defs) ? [...defs] : [];
+}
+
+/** 现行包；没装过 → 空包（判据一律走 `isEmptyRandomEventPack`，不比定义条数） */
+export function getRandomEventPack(): RandomEventPack {
+  if (customDefs.length === 0) return installedPack;
+  // 自定义覆盖同名内置（开发者显式创建的同名事件意味着「我要替换它」）
+  const customNames = new Set(customDefs.map((d) => d.name));
+  return {
+    config: installedPack.config,
+    defs: [...installedPack.defs.filter((d) => !customNames.has(d.name)), ...customDefs],
+  };
+}
 
 /**
  * 装上一份包。**刻意不做容错**（keep dumb）：入参必须是已经过 `coerceRandomEventPack`
@@ -73,11 +102,6 @@ export function installRandomEventPack(pack: RandomEventPack | null): void {
     : { config: { ...DEFAULT_RANDOM_EVENT_CONFIG }, defs: pack.defs };
 }
 
-/** 现行包；没装过 → 空包（判据一律走 `isEmptyRandomEventPack`，不比定义条数） */
-export function getRandomEventPack(): RandomEventPack {
-  return installedPack;
-}
-
 /**
  * 回到「没装过」（测试用）。
  *
@@ -86,4 +110,5 @@ export function getRandomEventPack(): RandomEventPack {
  */
 export function resetRandomEventRuntime(): void {
   installedPack = createEmptyPack();
+  customDefs = [];
 }

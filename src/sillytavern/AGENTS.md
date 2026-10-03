@@ -370,8 +370,21 @@ src/sillytavern/                    ← 核心引擎
   │       ├── summon-pool.ts                        ← [M3.5] 预生成召唤物池：**目前是空池 + 幂等查找 + key 归一化**
   │       │                                            （key = `种族-层级-定位`），未命中走实时 char_gen。
   │       │                                            池内容要靠离线脚本填，不在 plan 范围内
-  │       ├── types.ts                              ← v3 内部类型（1816 行；DiceChannel/CombatState/EffectIntent/
-  │       │                                            WindowKey/DomainEvent 等全在这里）
+  │       ├── types.ts                              ← v3 内部类型（DiceChannel/CombatState/EffectIntent/
+  │       │                                            WindowKey/DomainEvent 等全在这里）。
+  │       │                                            🆕 阶段4/5 玩卡通道：`CombatState.landscape?`（地景事实，
+  │       │                                            可选字段沿 frozenSlots 先例）+ `DeclareAction(item)
+  │       │                                            .payload.card`（阶段5 把 phase4 的 landscape 载荷
+  │       │                                            更名扩形统一）——action.ts 玩卡前置：sealed 卡先过
+  │       │                                            启封判定（intentCheck 骰带 → card-workshop/unsealing，
+  │       │                                            哑火无效果/反噬 REBOUND_DAMAGE/暴走照发）→ 地景落
+  │       │                                            landscapePatch（词条含「地景」，全部 automata 持久注册）
+  │       │                                            / 非地景卡 action.declared 订阅者**打出即发动**
+  │       │                                            （M3.5 召唤冻结链 + OverrideIntent 禁忌卡），其余窗口
+  │       │                                            持久注册；数值全在卡牌 DSL，内核零硬编码内容数。
+  │       │                                            测试 combat-v3/card-play.test.ts；设计：
+  │       │                                            docs/planning/2026-09-13-card-workshop-phase5-combat-wiring-design.md
+  │       │                                            （phase4 地景档案带阶段5 更正注记）
   │       ├── test-utils.ts                         ← 测试共享构造（最小 2 单位 bundle + 命令）
   │       ├── projection-ui.ts / projection-agent.ts← 双投影（UI 事件 + Agent 文本面板）
   │       ├── replay.ts / contract/ / fixtures/     ← contract harness + 7 场 fixture（JSON 在 fixtures/，

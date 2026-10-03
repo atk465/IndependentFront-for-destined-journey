@@ -335,7 +335,7 @@ describe('StatusOverview — 身份条落位（有大画像才 overlay）', () =
    * 两种落位都不能丢（丢了就等于用户永远看不到被截掉的那几项）。
    */
   it('两种落位都保留单行截断 + 完整带标签的 title', async () => {
-    const expected = '种族：人族　身份：—　职业：—　生命层级：普通　冒险者等级：—';
+    const expected = '种族：人族　身份：—　职业：—　生命层级：普通　冒险者等级：未评级';
 
     const plain = mount(StatusOverview);
     await flushPromises();

@@ -1,3 +1,4 @@
+import type { EventCommission, EventCommissionTemplate } from './card-workshop/commission';
 /**
  * types-random-events.ts — 随机事件子系统的类型分册（随机事件系统 v1，设计 2026-08-15 §3）
  *
@@ -125,12 +126,18 @@ interface PlaceFilter {
 }
 
 /**
- * 触发器。两种形态语义完全不同：
+ * 触发器。三种形态语义完全不同：
  * - `mtth`：平均每 `mtthDays` 天触发一次（权重 ×1 时），逐天掷骰 `p = min(1, w / mtthDays)`
  * - `first_visit`：`scope` 命中的地点首次到访时**强制入池**（绕过 MTTH 与全局冷却）
+ * - `exploration`：`scope` 命中的中层里**每轮探索动作**（采集/垂钓）结算时掷一次
+ *   （委托×地图闭环 2026-09-19 决议 #10）。与 mtth 的差别是「按动作不按天」：种子带
+ *   动作序号，同一动作的重复结算不会重掷出不同结果。`chancePct` 缺省 100 —— 权重链
+ *   照常生效，命中多条时权重加权抽一条。
  */
 export type RandomEventTrigger =
-  { type: 'mtth'; mtthDays: number } | { type: 'first_visit'; scope: PlaceFilter };
+  | { type: 'mtth'; mtthDays: number }
+  | { type: 'first_visit'; scope: PlaceFilter }
+  | { type: 'exploration'; scope?: PlaceFilter; chancePct?: number };
 
 /**
  * 一条随机事件定义。全部叙事字段是中文自由文本，**引擎零解释**。
@@ -159,6 +166,12 @@ export interface RandomEventDef {
   weights?: WeightModifier[];
   /** 组装槽位：入池时种子化采样并固化进 brief */
   slots?: Record<string, SlotTable>;
+  /**
+   * 🆕 事件委托（随机事件 × 委托板融合，2026-09-16）：事件被 AI 认领结算时，
+   *    委托板动态出现这条委托（玩家炼卡交付 → 奖励到账 → 委托消失）。
+   *    形状 = 委托定义 + 有效期（`ttlDays`，gameDay；缺省 7 天）。
+   */
+  commission?: EventCommissionTemplate;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -204,6 +217,8 @@ export interface RandomEventSaveFlags {
   visited?: string[];
   /** 触发档案（`once` 与个体冷却的依据） */
   fired?: Record<string, { count: number; lastDay: number }>;
+  /** 事件委托（随机事件 × 委托板融合）：事件触发生成的动态委托，交付即移除、过期自动清理 */
+  eventCommissions?: EventCommission[];
 }
 
 // ═══════════════════════════════════════════════════════════

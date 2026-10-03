@@ -147,7 +147,7 @@
           id="edit-keys"
           v-model="editForm.keys"
           class="form-input"
-          placeholder="阿斯塔利亚, 虚海"
+          placeholder="王城, 边境森林"
           :disabled="readonly"
           :readonly="readonly"
         />

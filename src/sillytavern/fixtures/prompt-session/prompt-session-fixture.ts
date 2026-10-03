@@ -6,7 +6,7 @@
  *       未来 T1–T4 的测试直接 import 这些命名导出，不必在测试里手拼样本数据。
  *
  * 🔴 匿名纪律（必读）：
- *   - 全部角色 / 物品 / 技能 / 地点 / 对话都是**凭空虚构**的，与《命定之诗》世界观、
+ *   - 全部角色 / 物品 / 技能 / 地点 / 对话都是**凭空虚构**的，与任何既有作品的世界观、
  *     内置世界书、真实玩家存档、`tests/realtime_export/` 与私有内容仓**没有任何关联**。
  *   - 严禁把真实导出、真实世界书条目、API Key、任何用户内容复制进本目录。
  *   - 条目 uid 故意取 9000+（远离内置书 1–509 与 ST 用户书 0..N-1 的常态区间），
@@ -48,7 +48,6 @@ export const fixturePlayer: CharacterState = createDefaultCharacterState({
   money: 32,
   location: '雨夜旅店',
   present: true,
-  adventurerRank: 'D',
   currentAction: '在旅店避雨',
   gender: '女',
   appearance: '背着旧行囊的旅人，斗笠压着湿漉漉的发梢。',
@@ -77,7 +76,6 @@ export const fixtureNpc: CharacterState = createDefaultCharacterState({
   money: 5,
   location: '雨夜旅店',
   present: true,
-  adventurerRank: '未评级',
   currentAction: '擦拭灯台',
   gender: '女',
   appearance: '系着布围裙的年轻伙计，袖口沾着灯油。',
