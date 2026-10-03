@@ -1885,7 +1885,9 @@ export const useGameStore = defineStore('game', () => {
     // 🔴 落库走 profile.worldFlags（`updateCustomContentFlags`）而不是 set_variable：
     //    后者会把内容写进 variables.sys.worldFlags，与读档读的 profile.worldFlags 不是
     //    同一个袋子 —— 同一局看不出问题，刷新就全没了（2026-09-18 真机修）。
-    void persistCustomContent({ talents: list });
+    void persistCustomContent({ talents: list }).catch((e) =>
+      console.error('[custom-content] 天赋落库失败（UI 仍会显示已保存）', e),
+    );
   }
 
   /** 读取自定义天赋列表（从 worldFlags 恢复到运行时注册表） */
@@ -1914,7 +1916,9 @@ export const useGameStore = defineStore('game', () => {
     }
     replaceCustomCommissions(list);
     installCustomCommissions(list);
-    void persistCustomContent({ commissions: list });
+    void persistCustomContent({ commissions: list }).catch((e) =>
+      console.error('[custom-content] 委托落库失败（UI 仍会显示已保存）', e),
+    );
   }
 
   /** 保存自定义链节探索事件列表（同步装进随机事件缝的自定义槽） */
@@ -1927,7 +1931,9 @@ export const useGameStore = defineStore('game', () => {
     }
     replaceCustomEvents(list);
     installCustomEventDefs(list);
-    void persistCustomContent({ events: list });
+    void persistCustomContent({ events: list }).catch((e) =>
+      console.error('[custom-content] 事件落库失败（UI 仍会显示已保存）', e),
+    );
   }
 
   /** 读档灌回：自定义委托 + 探索事件 → 各自运行时缝（loadCustomContent 尾部调用） */
@@ -1993,12 +1999,17 @@ export const useGameStore = defineStore('game', () => {
     // 内存里就地改（编辑器读的是这份响应式 profile），落库用去代理副本 ——
     // Dexie 的 structuredClone 克隆不了 Vue 的 reactive Proxy（DataCloneError）。
     setCustomContentFlagsInPlace(profile, content);
-    await updateCustomContentFlags(detach(profile), content);
+    // 🔴 content 也要去代理（CMP-08 2026-10-03）：编辑器传来的 list 可能整份/逐条是
+    // Vue reactive Proxy（读回的 worldFlags.customTalents 容器与条目都是 Proxy），
+    // 只 detach profile 会让 put 抛 DataCloneError → 静默整次保存全废、UI 却报已保存。
+    await updateCustomContentFlags(detach(profile), detach(content));
   }
 
   /** 把卡注册表整体写进当前存档（无活跃存档时跳过 —— 运行时仍生效） */
   function persistCustomCards(): void {
-    void persistCustomContent({ cards: getCustomCards() });
+    void persistCustomContent({ cards: getCustomCards() }).catch((e) =>
+      console.error('[custom-content] 购卡落库失败（UI 仍会显示已保存）', e),
+    );
   }
 
   /** 从存档灌回运行时注册表（进游戏 / 切换存档时调用） */
@@ -2890,9 +2901,9 @@ ${arc}`
   ): Promise<{ ok: boolean; reason?: string; summary?: string }> {
     const playerChar = player.value;
     if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
-    if (!hasMechanicGate('自我进化')) {
-      return { ok: false, reason: '需要【最终兵器：她】系天赋' };
-    }
+    // 🔴 天赋门槛已按设计 D13 删除（CMP-04 2026-10-03）：【最终兵器：她】保留为
+    // 战后自动进化线（既有语义），**不再 gate 常规仪式**——玩家天赋是加速器，不是门票。
+    // （「自我进化」kind 被两条天赋复用，原 gate 覆盖面比文案更宽，批⑤整条不可达。）
     const card = playerChar.inventory.find(
       (i): i is CardItem => i.name === cardName && i.type === '卡牌',
     );

@@ -16,6 +16,7 @@
  */
 
 import type { BasicCounter, SkirmishAction } from './skirmish';
+import { BASIC_COUNTERS } from './skirmish';
 
 /** 派生战斗三维（初版 v1 公式见头注） */
 export interface DerivedCombatStats {
@@ -135,8 +136,16 @@ export function applyStatMultiplier(
   };
 }
 
-/** 基础应对 → 反制行动：行动值取对应派生维，标签 = 同名单标签 */
-export function basicCounterAction(move: BasicCounter, stats: DerivedCombatStats): SkirmishAction {
-  const power = move === '强攻' ? stats.atk : move === '防御' ? stats.guard : stats.agi;
-  return { label: move, power, tags: [move] };
+/** 基础应对 → 反制行动：行动值取对应派生维，标签 = 同名单标签（非法 move → null，CMP-05） */
+export function basicCounterAction(
+  move: BasicCounter,
+  stats: DerivedCombatStats,
+): SkirmishAction | null {
+  // 白名单收口（2026-10-02 CMP-05）：非法 move 此前静默产出
+  // { label: undefined, power: agi, tags: [undefined] }——战报出字面 undefined、克制恒 0
+  // 而数字看着合理。三条正常入口（UI/自由文本 L1/L2）都只传白名单值，这里只拦脏调用。
+  const legal = BASIC_COUNTERS.includes(move) ? move : null;
+  if (!legal) return null;
+  const power = legal === '强攻' ? stats.atk : legal === '防御' ? stats.guard : stats.agi;
+  return { label: legal, power, tags: [legal] };
 }

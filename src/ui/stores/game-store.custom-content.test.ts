@@ -9,6 +9,7 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
+import { reactive } from 'vue';
 import {
   clearAllData,
   getSaveProfile,
@@ -202,6 +203,48 @@ describe('刷新页面后仍在（真落库，不靠会话层）', () => {
     await fresh.loadSave(SAVE_ID);
 
     expect(getCustomTalents().map((t) => t.name)).toContain('回归测试天赋');
+  });
+
+  // ═══ CMP-08（2026-10-03）：响应式（Proxy）形态的内容也能落库 ═══
+  // 真机根因：编辑器拿到的 list 来自响应式 profile（容器与条目都是 Proxy），
+  // persistCustomContent 只 detach 了 profile——Proxy 进 Dexie put 抛 DataCloneError，
+  // void 吞错 → UI 报已保存、刷新即丢。修前这两条必红。
+
+  it('CMP-08：传入 reactive（Proxy）条目也能落库', async () => {
+    await seedSave();
+    const game = useGameStore();
+    await game.loadSave(SAVE_ID);
+
+    const proxyTalent = reactive({ ...自定义天赋, name: '响应式天赋' });
+    expect((proxyTalent as unknown as { __v_raw?: unknown }).__v_raw).toBeTruthy(); // 证明确是 Proxy
+
+    game.saveCustomTalents([proxyTalent]);
+    await flush();
+
+    const profile = await getSaveProfile(SAVE_ID);
+    const saved = profile?.worldFlags?.customTalents as TalentTemplate[] | undefined;
+    expect(saved?.map((t) => t.name)).toContain('响应式天赋');
+  });
+
+  it('CMP-08：整份列表来自 reactive 容器也能落库（真机形态：容器本身是 Proxy）', async () => {
+    await seedSave();
+    const game = useGameStore();
+    await game.loadSave(SAVE_ID);
+    // 先落一条纯对象当底（编辑器真实形态：列表 = 读回的响应式 profile 数组）
+    game.saveCustomTalents([自定义天赋]);
+    await flush();
+
+    // 编辑器拿到的形态：从响应式 profile 读回的数组（容器+条目都是 Proxy），追加一条
+    const reactiveList = game.saveProfile!.worldFlags!.customTalents as unknown as TalentTemplate[];
+    expect((reactiveList as unknown as { __v_raw?: unknown }).__v_raw).toBeTruthy();
+    game.saveCustomTalents([...reactiveList, reactive({ ...自定义天赋, name: '容器内新增' })]);
+    await flush();
+
+    const profile = await getSaveProfile(SAVE_ID);
+    const saved = profile?.worldFlags?.customTalents as TalentTemplate[] | undefined;
+    expect(saved?.map((t) => t.name)).toEqual(
+      expect.arrayContaining(['回归测试天赋', '容器内新增']),
+    );
   });
 });
 

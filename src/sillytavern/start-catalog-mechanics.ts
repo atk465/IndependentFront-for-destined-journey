@@ -153,18 +153,22 @@ export function matchImitation(
 }
 
 import { coerceCardEffects } from './card-workshop/card-effects';
+import { normalizeCardTier } from './field-enums';
 
 /** 卡目录条目 → 实体卡（确定性构造；recipe 为快照占位，逻辑键=名字，铁律1/3） */
 export function cardCatalogToItem(c: CardCatalogItem): import('./types').CardItem {
   const 词条 = c.element ? [c.element, c.formEntry] : [c.formEntry];
   // 效果池登记（2026-09-25 效果批四）：门禁后随卡落库——非法条目整批丢弃，回落元素派生
   const gatedEffects = coerceCardEffects(c.effects, c.element ? [c.element] : []);
+  // 读入边界归一（CMP-03 2026-10-03）：旧包/第三方包可能仍带 D14 旧称「白铁」——
+  // 内存与库同口径，不再出现「内存白铁、落库黑铁」的刷新前后不一致。
+  const cardTier = normalizeCardTier(c.cardTier);
   return {
     name: c.name,
     quantity: 1,
     type: '卡牌',
     rarity: '普通',
-    cardTier: c.cardTier,
+    cardTier,
     词条,
     description: c.description,
     sealed: false,
@@ -172,7 +176,7 @@ export function cardCatalogToItem(c: CardCatalogItem): import('./types').CardIte
     recipe: {
       mainMaterial: c.name,
       subMaterials: [],
-      tier: c.cardTier,
+      tier: cardTier,
       fusionKind: '叠加',
       cost: c.cost,
       rating: '成功',

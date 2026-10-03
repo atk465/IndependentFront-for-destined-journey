@@ -3442,10 +3442,20 @@ export class GamePipeline {
         ];
       }
     } else {
-      action = basicCounterAction(
+      // CMP-05（2026-10-02）：未知 kind 不再静默当基础应对——basicCounterAction 对
+      // 非法 move 返回 null，这里明示拒绝并 return（不产出 undefined 招式名+错算数字）。
+      const basic = basicCounterAction(
         choice.move,
         deriveCombatStats({ attributes: playerC.attributes, level: playerC.level }),
       );
+      if (!basic) {
+        this.emitMessage(
+          `【交锋】未知的应对方式「${String((choice as { kind?: unknown }).kind)}」——已忽略（合法：出卡 / 强攻 / 防御 / 闪避）。`,
+          'assistant',
+        );
+        return;
+      }
+      action = basic;
     }
     // 行动宣言（主人裁定 2025-09-25 扩权：出卡与基础应对同权）——纯叙事素材，
     // 数值照常结算；置于拍审计之前的「意图」行

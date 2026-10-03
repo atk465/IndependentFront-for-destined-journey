@@ -1,4 +1,4 @@
-# 交接文档 —— 伙伴实体化（批①~⑤ + 规格裁决 R1~R5）实机测试指南（2026-10-03）
+# 交接文档 —— 伙伴实体化（批①~~⑤ + 规格裁决 R1~~R5）实机测试指南（2026-10-03）
 
 > 写给**零上下文接手的 AI Agent**：本文件只讲「**这批改动怎么验收**」。
 > 环境准备、dev 启动姿势、门禁棘轮、Agent 行为守则**全部沿用** [`2026-10-01-agent-testing-handoff.md`](2026-10-01-agent-testing-handoff.md)——先读它，再回来。
@@ -9,13 +9,13 @@
 
 把「伙伴」从一张战斗道具卡升级为**独立实体**（实体为主、卡为媒），五批全部落码：
 
-| 批 | 一句话 | 关键字 |
-| --- | --- | --- |
-| ① 地基 | 获得召唤卡即按卡名诞生 type:'summon' 实体（黑铁起步/新面板公式/性格）；卡全离手→沉眠、再得→唤醒续接；**黑铁全面替换白铁** | companionEnsurePatches、companion-panel、normalizeCardTier |
-| ② 战斗 | 召唤卡打出后数值基座从玩家换成**伙伴面板**；挡刀（忠诚≥30 或受击时被动）、HP 归零退场+重伤（不死不销卡）、MP 走实体 | companion-guard、companionBaseOf、companionGuard |
-| ③ 成长 | 投喂/战斗分成经验**改道实体**（升级 +3 点按元素偏置）；忠诚=affections 视图+引擎事件（投喂+3/并肩+2/挡刀+5/重伤−4）；制卡叙事提取性格 | applyCompanionExp、LEVEL_CAP_BY_TIER、personalityFromDesc |
-| ④ 装备+天赋 | 佩戴表三槽（**佩戴面=装备卡 only**，见 R3）；装备 stats 并入面板加算区；伙伴天赋池 6 kind（复用既有 TalentEntryKind，AI 选 kind 引擎定标） | companionEquipSlotOf、companionEffectivePanel、companion-talent |
-| ⑤ 进化+元素轴 | 仪式型蜕变：倾向 archetype→嵌 3 份祭品→忠诚≥50→品阶+1/面板回满/天赋重定标；效果可选 element[] 轴（⊆词条门禁，技能轨主轴**取优**） | ARCHETYPE_ELEMENTS、planCompanionEvolution、CardEffectDef.element |
+| 批            | 一句话                                                                                                                                     | 关键字                                                            |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
+| ① 地基        | 获得召唤卡即按卡名诞生 type:'summon' 实体（黑铁起步/新面板公式/性格）；卡全离手→沉眠、再得→唤醒续接；**黑铁全面替换白铁**                  | companionEnsurePatches、companion-panel、normalizeCardTier        |
+| ② 战斗        | 召唤卡打出后数值基座从玩家换成**伙伴面板**；挡刀（忠诚≥30 或受击时被动）、HP 归零退场+重伤（不死不销卡）、MP 走实体                        | companion-guard、companionBaseOf、companionGuard                  |
+| ③ 成长        | 投喂/战斗分成经验**改道实体**（升级 +3 点按元素偏置）；忠诚=affections 视图+引擎事件（投喂+3/并肩+2/挡刀+5/重伤−4）；制卡叙事提取性格      | applyCompanionExp、LEVEL_CAP_BY_TIER、personalityFromDesc         |
+| ④ 装备+天赋   | 佩戴表三槽（**佩戴面=装备卡 only**，见 R3）；装备 stats 并入面板加算区；伙伴天赋池 6 kind（复用既有 TalentEntryKind，AI 选 kind 引擎定标） | companionEquipSlotOf、companionEffectivePanel、companion-talent   |
+| ⑤ 进化+元素轴 | 仪式型蜕变：倾向 archetype→嵌 3 份祭品→忠诚≥50→品阶+1/面板回满/天赋重定标；效果可选 element[] 轴（⊆词条门禁，技能轨主轴**取优**）          | ARCHETYPE_ELEMENTS、planCompanionEvolution、CardEffectDef.element |
 
 规格裁决速记（详见任务书 §〇-bis）：R1 资源写入走 set_hp/set_mp/set_sp 专线（update_character 写资源是旧口径）；R2 session 记账缝 6 字段追认；**R3 装备物品佩戴退役（equippedSlot 非固有属性，引擎无背包装备槽位真源）→ 佩戴候选只有装备卡，别报缺**；R4 knip 基线+1；R5 弧光缝已落码（companion-evolve-narrate.ts）。
 
@@ -39,7 +39,7 @@ npm run test:run
 
 ## 四、测试存档与数据准备（一次造好）
 
-1. **捏人**：智力拉高（制卡轴）；天赋 12 抽选 2 **最好含【调教大师系统】**（投喂门槛，没有它 feedCompanion 直接拒绝）＋【最终兵器：她】可选（最终兵器自动进化线回归用；**不再 gate 常规仪式**——没抽到不影响批⑤验收）。GC 留足（祭品素材/仪式/购卡）。
+1. **捏人**：智力拉高（制卡轴）；天赋 12 抽选 2 **最好含【调教大师系统】**（调教 trainCompanion 门槛；**投喂 feedCompanion 不需要**，CMP-06 勘误）＋【最终兵器：她】可选（最终兵器自动进化线回归用；**不再 gate 常规仪式**——没抽到不影响批⑤验收）。GC 留足（祭品素材/仪式/购卡）。
 2. **召唤卡来源（三条路，任选其一即可开链）**：
    - 开局卡池选 1 张召唤卡（最快）；
    - `game.seedDemoCards()` 种演示卡（历史行为含召唤卡「远古巨兽·岩爪」，以实测 dump 为准——见 §五 API）；
@@ -52,29 +52,29 @@ npm run test:run
 ```js
 // 每个脚本开头（照 R8-craft-direct.js 同款）：
 const pinia = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia;
-const g = pinia._s.get('game');   // game store；ui store 同理 _s.get('ui')
+const g = pinia._s.get('game'); // game store；ui store 同理 _s.get('ui')
 ```
 
-| API | 签名 | 说明 |
-| --- | --- | --- |
-| `g.craftCard` | `({mainName, subNames, intent})` | 制卡主路（真 LLM） |
-| `g.seedDemoCards` | `()` | 种演示卡/素材 |
-| `g.setEvolutionDirection` | `(cardName, routeId)` | 倾向三选一：'炽野'\|'贯城'\|'镜影' |
-| `g.feedCompanion` | `(cardName, materialName)` | 投喂（需【调教大师系统】） |
-| `g.equipCompanionItem` | `(cardName, itemName)` | 佩戴（装备卡→hand；候选=装备卡 only） |
-| `g.unequipCompanionItem` | `(cardName, slot)` | slot: 'hand'\|'body'\|'charm' |
-| `g.embedCompanionOffering` | `(cardName, materialName)` | 嵌祭品（元素∩+档位≥卡档+上限3） |
-| `g.evolveCompanion` | `(cardName, arcImpl?)` | 进化仪式（UI 走无 arc 缺省；弧光句跳过=正常） |
+| API                        | 签名                             | 说明                                                         |
+| -------------------------- | -------------------------------- | ------------------------------------------------------------ |
+| `g.craftCard`              | `({mainName, subNames, intent})` | 制卡主路（真 LLM）                                           |
+| `g.seedDemoCards`          | `()`                             | 种演示卡/素材                                                |
+| `g.setEvolutionDirection`  | `(cardName, routeId)`            | 倾向三选一：'炽野'\|'贯城'\|'镜影'                           |
+| `g.feedCompanion`          | `(cardName, materialName)`       | 投喂（无需天赋；需天赋的是调教 trainCompanion——CMP-06 勘误） |
+| `g.equipCompanionItem`     | `(cardName, itemName)`           | 佩戴（装备卡→hand；候选=装备卡 only）                        |
+| `g.unequipCompanionItem`   | `(cardName, slot)`               | slot: 'hand'\|'body'\|'charm'                                |
+| `g.embedCompanionOffering` | `(cardName, materialName)`       | 嵌祭品（元素∩+档位≥卡档+上限3）                              |
+| `g.evolveCompanion`        | `(cardName, arcImpl?)`           | 进化仪式（UI 走无 arc 缺省；弧光句跳过=正常）                |
 
 **实体检视样例**（所有断言的取数口）：
 
 ```js
-const c = g.characters.find(x => x.type === 'summon' && x.name === '<卡名>');
+const c = g.characters.find((x) => x.type === 'summon' && x.name === '<卡名>');
 // 期待字段：c.level / c.totalExp / c.expToNext / c.attributes{str..spi} / c.hp,c.maxHp / c.present / c.personality / c.talents?.list[0]
 const bag = c.customFields.companion;
 // bag 形状：{ bornTier, equip:{hand?,body?,charm?}, evolution:{archetype?,routeName?,routeDesc?,unlocked,offerings[]}, injured? }
-g.player.inventory.filter(i => i.type === '卡牌' && i.词条.includes('召唤'))  // 召唤卡清单
-g.saveProfile.affections['<卡名>']                                            // 忠诚账本（同一账本）
+g.player.inventory.filter((i) => i.type === '卡牌' && i.词条.includes('召唤')); // 召唤卡清单
+g.saveProfile.affections['<卡名>']; // 忠诚账本（同一账本）
 ```
 
 ## 六、逐批验收清单（步骤 → 预期；括号 = 改坏先跑的测试）
