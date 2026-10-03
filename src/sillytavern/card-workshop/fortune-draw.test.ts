@@ -7,16 +7,16 @@ function poolCard(id: string, tier: CardCatalogItem['cardTier']): CardCatalogIte
 }
 
 const POOL = [
-  poolCard('a', '白铁'),
+  poolCard('a', '黑铁'),
   poolCard('b', '青铜'),
   poolCard('c', '白银'),
   poolCard('d', '鎏金'),
 ];
 
 describe('rollFortuneTier（d100 → 品质档）', () => {
-  it('帝冕币口径：1-40 白铁 / 41-75 青铜 / 76-95 白银 / 96-100 鎏金，星辉不出', () => {
-    expect(rollFortuneTier('coin', 1)).toBe('白铁');
-    expect(rollFortuneTier('coin', 40)).toBe('白铁');
+  it('帝冕币口径：1-40 黑铁 / 41-75 青铜 / 76-95 白银 / 96-100 鎏金，星辉不出', () => {
+    expect(rollFortuneTier('coin', 1)).toBe('黑铁');
+    expect(rollFortuneTier('coin', 40)).toBe('黑铁');
     expect(rollFortuneTier('coin', 41)).toBe('青铜');
     expect(rollFortuneTier('coin', 75)).toBe('青铜');
     expect(rollFortuneTier('coin', 76)).toBe('白银');
@@ -39,9 +39,9 @@ describe('rollFortuneTier（d100 → 品质档）', () => {
     expect(rollFortuneTier('coin', 999)).toBe(rollFortuneTier('coin', 100));
   });
 
-  it('口径表自检：币抽不出星辉，FP 抽不出白铁青铜', () => {
+  it('口径表自检：币抽不出星辉，FP 抽不出黑铁青铜', () => {
     expect(FORTUNE_MODES.coin.weights['星辉']).toBe(0);
-    expect(FORTUNE_MODES.fp.weights['白铁']).toBe(0);
+    expect(FORTUNE_MODES.fp.weights['黑铁']).toBe(0);
     expect(FORTUNE_MODES.fp.weights['青铜']).toBe(0);
   });
 });
@@ -60,6 +60,6 @@ describe('drawFortuneCard（按档抽卡，向下顺延）', () => {
   });
 
   it('空池 → undefined', () => {
-    expect(drawFortuneCard([], '白铁')).toBeUndefined();
+    expect(drawFortuneCard([], '黑铁')).toBeUndefined();
   });
 });

@@ -56,7 +56,7 @@ describe('cardCatalogToItem：效果池登记贯通（效果批四）', () => {
     const item = cardCatalogToItem({
       id: 'z',
       name: '老卡',
-      cardTier: '白铁',
+      cardTier: '黑铁',
       formEntry: '装备',
       element: '金',
       description: '',

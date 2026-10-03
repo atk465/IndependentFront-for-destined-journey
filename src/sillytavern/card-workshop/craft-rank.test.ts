@@ -25,8 +25,8 @@ describe('craftLevelOf —— 制卡师等级 = 冒险者等级（1:1）', () =>
 
 describe('craftTierCeiling —— 制卡师能处理的最高卡档', () => {
   it('按 tierForLevel 的分界走（+1 级）', () => {
-    // lv3+1=4 → 白铁；lv4+1=5 → 青铜；lv8+1=9 → 白银；lv12+1=13 → 鎏金；lv16+1=17 → 星辉
-    expect(craftTierCeiling(3, 1)).toBe('白铁');
+    // lv3+1=4 → 黑铁；lv4+1=5 → 青铜；lv8+1=9 → 白银；lv12+1=13 → 鎏金；lv16+1=17 → 星辉
+    expect(craftTierCeiling(3, 1)).toBe('黑铁');
     expect(craftTierCeiling(4, 1)).toBe('青铜');
     expect(craftTierCeiling(8, 1)).toBe('白银');
     expect(craftTierCeiling(12, 1)).toBe('鎏金');

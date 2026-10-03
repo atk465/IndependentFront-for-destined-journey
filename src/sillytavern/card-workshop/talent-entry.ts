@@ -7873,7 +7873,7 @@ export const TALENT_CATALOG: readonly TalentTemplate[] = [
     name: 'F级解释权',
     grade: 'F' as TalentGrade,
     source: 'universal',
-    description: '你拥有对你制作的白铁卡牌效果的最终解释权。当然，前提是有人信。',
+    description: '你拥有对你制作的黑铁卡牌效果的最终解释权。当然，前提是有人信。',
     entries: [],
   },
   {

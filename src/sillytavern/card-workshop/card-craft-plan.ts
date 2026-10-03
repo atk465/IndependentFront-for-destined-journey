@@ -35,6 +35,7 @@ import {
 import { liftCraftRating } from '../craft-gen-chain';
 import { liftFromMisfortune } from './craft-flow-hooks';
 import { blueprintCraftBonus } from './opponent-blueprints';
+import { aggregateMaterialEntries } from './material-entries';
 
 // ════════════════════════════════════════════════════════════════════
 // 数值表（初稿，数值总表终审对象）
@@ -42,7 +43,7 @@ import { blueprintCraftBonus } from './opponent-blueprints';
 
 /** 制作经验：按产物档位（越高的卡越难做，给得越多） */
 export const CRAFT_EXP_BY_TIER: Record<CardTier, number> = {
-  白铁: 10,
+  黑铁: 10,
   青铜: 25,
   白银: 50,
   鎏金: 90,
@@ -160,6 +161,11 @@ function finiteOr0(n: number | undefined): number {
   return typeof n === 'number' && Number.isFinite(n) ? n : 0;
 }
 
+/** 审计行用带符号数（+2 / −1） */
+function signedOf(n: number): string {
+  return `${n > 0 ? '+' : ''}${n}`;
+}
+
 /** 从天赋列表摊平条目 */
 function flatEntries(
   talents: readonly { entries?: readonly TalentEntry[] }[] | undefined,
@@ -209,17 +215,33 @@ export function planCardCraft(input: CardCraftInput): {
     `融合：${base.recipe.fusionKind} → 档位 ${base.cardTier}，词条 [${base.词条.join('、')}]，造价 ${base.recipe.cost} GC`,
   );
 
+  // ①.5 素材词条（2026-10-02 批次D）：主/副位激活——位差与负面瑕疵在此进数值。
+  //     全部确定性：掷骰修正与理解修正同一条加算链，产物修正直接落卡，逐条进审计。
+  const entryMods = aggregateMaterialEntries(input.inventory, mainName, unique.slice(1));
+  const entryTag = entryMods.dc ? ` ${signedOf(entryMods.dc)}（素材词条）` : '';
+
   // ② 基础评级 + Code 侧掷骰（评级是制卡唯一的成败信号）
   const baseRating = base.recipe.rating;
   const insight = Math.round(finiteOr0(input.insightMod));
-  let rating = rollCraftRating(baseRating, input.d20 + insight);
+  let rating = rollCraftRating(baseRating, input.d20 + insight + entryMods.dc);
   const insightTag = insight ? `${insight > 0 ? '+' : ''}${insight}（理解）` : '';
   audit.push(
-    `检定：d20=${Math.max(1, Math.min(20, Math.round(input.d20)))}${insightTag} → 评级「${rating}」`,
+    `检定：d20=${Math.max(1, Math.min(20, Math.round(input.d20)))}${insightTag}${entryTag} → 评级「${rating}」`,
   );
+  if (entryMods.notes.length > 0) {
+    audit.push(`素材词条：${entryMods.notes.join('，')}`);
+    notes.push(...entryMods.notes);
+  }
 
   // ③ 天赋上浮：制卡顺利/烙印 → 相克厄运 → 时间回溯
   let card = base;
+  if (entryMods.bonus词条.length > 0) {
+    card = { ...card, 词条: [...new Set([...card.词条, ...entryMods.bonus词条])] };
+  }
+  if (entryMods.power !== 0) {
+    // 允许轻微负值（残瑕/涩纹 = 瑕疵打折的 D3 弱化口径）；后续成长会把它长回来
+    card = { ...card, cardPowerBonus: (card.cardPowerBonus ?? 0) + entryMods.power };
+  }
   const baseLift = Math.max(0, Math.round(input.lift?.baseLift ?? 0));
   if (baseLift > 0) {
     const lifted = liftCraftRating(rating, baseLift);

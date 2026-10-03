@@ -55,6 +55,13 @@ import {
 import { liftFromMisfortune } from './card-workshop/craft-flow-hooks';
 import { EFFECT_POOL, coerceCardEffects } from './card-workshop/card-effects';
 import { cardCatalogToItem } from './start-catalog-mechanics';
+import {
+  buildSummonCompanion,
+  isSummonCard,
+  needsFirstSummon,
+  personalityFromDesc,
+} from './card-workshop/companion';
+import { CARD_ELEMENT_AXIS } from './card-workshop/derived-stats';
 import { extractJsonPayload } from './model-json';
 
 // ========== Types ==========
@@ -166,6 +173,11 @@ export interface CraftGenOutput {
   perfectionBonus?: string;
   itemRequests: ItemRequest[];
   narrative: string;
+  /** 伙伴性格一句话（伙伴实体化 B3.5；<personality> 解析，缺省回落 desc 首句） */
+  personality?: string;
+  /** 伙伴天赋 kind/name（B4.6；<talent_kind>/<talent_name> 解析，池外回落表） */
+  talentKind?: string;
+  talentName?: string;
   /**
    * 效果池选择（2026-09-25 效果池：AI 从池内选，原始未门禁——
    * 卡组装点经 coerceCardEffects 校验，非法回落元素派生）
@@ -254,7 +266,7 @@ ${request.talentBias}
       }｜${e.text}`,
   ).join('\n');
   const effectPoolWrapped = `<效果池>
-制卡师可以从下面的效果池中为产物卡选择至多 2 条效果（输出在 <effects> JSON 数组里，动作/数值/持续/代价逐字照抄池内定值，不得自创或改数；不选就不输出 <effects>）：
+制卡师可以从下面的效果池中为产物卡选择效果（输出在 <effects> JSON 数组里，动作/数值/持续/代价逐字照抄池内定值，不得自创或改数；槽位：主动类【打出时/击杀时/拍结束/消耗时/治疗时/施法时】至多 2 条，持续类【每拍/受击时】至多 2 条，合计至多 4 条，超槽整批作废；不选就不输出 <effects>）：
 ${effectPoolBlock}
 示例：<effects>[{"trigger":"打出时","target":"敌单体","action":"灼烧","value":4,"duration":2}]</effects>
 </效果池>
@@ -500,6 +512,55 @@ export function parseCraftResultXML(xml: string): CraftGenOutput {
  * - delta_fp: FP 奖励
  * - delta_hp/delta_mp/delta_sp: 资源消耗（由 craft_settle 暂存，与制品同事务提交）
  */
+/**
+ * 获得即诞生（伙伴实体化 D3，批①）：制卡 AI 链产出召唤卡 → 按卡名 ensure 伙伴实体。
+ * 无同名实体 → add_character（诞生；seed 缺省落「铭灵」通用口径，批③接制卡叙事提取）；
+ * 已有同名实体（沉眠）→ update_character present:true（唤醒）。返回的 patches 由
+ * 调用方并进制卡 patches 同一次 commitDomainCommand（单写入口纪律）。军团卡自然排除。
+ */
+function companionEnsurePatchesForCraft(
+  card: CardItem | undefined,
+  context: AgentContext,
+  ownerName: string,
+  personalityOverride?: string,
+  talentKind?: string,
+  talentName?: string,
+): StatePatch[] {
+  if (!card || !isSummonCard(card)) return [];
+  const roster = context.characters ?? [];
+  const owner = roster.find((c) => c.name === ownerName) ?? roster.find((c) => c.type === 'player');
+  if (!owner) return [];
+  if (
+    needsFirstSummon(
+      card.name,
+      roster.map((c) => c.name),
+    )
+  ) {
+    return [
+      {
+        op: 'add_character',
+        target: 'characters',
+        value: buildSummonCompanion({
+          card,
+          saveId: owner.saveId,
+          playerName: owner.name,
+          location: owner.location,
+          ...(personalityOverride ? { personalityOverride } : {}),
+          ...(talentKind ? { talentKind } : {}),
+          ...(talentName ? { talentName } : {}),
+        }) as unknown as Record<string, unknown>,
+      } as StatePatch,
+    ];
+  }
+  return [
+    {
+      op: 'update_character',
+      target: `characters.${card.name}`,
+      value: { present: true },
+    } as StatePatch,
+  ];
+}
+
 export function buildCraftPatches(
   craftOutput: CraftGenOutput,
   itemOutput: ItemGenOutput | null,
@@ -779,7 +840,11 @@ export async function runCraftGenChain(
       cardProduct = entryBoost.card;
       notes.push(...entryBoost.notes);
       // 效果池（2026-09-25）：AI 池内选经门禁存卡——非法/未选回落出牌时元素派生
-      const aiEffects = coerceCardEffects(craftOutput.effects);
+      // 批⑤ B5.4：效果元素轴门禁——element ⊆ 产物卡词条元素集
+      const aiEffects = coerceCardEffects(
+        craftOutput.effects,
+        cardProduct.词条.filter((w) => CARD_ELEMENT_AXIS[w]),
+      );
       if (aiEffects.length > 0) {
         cardProduct = { ...cardProduct, cardEffects: aiEffects } as typeof cardProduct;
         craftOutput.narrative = [
@@ -816,6 +881,16 @@ export async function runCraftGenChain(
   const patches = [
     ...(craftOutput.settlementPatches ?? []),
     ...buildCraftPatches(craftOutput, itemOutput, characterId, cardProduct),
+    // 获得即诞生（伙伴实体化 D3 批①）：制卡 AI 链产出召唤卡 → 同窗 ensure 伙伴实体
+    // B3.5：性格从 <personality> 提取，解析失败回落 desc（checkSummary）首句 40 字
+    ...companionEnsurePatchesForCraft(
+      cardProduct,
+      request.context,
+      characterId,
+      craftOutput.personality ?? personalityFromDesc(craftOutput.checkSummary),
+      craftOutput.talentKind,
+      craftOutput.talentName,
+    ),
   ];
 
   // Step 4: optional persistence
@@ -846,6 +921,11 @@ function parseCraftResultTag(xml: string): CraftGenOutput {
   const checkSummary = tagInner(xml, 'check_summary')?.trim() ?? '';
   const perfectionBonus = tagInner(xml, 'perfection_bonus')?.trim() || undefined;
   const narrative = tagInner(xml, 'narrative')?.trim() ?? '';
+  // 伙伴实体化 B3.5：<personality>（一句话 ≤40 字；解析不出回落 desc 首句，调用方处理）
+  const personality = tagInner(xml, 'personality')?.trim().slice(0, 40) || undefined;
+  // 伙伴实体化 B4.6：<talent_kind>/<talent_name>（池白名单校验在建账处，回落表兜底）
+  const talentKind = tagInner(xml, 'talent_kind')?.trim().slice(0, 12) || undefined;
+  const talentName = tagInner(xml, 'talent_name')?.trim().slice(0, 12) || undefined;
 
   // 解析 <item_requests> 块
   const itemRequestsXML = tagInner(xml, 'item_requests');
@@ -876,6 +956,9 @@ function parseCraftResultTag(xml: string): CraftGenOutput {
     perfectionBonus,
     itemRequests,
     narrative,
+    ...(personality ? { personality } : {}),
+    ...(talentKind ? { talentKind } : {}),
+    ...(talentName ? { talentName } : {}),
     craftParams,
   };
 }

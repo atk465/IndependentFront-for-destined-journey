@@ -6,6 +6,7 @@ import {
   EFFECT_POOL,
   ELEMENT_DEFAULT_EFFECT,
   poolEntryOf,
+  slotOfTrigger,
   statModsOf,
   deriveCardEffects,
   registerCardEffects,
@@ -35,7 +36,7 @@ describe('效果池与元素映射（派生打底）', () => {
     expect(fx[0].target).toBe('敌单体');
   });
   it('无元素词条 → 空集（不硬造）', () => {
-    expect(deriveCardEffects({ name: '白板卡', 词条: ['技能'], cardTier: '白铁' })).toEqual([]);
+    expect(deriveCardEffects({ name: '白板卡', 词条: ['技能'], cardTier: '黑铁' })).toEqual([]);
   });
   it('精配覆写优先；清空后回落派生', () => {
     registerCardEffects({
@@ -71,14 +72,18 @@ describe('coerceCardEffects（AI 池内选的门禁）', () => {
     ]);
     expect(dirty).toEqual([]);
   });
-  it('超量（>2 条）整批丢弃（防滥用）', () => {
-    const entries = EFFECT_POOL.slice(0, 3).map((e) => ({
-      trigger: '每拍',
-      target: '敌单体',
-      action: e.action,
-      value: e.value,
-      duration: e.duration,
-    }));
+  it('超量（合计>4 条）整批丢弃（防滥用；批次E 分槽后 3 条已合法）', () => {
+    const costFree = ['伤害', '治疗', '破防', '驱散', '反伤'];
+    const entries = costFree.map((action) => {
+      const e = EFFECT_POOL.find((p) => p.action === action)!;
+      return {
+        trigger: '每拍',
+        target: '敌单体',
+        action: e.action,
+        value: e.value,
+        duration: e.duration,
+      };
+    });
     expect(coerceCardEffects(entries)).toEqual([]);
   });
 });
@@ -506,20 +511,41 @@ describe('planEnchant（附魔规划）', () => {
   });
   it('物资/素材拒附魔', () => {
     const r = planEnchant({
-      card: { name: '干粮卡', cardTier: '白铁' as never, 词条: ['物资'], cardEffects: [] },
+      card: { name: '干粮卡', cardTier: '黑铁' as never, 词条: ['物资'], cardEffects: [] },
       effect,
       money: 999,
     });
     expect(r.ok).toBe(false);
   });
-  it('同名效果唯一；上限 2 条', () => {
+  it('同名效果唯一；槽位上限（批次E 分槽）：同名拒、主动槽满拒、跨槽可加、被动槽满拒', () => {
     const withBurn = { ...card, cardEffects: [effect] };
     expect(planEnchant({ card: withBurn, effect, money: 999 }).ok).toBe(false);
-    const two = {
+    const twoActive = {
       ...card,
-      cardEffects: [effect, { trigger: '每拍', target: '自身', action: '治疗', value: 150 }],
+      cardEffects: [effect, { trigger: '施法时', target: '自身', action: '治疗', value: 150 }],
     };
-    expect(planEnchant({ card: two, effect, money: 999 }).ok).toBe(false);
+    expect(planEnchant({ card: twoActive, effect, money: 999 }).ok).toBe(false); // 主动槽满（2）
+    const twoActiveOnePassive = {
+      ...card,
+      cardEffects: [
+        ...twoActive.cardEffects,
+        { trigger: '每拍', target: '敌单体', action: '中毒', value: 40, duration: 3 },
+      ],
+    };
+    const cross = planEnchant({
+      card: twoActiveOnePassive,
+      effect: { trigger: '每拍', target: '自身', action: '护盾', value: 25, duration: 3 },
+      money: 999,
+    });
+    expect(cross.ok).toBe(true); // 主动槽虽满，被动槽仍有位——分槽口径
+    expect(cross.nextEffects).toHaveLength(4);
+    expect(
+      planEnchant({
+        card: { ...card, cardEffects: cross.nextEffects },
+        effect: { trigger: '受击时', target: '自身', action: '反伤', value: 5, duration: 2 },
+        money: 999,
+      }).ok,
+    ).toBe(false); // 被动槽满（2）——合计 4 也到顶
   });
   it('钱不够拒；池外效果拒', () => {
     expect(planEnchant({ card, effect, money: 10 }).ok).toBe(false);
@@ -1178,5 +1204,73 @@ describe('effectLineOf（卡面展示）', () => {
         cost: { mp: 5 },
       }),
     ).toContain('5MP');
+  });
+});
+
+// ═══ 槽位门禁（2026-10-02 批次E 分槽扩容）═══
+
+describe('槽位门禁（批次E：主动≤2 / 被动≤2 / 合计≤4）', () => {
+  const burn = { trigger: '每拍', target: '敌单体', action: '灼烧', value: 65, duration: 2 };
+  const bleed = { trigger: '每拍', target: '敌单体', action: '流血', value: 35, duration: 4 };
+  const shield = { trigger: '每拍', target: '自身', action: '护盾', value: 25, duration: 3 };
+  const strike = {
+    trigger: '打出时',
+    target: '敌单体',
+    action: '连击',
+    value: 50,
+    duration: 0,
+    cost: { sp: 3 },
+  };
+  const parry = { trigger: '打出时', target: '自身', action: '格挡', value: 30, duration: 1 };
+
+  it('对旧门禁（合计≤2）是严格超集：双被动/双主动旧合法组合仍合法（存档零回归）', () => {
+    expect(coerceCardEffects([burn, bleed])).toHaveLength(2);
+    expect(coerceCardEffects([strike, parry])).toHaveLength(2);
+  });
+  it('2 主动 + 2 被动 = 4 条合法（分槽后的新容量）', () => {
+    expect(coerceCardEffects([strike, parry, burn, bleed])).toHaveLength(4);
+  });
+  it('同槽第三条 → 整批丢弃；合计 5 → 整批丢弃', () => {
+    expect(coerceCardEffects([strike, parry, burn, bleed, shield])).toEqual([]);
+    expect(
+      coerceCardEffects([
+        strike,
+        parry,
+        { trigger: '击杀时', target: '自身', action: '汲取', value: 20, duration: 0 },
+      ]),
+    ).toEqual([]);
+  });
+  it('slotOfTrigger 分类：六种主动时机 vs 每拍/受击时', () => {
+    expect(slotOfTrigger('打出时')).toBe('主动');
+    expect(slotOfTrigger('击杀时')).toBe('主动');
+    expect(slotOfTrigger('拍结束')).toBe('主动');
+    expect(slotOfTrigger('消耗时')).toBe('主动');
+    expect(slotOfTrigger('治疗时')).toBe('主动');
+    expect(slotOfTrigger('施法时')).toBe('主动');
+    expect(slotOfTrigger('每拍')).toBe('被动');
+    expect(slotOfTrigger('受击时')).toBe('被动');
+  });
+});
+
+describe('coerceCardEffects·效果元素轴（伙伴实体化 D15，批⑤ B5.4）', () => {
+  const 灼烧 = { trigger: '打出时', target: '敌单体', action: '灼烧', value: 65, duration: 2 };
+  it('element ⊆ allowedElements → 保留 element', () => {
+    const ok = coerceCardEffects([{ ...灼烧, element: ['火', '暗'] }], ['火', '暗', '金']);
+    expect(ok).toHaveLength(1);
+    expect(ok[0].element).toEqual(['火', '暗']);
+  });
+  it('element ⊄ allowedElements → 整条丢弃（不剪裁）', () => {
+    expect(coerceCardEffects([{ ...灼烧, element: ['火', '水'] }], ['火'])).toEqual([]);
+  });
+  it('element 空数组 → 丢弃', () => {
+    expect(coerceCardEffects([{ ...灼烧, element: [] }], ['火'])).toEqual([]);
+  });
+  it('未传 allowedElements：shape 合法的 element 透传（写侧另有全量口径）', () => {
+    const ok = coerceCardEffects([{ ...灼烧, element: ['火'] }]);
+    expect(ok[0].element).toEqual(['火']);
+  });
+  it('无 element 字段行为与现状完全一致', () => {
+    expect(coerceCardEffects([灼烧])).toHaveLength(1);
+    expect(coerceCardEffects([灼烧])[0].element).toBeUndefined();
   });
 });

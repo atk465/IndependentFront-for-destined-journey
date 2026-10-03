@@ -23,13 +23,13 @@ const 卡 = (tier: CardTier, fusionKind: '叠加' | '相生' | '相克' = '叠�
 
 describe('数值表（单一真源）', () => {
   it('封印 DC 五档单调上升', () => {
-    expect(UNSEAL_DC).toEqual({ 白铁: 8, 青铜: 11, 白银: 14, 鎏金: 17, 星辉: 20 });
+    expect(UNSEAL_DC).toEqual({ 黑铁: 8, 青铜: 11, 白银: 14, 鎏金: 17, 星辉: 20 });
   });
   it('启封槽位成本：鎏金/星辉要 2 个动作槽', () => {
-    expect(UNSEAL_SLOT_COST).toEqual({ 白铁: 1, 青铜: 1, 白银: 1, 鎏金: 2, 星辉: 2 });
+    expect(UNSEAL_SLOT_COST).toEqual({ 黑铁: 1, 青铜: 1, 白银: 1, 鎏金: 2, 星辉: 2 });
   });
   it('反噬伤害表：单调上升、非致死档（阶段5 收口）', () => {
-    expect(REBOUND_DAMAGE).toEqual({ 白铁: 5, 青铜: 8, 白银: 12, 鎏金: 16, 星辉: 20 });
+    expect(REBOUND_DAMAGE).toEqual({ 黑铁: 5, 青铜: 8, 白银: 12, 鎏金: 16, 星辉: 20 });
   });
   it('相克 DC +3', () => {
     expect(unsealDC(卡('白银'))).toBe(14);
@@ -51,20 +51,20 @@ describe('willModifierOf（意志修正 = floor((精神-10)/2)）', () => {
   });
 });
 
-describe('judgeUnseal 分级边界（willMod=0，DC 8 白铁）', () => {
-  const 白铁 = 卡('白铁'); // DC 8
+describe('judgeUnseal 分级边界（willMod=0，DC 8 黑铁）', () => {
+  const 黑铁 = 卡('黑铁'); // DC 8
   it.each([
     [8, '启封'], // margin 0
     [7, '哑火'], // margin -1
     [5, '哑火'], // margin -3
     [4, '暴走'], // margin -4
   ] as const)('d20=%i → %s', (roll, kind) => {
-    expect(judgeUnseal(白铁, roll, 0).kind).toBe(kind);
+    expect(judgeUnseal(黑铁, roll, 0).kind).toBe(kind);
   });
   it('margin 六条边界：0 / -1 / -3 → 启封·哑火·哑火', () => {
-    expect(judgeUnseal(白铁, 8, 0)).toEqual({ kind: '启封', margin: 0 });
-    expect(judgeUnseal(白铁, 7, 0)).toEqual({ kind: '哑火', margin: -1 });
-    expect(judgeUnseal(白铁, 5, 0)).toEqual({ kind: '哑火', margin: -3 });
+    expect(judgeUnseal(黑铁, 8, 0)).toEqual({ kind: '启封', margin: 0 });
+    expect(judgeUnseal(黑铁, 7, 0)).toEqual({ kind: '哑火', margin: -1 });
+    expect(judgeUnseal(黑铁, 5, 0)).toEqual({ kind: '哑火', margin: -3 });
   });
   it('margin 边界：-4 / -7 / -8 → 暴走·暴走·反噬（星辉 DC 20）', () => {
     const 星辉 = 卡('星辉');
@@ -82,10 +82,10 @@ describe('边界规则：nat 20 / nat 1', () => {
     expect(r.margin).toBe(-4); // margin 仍如实记录
   });
   it('nat 1 必定抗命：名义 margin 为正也压成哑火（封印物反噬意志最黑的时刻）', () => {
-    expect(judgeUnseal(卡('白铁'), 1, 10).kind).toBe('哑火'); // 名义 margin +3
+    expect(judgeUnseal(卡('黑铁'), 1, 10).kind).toBe('哑火'); // 名义 margin +3
   });
-  it('nat 1 按 margin 分档：白铁 nat1 → 暴走（margin -7）；星辉 nat1 → 反噬（margin -19）', () => {
-    expect(judgeUnseal(卡('白铁'), 1, 0)).toEqual({ kind: '暴走', margin: -7 });
+  it('nat 1 按 margin 分档：黑铁 nat1 → 暴走（margin -7）；星辉 nat1 → 反噬（margin -19）', () => {
+    expect(judgeUnseal(卡('黑铁'), 1, 0)).toEqual({ kind: '暴走', margin: -7 });
     expect(judgeUnseal(卡('星辉'), 1, 0)).toEqual({ kind: '反噬', margin: -19 });
   });
 });
@@ -111,7 +111,7 @@ describe('纯函数不变式', () => {
     expect(JSON.stringify(卡片)).toBe(snapshot);
   });
   it('骰值越界收拢到 1..20（防御调用方）', () => {
-    expect(judgeUnseal(卡('白铁'), 0, 0)).toEqual(judgeUnseal(卡('白铁'), 1, 0));
-    expect(judgeUnseal(卡('白铁'), 99, 0)).toEqual(judgeUnseal(卡('白铁'), 20, 0));
+    expect(judgeUnseal(卡('黑铁'), 0, 0)).toEqual(judgeUnseal(卡('黑铁'), 1, 0));
+    expect(judgeUnseal(卡('黑铁'), 99, 0)).toEqual(judgeUnseal(卡('黑铁'), 20, 0));
   });
 });

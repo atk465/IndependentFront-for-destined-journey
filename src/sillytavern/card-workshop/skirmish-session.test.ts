@@ -13,6 +13,7 @@ import {
   crushFinish,
   fleeSkirmish,
   settleSkirmish,
+  translateCardEffects,
 } from './skirmish-session';
 
 /** 终局四态钉死（null = 交锋中不在此列） */
@@ -502,5 +503,38 @@ describe('playBeat — 禁忌卡六正本', () => {
       waxNight: true,
     });
     expect(healed.playerHp).toBe(30 + 15); // 30% of 50
+  });
+});
+
+describe('混合轴取优（伙伴实体化 D15，批⑤ B5.5）', () => {
+  // 效果池基线：伤害 A 类（打出时/敌单体），value 以池内定值过 resolveSkillAmount
+  it('效果带 element[] → 派生 = max(各元素轴派生)，无 element 行为不变', () => {
+    const skill = {
+      mainDerivation: 30,
+      secondary: [],
+      difficulty: '标准' as const,
+      axisDerivations: { str: 30, int: 8 },
+    };
+    const fire = {
+      trigger: '打出时' as const,
+      target: '敌单体' as const,
+      action: '伤害' as const,
+      value: 0,
+    };
+    const mixed = { ...fire, element: ['火', '暗'] };
+    const withTable = translateCardEffects([fire], 1, undefined, skill);
+    const withMixed = translateCardEffects([mixed], 1, undefined, skill);
+    // 火（str 30）与暗（int 8）取优 → 与单火相同；审计行带「混合轴」
+    expect(withMixed.powerBonus ?? withMixed.powerBonus).toBe(
+      withTable.powerBonus ?? withTable.powerBonus,
+    );
+    expect(withMixed.lines.join()).toContain('混合轴');
+    // 无 element：不带混合轴字样
+    expect(withTable.lines.join()).not.toContain('混合轴');
+    // 单暗：取 int 8（低于主轴 30）→ 伤害点数低于混合/单火
+    const darkOnly = translateCardEffects([{ ...fire, element: ['暗'] }], 1, undefined, skill);
+    expect(darkOnly.powerBonus ?? darkOnly.powerBonus ?? 0).toBeLessThanOrEqual(
+      withMixed.powerBonus ?? withMixed.powerBonus ?? 0,
+    );
   });
 });

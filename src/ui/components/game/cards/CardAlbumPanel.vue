@@ -23,9 +23,18 @@ import {
 import { deckPower } from '@engine/card-workshop/deck-power';
 import { isPlayableCard } from '@engine/card-workshop/card-kind';
 import { UNSEAL_SLOT_COST, unsealDC, willModifierOf } from '@engine/card-workshop/unsealing';
+import { cardAxisChips, cardEffectLines, cardWarSkillLine } from '../../../lib/card-display';
+import { isSummonCard } from '@engine/card-workshop/companion';
+import {
+  companionEquipSlotOf,
+  companionWearingNames,
+  type CompanionEquipSlot,
+} from '@engine/card-workshop/companion-panel';
+import { useUIStore } from '../../../stores/ui-store';
 import AppButton from '../../shared/AppButton.vue';
 
 const game = useGameStore();
+const ui = useUIStore();
 
 const player = computed(() => game.player);
 
@@ -45,7 +54,7 @@ const deckRows = computed<{ name: string; count: number }[]>(() => {
 });
 
 function tierOf(name: string): string {
-  return cardItems.value.find((c) => c.name === name)?.cardTier ?? '白铁';
+  return cardItems.value.find((c) => c.name === name)?.cardTier ?? '黑铁';
 }
 
 const selectedName = ref('');
@@ -55,6 +64,46 @@ const selectedCard = computed<CardItem | undefined>(
 
 /** 最近一次操作提示（成功清空；失败展示原因） */
 const opMessage = ref('');
+
+// ═══ 伙伴佩戴区（伙伴实体化 D10，批④ B4.5）：三槽 chip + 候选下拉 + 卸下 ═══
+const SLOT_DEFS: { key: CompanionEquipSlot; label: string }[] = [
+  { key: 'hand', label: '手部' },
+  { key: 'body', label: '身位' },
+  { key: 'charm', label: '灵位' },
+];
+const selectedIsSummon = computed(() => !!selectedCard.value && isSummonCard(selectedCard.value));
+const companionEntity = computed(() =>
+  selectedIsSummon.value
+    ? (game.characters ?? []).find(
+        (c) => c.name === selectedCard.value?.name && c.type === 'summon',
+      )
+    : undefined,
+);
+const wearing = computed<Record<string, string | undefined>>(() => {
+  const bag = (companionEntity.value?.customFields as Record<string, unknown> | undefined)
+    ?.companion as { equip?: Record<string, string | undefined> } | undefined;
+  return bag?.equip ?? {};
+});
+const wearingNames = computed(() => companionWearingNames(game.characters));
+const equipCandidates = computed(() =>
+  (player.value?.inventory ?? []).filter(
+    (i) =>
+      companionEquipSlotOf(i) !== null && i.equippedSlot == null && !wearingNames.value.has(i.name),
+  ),
+);
+const equipPick = ref('');
+const equipMsg = ref('');
+async function onEquip() {
+  if (!selectedCard.value || !equipPick.value) return;
+  const r = await game.equipCompanionItem(selectedCard.value.name, equipPick.value);
+  equipMsg.value = r.ok ? (r.summary ?? '佩戴完成') : (r.reason ?? '佩戴失败');
+  if (r.ok) equipPick.value = '';
+}
+async function onUnequip(slot: CompanionEquipSlot) {
+  if (!selectedCard.value) return;
+  const r = await game.unequipCompanionItem(selectedCard.value.name, slot);
+  equipMsg.value = r.ok ? (r.summary ?? '已卸下') : (r.reason ?? '卸下失败');
+}
 
 async function commit(next: CardAlbumState) {
   const r = await game.updateCardAlbum(next);
@@ -117,6 +166,30 @@ function selectCard(name: string) {
 /** 启封者的意志修正（精神），用于详情区预览实际对抗难度 */
 const willMod = computed(() => willModifierOf(player.value?.attributes));
 
+/** 详情卡的战斗面（读侧全过引擎门禁，与出牌结算同口径——2026-10-02 批次A）。
+ *  物资/素材卡不可出战，其元素派生效果永远不会结算——整节不显示，免得误导。 */
+const selectedPlayable = computed(() => !!selectedCard.value && isPlayableCard(selectedCard.value));
+const effectLines = computed(() => (selectedCard.value ? cardEffectLines(selectedCard.value) : []));
+const warSkillLine = computed(() =>
+  selectedCard.value ? cardWarSkillLine(selectedCard.value) : undefined,
+);
+const axisChips = computed(() => (selectedCard.value ? cardAxisChips(selectedCard.value) : []));
+
+/** 卡面描述一键复制（批次F4）：description 即画图提示词，喂给画图工具即可配卡图 */
+const copyHint = ref('');
+async function copyArtPrompt() {
+  const desc = selectedCard.value?.description?.trim() ?? '';
+  if (!desc) return;
+  try {
+    await navigator.clipboard.writeText(desc);
+    copyHint.value = '卡面描述已复制——可作画图提示词';
+    ui.toast('已复制卡面');
+  } catch {
+    copyHint.value = '复制失败——浏览器未授权剪贴板';
+    ui.toast('复制失败——浏览器未授权剪贴板', 'error');
+  }
+}
+
 /** 卡组战力（阶段 3a）：委托难度档的对照值，公式在 deck-power.ts */
 const power = computed(() =>
   deckPower(album.value.deck, (n) => cardItems.value.find((c) => c.name === n)),
@@ -147,17 +220,21 @@ const power = computed(() =>
             v-for="row in deckRows"
             :key="row.name"
             class="deck-row"
-            :class="{ 'not-playable': !playableByName(row.name) }"
+            :class="{
+              'not-playable': !playableByName(row.name),
+              selected: selectedCard?.name === row.name,
+            }"
             :title="
               playableByName(row.name) ? undefined : '不可出战（物资/素材卡）——它在卡组里不计战力'
             "
+            @click="selectCard(row.name)"
           >
             <span class="count-badge">×{{ row.count }}</span>
             <span class="card-name" :style="{ color: cardTierVar(tierOf(row.name)) }">{{
               row.name
             }}</span>
             <span v-if="!playableByName(row.name)" class="noplay-badge">不可出战</span>
-            <AppButton size="sm" variant="ghost" @click="withdraw(row.name)">撤出</AppButton>
+            <AppButton size="sm" variant="ghost" @click.stop="withdraw(row.name)">撤出</AppButton>
           </li>
         </ul>
       </section>
@@ -212,8 +289,18 @@ const power = computed(() =>
               selectedCard.name
             }}</span>
             <span class="tier-badge">{{ selectedCard.cardTier }}</span>
+            <AppButton
+              v-if="selectedCard.description"
+              size="sm"
+              variant="ghost"
+              title="把卡面描述复制为画图提示词"
+              @click="copyArtPrompt"
+            >
+              复制卡面
+            </AppButton>
           </div>
           <p v-if="selectedCard.description" class="detail-desc">{{ selectedCard.description }}</p>
+          <p v-if="copyHint" class="seal-note">{{ copyHint }}</p>
           <div class="detail-section">
             <h5 class="d-label">词条</h5>
             <div v-if="(selectedCard.词条 ?? []).length" class="chip-row">
@@ -221,6 +308,31 @@ const power = computed(() =>
             </div>
             <div v-else class="empty-tab small">无词条</div>
           </div>
+          <template v-if="selectedPlayable">
+            <div class="detail-section">
+              <h5 class="d-label">效果</h5>
+              <div v-if="effectLines.length" class="effect-list">
+                <p v-for="(line, i) in effectLines" :key="i" class="effect-line">{{ line }}</p>
+              </div>
+              <div v-else class="empty-tab small">无战斗效果</div>
+            </div>
+            <div v-if="warSkillLine" class="detail-section">
+              <h5 class="d-label">战技</h5>
+              <p class="effect-line">{{ warSkillLine }}</p>
+            </div>
+            <div v-if="axisChips.length" class="detail-section">
+              <h5 class="d-label">副轴</h5>
+              <div class="chip-row">
+                <span
+                  v-for="a in axisChips"
+                  :key="a.label"
+                  class="chip"
+                  title="技能伤害额外按该轴派生计一份加成"
+                  >{{ a.label }} +{{ a.bonus }}%</span
+                >
+              </div>
+            </div>
+          </template>
           <!-- 🔴 2026-09-13 真机：recipe 是可选字段（老档/AI 产卡可能没有）——
                原先裸读 .mainMaterial 会抛错打断整个面板。缺配方就不显示这一节。 -->
           <div v-if="selectedCard.recipe" class="detail-section">
@@ -264,6 +376,36 @@ const power = computed(() =>
               </div>
             </div>
             <p class="seal-note">启封即使用：意志对抗失败将遭抗命——哑火、暴走，或反噬。</p>
+          </div>
+          <!-- 伙伴佩戴区（伙伴实体化 D10，批④ B4.5）：仅召唤卡详情展示 -->
+          <div v-if="selectedIsSummon && companionEntity" class="detail-section">
+            <h5 class="d-label">伙伴佩戴</h5>
+            <div class="chip-row">
+              <span v-for="sdef in SLOT_DEFS" :key="sdef.key" class="chip">
+                {{ sdef.label }}：{{ wearing[sdef.key] ?? '空' }}
+                <button
+                  v-if="wearing[sdef.key]"
+                  class="chip-x"
+                  :aria-label="`卸下${sdef.label}`"
+                  @click="onUnequip(sdef.key)"
+                >
+                  卸
+                </button>
+              </span>
+            </div>
+            <div v-if="equipCandidates.length > 0" class="seal-controls">
+              <select v-model="equipPick" aria-label="选择佩戴物品">
+                <option value="" disabled>从背包选择可佩戴物…</option>
+                <option v-for="cand in equipCandidates" :key="cand.name" :value="cand.name">
+                  {{ cand.name }}
+                </option>
+              </select>
+              <AppButton :disabled="!equipPick" @click="onEquip">佩戴</AppButton>
+            </div>
+            <p v-if="equipCandidates.length === 0" class="empty-tab small">
+              背包里没有可佩戴物（装备卡或带槽位信息的装备，且未被佩戴）
+            </p>
+            <p v-if="equipMsg" class="seal-note">{{ equipMsg }}</p>
           </div>
         </div>
       </section>
@@ -361,7 +503,8 @@ const power = computed(() =>
 .pack-row:hover {
   background: var(--theme-tab-hover-bg);
 }
-.pack-row.selected {
+.pack-row.selected,
+.deck-row.selected {
   background: color-mix(in srgb, var(--theme-primary) 8%, var(--theme-card-bg));
   border-color: color-mix(in srgb, var(--theme-primary) 30%, var(--theme-card-border));
 }
@@ -458,6 +601,42 @@ const power = computed(() =>
   border: 1px solid var(--theme-card-border);
   border-radius: var(--theme-radius-sm);
   padding: 2px 8px;
+}
+/* 伙伴佩戴区（批④ B4.5）：卸下小按钮 + 佩戴控件行 */
+.chip-x {
+  margin-left: 4px;
+  font-size: 0.625rem;
+  color: var(--theme-text-secondary);
+  background: transparent;
+  border: 1px solid var(--theme-card-border);
+  border-radius: 999px;
+  padding: 0 5px;
+  cursor: pointer;
+}
+.chip-x:hover {
+  color: var(--theme-error);
+  border-color: var(--theme-error);
+}
+.seal-controls {
+  display: flex;
+  gap: var(--theme-spacing-xs);
+  align-items: center;
+  margin-top: var(--theme-spacing-xs);
+}
+.seal-controls select {
+  flex: 1;
+  min-width: 0;
+}
+.effect-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.effect-line {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--theme-text-secondary);
+  line-height: 1.55;
 }
 .kv-grid {
   display: grid;

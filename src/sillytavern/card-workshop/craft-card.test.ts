@@ -2,13 +2,14 @@
  * craft-card.test.ts — 制卡桥（阶段 3b）：名单解析 / 素材解析 / 确定性组装
  */
 import { describe, it, expect } from 'vitest';
+import { toMaterial } from './material';
+import type { InventoryItem } from '../types';
 import {
   isHighTierCard,
   parseMaterialNames,
   resolveMaterialSpecs,
   buildCardItem,
 } from './craft-card';
-import type { InventoryItem } from '../types';
 
 describe('parseMaterialNames（craftParams.materials 名单）', () => {
   it('顿号/逗号/分号/换行都认', () => {
@@ -46,13 +47,40 @@ describe('resolveMaterialSpecs（对照背包，查不到跳过）', () => {
 
 describe('isHighTierCard（鎏金/星辉才带封印物）', () => {
   it.each([
-    ['白铁', false],
+    ['黑铁', false],
     ['青铜', false],
     ['白银', false],
     ['鎏金', true],
     ['星辉', true],
   ] as const)('%s → %s', (tier, sealed) => {
     expect(isHighTierCard(tier)).toBe(sealed);
+  });
+});
+
+describe('buildCardItem —— CRAFT-1 真机现场（地脉髓+炎心草白板卡）', () => {
+  // 2026-10-02 实测：这套素材制出 词条[]/缺 cardExp/cardPowerBonus 的白板卡。
+  // 根因 = 两素材不在内建元素档案（elements 为空 → 叠加 → 词条空）。
+  it('地脉髓+炎心草 → 词条含土/火（+相生产物熔岩），结构字段齐全', () => {
+    const card = buildCardItem({
+      productName: '残偶怒俑',
+      description: '以被遗弃的残偶为引',
+      quantity: 1,
+      quality: '普通',
+      rating: '成功',
+      materialSpecs: [
+        toMaterial({ name: '地脉髓', quantity: 1, type: '材料' } as InventoryItem),
+        toMaterial({ name: '炎心草', quantity: 1, type: '材料' } as InventoryItem),
+      ],
+    });
+    expect(card.词条).toContain('土');
+    expect(card.词条).toContain('火');
+    expect(card.词条).toContain('熔岩'); // 土+火 相生
+    expect(card.recipe.mainMaterial).toBe('地脉髓');
+    expect(card.recipe.subMaterials).toEqual(['炎心草']);
+    expect(card.recipe.fusionKind).toBe('相生');
+    expect(card.recipe.cost).toBeGreaterThan(0);
+    expect(card.cardExp).toBe(0);
+    expect(card.cardPowerBonus).toBe(0);
   });
 });
 
@@ -70,7 +98,7 @@ describe('buildCardItem（数值全部来自融合内核）', () => {
       materialSpecs: [火晶, 风羽],
     });
     expect(card.type).toBe('卡牌');
-    expect(card.cardTier).toBe('青铜'); // 主白铁 +1
+    expect(card.cardTier).toBe('青铜'); // 主黑铁 +1
     expect(card.词条).toContain('燎原');
     expect(card.recipe.cost).toBe(Math.round((20 + 10) * 1.6)); // 48
     expect(card.recipe.fusionKind).toBe('相生');
@@ -100,7 +128,7 @@ describe('buildCardItem（数值全部来自融合内核）', () => {
       }),
     ).toMatchObject({ cardTier: '星辉', sealed: true });
   });
-  it('主素材缺失兜底：白铁无素卡，不炸', () => {
+  it('主素材缺失兜底：黑铁无素卡，不炸', () => {
     const card = buildCardItem({
       productName: '空白卡',
       quantity: 2,
@@ -108,7 +136,7 @@ describe('buildCardItem（数值全部来自融合内核）', () => {
       rating: '成功',
       materialSpecs: [],
     });
-    expect(card.cardTier).toBe('白铁');
+    expect(card.cardTier).toBe('黑铁');
     expect(card.quantity).toBe(2);
     expect(card.recipe.mainMaterial).toBe('空白卡');
   });

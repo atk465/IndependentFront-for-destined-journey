@@ -20,6 +20,7 @@ import type {
   PlotEvent,
   InventoryItem,
   StatusEffect,
+  CardItem,
 } from './types';
 
 // ========== Helpers ==========
@@ -1814,5 +1815,71 @@ describe('{{TALENT}} 自定义天赋词表段', () => {
     });
     const ctx = mockCtx({ combatActive: true });
     expect(PLACEHOLDER_REGISTRY['TALENT'](ctx, cfg)).toBe('');
+  });
+});
+
+// ========== {{CARD_DECK}} 卡组战备（2026-10-02 批次B） ==========
+
+describe('{{CARD_DECK}} 卡组战备', () => {
+  const cfg = { agentId: 'story' } as AgentConfig;
+
+  function card(name: string, over: Partial<CardItem> = {}): CardItem {
+    return {
+      name,
+      quantity: 1,
+      type: '卡牌',
+      cardTier: '青铜',
+      词条: ['火'],
+      sealed: false,
+      ...over,
+    } as CardItem;
+  }
+
+  function playerWith(cards: CardItem[], deck: string[]): CharacterState {
+    return makeChar({
+      type: 'player',
+      name: '主角',
+      inventory: cards as InventoryItem[],
+      cardAlbum: { owned: deck, deck, capacity: 60 },
+    });
+  }
+
+  it('空卡组/无玩家角色 → 空串（零 token）', () => {
+    expect(PLACEHOLDER_REGISTRY['CARD_DECK'](mockCtx(), mockConfig())).toBe('');
+    const ctx = mockCtx({ characters: [makeChar({ name: '路人', type: 'npc' })] });
+    expect(PLACEHOLDER_REGISTRY['CARD_DECK'](ctx, cfg)).toBe('');
+    const emptyDeck = mockCtx({ characters: [playerWith([], [])] });
+    expect(PLACEHOLDER_REGISTRY['CARD_DECK'](emptyDeck, cfg)).toBe('');
+  });
+
+  it('战斗会话活跃 → 静默（§13-2 同款）', () => {
+    const ctx = mockCtx({
+      combatActive: true,
+      characters: [playerWith([card('燎原')], ['燎原'])],
+    });
+    expect(PLACEHOLDER_REGISTRY['CARD_DECK'](ctx, cfg)).toBe('');
+  });
+
+  it('有卡组 → <卡组战备> 块：deck 顺序、定值行、禁编数纪律、未启封标注', () => {
+    const ctx = mockCtx({
+      characters: [
+        playerWith(
+          [
+            card('燎原'),
+            card('幽影', { 词条: [], sealed: true }),
+            card('废料', { 词条: ['火', '物资'] }),
+          ],
+          ['幽影', '燎原', '废料', '查无此卡'],
+        ),
+      ],
+    });
+    const out = PLACEHOLDER_REGISTRY['CARD_DECK'](ctx, cfg);
+    expect(out).toContain('<卡组战备>');
+    expect(out.indexOf('幽影')).toBeLessThan(out.indexOf('燎原')); // deck 编入顺序
+    expect(out).toContain('【灼烧】'); // 元素派生打底的定值行
+    expect(out).toContain('未启封');
+    expect(out).toContain('禁止自创'); // 禁编数纪律
+    expect(out).not.toContain('废料'); // 物资卡不可出战，不进战备
+    expect(out).not.toContain('查无此卡'); // 漂移位不进战备
   });
 });

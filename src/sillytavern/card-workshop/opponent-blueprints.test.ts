@@ -91,7 +91,7 @@ describe('coerceBlueprints / addBlueprint / consumeBlueprint', () => {
   });
 
   it('威胁分档只作展示参考，不参与数值', () => {
-    expect(threatTierOf(5)).toBe('白铁');
+    expect(threatTierOf(5)).toBe('黑铁');
     expect(threatTierOf(18)).toBe('白银');
     expect(threatTierOf(40)).toBe('星辉');
     expect(threatTierOf(0)).toBeUndefined();

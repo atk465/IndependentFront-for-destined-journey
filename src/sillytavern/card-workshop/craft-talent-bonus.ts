@@ -62,7 +62,7 @@ export function applyCraftTalentBonus(
   // ① 卡牌造物主：越阶 tierGain 档 + 造价减半
   const gain = Math.max(0, Math.round(ctx.tierGain ?? 0));
   if (gain > 0) {
-    let cur = next.cardTier ?? '白铁';
+    let cur = next.cardTier ?? '黑铁';
     let moved = 0;
     for (let i = 0; i < gain; i++) {
       const step = tierUpOf(cur);

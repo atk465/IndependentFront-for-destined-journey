@@ -37,14 +37,33 @@ import {
   planCorruptCompanion,
   planOffspring,
 } from '@engine/card-workshop/companion-capture';
-import { buildSummonCompanion } from '@engine/card-workshop/companion';
+import {
+  buildSummonCompanion,
+  companionBagOf,
+  isSummonCard,
+  isCompanionDormant,
+  needsFirstSummon,
+} from '@engine/card-workshop/companion';
+import { applyCompanionExp } from '@engine/card-workshop/companion-panel';
+import {
+  companionEquipSlotOf,
+  companionEffectivePanel,
+  companionWearingNames,
+  type CompanionEquipSlot,
+} from '@engine/card-workshop/companion-panel';
+// B3.5 性格回落：desc 首句截 40 字
+import { personalityFromDesc } from '@engine/card-workshop/companion';
+import type { CompanionSeed } from '@engine/start-catalog-mechanics';
 // 卡池唯一口径：内容仓 cardPool + 运行时自定义卡（2026-09-18）
 import { findCardDefinition, getPurchasableCardPool } from '@engine/card-workshop/card-pool';
 import { planStripEntry } from '@engine/card-workshop/card-strip';
 import {
   planAffectionTribute,
   planEnthrone,
+  planEvolutionDirection,
+  planFeedCompanion,
   type ConsortRank,
+  type EvolutionRouteId,
 } from '@engine/card-workshop/companion-growth';
 import { planDismantle } from '@engine/card-workshop/card-dismantle';
 import {
@@ -76,6 +95,7 @@ import { isRerollFace, rollOnTable } from '@engine/card-workshop/fortune-dice';
 import { DAILY_BUFF_CRAFT_LUCK } from '@engine/card-workshop/fortune-dice';
 import type { FortuneDiceTable } from '@engine/card-workshop/fortune-dice';
 import { planRarityUpgrade, registerMaterialElements } from '@engine/card-workshop/material';
+import { registerMaterialEntries } from '@engine/card-workshop/material-entries';
 import { insightModOf } from '@engine/card-workshop/derived-stats';
 import { planEnchant } from '@engine/card-workshop/card-enchant';
 import { planUnequalExchange } from '@engine/card-workshop/unequal-exchange';
@@ -208,6 +228,10 @@ import {
   clearNarrativeIntent as clearNarrativeIntentInDb,
 } from '@engine/save-profile';
 import type { CardTier } from '@engine/field-enums';
+import { isHighTierCard } from '@engine/card-workshop/craft-card';
+import { companionTalentParamsOf } from '@engine/card-workshop/companion-talent';
+import { planCompanionEvolution, planEmbedOffering } from '@engine/card-workshop/companion-growth';
+import { CARD_ELEMENT_AXIS } from '@engine/card-workshop/derived-stats';
 import type { SkirmishSession } from '@engine/card-workshop/skirmish-session';
 import type { SkirmishChoice } from '@engine/card-workshop/skirmish';
 import {
@@ -280,9 +304,32 @@ export type CraftNarrateImpl = (req: {
   intent: string;
   crafterName?: string;
   talentNotes?: string[];
-}) => Promise<{ name?: string; description?: string; narrative: string }>;
+}) => Promise<{
+  name?: string;
+  description?: string;
+  personality?: string;
+  talentKind?: string;
+  talentName?: string;
+  narrative: string;
+}>;
 
 let craftNarrateImpl: CraftNarrateImpl | null = null;
+
+/** 进化弧光句注入缝（伙伴实体化 B5.2b）：失败/超时/空一律 null，绝不阻塞仪式 commit */
+export type EvolveArcImpl = (input: {
+  name: string;
+  personality?: string;
+  archetype?: string;
+  routeName?: string;
+  routeDesc?: string;
+  fromTier: CardTier;
+  toTier: CardTier;
+}) => Promise<string | null>;
+let evolveArcImpl: EvolveArcImpl | null = null;
+
+export function setEvolveArcImpl(impl: EvolveArcImpl | null): void {
+  evolveArcImpl = impl;
+}
 
 /** 由 GamePage 在创建 GamePipeline 后调用（与 setRewriteLoadoutImpl 同款） */
 export function setCraftNarrateImpl(impl: CraftNarrateImpl): void {
@@ -1527,6 +1574,8 @@ export const useGameStore = defineStore('game', () => {
         target: `characters.${playerChar.name}`,
         value: cardItem as unknown as Record<string, unknown>,
       },
+      // 获得即诞生（伙伴实体化 D3 批①）：抽中召唤卡 → 同窗 ensure（seed 取池条目 companion）
+      ...companionEnsurePatches(cardItem, picked.companion),
     ];
     if (mode === 'coin') {
       patches.push({
@@ -1715,6 +1764,8 @@ export const useGameStore = defineStore('game', () => {
         target: `characters.${playerChar.name}`,
         value: { name: plan.fuelName, quantity: 1 },
       },
+      // 休眠出口（伙伴实体化 D4，批② B2.0）：燃料吃光同名召唤卡 → 实体沉眠（同窗）
+      ...checkCompanionDormancy(plan.fuelName, 1),
     ];
     const sm = createStateManager(activeSaveId.value);
     const result = await sm.commitChatState(patches);
@@ -1741,6 +1792,11 @@ export const useGameStore = defineStore('game', () => {
     const { ok, reason, plan } = planSmelt(sources as CardItem[], strengthOf('熔炼', 'tierGain'));
     if (!ok || !plan) return { ok: false, reason };
 
+    // 休眠出口（伙伴实体化 D4，批② B2.0）：熔炼吃光同名召唤卡 → 实体沉眠（同窗，按名计数）
+    const smeltQty = new Map<string, number>();
+    for (const name of plan.consumed) smeltQty.set(name, (smeltQty.get(name) ?? 0) + 1);
+    const smeltDormancy = [...smeltQty].flatMap(([name, n]) => checkCompanionDormancy(name, n));
+
     const patches: StatePatch[] = [
       {
         op: 'add_item',
@@ -1752,6 +1808,7 @@ export const useGameStore = defineStore('game', () => {
         target: `characters.${playerChar.name}`,
         value: { name, quantity: 1 },
       })),
+      ...smeltDormancy,
     ];
     const sm = createStateManager(activeSaveId.value);
     const result = await sm.commitChatState(patches);
@@ -1958,10 +2015,16 @@ export const useGameStore = defineStore('game', () => {
     // 素材元素档案（2026-09-25）：内容包 catalog.materialElements → material.ts 注册表。
     // 采集素材名大多不含元素字样，按名猜会让词条成片为空；档案由内容仓正典给定。
     registerMaterialElements(parseCatalogData(getContentRegistry().catalog).materialElements);
+    // 素材词条（2026-10-02 批次D）：内容包 catalog.materialEntries → material-entries 注册表
+    // （覆写内建基线；负面词条与主/副位差由此进制卡数值）。
+    registerMaterialEntries(parseCatalogData(getContentRegistry().catalog).materialEntries);
     // 高阶卡精配覆写（效果批四收尾）：内容包 cardPool[].effects → card-effects 注册表。
     // 按名注册 → 任何途径获得的同名卡出牌时都带精配效果（旧存档已持有的也覆盖）。
     for (const c of parseCatalogData(getContentRegistry().catalog).cardPool) {
-      const fx = coerceCardEffects((c as { effects?: unknown }).effects);
+      const fx = coerceCardEffects(
+        (c as { effects?: unknown }).effects,
+        (c as { element?: string }).element ? [(c as { element: string }).element] : [],
+      );
       if (fx.length > 0) registerCardEffects({ [c.name]: fx });
     }
     // 会话稿盖回（见 sessionCustomTalents 的说明）：读档按存档重建注册表后，
@@ -2068,6 +2131,433 @@ export const useGameStore = defineStore('game', () => {
   }
 
   /**
+   * 获得即诞生（伙伴实体化 D3，批①）：召唤卡入手 → 按卡名 ensure 伙伴实体。
+   * 无同名实体 → add_character（诞生）；已有同名实体（沉眠）→ update_character
+   * present:true（唤醒，等级/忠诚/进化原样接回）。返回的 patches 由调用方并进
+   * 该卡 add_item 的同一次 commitChatState 数组（单写入口纪律）。
+   * 军团卡自然排除（isSummonCard）；seed 缺省落「铭灵」通用口径。
+   */
+  function companionEnsurePatches(
+    card: CardItem,
+    seed?: CompanionSeed,
+    personalityOverride?: string,
+    talentKind?: string,
+    talentName?: string,
+  ): StatePatch[] {
+    const playerChar = player.value;
+    if (!activeSaveId.value || !playerChar || !isSummonCard(card)) return [];
+    const existingNames = characters.value.map((c: CharacterState) => c.name);
+    if (needsFirstSummon(card.name, existingNames)) {
+      return [
+        {
+          op: 'add_character',
+          target: 'characters',
+          value: buildSummonCompanion({
+            card,
+            ...(seed ? { seed } : {}),
+            saveId: activeSaveId.value,
+            playerName: playerChar.name,
+            location: playerChar.location,
+            ...(personalityOverride ? { personalityOverride } : {}),
+            ...(talentKind ? { talentKind } : {}),
+            ...(talentName ? { talentName } : {}),
+          }) as unknown as Record<string, unknown>,
+        } as StatePatch,
+      ];
+    }
+    // 旧档迁移（伙伴实体化 D8，批③ B3.4）：实体在且旧卡有存量 cardExp →
+    // 一次性折算迁入实体账本（迁后 cardExp=0，幂等不再触发）；同窗提交。
+    const existing = characters.value.find(
+      (c: CharacterState) => c.name === card.name && c.type === 'summon',
+    );
+    const wake: StatePatch[] = [
+      {
+        op: 'update_character',
+        target: `characters.${card.name}`,
+        value: { present: true },
+      } as StatePatch,
+    ];
+    const legacyExp = Math.max(0, Math.round(card.cardExp ?? 0));
+    if (!existing || legacyExp <= 0) return wake;
+    const grown = applyCompanionExp(
+      {
+        level: existing.level,
+        totalExp: existing.totalExp,
+        attributes: existing.attributes,
+        maxHp: existing.maxHp,
+        maxMp: existing.maxMp,
+        maxSp: existing.maxSp,
+        hp: existing.hp,
+        mp: existing.mp,
+        sp: existing.sp,
+        词条: card.词条,
+      },
+      legacyExp,
+      card.cardTier,
+    );
+    wake.push({
+      op: 'update_character',
+      target: `characters.${card.name}`,
+      value: {
+        level: grown.level,
+        totalExp: grown.totalExp,
+        expToNext: grown.expToNext,
+        attributes: grown.attributes,
+      },
+    } as StatePatch);
+    // 资源专线令（CMP-01 同款）：折算成长的 max* 走 set_max_* 专线——此前该分支
+    // 被 update_character 禁写资源整份拒绝，旧档 cardExp 折算从未生效（CMP-07 观察）。
+    wake.push({
+      op: 'set_max_hp',
+      target: `characters.${card.name}`,
+      value: grown.maxHp,
+    } as StatePatch);
+    wake.push({
+      op: 'set_max_mp',
+      target: `characters.${card.name}`,
+      value: grown.maxMp,
+    } as StatePatch);
+    wake.push({
+      op: 'set_max_sp',
+      target: `characters.${card.name}`,
+      value: grown.maxSp,
+    } as StatePatch);
+    wake.push({ op: 'set_hp', target: `characters.${card.name}`, value: grown.hp } as StatePatch);
+    wake.push({ op: 'set_mp', target: `characters.${card.name}`, value: grown.mp } as StatePatch);
+    wake.push({ op: 'set_sp', target: `characters.${card.name}`, value: grown.sp } as StatePatch);
+    wake.push({
+      op: 'update_item',
+      target: `characters.${playerChar.name}`,
+      value: { name: card.name, changes: { cardExp: 0 } },
+    } as StatePatch);
+    return wake;
+  }
+
+  /**
+   * 休眠出口（伙伴实体化 D4，批①）：召唤卡离手（出售/拆解/战斗消耗）后检查——
+   * 玩家背包同名卡清零（按 patch 后库存口径：removingQty = 本次将扣数量）且存档内
+   * 有同名 type:'summon' 实体 → update_character present:false（沉眠，数据完整保留）。
+   * 返回的 patches 由调用方并进同一次 commitChatState 数组（同窗提交）。
+   */
+  function checkCompanionDormancy(cardName: string, removingQty = 0): StatePatch[] {
+    const playerChar = player.value;
+    if (!playerChar) return [];
+    const afterRemove =
+      removingQty > 0
+        ? playerChar.inventory.map((i) =>
+            i.name === cardName && i.type === '卡牌'
+              ? { ...i, quantity: Math.max(0, i.quantity - removingQty) }
+              : i,
+          )
+        : playerChar.inventory;
+    if (!isCompanionDormant(cardName, afterRemove)) return [];
+    const entity = characters.value.find((c: CharacterState) => c.name === cardName);
+    if (!entity || entity.type !== 'summon' || entity.present !== true) return [];
+    return [
+      {
+        op: 'update_character',
+        target: `characters.${cardName}`,
+        value: { present: false },
+      } as StatePatch,
+    ];
+  }
+
+  /**
+   * 伙伴佩戴（伙伴实体化 D10，批④ B4.2）：把玩家 inventory 的装备/装备卡记到伙伴
+   * 佩戴表（背借用：物品不转移、quantity 不动；目标槽旧物自动卸回=覆写）。
+   * 校验：物品在背包、槽位映射非 null、未被玩家佩戴（equippedSlot 为空）。
+   */
+  async function equipCompanionItem(
+    cardName: string,
+    itemName: string,
+  ): Promise<{ ok: boolean; reason?: string; summary?: string }> {
+    const playerChar = player.value;
+    if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
+    const card = playerChar.inventory.find(
+      (i): i is CardItem => i.name === cardName && i.type === '卡牌',
+    );
+    if (!card || !isSummonCard(card)) return { ok: false, reason: '只有伙伴卡可以佩戴' };
+    const entity = characters.value.find(
+      (c: CharacterState) => c.name === cardName && c.type === 'summon',
+    );
+    const bag = entity ? companionBagOf(entity) : null;
+    if (!entity || !bag) return { ok: false, reason: '该伙伴实体不在场' };
+    const item = playerChar.inventory.find((i) => i.name === itemName);
+    if (!item) return { ok: false, reason: '找不到该物品' };
+    const slot = companionEquipSlotOf(item);
+    if (!slot) return { ok: false, reason: '该物品不能被伙伴佩戴' };
+    if (item.equippedSlot != null) return { ok: false, reason: '你正戴着它——先卸下' };
+
+    const nextBag = { ...bag, equip: { ...bag.equip, [slot]: itemName } };
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState([
+      {
+        op: 'update_character',
+        target: `characters.${cardName}`,
+        value: {
+          customFields: {
+            ...(entity.customFields as Record<string, unknown>),
+            companion: nextBag,
+          },
+        },
+      },
+    ]);
+    if (!result.success) return { ok: false, reason: result.errors.join('; ') };
+    await refreshFromDb();
+    const prev = bag.equip[slot];
+    const effective = companionEffectivePanel(entity, playerChar.inventory);
+    return {
+      ok: true,
+      summary: `【${itemName}】交到【${cardName}】手上（${
+        slot === 'hand' ? '手部' : slot === 'body' ? '身位' : '灵位'
+      }）${prev ? `——原佩戴【${prev}】卸回背包` : ''}；面板 ${JSON.stringify(effective.attributes)}`,
+    };
+  }
+
+  /** 卸下伙伴佩戴（批④ B4.2）：槽位旧物卸回背包（佩戴表删除即卸，物品从未转移） */
+  async function unequipCompanionItem(
+    cardName: string,
+    slot: CompanionEquipSlot,
+  ): Promise<{ ok: boolean; reason?: string; summary?: string }> {
+    const playerChar = player.value;
+    if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
+    const entity = characters.value.find(
+      (c: CharacterState) => c.name === cardName && c.type === 'summon',
+    );
+    const bag = entity ? companionBagOf(entity) : null;
+    if (!entity || !bag) return { ok: false, reason: '该伙伴实体不在场' };
+    const prev = bag.equip[slot];
+    if (!prev) return { ok: false, reason: '该槽位没有佩戴物' };
+
+    const nextEquip = { ...bag.equip };
+    delete nextEquip[slot];
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState([
+      {
+        op: 'update_character',
+        target: `characters.${cardName}`,
+        value: {
+          customFields: {
+            ...(entity.customFields as Record<string, unknown>),
+            companion: { ...bag, equip: nextEquip },
+          },
+        },
+      },
+    ]);
+    if (!result.success) return { ok: false, reason: result.errors.join('; ') };
+    await refreshFromDb();
+    return { ok: true, summary: `【${prev}】从【${cardName}】身上卸下，回到背包` };
+  }
+
+  /**
+   * 祭品嵌入（伙伴实体化 D13，批⑤ B5.1/B5.3）：素材嵌入倾向祭品槽
+   * （元素交集 + 品质档 ≥ 卡档 + 上限 3；通过 → remove_item + bag.offerings append 同窗）。
+   */
+  async function embedCompanionOffering(
+    cardName: string,
+    materialName: string,
+  ): Promise<{ ok: boolean; reason?: string; summary?: string }> {
+    const playerChar = player.value;
+    if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
+    const card = playerChar.inventory.find(
+      (i): i is CardItem => i.name === cardName && i.type === '卡牌',
+    );
+    if (!card || !isSummonCard(card)) return { ok: false, reason: '只有伙伴卡可以嵌祭品' };
+    const entity = characters.value.find(
+      (c: CharacterState) => c.name === cardName && c.type === 'summon',
+    );
+    const bag = entity ? companionBagOf(entity) : null;
+    if (!entity || !bag) return { ok: false, reason: '该伙伴实体不在场' };
+    const archetype = bag.evolution.archetype;
+    if (!archetype) return { ok: false, reason: '先定进化倾向，再嵌祭品' };
+    const material = playerChar.inventory.find((i) => i.name === materialName && i.type === '材料');
+    if (!material) return { ok: false, reason: '找不到该素材' };
+    const { ok, reason, plan } = planEmbedOffering(
+      card,
+      material,
+      archetype,
+      bag.evolution.offerings,
+    );
+    if (!ok || !plan) return { ok: false, reason };
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState([
+      {
+        op: 'remove_item',
+        target: `characters.${playerChar.name}`,
+        value: { name: materialName, quantity: 1 },
+      },
+      {
+        op: 'update_character',
+        target: `characters.${cardName}`,
+        value: {
+          customFields: {
+            ...(entity.customFields as Record<string, unknown>),
+            companion: {
+              ...bag,
+              evolution: { ...bag.evolution, offerings: plan.offerings },
+            },
+          },
+        },
+      },
+    ]);
+    if (!result.success) return { ok: false, reason: result.errors.join('; ') };
+    await refreshFromDb();
+    return { ok: true, summary: plan.summary };
+  }
+
+  /**
+   * 进化仪式（伙伴实体化 D13，批⑤ B5.2）：四门槛全过 → 品阶+1、+6 五维点按词条
+   * 权重分入、HP/MP/SP 重算回满、bornTier 快照升档、祭品清空、天赋 params 按新品阶
+   * 系数重算、evolution.unlocked 关闸进入下轮。
+   */
+  async function evolveCompanion(
+    cardName: string,
+    arcImpl?: EvolveArcImpl | null,
+  ): Promise<{ ok: boolean; reason?: string; summary?: string }> {
+    const playerChar = player.value;
+    if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
+    const card = playerChar.inventory.find(
+      (i): i is CardItem => i.name === cardName && i.type === '卡牌',
+    );
+    if (!card || !isSummonCard(card)) return { ok: false, reason: '只有伙伴卡可以进化' };
+    const entity = characters.value.find(
+      (c: CharacterState) => c.name === cardName && c.type === 'summon',
+    );
+    const bag = entity ? companionBagOf(entity) : null;
+    if (!entity || !bag) return { ok: false, reason: '该伙伴实体不在场' };
+
+    const affection = saveProfile.value?.affections?.[cardName] ?? 0;
+    const { ok, gates, plan } = planCompanionEvolution({
+      level: entity.level,
+      cardTier: card.cardTier,
+      archetype: bag.evolution.archetype,
+      offerings: bag.evolution.offerings,
+      affection,
+      cardName,
+    });
+    if (!ok || !plan) return { ok: false, reason: gates.reasons.join('；') || '未达进化门槛' };
+    const newTier = plan.newTier;
+    if (newTier === card.cardTier) return { ok: false, reason: '已是最高品阶' };
+
+    // 弧光句（伙伴实体化 B5.2b）：注入缝可用时取一句话；失败/超时/空一律 null 跳过
+    const arcProvider = arcImpl ?? evolveArcImpl;
+    let arc: string | null = null;
+    if (arcProvider) {
+      try {
+        arc = await arcProvider({
+          name: cardName,
+          ...(entity.personality ? { personality: entity.personality } : {}),
+          ...(bag.evolution.archetype ? { archetype: bag.evolution.archetype } : {}),
+          ...(bag.evolution.routeName ? { routeName: bag.evolution.routeName } : {}),
+          ...(bag.evolution.routeDesc ? { routeDesc: bag.evolution.routeDesc } : {}),
+          fromTier: card.cardTier,
+          toTier: newTier,
+        });
+      } catch {
+        arc = null;
+      }
+    }
+    const arcBackground =
+      arc && arc.length > 0
+        ? entity.background
+          ? `${entity.background}
+${arc}`
+          : arc
+        : undefined;
+
+    // +6 五维点按词条权重分入（照 §2.3 权重算法：元素轴 +3，逐点轮转权重降序）
+    const attrs: CharacterState['attributes'] = { ...entity.attributes };
+    const weights: Record<string, number> = { str: 1, dex: 1, con: 1, int: 1, spi: 1 };
+    for (const w of card.词条) {
+      const axis = CARD_ELEMENT_AXIS[w];
+      if (axis) weights[axis] += 3;
+    }
+    const AXES5 = ['str', 'dex', 'con', 'int', 'spi'] as const;
+    const order = [...AXES5].sort(
+      (a, b) => weights[b] - weights[a] || AXES5.indexOf(a) - AXES5.indexOf(b),
+    );
+    for (let i = 0; i < 6; i += 1) attrs[order[i % order.length]] += 1;
+    const maxHp = 30 + attrs.con * 8;
+    const maxMp = 15 + attrs.int * 6 + attrs.spi * 4;
+    const maxSp = 20 + attrs.con * 4;
+
+    // 天赋 params 按新品阶系数重算（kind 不变）
+    const talents = entity.talents
+      ? {
+          capacity: entity.talents.capacity,
+          list: entity.talents.list.map((t) => ({
+            ...t,
+            entries: t.entries.map((e) =>
+              companionTalentParamsOf(newTier, e.kind) > 0
+                ? { ...e, params: { ...e.params, bonus: companionTalentParamsOf(newTier, e.kind) } }
+                : e,
+            ),
+          })),
+        }
+      : undefined;
+
+    const patches: StatePatch[] = [
+      {
+        op: 'update_item',
+        target: `characters.${playerChar.name}`,
+        value: {
+          name: cardName,
+          changes: {
+            cardTier: newTier,
+            recipe: { ...card.recipe, tier: newTier },
+            sealed: isHighTierCard(newTier),
+          },
+        },
+      },
+      {
+        op: 'update_character',
+        target: `characters.${cardName}`,
+        value: {
+          attributes: attrs,
+          // 弧光句并窗（B5.2b）：background 追加，不另开提交窗
+          ...(arcBackground ? { background: arcBackground } : {}),
+        },
+      },
+      // 资源专线令（CMP-01）：仪式重算的 max* 走 set_max_* 专线
+      { op: 'set_max_hp', target: `characters.${cardName}`, value: maxHp } as StatePatch,
+      { op: 'set_max_mp', target: `characters.${cardName}`, value: maxMp } as StatePatch,
+      { op: 'set_max_sp', target: `characters.${cardName}`, value: maxSp } as StatePatch,
+      { op: 'set_hp', target: `characters.${cardName}`, value: maxHp } as StatePatch,
+      { op: 'set_mp', target: `characters.${cardName}`, value: maxMp } as StatePatch,
+      { op: 'set_sp', target: `characters.${cardName}`, value: maxSp } as StatePatch,
+      {
+        op: 'update_character',
+        target: `characters.${cardName}`,
+        value: {
+          customFields: {
+            ...(entity.customFields as Record<string, unknown>),
+            companion: {
+              ...bag,
+              bornTier: newTier,
+              evolution: { ...bag.evolution, unlocked: false, offerings: [] },
+              injured: false,
+            },
+          },
+        },
+      },
+      ...(talents
+        ? [
+            {
+              op: 'update_character',
+              target: `characters.${cardName}`,
+              value: { talents },
+            } as StatePatch,
+          ]
+        : []),
+    ];
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState(patches);
+    if (!result.success) return { ok: false, reason: result.errors.join('; ') };
+    await refreshFromDb();
+    return { ok: true, summary: plan.summary };
+  }
+
+  /**
    * 制卡主路（2026-09-17 第三档）：**Code 侧一次算完，AI 只写叙事与命名**。
    *
    * 流程：玩家选素材 + 写「想做成什么样」 → `planCardCraft` 算档位/词条/造价/评级/
@@ -2138,6 +2628,11 @@ export const useGameStore = defineStore('game', () => {
     let narrative = '';
     // 卡面描述：AI 写的 desc 优先；拿不到保留玩家意图原文（buildCardItem 已把 intent 存进 description）
     let aiDescription: string | undefined;
+    // 伙伴实体化 B3.5：AI 提取的伙伴性格（<personality>；失败回落 desc 首句 40 字）
+    let aiPersonality: string | undefined;
+    // 伙伴实体化 B4.6：AI 选的伙伴天赋 kind/name（池外回落表）
+    let aiTalentKind: string | undefined;
+    let aiTalentName: string | undefined;
     if (craftNarrateImpl) {
       try {
         const said = await craftNarrateImpl({
@@ -2161,6 +2656,9 @@ export const useGameStore = defineStore('game', () => {
           namingNote = '模型没有按 <name> 格式给出名字';
         }
         aiDescription = said.description;
+        aiPersonality = said.personality ?? personalityFromDesc(said.description);
+        aiTalentKind = said.talentKind;
+        aiTalentName = said.talentName;
         narrative = said.narrative;
       } catch (err) {
         namingNote = err instanceof Error ? err.message : String(err);
@@ -2190,6 +2688,9 @@ export const useGameStore = defineStore('game', () => {
         target: `characters.${playerChar.name}`,
         value: card as unknown as Record<string, unknown>,
       },
+      // 获得即诞生（伙伴实体化 D3 批①）：召唤卡产物 → 同窗 ensure 伙伴实体
+      // B3.5：性格从制卡叙事提取（<personality> 优先，desc 首句回落）
+      ...companionEnsurePatches(card, undefined, aiPersonality, aiTalentKind, aiTalentName),
       ...(album.owned.includes(productName)
         ? []
         : [
@@ -2377,6 +2878,206 @@ export const useGameStore = defineStore('game', () => {
     if (!result.success) return { ok: false, reason: result.errors.join('; ') };
     await refreshFromDb();
     return { ok: true, summary: plan.summary };
+  }
+
+  /**
+   * 进化倾向（2026-10-02 批次C）：给伙伴卡定三选一成长路线，写 `data.倾向`。
+   * 门槛与「最终兵器」同门（自我进化）——倾向只影响此后自我进化的空档生长。
+   */
+  async function setEvolutionDirection(
+    cardName: string,
+    routeId: EvolutionRouteId,
+  ): Promise<{ ok: boolean; reason?: string; summary?: string }> {
+    const playerChar = player.value;
+    if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
+    if (!hasMechanicGate('自我进化')) {
+      return { ok: false, reason: '需要【最终兵器：她】系天赋' };
+    }
+    const card = playerChar.inventory.find(
+      (i): i is CardItem => i.name === cardName && i.type === '卡牌',
+    );
+    if (!card) return { ok: false, reason: '找不到该伙伴卡' };
+    const { ok, reason, plan } = planEvolutionDirection(card, routeId);
+    if (!ok || !plan) return { ok: false, reason };
+    // 批⑤纲要「倾向三选一 UI 改接实体袋」：同窗把 archetype 写进 companion 袋
+    // （card.data.倾向 保留——【最终兵器：她】战后自动进化线仍读它，D13 兼容口径）
+    const entity = characters.value.find(
+      (c: CharacterState) => c.name === cardName && c.type === 'summon',
+    );
+    const bag = entity ? companionBagOf(entity) : null;
+    const bagPatch =
+      entity && bag
+        ? [
+            {
+              op: 'update_character',
+              target: `characters.${cardName}`,
+              value: {
+                customFields: {
+                  ...(entity.customFields as Record<string, unknown>),
+                  companion: {
+                    ...bag,
+                    evolution: { ...bag.evolution, archetype: plan.routeId },
+                  },
+                },
+              },
+            } as StatePatch,
+          ]
+        : [];
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState([
+      {
+        op: 'update_item',
+        target: `characters.${playerChar.name}`,
+        value: {
+          name: cardName,
+          changes: { data: { ...(card.data ?? {}), 倾向: plan.routeId } },
+        },
+      },
+      ...bagPatch,
+    ]);
+    if (!result.success) return { ok: false, reason: result.errors.join('; ') };
+    await refreshFromDb();
+    return { ok: true, summary: plan.summary };
+  }
+
+  /**
+   * 投喂（2026-10-02 批次C）：素材按元素匹配换卡面成长——炼制之外的第二消耗出口。
+   * 无天赋门槛（基础养成环）；经验走 growCardByRawExp，满管溢出即卡面战力。
+   */
+  async function feedCompanion(
+    cardName: string,
+    materialName: string,
+  ): Promise<{ ok: boolean; reason?: string; summary?: string }> {
+    const playerChar = player.value;
+    if (!activeSaveId.value || !playerChar) return { ok: false, reason: '无活跃存档' };
+    const card = playerChar.inventory.find(
+      (i): i is CardItem => i.name === cardName && i.type === '卡牌',
+    );
+    if (!card) return { ok: false, reason: '找不到该伙伴卡' };
+    const material = playerChar.inventory.find((i) => i.name === materialName && i.type === '材料');
+    if (!material) return { ok: false, reason: '找不到该素材' };
+    if ((material.quantity ?? 1) < 1) return { ok: false, reason: '素材数量不足' };
+    const { ok, reason, plan } = planFeedCompanion(card, material);
+    if (!ok || !plan) return { ok: false, reason };
+
+    // 伙伴实体化 D8（批③ B3.2）：召唤卡同名实体在 → 经验改道实体账本
+    // （update_character + 资源专线 set_hp/mp/sp；投喂成功忠诚 +3；重伤则清标回满=伤愈）
+    const entity = characters.value.find(
+      (c: CharacterState) => c.name === cardName && c.type === 'summon',
+    );
+    const bag = entity ? companionBagOf(entity) : null;
+    const patches: StatePatch[] = [
+      {
+        op: 'remove_item',
+        target: `characters.${playerChar.name}`,
+        value: { name: materialName, quantity: 1 },
+      },
+    ];
+    let summary = plan.summary;
+    if (entity) {
+      const grown = applyCompanionExp(
+        {
+          level: entity.level,
+          totalExp: entity.totalExp,
+          attributes: entity.attributes,
+          maxHp: entity.maxHp,
+          maxMp: entity.maxMp,
+          maxSp: entity.maxSp,
+          hp: entity.hp,
+          mp: entity.mp,
+          sp: entity.sp,
+          词条: card.词条,
+        },
+        plan.rawExp,
+        card.cardTier,
+      );
+      // 资源专线令（CMP-01）：成长后的 max* 走 set_max_* 专线，不进 update_character
+      patches.push({
+        op: 'update_character',
+        target: `characters.${cardName}`,
+        value: {
+          level: grown.level,
+          totalExp: grown.totalExp,
+          expToNext: grown.expToNext,
+          attributes: grown.attributes,
+        },
+      } as StatePatch);
+      patches.push({
+        op: 'set_max_hp',
+        target: `characters.${cardName}`,
+        value: grown.maxHp,
+      } as StatePatch);
+      patches.push({
+        op: 'set_max_mp',
+        target: `characters.${cardName}`,
+        value: grown.maxMp,
+      } as StatePatch);
+      patches.push({
+        op: 'set_max_sp',
+        target: `characters.${cardName}`,
+        value: grown.maxSp,
+      } as StatePatch);
+      patches.push({
+        op: 'set_hp',
+        target: `characters.${cardName}`,
+        value: grown.hp,
+      } as StatePatch);
+      patches.push({
+        op: 'set_mp',
+        target: `characters.${cardName}`,
+        value: grown.mp,
+      } as StatePatch);
+      patches.push({
+        op: 'set_sp',
+        target: `characters.${cardName}`,
+        value: grown.sp,
+      } as StatePatch);
+      patches.push({ op: 'delta_affection', target: `affections.${cardName}`, amount: 3 });
+      if (bag?.injured === true) {
+        patches.push({
+          op: 'update_character',
+          target: `characters.${cardName}`,
+          value: {
+            customFields: {
+              ...(entity.customFields as Record<string, unknown>),
+              companion: { ...bag, injured: false },
+            },
+          },
+        } as StatePatch);
+        // 伤愈：清标记且 hp/mp/sp 回满（覆盖上方 Δmax 抬升值）
+        patches.push({
+          op: 'set_hp',
+          target: `characters.${cardName}`,
+          value: grown.maxHp,
+        } as StatePatch);
+        patches.push({
+          op: 'set_mp',
+          target: `characters.${cardName}`,
+          value: grown.maxMp,
+        } as StatePatch);
+        patches.push({
+          op: 'set_sp',
+          target: `characters.${cardName}`,
+          value: grown.maxSp,
+        } as StatePatch);
+        summary = `${summary}；【伤愈】HP/MP/SP 回满，可再战`;
+      }
+    } else {
+      // 实体缺（旧档/兜底）：卡面经验旧路，零回归
+      patches.push({
+        op: 'update_item',
+        target: `characters.${playerChar.name}`,
+        value: {
+          name: cardName,
+          changes: { cardExp: plan.cardExp, cardPowerBonus: plan.cardPowerBonus },
+        },
+      });
+    }
+    const sm = createStateManager(activeSaveId.value);
+    const result = await sm.commitChatState(patches);
+    if (!result.success) return { ok: false, reason: result.errors.join('; ') };
+    await refreshFromDb();
+    return { ok: true, summary };
   }
 
   /**
@@ -2806,6 +3507,8 @@ export const useGameStore = defineStore('game', () => {
           target: `characters.${playerChar.name}`,
           value: cardItem as unknown as Record<string, unknown>,
         } as StatePatch);
+        // 获得即诞生（伙伴实体化 D3 批①）：掷出召唤卡 → 同窗 ensure（seed 取池条目 companion）
+        patches.push(...companionEnsurePatches(cardItem, picked.companion));
         // 卡册收录（与祭坛同源：toPlainCardAlbum 净化 reactive proxy，防 DataCloneError）
         const album = toPlainCardAlbum(
           playerChar.cardAlbum ?? { owned: [], deck: [], capacity: 60 },
@@ -2937,6 +3640,10 @@ export const useGameStore = defineStore('game', () => {
     }
     const item = playerChar.inventory.find((i) => i.name === itemName);
     if (!item) return { ok: false, reason: '找不到该物品' };
+    // 佩戴拦截（伙伴实体化 D10，批④ B4.4）：伙伴佩戴中的物品禁拆
+    if (companionWearingNames(characters.value).has(itemName)) {
+      return { ok: false, reason: '伙伴佩戴中——先卸下' };
+    }
 
     const { ok, reason, plan } = planDismantle(
       item,
@@ -2950,6 +3657,8 @@ export const useGameStore = defineStore('game', () => {
         target: `characters.${playerChar.name}`,
         value: { name: plan.sourceName, quantity: 1 },
       },
+      // 休眠出口（伙伴实体化 D4 批①）：拆光同名召唤卡 → 实体沉眠（同窗）
+      ...checkCompanionDormancy(plan.sourceName, 1),
       ...plan.yields.map((y) => ({
         op: 'add_item' as const,
         target: `characters.${playerChar.name}`,
@@ -2992,6 +3701,8 @@ export const useGameStore = defineStore('game', () => {
         target: `characters.${playerChar.name}`,
         value: plan.product as unknown as Record<string, unknown>,
       },
+      // 获得即诞生（伙伴实体化 D3 批①）：融合产物含召唤词条 → 同窗 ensure
+      ...companionEnsurePatches(plan.product),
       ...plan.consumed.map((name) => ({
         op: 'remove_item' as const,
         target: `characters.${playerChar.name}`,
@@ -3166,16 +3877,9 @@ export const useGameStore = defineStore('game', () => {
               },
             } as StatePatch,
           ]),
-      {
-        op: 'add_character',
-        target: 'characters',
-        value: buildSummonCompanion({
-          card: plan.card,
-          saveId: activeSaveId.value,
-          playerName: playerChar.name,
-          location: playerChar.location,
-        }) as unknown as Record<string, unknown>,
-      } as StatePatch,
+      // 获得即诞生（伙伴实体化 D3 批①）：捕获改为 ensure 语义——查重后构造/唤醒，
+      // 替代原直调 add_character（seed：CapturePlan 无种子字段，落缺省铭灵口径）
+      ...companionEnsurePatches(plan.card),
     ];
     const sm = createStateManager(activeSaveId.value);
     const result = await sm.commitChatState(patches);
@@ -3228,6 +3932,9 @@ export const useGameStore = defineStore('game', () => {
               },
             } as StatePatch,
           ]),
+      // 获得即诞生（伙伴实体化 D3 批①）：子嗣必为召唤卡 → 同窗 ensure
+      // （OffspringPlan 无种子字段，落缺省铭灵口径）
+      ...companionEnsurePatches(plan.card),
     ];
     const sm = createStateManager(activeSaveId.value);
     const result = await sm.commitChatState(patches);
@@ -3261,6 +3968,8 @@ export const useGameStore = defineStore('game', () => {
         target: `characters.${playerChar.name}`,
         value: { name: plan.sourceName, quantity: 1 },
       },
+      // 休眠出口（伙伴实体化 D4，批② B2.0）：转化退场吃光同名召唤卡 → 实体沉眠（同窗）
+      ...checkCompanionDormancy(plan.sourceName, 1),
       ...plan.materials.map((m) => ({
         op: 'add_item' as const,
         target: `characters.${playerChar.name}`,
@@ -4356,6 +5065,10 @@ export const useGameStore = defineStore('game', () => {
     quantity = 1,
   ): Promise<{ ok: boolean; error?: string }> {
     if (!activeSaveId.value) return { ok: false, error: '无活跃存档' };
+    // 佩戴拦截（伙伴实体化 D10，批④ B4.4）：伙伴佩戴中的物品禁售/弃
+    if (companionWearingNames(characters.value).has(itemName)) {
+      return { ok: false, error: '伙伴佩戴中——先卸下' };
+    }
     const sm = createStateManager(activeSaveId.value);
     const result = await sm.commitChatState([
       {
@@ -4363,6 +5076,8 @@ export const useGameStore = defineStore('game', () => {
         target: `characters.${player.value?.name ?? ''}`,
         value: { name: itemName, quantity },
       },
+      // 休眠出口（伙伴实体化 D4 批①）：卖光/弃光同名召唤卡 → 实体沉眠（同窗）
+      ...checkCompanionDormancy(itemName, quantity),
     ]);
     if (result.success) await refreshFromDb();
     return result.success ? { ok: true } : { ok: false, error: result.errors.join('; ') };
@@ -4744,6 +5459,12 @@ export const useGameStore = defineStore('game', () => {
     currentNemesis,
     knownTrueNames,
     trainCompanion,
+    setEvolutionDirection,
+    feedCompanion,
+    equipCompanionItem,
+    unequipCompanionItem,
+    embedCompanionOffering,
+    evolveCompanion,
     setPendingRewind,
     pendingRewind,
     misfortuneLayers,

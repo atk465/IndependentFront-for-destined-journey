@@ -328,7 +328,7 @@
     {
       "id": "ph_blade",
       "name": "行伍短剑",
-      "cardTier": "白铁",
+      "cardTier": "黑铁",
       "formEntry": "装备",
       "description": "量产短剑卡，铭着「够用」。",
       "cost": 10,
@@ -346,7 +346,7 @@
     {
       "id": "ph_strike",
       "name": "石火一击",
-      "cardTier": "白铁",
+      "cardTier": "黑铁",
       "formEntry": "技能",
       "description": "打火石般的一击，快而短。",
       "cost": 10,
@@ -355,7 +355,7 @@
     {
       "id": "ph_mend",
       "name": "包扎术",
-      "cardTier": "白铁",
+      "cardTier": "黑铁",
       "formEntry": "技能",
       "description": "旅人都会的初级处理。",
       "cost": 10
@@ -363,7 +363,7 @@
     {
       "id": "ph_campfire",
       "name": "营地火光",
-      "cardTier": "白铁",
+      "cardTier": "黑铁",
       "formEntry": "领域",
       "description": "一小圈暖意的领域。",
       "cost": 10,
@@ -381,7 +381,7 @@
     {
       "id": "ph_rations",
       "name": "干粮袋",
-      "cardTier": "白铁",
+      "cardTier": "黑铁",
       "formEntry": "物资",
       "description": "三天的口粮。",
       "cost": 10

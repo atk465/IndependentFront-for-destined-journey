@@ -2,7 +2,7 @@
  * Phase 10: Placeholder Registry — Unified Agent Template System
  *
  * 职责:
- * 1. 定义 PLACEHOLDER_REGISTRY — 18 个 {{PLACEHOLDER}} → 解析函数的映射
+ * 1. 定义 PLACEHOLDER_REGISTRY — {{PLACEHOLDER}} → 解析函数的映射
  * 2. getDefaultTemplate(agentId) — 为每个 Agent 返回默认模板字符串
  * 3. setPlaceholderGlobals / resetPlaceholderGlobals — 管理跨函数共享的世界书/配置数据
  *
@@ -22,6 +22,7 @@
  */
 
 import type { CommissionDef } from './card-workshop/commission';
+import { cardBriefLine, deckBriefCards } from './card-workshop/card-display';
 import {
   TALENT_ENTRY_POOL,
   getCustomTalents,
@@ -31,6 +32,7 @@ import { renderOptionPolicy, resolveOptionScheme } from './option-policy';
 import type {
   AgentContext,
   AgentConfig,
+  CardItem,
   WorldBook,
   PlaceholderResolver,
   RecentCombatInfo,
@@ -786,6 +788,19 @@ function renderCustomTalentWords(): string {
   return lines.join('\n');
 }
 
+/**
+ * 卡组战备块 → `<卡组战备>`（2026-10-02 批次B，{{CARD_DECK}} 专用）。
+ * 逐行 = cardBriefLine 定值简报；纪律行照 {{TALENT}} 的「数值不得自创」口径。
+ */
+function renderDeckBriefBlock(cards: CardItem[]): string {
+  return [
+    '<卡组战备>',
+    `玩家当前卡组（${cards.length} 张）。出卡过程可按下面各卡的定值演绎；结算数字由引擎与战报负责，禁止自创卡名、效果或数值：`,
+    ...cards.map((c) => `· ${cardBriefLine(c)}`),
+    '</卡组战备>',
+  ].join('\n');
+}
+
 // ═══════════════════════════════════════════════════════════
 // RANDOM_EVENTS 渲染（随机事件 v1 §5.1 —— 与 MAP_CONTEXT 同款分工）
 // ═══════════════════════════════════════════════════════════
@@ -1110,6 +1125,29 @@ export const PLACEHOLDER_REGISTRY: Record<string, PlaceholderResolver> = {
     const hasList = talents && Array.isArray(talents.list) && talents.list.length > 0;
     if (!hasList) return words;
     return renderTalentsBlock(talents, ctx.insightMod) + (words ? `\n${words}` : '');
+  },
+
+  /**
+   * {{CARD_DECK}} — 玩家卡组战备简报（2026-10-02 批次B）。
+   *
+   * 数据直接取 ctx.characters 里的玩家 CharacterState（inventory + cardAlbum，
+   * 与 CHARACTER_STATE 同源，不必 buildContext 另供）；deck 顺序与逐卡定值
+   * 组装在 card-workshop/card-display.ts 纯函数（deckBriefCards/cardBriefLine）。
+   *
+   * 🔴 **三条空串出口**：① 无玩家角色；② 卡组为空 / 全是不可出战卡（零 token）；
+   *    ③ 战斗会话活跃（combatActive，§13-2 同款静默——交锋侧的卡面由战报卡与
+   *    skirmish 意图解析供给，正文块再注入只会诱导 AI 在战斗正文里报数）。
+   * 🔴 块自带 XML 外壳，模板里不要再包中文标签（照 MAP_CONTEXT 口径）。
+   * 🔴 只给定值文案：AI 只许按定值演绎出卡过程，禁止自创卡名/效果/数字
+   *    （与 {{TALENT}} 的授予纪律同款；结算数字归战报卡）。
+   */
+  CARD_DECK: (ctx, _config, _params) => {
+    if (ctx.combatActive === true) return '';
+    const player = (ctx.characters ?? []).find((c) => c.type === 'player');
+    if (!player) return '';
+    const cards = deckBriefCards(player);
+    if (cards.length === 0) return '';
+    return renderDeckBriefBlock(cards);
   },
 
   /**

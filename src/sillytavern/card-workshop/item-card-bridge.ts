@@ -11,7 +11,7 @@
  *   所以这一步是「把死数据修正成有战斗用途的卡」，不是功能降级。
  *
  * 数值全 Code 推导（铁律3）：
- * - `cardTier` ← item_gen 的 7 级 `quality` 映射（普通/优良→白铁 … 神话/唯一→星辉）
+ * - `cardTier` ← item_gen 的 7 级 `quality` 映射（普通/优良→黑铁 … 神话/唯一→星辉）
  * - `词条` = 形态词（装备/技能）+ 元素词（从名字/效果关键词命中九元素，复用 material.ts）
  * AI 只负责名字与叙事描述，不产出任何数值。
  */
@@ -21,10 +21,10 @@ import type { CardItem } from '../types';
 import { deriveElements } from './material';
 import type { ItemGenOutput } from '../types';
 
-/** item_gen 的 7 级品质 → 卡牌 5 级 tier（两档合一的只有最低一档：普通与优良都是白铁） */
+/** item_gen 的 7 级品质 → 卡牌 5 级 tier（两档合一的只有最低一档：普通与优良都是黑铁） */
 const RARITY_TO_TIER: Record<Rarity, CardTier> = {
-  普通: '白铁',
-  优良: '白铁',
+  普通: '黑铁',
+  优良: '黑铁',
   稀有: '青铜',
   史诗: '白银',
   传说: '鎏金',

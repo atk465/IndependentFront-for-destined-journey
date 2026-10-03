@@ -25,7 +25,7 @@ const CAPTURE_LEVEL_BONUS = ENTRY_STRENGTH_BASELINE.捕获.levelBonus;
 /** 等级 → 卡档（与 tier-constants 的 7 层级不同：这是**卡**的五档） */
 export function tierForLevel(level: number): CardTier {
   const lv = Math.max(1, Math.round(level) || 1);
-  if (lv <= 4) return '白铁';
+  if (lv <= 4) return '黑铁';
   if (lv <= 8) return '青铜';
   if (lv <= 12) return '白银';
   if (lv <= 16) return '鎏金';
@@ -133,9 +133,9 @@ export function planOffspring(
   if (mother.name === father.name) {
     return { ok: false, reason: '同一张卡不能自为双亲' };
   }
-  const mi = CARD_TIERS.indexOf(mother.cardTier ?? '白铁');
-  const fi = CARD_TIERS.indexOf(father.cardTier ?? '白铁');
-  const tier = CARD_TIERS[Math.max(mi, fi)] ?? '白铁';
+  const mi = CARD_TIERS.indexOf(mother.cardTier ?? '黑铁');
+  const fi = CARD_TIERS.indexOf(father.cardTier ?? '黑铁');
+  const tier = CARD_TIERS[Math.max(mi, fi)] ?? '黑铁';
 
   // 双亲各取一词条（排除形态/标记类，优先未重复的实际词条）
   const pickFrom = (p: { name: string; 词条?: string[] }): string | undefined => {
@@ -208,7 +208,7 @@ export function planCorruptCompanion(
   if (isDamaged(card as CardItem)) {
     return { ok: false, reason: `【${card.name}】已损坏——先修复再转化` };
   }
-  const rarity = TIER_TO_RARITY[(card.cardTier ?? '白铁') as CardTier] ?? '普通';
+  const rarity = TIER_TO_RARITY[(card.cardTier ?? '黑铁') as CardTier] ?? '普通';
   const words = (card.词条 ?? []).filter((w) => w && w !== '召唤');
   const list = words.length > 0 ? words : ['残念'];
   const materials = list.map((w) => ({

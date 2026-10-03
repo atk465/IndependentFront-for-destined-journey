@@ -24,8 +24,8 @@ const 卡 = (tier: CardItem['cardTier'], 词条: string[] = []): CardItem =>
   }) as CardItem;
 
 describe('TIER_POWER（单一真源）', () => {
-  it('白铁 1 → 星辉 5', () => {
-    expect(TIER_POWER).toEqual({ 白铁: 1, 青铜: 2, 白银: 3, 鎏金: 4, 星辉: 5 });
+  it('黑铁 1 → 星辉 5', () => {
+    expect(TIER_POWER).toEqual({ 黑铁: 1, 青铜: 2, 白银: 3, 鎏金: 4, 星辉: 5 });
   });
 });
 
@@ -38,10 +38,10 @@ describe('cardPower', () => {
     expect(cardPower(卡('星辉', ['虹耀', '焚影']))).toBe(5 + 2 * 2);
   });
   it('无词条卡也有底权重', () => {
-    expect(cardPower(卡('白铁'))).toBe(1);
+    expect(cardPower(卡('黑铁'))).toBe(1);
   });
   it('卡牌经验满管转化的 cardPowerBonus 逐点累加（交锋拍制）', () => {
-    expect(cardPower({ ...卡('白铁'), cardPowerBonus: 3 })).toBe(1 + 3);
+    expect(cardPower({ ...卡('黑铁'), cardPowerBonus: 3 })).toBe(1 + 3);
     expect(cardPower({ ...卡('星辉', ['燎原']), cardPowerBonus: 2 })).toBe(5 + 2 + 2);
   });
 });
@@ -51,19 +51,19 @@ describe('存档数据缺字段的健壮性（2026-09-13 真机：deckPower 曾�
     expect(cardPower({ cardTier: '白银' } as never)).toBe(3);
     expect(cardPower({ cardTier: '白银', 词条: null } as never)).toBe(3);
   });
-  it('品质缺失 → 白铁兜底，不抛', () => {
+  it('品质缺失 → 黑铁兜底，不抛', () => {
     expect(cardPower({ 词条: ['火'] } as never)).toBe(1);
   });
 });
 
 describe('deckPower', () => {
   const cardOf = (name: string): CardItem | undefined =>
-    name === '燎原之卡' ? 卡('青铜', ['燎原']) : name === '白铁之卡' ? 卡('白铁') : undefined;
+    name === '燎原之卡' ? 卡('青铜', ['燎原']) : name === '黑铁之卡' ? 卡('黑铁') : undefined;
   it('逐张累加，同名两张计两份', () => {
-    expect(deckPower(['燎原之卡', '燎原之卡', '白铁之卡'], cardOf)).toBe(4 + 4 + 1);
+    expect(deckPower(['燎原之卡', '燎原之卡', '黑铁之卡'], cardOf)).toBe(4 + 4 + 1);
   });
   it('查不到实物的编入位按 0 跳过（不炸不猜）', () => {
-    expect(deckPower(['幽灵卡', '白铁之卡'], cardOf)).toBe(1);
+    expect(deckPower(['幽灵卡', '黑铁之卡'], cardOf)).toBe(1);
     expect(deckPower([], cardOf)).toBe(0);
   });
 });
@@ -75,7 +75,7 @@ describe('battleReadyCards（出卡资格）', () => {
     { ...卡('青铜', ['火', '技能']), name: '已编组卡' },
     { ...卡('白银'), name: '未编组卡' },
     { ...卡('鎏金', []), name: '封印卡', sealed: true },
-    { ...卡('白铁', []), name: '损坏卡', data: { damaged: true } },
+    { ...卡('黑铁', []), name: '损坏卡', data: { damaged: true } },
   ];
   const deck = ['已编组卡'];
 

@@ -72,7 +72,7 @@ export function cardCombatTags(词条: readonly string[] | null | undefined): Co
 /**
  * 出卡反制行动：行动值 = 派生攻击 + 2×卡面战力，标签 = 词条反制标签。
  *
- * 🔴 2026-09-13 真机校准：最初出卡只用卡面战力（白铁 1 ~ 星辉 5+）当行动值，
+ * 🔴 2026-09-13 真机校准：最初出卡只用卡面战力（黑铁 1 ~ 星辉 5+）当行动值，
  * 而基础强攻 = 派生攻击（Lv12 str16 = 44）——出卡永远比按强攻亏，「增强通道」
  * 共识（§8 问题 29）被数值倒挂。修正口径：**卡在攻击之上叠战力**，出卡严格 ≥
  * 对应基础应对，再叠加反制标签的克制收益；代价是消耗卡会耗掉、启封有风险。
@@ -224,7 +224,7 @@ export function planEffects(plan: CardPlayPlan): CardInPlayEffect[] {
 // 物资=道具通道、素材=不可打出，三者免。MP 不足硬门槛（禁打）——基础应对
 // （强攻/防御/闪避）不耗 MP 永远可用，交锋不会卡死。
 export const CARD_MP_COST_BY_TIER: Readonly<Record<string, number>> = Object.freeze({
-  白铁: 5,
+  黑铁: 5,
   青铜: 10,
   白银: 20,
   鎏金: 35,
@@ -352,7 +352,7 @@ export function sealedCardPlay(
   const prepend = [
     `▸ 启封判定：d20=${d20}+${bonusText} vs DC${dc} → ${outcome.kind}（${outcome.margin >= 0 ? '+' : ''}${outcome.margin}）`,
   ];
-  const rebound = REBOUND_DAMAGE[card.cardTier] ?? REBOUND_DAMAGE['白铁'];
+  const rebound = REBOUND_DAMAGE[card.cardTier] ?? REBOUND_DAMAGE['黑铁'];
 
   if (!sealBreaks(outcome)) {
     // 哑火：封印扛住——本拍空过，卡不记已用账（下拍可再试）

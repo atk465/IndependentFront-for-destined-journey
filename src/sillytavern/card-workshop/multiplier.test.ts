@@ -150,15 +150,15 @@ describe('副轴门禁（Q4/Q6）', () => {
   const axes = { str: 12, dex: 10, con: 8, int: 16, spi: 10 };
   it('条数阶梯 0/1/1/2/2', () => {
     expect([
-      secondarySlotsOf('白铁'),
+      secondarySlotsOf('黑铁'),
       secondarySlotsOf('青铜'),
       secondarySlotsOf('白银'),
       secondarySlotsOf('鎏金'),
       secondarySlotsOf('星辉'),
     ]).toEqual([0, 1, 1, 2, 2]);
   });
-  it('白铁 0 条：有副轴也整批丢弃', () => {
-    expect(coerceSecondaryAxes([{ axis: 'dex', bonus: 40 }], 'str', '白铁')).toEqual([]);
+  it('黑铁 0 条：有副轴也整批丢弃', () => {
+    expect(coerceSecondaryAxes([{ axis: 'dex', bonus: 40 }], 'str', '黑铁')).toEqual([]);
   });
   it('星辉 2 条合法；超量整批丢弃', () => {
     const two = [
@@ -203,7 +203,7 @@ describe('技能公式（替换制结算基数）', () => {
     expect(r.secondaryAmount).toBe(4);
     expect(r.amount).toBe(35);
   });
-  it('白铁无副轴：纯主项', () => {
+  it('黑铁无副轴：纯主项', () => {
     const r = resolveSkillAmount({
       action: '伤害',
       difficulty: '标准',

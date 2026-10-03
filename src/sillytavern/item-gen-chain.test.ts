@@ -136,7 +136,7 @@ describe('buildItemGenPatches', () => {
     expect(addItem.equippedSlot).toBe('身体');
     // 卡牌侧（2026-09-18 第二批）：type 变卡牌 + Code 推导 tier/词条
     expect(addItem.type).toBe('卡牌');
-    expect(addItem.cardTier).toBe('白铁'); // 优良 → 白铁（品质映射表）
+    expect(addItem.cardTier).toBe('黑铁'); // 优良 → 黑铁（品质映射表）
     expect(addItem.词条).toContain('装备');
     expect(addItem.rarity).toBe('优良');
     expect(addItem.quantity).toBe(1);

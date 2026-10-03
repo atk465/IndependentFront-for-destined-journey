@@ -42,7 +42,7 @@ describe('数值表（单一真源）', () => {
     expect(GRADE_MULTIPLIER).toEqual({ S: 2.0, A: 1.5, B: 1.0, C: 0.5 });
   });
   it('卡牌经验上限随品质翻倍：200/400/800/1600/3200', () => {
-    expect(CARD_EXP_CAP).toEqual({ 白铁: 200, 青铜: 400, 白银: 800, 鎏金: 1600, 星辉: 3200 });
+    expect(CARD_EXP_CAP).toEqual({ 黑铁: 200, 青铜: 400, 白银: 800, 鎏金: 1600, 星辉: 3200 });
   });
   it('反制标签白名单与基础应对三选项', () => {
     expect(COUNTER_TAGS).toEqual(['强攻', '防御', '闪避', '打断']);
@@ -113,6 +113,36 @@ describe('counterBonusOf —— 读招打对的奖励', () => {
 });
 
 describe('resolveBeat —— 拍结算公式', () => {
+  // 伙伴实体化 B2.2：敏捷修入反制掷骰（基座命中传入，缺省 0 = 零回归）
+  it('敏捷修：roll = d20 + 行动值 + 克制 + 敏捷，审计行带「+ 敏捷X」', () => {
+    const intent: EnemyIntent = { move: '蓄力·崩山击', threat: 18, counters: ['打断', '防御'] };
+    const action = { label: '打出 召唤卡', power: 5, tags: [] as never[] };
+    // 无敏捷：d20=10 + 5 + 0 = 15 < 18 → 反制失败
+    const plain = resolveBeat({
+      intent,
+      action,
+      playerHp: 100,
+      enemyHp: 100,
+      guard: 0,
+      dice: 10,
+    });
+    expect(plain.roll).toBe(15);
+    expect(plain.countered).toBe(false);
+    // 敏捷 3：15 + 3 = 18 ≥ 18 → 反制成功；audit 行含敏捷段
+    const agile = resolveBeat({
+      intent,
+      action,
+      playerHp: 100,
+      enemyHp: 100,
+      guard: 0,
+      dice: 10,
+      agility: 3,
+    });
+    expect(agile.roll).toBe(18);
+    expect(agile.countered).toBe(true);
+    expect(agile.audit[0]).toContain('+ 敏捷3');
+  });
+
   const intent: EnemyIntent = { move: '蓄力·崩山击', threat: 18, counters: ['打断', '防御'] };
   it('反制成功：碾压伤 = 行动值 + 余量，玩家无伤', () => {
     const got = resolveBeat({
@@ -283,15 +313,15 @@ describe('cardExpGain / applyCardExp —— 卡牌经验 50% 分成', () => {
     expect(cardExpGain(-1)).toBe(0);
   });
   it('满管 → 卡面战力 +1、余量进下一管（不丢经验）', () => {
-    const got = applyCardExp({ cardTier: '白铁', cardExp: 190, cardPowerBonus: 0 }, 100);
+    const got = applyCardExp({ cardTier: '黑铁', cardExp: 190, cardPowerBonus: 0 }, 100);
     expect(got).toEqual({ cardExp: 40, cardPowerBonus: 1, powerUps: 1 });
   });
   it('一次巨量经验可连升多管', () => {
-    const got = applyCardExp({ cardTier: '白铁' }, 1000);
+    const got = applyCardExp({ cardTier: '黑铁' }, 1000);
     expect(got).toEqual({ cardExp: 100, cardPowerBonus: 2, powerUps: 2 });
   });
-  it('旧存档缺字段 / 未知品质兜底，不抛（400 经验 50% 分成 = 200 恰满一管白铁）', () => {
-    expect(applyCardExp({ cardTier: '白铁' }, 10)).toEqual({
+  it('旧存档缺字段 / 未知品质兜底，不抛（400 经验 50% 分成 = 200 恰满一管黑铁）', () => {
+    expect(applyCardExp({ cardTier: '黑铁' }, 10)).toEqual({
       cardExp: 5,
       cardPowerBonus: 0,
       powerUps: 0,

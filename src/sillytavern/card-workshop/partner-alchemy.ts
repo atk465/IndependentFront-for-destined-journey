@@ -36,7 +36,7 @@ const FALLBACK_FORM = { form: '炼物', 词条: ['炼成'] };
 
 /** 卡档 → 对应的稀有度（与拆解同源的那张表；这里只用于比较） */
 const TIER_RANK: Record<CardTier, number> = {
-  白铁: 0,
+  黑铁: 0,
   青铜: 1,
   白银: 2,
   鎏金: 3,
@@ -67,7 +67,7 @@ export function alchemyFormOf(materialName: string): { form: string; 词条: str
 /** 稀有度 → 卡档（产物落档用；传说以上封顶星辉） */
 function tierOfRarity(rarity: string | undefined): CardTier {
   const idx = (RARITY_LEVELS as readonly string[]).indexOf(rarity ?? '');
-  if (idx <= 0) return '白铁';
+  if (idx <= 0) return '黑铁';
   if (idx === 1) return '青铜';
   if (idx === 2) return '白银';
   if (idx === 3) return '鎏金';
@@ -90,7 +90,7 @@ export function planFootAlchemy(
     return { ok: false, reason: `【${material.name}】不是素材——她踩不动别的东西` };
   }
   const matTier = tierOfRarity(material.rarity);
-  const partnerRank = TIER_RANK[partner.cardTier ?? '白铁'];
+  const partnerRank = TIER_RANK[partner.cardTier ?? '黑铁'];
   const matRank = TIER_RANK[matTier];
   // 取两者较高的那一档（她踩得动的东西决定了成色上限）
   const cap = Math.max(0, Math.min(CARD_TIERS.length - 1, Math.round(maxTierIndex)));

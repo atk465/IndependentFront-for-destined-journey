@@ -73,6 +73,10 @@ import {
   type SkirmishSession,
 } from '@engine/card-workshop/skirmish-session';
 import { buildSkirmishSettlementPatches } from '@engine/card-workshop/skirmish-settlement';
+import { isCompanionDormant } from '@engine/card-workshop/companion';
+import { companionBaseOf, companionWearingNames } from '@engine/card-workshop/companion-panel';
+import { companionTalentOf } from '@engine/card-workshop/companion-talent';
+import { anchorEnemyStrength } from '@engine/card-workshop/skirmish-strength-anchor';
 import type { SkirmishContract } from '@engine/card-workshop/skirmish-session';
 import {
   collectRuleHooks,
@@ -164,6 +168,11 @@ import {
 } from '@engine/card-workshop/sealed-talents';
 import { CARD_CRAFT_NARRATE_AGENT, runCardCraftNarration } from '@engine/card-craft-narrate';
 import {
+  buildEvolutionArcMessages,
+  parseEvolutionArc,
+  type EvolutionArcInput,
+} from '@engine/card-workshop/companion-evolve-narrate';
+import {
   COMMISSION_NARRATE_AGENT,
   runCommissionNarration,
 } from '@engine/card-workshop/commission-narrate';
@@ -186,6 +195,7 @@ import { deckGuardBonus, deckPower } from '@engine/card-workshop/deck-power';
 import { matchFreeCardPlay } from '@engine/card-workshop/free-card-play';
 import { battleReadyCards } from '@engine/card-workshop/deck-power';
 import { cardCombatTags } from '@engine/card-workshop/entry-combat';
+import { cardBriefLine } from '@engine/card-workshop/card-display';
 import { runSkirmishIntentResolve } from '@engine/card-workshop/skirmish-agent';
 import { projectStoryOutput, projectStreamingStory } from '@engine/story-output';
 import { filterOptionsForScheme, resolveOptionScheme } from '@engine/option-policy';
@@ -2418,7 +2428,16 @@ export class GamePipeline {
     intent: string;
     crafterName?: string;
     talentNotes?: string[];
-  }): Promise<{ name?: string; narrative: string }> {
+    // 返回值补 description（CRAFT-2）：runCardCraftNarration 一直返回它，类型漏了
+    // B3.5：再补 personality（伙伴实体化·制卡叙事提取）
+  }): Promise<{
+    name?: string;
+    description?: string;
+    personality?: string;
+    talentKind?: string;
+    talentName?: string;
+    narrative: string;
+  }> {
     // 🔴 端点锚定正文（2026-09-25 真机）：card_craft_narrate 不在内容包默认层 12 agent
     //    名单里、用户也没绑过 → getEndpointForAgent 落到「API 池第一个」——那未必是
     //    正文正在用且可用的那个池（正文能跑、命名挂死的正是这个错位）。叙事链没有
@@ -2430,6 +2449,23 @@ export class GamePipeline {
       { ...req, endpoint },
       { clientFactory: (agentId, ep, saveId) => this.getClientFactory()(agentId, ep, saveId) },
     );
+  }
+
+  /**
+   * 进化弧光句（伙伴实体化 B5.2b）：一次 AI 调用只取一句话——失败/超时/空一律
+   * 返回 null，绝不阻塞仪式 commit。端点锚 story（正文可用池优先，同 narrateCardCraft 口径）。
+   */
+  async narrateEvolutionArc(input: EvolutionArcInput): Promise<string | null> {
+    const endpoint = this.getEndpointForAgent('story');
+    if (!endpoint) return null;
+    try {
+      const client = this.getClientFactory()('story', endpoint, this.saveId);
+      const result = await client.chat({ messages: buildEvolutionArcMessages(input) });
+      if (result.error) return null;
+      return parseEvolutionArc(result.output ?? result.rawResponse ?? '');
+    } catch {
+      return null;
+    }
   }
 
   /** 委托终点叙事（获得瞬间；共识稿 #13 修订）。失败由 store 侧兜底模板文案。 */
@@ -2932,13 +2968,36 @@ export class GamePipeline {
       const selfStatuses = selfStatusesOf(talentList);
       const stealthPct = totalSelfStatus(selfStatuses, 'threatDown');
       const threatCut = Math.min(90, fearPct + stealthPct);
+      // 🔴 强度锚（2026-10-02 WT6-1）：导演时长锚是设计真源——敌方气血下限 =
+      // 标称中位拍数 × 玩家单拍伤害（AI 叙事值保留为下限，只兜底不削）；威胁随玩家
+      // 战力缩放（AI 数值按低战力基线校准）。先锚、后算威压/隐身的削减。
+      const anchor = anchorEnemyStrength({
+        difficulty: assessment.difficulty,
+        playerAtk: stats.atk,
+        enemyLevel: assessment.enemyLevel,
+        playerLevel: playerC.level,
+        aiHp: assessment.enemyHp,
+        aiThreats: assessment.intents.map((it) => it.threat),
+        playerTotalPower: stats.atk + stats.guard + stats.agi + deck,
+        aiPower: assessment.enemyPower,
+      });
+      if (anchor.hpRaised || anchor.powerRaised) {
+        this.emitMessage(
+          `▸ 强度锚（${anchor.difficulty}${anchor.minion ? '·杂兵' : `·约${anchor.anchorBeat}拍`}）：敌方气血按你的战力标定（${Math.round(assessment.enemyHp)} → ${anchor.enemyHp}）`,
+          'assistant',
+        );
+      }
+      const anchoredIntents = assessment.intents.map((it, i) => ({
+        ...it,
+        threat: anchor.threats[i] ?? it.threat,
+      }));
       const intents =
         threatCut > 0
-          ? assessment.intents.map((it) => ({
+          ? anchoredIntents.map((it) => ({
               ...it,
               threat: Math.max(0, Math.round(it.threat * (1 - threatCut / 100))),
             }))
-          : assessment.intents;
+          : anchoredIntents;
       if (fearPct > 0) this.emitMessage(`▸ 威压：敌方威胁 −${fearPct}%（全体）`, 'assistant');
       if (stealthPct > 0) {
         this.emitMessage(`▸ 【自身状态·隐身】敌方威胁 −${stealthPct}%（打不中你）`, 'assistant');
@@ -2957,8 +3016,8 @@ export class GamePipeline {
         playerHp: Math.min(playerC.hp, maxHp),
         playerSp: playerC.sp,
         playerMaxHp: maxHp,
-        enemyHp: assessment.enemyHp,
-        difficulty: assessment.difficulty,
+        enemyHp: anchor.enemyHp, // 强度锚（WT6-1）：AI 值为下限，标称拍数兜底
+        difficulty: anchor.difficulty,
         // 多敌实体（2026-09-28 效果批六后续）：逐敌档案透传（含角色/风格/轮换）
         ...(assessment.enemies && assessment.enemies.length > 0
           ? { enemies: assessment.enemies }
@@ -2968,7 +3027,10 @@ export class GamePipeline {
         enemyCount: coerceEnemyCount(assessment.enemyCount),
         enemyScale: assessment.enemyScale,
       });
-      const session = judgeCrush(stats.atk + stats.guard + stats.agi + deck, assessment.enemyPower)
+      const session = judgeCrush(
+        stats.atk + stats.guard + stats.agi + deck,
+        anchor.enemyPower, // 强度锚（WT6-1 残留 1）：非杂兵锚到不触发 ×2 跳拍
+      )
         ? crushFinish(base)
         : base;
       this.game.setSkirmishSession(session);
@@ -3027,6 +3089,13 @@ export class GamePipeline {
           cards: ready.map((c) => ({
             name: c.name,
             tags: cardCombatTags(c.词条),
+            // 伙伴实体化 B3.6：召唤卡 brief 附性格关键词（只影响 L2 选择倾向，不入数值）
+            brief: (() => {
+              const line = cardBriefLine(c);
+              if (cardKindOf(c.词条) !== '召唤') return line;
+              const p = this.game.characters.find((ch) => ch.name === c.name)?.personality;
+              return p ? `${line}｜性：${p.slice(0, 24)}` : line;
+            })(),
           })),
           intentCounters:
             session.intents[session.beat % Math.max(1, session.intents.length)]?.counters ?? [],
@@ -3067,11 +3136,29 @@ export class GamePipeline {
     mainDerivation: number;
     secondary: { axis: string; bonus: number; derivation: number }[];
     difficulty: '爽战' | '标准' | '长战';
+    axisDerivations: Partial<Record<'str' | 'dex' | 'con' | 'int' | 'spi', number>>;
   } {
     const playerC = this.game.player;
     const attrs = (playerC?.attributes ?? {}) as Record<string, number>;
     const level = playerC?.level ?? 1;
-    const mainDerivation = deriveCardAtk(item?.词条 ?? [], attrs, level);
+    // 伙伴实体化 D5（批② B2.1）：召唤卡基座命中 → 技能轨主轴派生改读伙伴面板
+    // （公式链形状不动、基座换人；副轴保持玩家 build 语义）
+    const base = item ? companionBaseOf(item, this.game.characters, playerC?.inventory) : null;
+    // 伙伴天赋（批④ B4.7）：行动值加成 → 基座行动值 +bonus
+    const baseEntity = base ? this.game.characters.find((c) => c.name === base.name) : undefined;
+    const baseTalent = companionTalentOf(baseEntity);
+    const baseBonus = baseTalent?.kind === '行动值加成' ? baseTalent.params : 0;
+    const mainDerivation =
+      (base
+        ? deriveCardAtk(item?.词条 ?? [], base.attributes, base.level)
+        : deriveCardAtk(item?.词条 ?? [], attrs, level)) + baseBonus;
+    // 批⑤ B5.5：五维轴派生表（混合元素效果的取优池；基座命中的换伙伴面板）
+    const panelAttrs = (base?.attributes ?? attrs) as Record<string, number>;
+    const panelLevel = base?.level ?? level;
+    const AXES = ['str', 'dex', 'con', 'int', 'spi'] as const;
+    const axisDerivations = Object.fromEntries(
+      AXES.map((a) => [a, 2 * (panelAttrs[a] ?? 10) + panelLevel]),
+    ) as Partial<Record<'str' | 'dex' | 'con' | 'int' | 'spi', number>>;
     const secondary = item
       ? coerceSecondaryAxes(item.cardSecondaryAxes, cardAxisOf(item.词条), item.cardTier).map(
           (a) => ({
@@ -3081,7 +3168,7 @@ export class GamePipeline {
           }),
         )
       : [];
-    return { mainDerivation, secondary, difficulty: coerceDifficulty(difficulty) };
+    return { mainDerivation, secondary, difficulty: coerceDifficulty(difficulty), axisDerivations };
   }
 
   private async submitSkirmishCounter(choice: SkirmishChoice): Promise<void> {
@@ -3111,6 +3198,10 @@ export class GamePipeline {
     const finalChapter = (combatTalents ?? []).some((t) =>
       (t.entries ?? []).some((e) => e.kind === '终章'),
     );
+    /** 本拍出卡的伙伴基座（伙伴实体化 B2.1/B2.5：召唤卡且实体在场未重伤时非 null） */
+    let playedBase: ReturnType<typeof companionBaseOf> = null;
+    /** 基座命中实体的天赋（批④ B4.7：行动值加成/暴击消费） */
+    let playedBaseTalent: ReturnType<typeof companionTalentOf> = null;
     const chapterOpts = finalChapter
       ? {
           finalChapter: true,
@@ -3158,12 +3249,35 @@ export class GamePipeline {
         this.emitMessage(duelBlocked.reason ?? '决斗中这张卡不能上场。', 'assistant');
         return;
       }
+      // 佩戴拦截（伙伴实体化 D10，批④ B4.4）：被伙伴佩戴的物品/装备卡禁祭出
+      if (companionWearingNames(this.game.characters).has(card.name)) {
+        this.emitMessage('【交锋】伙伴佩戴中——先卸下。', 'assistant');
+        return;
+      }
+      // 伙伴实体化 D5（批② B2.1/B2.5）：召唤卡基座命中 → 直击/压场/MP 改读伙伴实体
+      // 批④ B4.3：传 inventory → effective 面板（佩戴加算区并入）
+      playedBase = companionBaseOf(card, this.game.characters, playerC.inventory);
+      // 伙伴天赋（批④ B4.7）：基座命中实体的天赋（行动值加成/暴击消费）
+      const sealedBase = playedBase;
+      const sealedBaseEntity = sealedBase
+        ? this.game.characters.find((c) => c.name === sealedBase.name)
+        : undefined;
+      const sealedBaseTalent = companionTalentOf(sealedBaseEntity);
       // 封印卡：这一拍的行动就是启封判定（阶段 2 内核分级：启封/哑火/暴走/反噬）
       if (card.sealed) {
         const res = sealedCardPlay(
           card,
           // 元素主属性轴（2026-09-25）：卡的行动值挂元素对应属性，不再一律力量
-          { atk: deriveCardAtk(card.词条, playerC.attributes, playerC.level) },
+          // 伙伴实体化 B2.1：基座命中 → 派生基座换伙伴面板（公式链形状不动）
+          {
+            atk:
+              deriveCardAtk(
+                card.词条,
+                playedBase?.attributes ?? playerC.attributes,
+                playedBase?.level ?? playerC.level,
+              ) +
+              (playedBase && sealedBaseTalent?.kind === '行动值加成' ? sealedBaseTalent.params : 0),
+          },
           this.rollSkirmishD20(),
           willModifierOf(playerC.attributes),
           insightModOf(playerC.attributes),
@@ -3203,7 +3317,8 @@ export class GamePipeline {
           recoil,
           sealBroke,
           // 封印卡 MP：破封（效果发动）才扣——哑火/反噬空过不收费
-          ...(res.effectFired ? { mpCost: mpCostOf(card) } : {}),
+          // 伙伴实体化 B2.5：基座命中 → 扣实体 mp（不入玩家 mpSpent，下方按名记账）
+          ...(res.effectFired && !playedBase ? { mpCost: mpCostOf(card) } : {}),
           // 封印卡效果：破封才结算
           ...(res.effectFired
             ? (() => {
@@ -3217,17 +3332,48 @@ export class GamePipeline {
           ...(contract ? { contract } : {}),
           ...chapterOpts,
         });
+        // 伙伴实体化 B2.5：基座命中的 MP 记实体名下（结算层写实体 mp）
+        if (playedBase && res.effectFired) {
+          const cost = mpCostOf(card);
+          if (cost > 0) {
+            next.companionMpSpent = {
+              ...(next.companionMpSpent ?? {}),
+              [playedBase.name]: (next.companionMpSpent?.[playedBase.name] ?? 0) + cost,
+            };
+          }
+        }
         this.game.setSkirmishSession(next);
         this.emitMessage(next.log.slice(session.log.length).join('\n'), 'assistant');
         if (next.finished) await this.settleAndNarrate(next);
         return;
       }
+      // 伙伴天赋（批④ B4.7）：基座命中实体的天赋
+      const playedBaseConst = playedBase;
+      const playedBaseEntity = playedBaseConst
+        ? this.game.characters.find((c) => c.name === playedBaseConst.name)
+        : undefined;
+      playedBaseTalent = companionTalentOf(playedBaseEntity);
       const plan = cardPlayPlan(
         card,
         // 元素主属性轴（2026-09-25）：按卡的主属性派生行动值
-        { atk: deriveCardAtk(card.词条, playerC.attributes, playerC.level) },
+        // 伙伴实体化 B2.1：基座命中 → 直击/压场基座换伙伴面板（公式链形状不动）
+        // 批④ B4.7：行动值加成 → 基座命中时基座行动值 +bonus
+        {
+          atk:
+            deriveCardAtk(
+              card.词条,
+              playedBase?.attributes ?? playerC.attributes,
+              playedBase?.level ?? playerC.level,
+            ) +
+            (playedBase && playedBaseTalent?.kind === '行动值加成' ? playedBaseTalent.params : 0),
+        },
         // MP 硬门槛（2026-09-25 访谈共识）：有效 MP = 角色 MP − 本会话已耗
-        { mp: playerC.mp - (session.mpSpent ?? 0) },
+        // 伙伴实体化 B2.5：基座命中 → 门槛读实体 mp − 该实体本场已耗
+        {
+          mp: playedBase
+            ? playedBase.mp - (session.companionMpSpent?.[card.name] ?? 0)
+            : playerC.mp - (session.mpSpent ?? 0),
+        },
       );
       if (plan.mode === '禁打') {
         this.emitMessage(`【交锋】${plan.reason}。`, 'assistant');
@@ -3328,6 +3474,40 @@ export class GamePipeline {
         if (crit.crit) {
           action = { ...action, power: crit.power };
           prepend = [...(prepend ?? []), `▸ ${crit.note}`];
+        }
+      }
+      // 伙伴天赋·暴击（批④ B4.7）：基座命中伙伴带「暴击」→ 照玩家既有暴击语义
+      if (playedBase && playedBaseTalent?.kind === '暴击' && playedBaseTalent.params > 0) {
+        const crit = resolveCrit(
+          action.power,
+          { chance: playedBaseTalent.params, mult: Number.NaN },
+          this.rollD100(),
+        );
+        if (crit.crit) {
+          action = { ...action, power: crit.power };
+          prepend = [...(prepend ?? []), `▸ 【${playedBase.name}】${crit.note}`];
+        }
+      }
+      // 伙伴天赋·嗜血（批④ B4.7）：在场挡刀位 HP<30% → 行动值 ×(1+pct/100)
+      {
+        const guardNow = session.companionGuard;
+        const guardEntity = guardNow
+          ? this.game.characters.find((c) => c.name === guardNow.name)
+          : undefined;
+        const gt = companionTalentOf(guardEntity);
+        if (
+          gt?.kind === '嗜血' &&
+          gt.params > 0 &&
+          guardNow &&
+          guardNow.maxHp > 0 &&
+          guardNow.hp < guardNow.maxHp * 0.3
+        ) {
+          const mult = 1 + gt.params / 100;
+          action = { ...action, power: Math.round(action.power * mult) };
+          prepend = [
+            ...(prepend ?? []),
+            `▸ 【嗜血】【${guardNow.name}】濒伤狂性：行动值 ×${mult.toFixed(2)}`,
+          ];
         }
       }
       // 体格差压制（B「体格差压制」）：敌方体型远小于玩家 → 行动值加成
@@ -3439,13 +3619,79 @@ export class GamePipeline {
     // 强攻注入基础强攻效果=主轴派生×难度表；防御/闪避无效果=伤害基数 0、只吃碾压余量）。
     // 特殊拍（真名/献祭/倒也可斩/禁忌回调）不传 skill = 直接伤害轨（power 即天赋伤害值）。
     const skillCtx = this.skillContextOf(beatCardItem as CardItem | undefined, session.difficulty);
+    // 伙伴实体化（批② B2.2/B2.3）：敏捷修与挡刀上下文——基座命中/在场挡刀位时供数
+    const baseAgility = playedBase
+      ? Math.min(3, Math.floor((playedBase.attributes.dex ?? 0) / 10))
+      : 0;
+    const baseGuardExited =
+      playedBase != null &&
+      session.companionGuard?.name === playedBase.name &&
+      session.companionGuard?.exited === true;
+    // 本拍实际在场挡刀位：基座命中且换人 → 新基座；否则沿用既有挡刀位
+    const beatGuard = playedBase
+      ? {
+          name: playedBase.name,
+          hp: playedBase.hp,
+          con: playedBase.attributes.con,
+          exited: baseGuardExited,
+        }
+      : session.companionGuard
+        ? {
+            name: session.companionGuard.name,
+            hp: session.companionGuard.hp,
+            con: session.companionGuard.con,
+            exited: session.companionGuard.exited === true,
+          }
+        : null;
+    const guardContext = beatGuard
+      ? {
+          loyal: (this.game.saveProfile?.affections?.[beatGuard.name] ?? 0) >= 30,
+          hasReceiveHitPassive: (() => {
+            const guardCard = playerC.inventory.find(
+              (i) => i.name === beatGuard.name && i.type === '卡牌',
+            ) as CardItem | undefined;
+            return guardCard
+              ? deriveCardEffects(guardCard).some((fx) => fx.trigger === '受击时')
+              : false;
+          })(),
+        }
+      : undefined;
     const beatOpts = {
       activate,
       prepend,
       ...chapterOpts,
       ...(lastStand ? { lastStand } : {}),
       ...(comboFired ? { comboFired } : {}),
-      ...(beatMpCost > 0 ? { mpCost: beatMpCost } : {}),
+      // 伙伴实体化 B2.5：基座命中 → 本拍 MP 记实体名下（不入玩家 mpSpent，出拍后按名记账）
+      ...(beatMpCost > 0 && !playedBase ? { mpCost: beatMpCost } : {}),
+      // 伙伴实体化 B2.2：基座命中且未退场 → 伙伴敏捷修入反制掷骰
+      ...(baseAgility > 0 && !baseGuardExited ? { agility: baseAgility } : {}),
+      // 伙伴实体化 B2.3：挡刀位建立（基座命中）与转移判定上下文（在场挡刀位忠诚/被动）
+      // 批④ B4.7：防御加值 → seed con +bonus；体魄 → seed maxHp ×(1+pct/100)
+      ...(playedBase
+        ? {
+            companionGuardSeed: {
+              name: playedBase.name,
+              hp: playedBase.hp,
+              maxHp: Math.round(
+                playedBase.maxHp *
+                  (1 + (playedBaseTalent?.kind === '体魄' ? playedBaseTalent.params : 0) / 100),
+              ),
+              con:
+                playedBase.attributes.con +
+                (playedBaseTalent?.kind === '防御加值' ? playedBaseTalent.params : 0),
+            },
+          }
+        : {}),
+      ...(guardContext ? { guardContext } : {}),
+      // 批④ B4.7：威压 → 本拍敌方威胁 ×(1−pct/100)（在场挡刀位带威压天赋时）
+      ...(() => {
+        const guardEntity = beatGuard
+          ? this.game.characters.find((c) => c.name === beatGuard.name)
+          : undefined;
+        const gt = companionTalentOf(guardEntity);
+        return gt?.kind === '威压' && gt.params > 0 ? { threatModPct: gt.params } : {};
+      })(),
       ...(beatEffects.length > 0 ? { effects: beatEffects } : {}),
       ...(session.enemyCount !== undefined ? { enemyCount: session.enemyCount } : {}),
       skill: skillCtx,
@@ -3457,6 +3703,13 @@ export class GamePipeline {
         : {}),
     };
     const next = playBeat(session, action, this.rollSkirmishD20(), beatOpts);
+    // 伙伴实体化 B2.5：基座命中的 MP 记实体名下（结算层写实体 mp，玩家 mp 不扣）
+    if (playedBase && beatMpCost > 0) {
+      next.companionMpSpent = {
+        ...(next.companionMpSpent ?? {}),
+        [playedBase.name]: (next.companionMpSpent?.[playedBase.name] ?? 0) + beatMpCost,
+      };
+    }
     // 技能冷却（战斗维度）：每拍 tick + 打出技能卡时启动冷却
     let cd = tickCooldowns(session.cooldowns);
     if (
@@ -3688,7 +3941,16 @@ export class GamePipeline {
         existingCharacterNames: this.game.characters.map((c) => c.name),
         playerLocation: playerC.location,
         saveId: this.saveId,
+        // 伙伴实体化 B2.4/B2.5：挡刀位重伤写袋与实体 MP 回写读现值
+        companionEntityOf: (name) => this.game.characters.find((c) => c.name === name),
       });
+      // 重伤战报（伙伴实体化 B2.4）：挡刀池打空 → 结算审计行（实体已标重伤未死）
+      if (session.companionGuard && session.companionGuard.hp <= 0) {
+        this.emitMessage(
+          `▸ 【${session.companionGuard.name}】重伤——挡刀池打空退场，需要修复素材或悉心照护才能再战（卡未销毁）`,
+          'assistant',
+        );
+      }
       // 消耗时效果（效果批五）：本场被消耗的技能/领域/场景卡带「消耗时」触发的，
       // 结算同窗把治疗/MP 落给玩家（无战斗数值面——战斗已结束）
       const consumeLines: string[] = [];
@@ -4112,6 +4374,31 @@ export class GamePipeline {
         } as StatePatch);
         for (const name of tick.returned) {
           this.emitMessage(`▸ 【无名河】河水退去——天赋【${name}】回到了你身上`, 'assistant');
+        }
+      }
+      // 休眠出口（伙伴实体化 D4 批①）：本场被消耗的同名卡若清空背包存量且存档内有
+      // 召唤实体 → 同窗沉眠（present:false）。按 patch 后库存口径折算本次消耗数。
+      {
+        const consumedQty = new Map<string, number>();
+        for (const name of session.playedCards) {
+          const played = playerC.inventory.find((i) => i.name === name && i.type === '卡牌');
+          if (!played || !isConsumableKind(cardKindOf((played as CardItem).词条 ?? []))) continue;
+          consumedQty.set(name, (consumedQty.get(name) ?? 0) + 1);
+        }
+        for (const [name, qty] of consumedQty) {
+          const afterRemove = playerC.inventory.map((i) =>
+            i.name === name && i.type === '卡牌'
+              ? { ...i, quantity: Math.max(0, i.quantity - qty) }
+              : i,
+          );
+          if (!isCompanionDormant(name, afterRemove)) continue;
+          const entity = this.game.characters.find((c) => c.name === name);
+          if (!entity || entity.type !== 'summon' || entity.present !== true) continue;
+          settlementPatches.push({
+            op: 'update_character',
+            target: `characters.${name}`,
+            value: { present: false },
+          } as StatePatch);
         }
       }
       const result = await sm.commitChatState(settlementPatches);

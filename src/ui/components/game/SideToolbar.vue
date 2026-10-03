@@ -19,6 +19,7 @@ const allTools = [
   { id: 'talentPanel', label: '天赋', icon: 'fa-solid fa-fingerprint' },
   { id: 'craftBench', label: '制台', icon: 'fa-solid fa-wand-magic-sparkles' },
   { id: 'characters', label: '角色', icon: 'fa-solid fa-users' },
+  { id: 'relations', label: '关系', icon: 'fa-solid fa-link' },
   { id: 'quests', label: '任务', icon: 'fa-solid fa-scroll' },
   { id: 'map', label: '地图', icon: 'fa-solid fa-map' },
   { id: 'memory', label: '记忆', icon: 'fa-solid fa-brain' },

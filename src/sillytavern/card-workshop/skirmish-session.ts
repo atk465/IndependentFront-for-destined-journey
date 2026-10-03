@@ -29,6 +29,8 @@ import { activateListOf, type ActivateInput, type CardInPlayEffect } from './ent
 import { duelSuppressesEffect, type DuelRules } from './battle-rules';
 import { ENTRY_STRENGTH_BASELINE } from './talent-entry';
 import { conditionsMet, effectLineOf, type CardEffectDef } from './card-effects';
+import { planGuardTransfer } from './companion-guard';
+import { CARD_ELEMENT_AXIS } from './derived-stats';
 import {
   aggregateDamage,
   coerceDifficulty,
@@ -47,7 +49,13 @@ export interface SkillContext {
   secondary: readonly { axis: string; bonus: number; derivation: number }[];
   /** 难度档（敌情评估 AI 开战选定；脏值兜底标准表） */
   difficulty: Difficulty;
+  /** 五维轴派生表（批⑤ B5.5 混合轴取优：element[] 效果取 max(各元素轴派生)；缺省不启用） */
+  axisDerivations?: Partial<Record<'str' | 'dex' | 'con' | 'int' | 'spi', number>>;
 }
+
+// 伙伴实体化 D15（批⑤ B5.5）：混合元素效果的技能轨派生取优——
+// axisDerivations 由调用方按（基座命中的）五维+等级算好传入；效果带 element[] 时
+// 取 max(各元素轴派生)，不叠加；无 element 字段行为与现状完全一致。
 
 /** A 类 dot/护盾群（skill 轨：每拍量按难度表出手快照，Q12；削减族与 % 状态保持定点） */
 const DOT_LIKE: ReadonlySet<string> = new Set([
@@ -138,6 +146,21 @@ export interface SkirmishSession {
   spSpent?: number;
   /** 本场 MP 已耗（主动形态卡打出扣费；结算层提交 `mp -= mpSpent`） */
   mpSpent?: number;
+  /**
+   * 伙伴实体化 D6（批② B2.3）：在场挡刀伙伴（基座命中的召唤卡首次打出时建立；
+   * 同名卡重复打出不重建）。hp = 挡刀池余量；hp ≤ 0 → exited = true（退场+重伤）。
+   */
+  companionGuard?: { name: string; hp: number; maxHp: number; con: number; exited: boolean };
+  /**
+   * 伙伴实体化 D5（批② B2.5）：基座命中的召唤卡本场 MP 已耗（按卡名分账；
+   * 结算层 `update_character { mp: entity.mp − cost }`，玩家 mpSpent 不含这部分）。
+   */
+  companionMpSpent?: Record<string, number>;
+  /**
+   * 伙伴实体化（批③ B3.7）：本场挡刀转移成功次数（忠诚 +5 × 次数，结算汇总落账）。
+   */
+  companionGuardTransfers?: number;
+
   /** 效果池：本场敌方防护累计削减（破防；resolveBeat 侧 guard 减它） */
   guardDown?: number;
   /** 效果池：本场 MP 累计回复（凝神；结算层与 mpSpent 轧差落库） */
@@ -333,6 +356,27 @@ export interface BeatOptions {
   /** 本拍 MP 扣费（主动形态卡；2026-09-25 访谈共识。拦人在 cardPlayPlan，这里只记账） */
   mpCost?: number;
   /**
+   * 伙伴实体化（批② B2.2）：本拍反制掷骰的敏捷修 `min(3,⌊dex/10⌋)`——
+   * 基座命中且未退场时由调用方传入；缺省不生效（零回归）。
+   */
+  agility?: number;
+  /**
+   * 伙伴实体化（批② B2.3）：挡刀转移判定上下文（调用方按当前 companionGuard 算好：
+   * loyal = affections ≥ 30；hasReceiveHitPassive = 同名卡带「受击时」效果）。
+   * 缺省 = 不发生转移。
+   */
+  guardContext?: { loyal: boolean; hasReceiveHitPassive: boolean };
+  /**
+   * 伙伴实体化（批④ B4.7）：本拍敌方威胁修正（威压：×(1−pct/100)，钳下限 1）。
+   * 由调用方按在场挡刀位的天赋算好传入；缺省 0 = 不修正。
+   */
+  threatModPct?: number;
+  /**
+   * 伙伴实体化（批② B2.3）：基座命中的召唤卡打出时建立挡刀位
+   * （同名重复打出不重建；不同名替换——调用方在基座命中时传）。
+   */
+  companionGuardSeed?: { name: string; hp: number; maxHp: number; con: number };
+  /**
    * 本拍打出的卡带来的结构化效果（2026-09-25 效果池；调用方 deriveCardEffects 算好传入）。
    * 翻译规则见 translateCardEffects：动作层即时结算进拍账，状态层入 activeEffects。
    */
@@ -469,12 +513,23 @@ export function translateCardEffects(
   const mult = Math.max(1, Math.round(enemyCount));
   // v2 共识·替换制（skill 轨）：A 类输出量按三套难度表换算成公式点数（出手快照），
   // Q7' 重定基的 B 类「本拍伤害+%」进乘区加算层；旧轨维持池定值语义（批次 3 删）。
+  // 批⑤ B5.5：效果带 element[] → 技能轨主轴派生 = max(各元素对应五维派生)（不叠加）
+  const effectMainDerivation = (e: CardEffectDef): { derivation: number; mixed: boolean } => {
+    const els = Array.isArray(e.element) ? e.element : [];
+    const table = skill?.axisDerivations;
+    if (els.length === 0 || !table) return { derivation: skill?.mainDerivation ?? 0, mixed: false };
+    const vals = els
+      .map((el) => table[CARD_ELEMENT_AXIS[el] ?? ''])
+      .filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+    if (vals.length === 0) return { derivation: skill?.mainDerivation ?? 0, mixed: false };
+    return { derivation: Math.max(...vals), mixed: true };
+  };
   const skillify = (e: CardEffectDef): number => {
     if (!skill) return e.value;
     const r = resolveSkillAmount({
       action: e.action,
       difficulty: skill.difficulty,
-      mainDerivation: skill.mainDerivation,
+      mainDerivation: effectMainDerivation(e).derivation,
       secondary: skill.secondary,
     });
     const base = r.mainAmount + r.secondaryAmount;
@@ -485,12 +540,13 @@ export function translateCardEffects(
     const r = resolveSkillAmount({
       action: e.action,
       difficulty: skill.difficulty,
-      mainDerivation: skill.mainDerivation,
+      mainDerivation: effectMainDerivation(e).derivation,
       secondary: skill.secondary,
     });
+    const mixed = effectMainDerivation(e).mixed ? `（混合轴 ${e.element?.join('/')}）` : '';
     return skill.secondary.length > 0
-      ? `${r.mainAmount}+副轴${r.secondaryAmount}`
-      : `${r.mainAmount}`;
+      ? `${r.mainAmount}+副轴${r.secondaryAmount}${mixed}`
+      : `${r.mainAmount}${mixed}`;
   };
   for (const e of effects) {
     // 条件位（效果批七）：不满足 → 空过+战报注明
@@ -826,6 +882,14 @@ export function playBeat(
   const intent = currentIntent(s);
   if (!intent) return s;
 
+  // 挡刀位建立（伙伴实体化 B2.3）：基座命中的召唤卡打出时由调用方传 seed——
+  // 同名重复打出不重建（挡刀池延续）；不同名替换。未传 = 沿用现有挡刀位。
+  const guardSeed = opts?.companionGuardSeed;
+  const activeGuard: SkirmishSession['companionGuard'] =
+    guardSeed && s.companionGuard?.name !== guardSeed.name
+      ? { ...guardSeed, exited: false }
+      : s.companionGuard;
+
   // 倒也可斩：一次性大威力攻击（缺省 50% 敌方当前 HP），消耗 90% 玩家 HP/MP
   // 🔴 每场限一次（2026-09-17）：session.nukeUsed 守卫，重复请求按未请求处理
   const nukeRequested = opts?.nuke === true && s.nukeUsed !== true;
@@ -1060,6 +1124,12 @@ export function playBeat(
 
   // 变异威胁：仅影响本拍敌方威胁判定（resolveBeat 输入侧），不改敌方意图本体
   const effectiveThreat = effectiveIntent.threat + mutationThreat;
+  // 伙伴天赋·威压（批④ B4.7）：在场挡刀位带威压 → 敌方威胁 ×(1−pct/100)，钳下限 1
+  const threatModPct = Math.max(0, Math.round(opts?.threatModPct ?? 0));
+  const beatThreat =
+    threatModPct > 0
+      ? Math.max(1, Math.round(effectiveThreat * (1 - threatModPct / 100)))
+      : effectiveThreat;
 
   // 本拍在场护盾（护盾/格挡状态）+ 本拍易伤层数——供 resolveBeat 乘区与减伤
   const liveShield = live
@@ -1089,7 +1159,7 @@ export function playBeat(
   // 免疫（效果批六）：N 拍全免窗——全部伤害归零（强于圣盾的持续版）
   const liveImmune = live.some((e) => e.type === 'immune');
   const result = resolveBeat({
-    intent: { ...effectiveIntent, threat: effectiveThreat },
+    intent: { ...effectiveIntent, threat: beatThreat },
     action: effectiveAction,
     playerHp: s.playerHp,
     enemyHp: s.enemyHp,
@@ -1097,6 +1167,8 @@ export function playBeat(
     // 破防/穿透在 skill 轨走威胁族（weaken），此处不再削玩家防护
     guard: Math.max(0, s.guard),
     dice: dice + (liveInitiative ? 3 : 0),
+    // 伙伴实体化 B2.2：基座命中且未退场 → 伙伴敏捷修入反制掷骰
+    ...(opts?.agility && activeGuard?.exited !== true ? { agility: opts.agility } : {}),
     ...(liveShield + responseShield > 0 ? { shield: liveShield + responseShield } : {}),
     // skill 轨：易伤乘区已并入 aggregateDamage（Q13'，margin 在乘区外），不再传 resolveBeat
     ...(opts?.skill
@@ -1106,7 +1178,30 @@ export function playBeat(
         : {}),
     ...(beatDamage !== undefined ? { damage: beatDamage } : {}),
   });
-  const playerDamageBase = result.playerDamage ?? 0;
+  const incomingDamage = result.playerDamage ?? 0;
+  // 挡刀承伤转移（伙伴实体化 D6，批② B2.3）：在场挡刀位满足条件 → 伤害改由伙伴承受，
+  // 玩家承 0（resolveBeat 已扣的 HP 由下方 hpAfterBeat 链补回）。不满足 → null 照旧。
+  const guardDecision =
+    activeGuard && incomingDamage > 0 && opts?.guardContext
+      ? planGuardTransfer({
+          incoming: incomingDamage,
+          con: activeGuard.con,
+          guardHp: activeGuard.hp,
+          loyal: opts.guardContext.loyal === true,
+          hasReceiveHitPassive: opts.guardContext.hasReceiveHitPassive === true,
+          exited: activeGuard.exited === true,
+        })
+      : null;
+  const guardTook = guardDecision !== null;
+  // 退场判定（伙伴实体化 B2.4）：挡刀池打空 → 本场退场（压场停止、敏捷修失效、不再转移）
+  const guardNext: SkirmishSession['companionGuard'] | undefined = (() => {
+    if (!activeGuard) return undefined;
+    if (!guardDecision) return activeGuard;
+    const hp = Math.max(0, activeGuard.hp - guardDecision.companionDamage);
+    return { ...activeGuard, hp, exited: hp <= 0 ? true : activeGuard.exited };
+  })();
+  const guardRetired = guardNext !== undefined && guardNext.hp <= 0 && guardNext.exited === true;
+  const playerDamageBase = guardTook ? 0 : incomingDamage;
   const divineBlocked = liveDivine !== undefined && playerDamageBase > 0;
   const immuneBlocked = liveImmune && playerDamageBase > 0;
 
@@ -1125,6 +1220,12 @@ export function playBeat(
     // 出卡宣言（主人裁定：玩家写这张牌用来做什么，纯叙事素材，置于拍审计之前）
     ...(action.note ? [`▸ 意图：${action.note}`] : []),
     ...(opts?.prepend ?? []),
+    // 挡刀（伙伴实体化 D6，批② B2.3）：置于拍审计之前——伤害改道发生在这里
+    ...(guardDecision && activeGuard
+      ? [
+          `▸ 【${activeGuard.name}】挡刀：承伤${incomingDamage} −⌊防${activeGuard.con}/2⌋ = ${guardDecision.companionDamage}`,
+        ]
+      : []),
     ...effectLines,
     ...fx.lines,
     ...(buffTotal > 0 ? [`▸ 在场加成：行动值 +${buffTotal}`] : []),
@@ -1294,11 +1395,17 @@ export function playBeat(
   }
 
   // 圣盾（效果批一）：一次性免疫——被挡下的伤害原样补回 HP 链
-  const hpAfterBeat = result.playerHp + (immuneBlocked || divineBlocked ? playerDamageBase : 0);
+  // 挡刀（伙伴实体化 B2.3）：伙伴承伤同款补回——玩家 HP 回到拍前值
+  const hpAfterBeat =
+    result.playerHp +
+    (immuneBlocked || divineBlocked ? playerDamageBase : 0) +
+    (guardTook ? incomingDamage : 0);
   if (immuneBlocked) {
     lines.push(`▸ 【免疫】本拍 ${playerDamageBase} 点伤害被完全挡下`);
   } else if (divineBlocked && liveDivine) {
     lines.push(`▸ 【圣盾】光芒展开——本拍 ${playerDamageBase} 点伤害被完全挡下（护盾消耗）`);
+  } else if (guardRetired && activeGuard) {
+    lines.push(`▸ 【${activeGuard.name}】退场——挡刀池打空，本场无法再战`);
   }
 
   // 暴走/反噬反冲（启封失败的代价）：拍末玩家扣血，可致死
@@ -1438,6 +1545,11 @@ export function playBeat(
       ? [{ name: forbiddenCard ?? '禁忌卡', type: 'dot' as const, amount: tideAmount }]
       : []),
   ];
+  // 挡刀位退场（伙伴实体化 B2.4）：该实体的压场效果停止（其名下在场效果全部移除）
+  const effectsAfterGuard =
+    guardRetired && activeGuard
+      ? nextEffects.filter((e) => e.name !== activeGuard.name)
+      : nextEffects;
   for (const a of activateList) {
     const line =
       a.type === 'dot'
@@ -1472,7 +1584,11 @@ export function playBeat(
         ? [...s.playedCards, action.cardName]
         : s.playedCards,
     counteredBeats: s.counteredBeats + (result.countered ? 1 : 0),
-    activeEffects: nextEffects,
+    activeEffects: effectsAfterGuard,
+    // 挡刀位状态（伙伴实体化 B2.3/B2.4）：hp 维护与退场标记随会话延续，结算层落库
+    ...(guardNext ? { companionGuard: guardNext } : {}),
+    // 挡刀成功计数（伙伴实体化 B3.7）：结算层按 ×5 落忠诚
+    ...(guardDecision ? { companionGuardTransfers: (s.companionGuardTransfers ?? 0) + 1 } : {}),
     unsealedCards:
       opts?.sealBroke && !s.unsealedCards.includes(opts.sealBroke)
         ? [...s.unsealedCards, opts.sealBroke]
@@ -1775,6 +1891,10 @@ export function playMultiEnemyBeat(
   }
 
   // ── 其余存活敌：威胁直砸玩家（防护/护盾减免，不可反制） ──
+  // 伙伴天赋·威压（批④ B4.7）：威胁 ×(1−pct/100)（钳下限 1，与单敌路径同口径）
+  const multiThreatModPct = Math.max(0, Math.round(opts?.threatModPct ?? 0));
+  const threatScaled = (t: number): number =>
+    multiThreatModPct > 0 ? Math.max(1, Math.round(t * (1 - multiThreatModPct / 100))) : t;
   let incoming = 0;
   const incomingLines: string[] = [];
   for (const { e, i } of alive) {
@@ -1782,8 +1902,13 @@ export function playMultiEnemyBeat(
     const it = e.intents[e.intentIndex % e.intents.length];
     const t = it ? Math.max(0, Math.round(it.threat)) : 0;
     if (t <= 0) continue;
-    incoming += t;
-    incomingLines.push(`▸ 【${e.name}】${it?.move ?? '攻击'}：威胁 ${t}`);
+    const scaled = threatScaled(t);
+    incoming += scaled;
+    incomingLines.push(
+      scaled !== t
+        ? `▸ 【${e.name}】${it?.move ?? '攻击'}：威胁 ${t} → ${scaled}（威压）`
+        : `▸ 【${e.name}】${it?.move ?? '攻击'}：威胁 ${t}`,
+    );
   }
 
   // ── 死亡退场 ──
@@ -1791,9 +1916,10 @@ export function playMultiEnemyBeat(
 
   // 玩家承伤：目标未反制部分 + 其余敌直砸，防护/护盾/免疫统一在入口减
   const attackerCount = alive.length;
+  const targetThreatMod = threatScaled(targetThreat);
   const playerDamage = countered
     ? Math.max(attackerCount > 0 ? 1 : 0, incoming - Math.floor(s.guard / 2))
-    : Math.max(1, targetThreat + incoming - Math.floor(s.guard / 2));
+    : Math.max(1, targetThreatMod + incoming - Math.floor(s.guard / 2));
 
   // 目标承伤：玩家伤害（反制成功加余量），护卫减伤只保护首领
   const aliveMinions = alive.filter(({ e: en }) => en.role === '杂兵').length;

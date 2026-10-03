@@ -661,6 +661,17 @@ export const useSettingsStore = defineStore('settings', () => {
             if (dbMatch && dbMatch.name !== embedded.name) {
               await savePreset({ ...dbMatch, name: embedded.name });
             }
+            // B-1 自愈（2026-10-02）：出厂行（updatedAt===0，boot 播种/装包都不盖
+            // 时间戳）跟随默认层升级——2.9.8 给 story 预设加 {{CARD_DECK}} 时，所有
+            // 已装旧包的设备靠这条在下次启动自愈；用户改过的行（updatedAt>0）仍保留。
+            // 装包路径的指纹跟随（content-store applyInstall b2）覆盖「改过但没动过」的判定。
+            if (
+              dbMatch &&
+              dbMatch.updatedAt === 0 &&
+              JSON.stringify(dbMatch.settings) !== JSON.stringify(embedded.settings)
+            ) {
+              await savePreset({ ...embedded, createdAt: dbMatch.createdAt ?? 0 });
+            }
           }
         } catch {
           /* IndexedDB 不可用时静默跳过 */

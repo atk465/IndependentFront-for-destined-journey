@@ -79,5 +79,10 @@ export function buildCardItem(input: BuildCardItemInput): CardItem {
       rating: input.rating,
     },
     sealed: isHighTierCard(result.tier),
+    // 成长基线字段（2026-10-02 CRAFT-1）：既有卡都有、制卡产物此前缺——参战卡
+    // 经验分成与战力加成读这两格，缺省虽被读侧容错，但新卡与存量卡形状不一致
+    // 会让「字段体检」类取证永远报缺失。出厂即 0。
+    cardExp: 0,
+    cardPowerBonus: 0,
   };
 }

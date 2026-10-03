@@ -36,7 +36,7 @@ export interface RepairRecipe {
 }
 
 export const REPAIR_RECIPE: Record<CardTier, RepairRecipe> = {
-  白铁: { materialCount: 2, minMaterialTier: 1 },
+  黑铁: { materialCount: 2, minMaterialTier: 1 },
   青铜: { materialCount: 3, minMaterialTier: 1 },
   白银: { materialCount: 4, minMaterialTier: 2 },
   鎏金: { materialCount: 5, minMaterialTier: 3 },

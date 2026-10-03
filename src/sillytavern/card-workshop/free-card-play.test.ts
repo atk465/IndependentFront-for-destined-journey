@@ -25,7 +25,7 @@ const 卡 = (name: string, tier: CardItem['cardTier'], 词条: string[]): CardIt
 });
 
 const HAND = [
-  卡('凝神一击', '白铁', ['火', '技能']),
+  卡('凝神一击', '黑铁', ['火', '技能']),
   卡('苍穹之翼', '白银', ['金', '装备']),
   卡('雾渊鲛姬', '鎏金', ['水', '召唤']),
 ];
@@ -66,7 +66,7 @@ describe('matchFreeCardPlay（L1 确定性快路径）', () => {
 describe('recommendCards（L3 推荐徽章）', () => {
   it('按当前意图的反制标签命中数排序并标记推荐', () => {
     const rows = recommendCards(
-      [卡('苍穹之翼', '白银', ['金', '装备']), 卡('凝神一击', '白铁', ['火', '技能'])],
+      [卡('苍穹之翼', '白银', ['金', '装备']), 卡('凝神一击', '黑铁', ['火', '技能'])],
       ['打断'], // 敌方意图反制：打断
       [],
     );
@@ -76,7 +76,7 @@ describe('recommendCards（L3 推荐徽章）', () => {
 
   it('命中意图反制标签的卡获得推荐', () => {
     const rows = recommendCards(
-      [卡('带打断的卡', '青铜', ['火', '燎原']), 卡('白铁之卡', '白铁', [])],
+      [卡('带打断的卡', '青铜', ['火', '燎原']), 卡('黑铁之卡', '黑铁', [])],
       ['打断'],
       [],
     );
@@ -111,10 +111,26 @@ describe('buildIntentResolveMessages', () => {
     expect(msgs[1].content).toContain('打断');
     expect(msgs[1].content).toContain('用火那招烧它');
   });
+  it('brief 定值简报替换纯名字头（玩家用效果名指卡时有匹配线索，2026-10-02 批次B）', () => {
+    const msgs = buildIntentResolveMessages({
+      playerText: '用灼烧那招',
+      cards: [
+        {
+          name: '燎原',
+          tags: ['火'],
+          brief: '【燎原】青铜｜效果：【灼烧】每拍 65% 主属性伤害（2 拍）',
+        },
+      ],
+      intentCounters: [],
+    });
+    expect(msgs[1].content).toContain('【燎原】青铜');
+    expect(msgs[1].content).toContain('【灼烧】');
+    expect(msgs[1].content).toContain('｜反制：火');
+  });
 });
 
 describe('parseIntentResponse（严格白名单）', () => {
-  const hand = [卡('凝神一击', '白铁', ['火', '技能'])];
+  const hand = [卡('凝神一击', '黑铁', ['火', '技能'])];
 
   it('合法 play_card → 出卡 + 宣言', () => {
     const r = parseIntentResponse(

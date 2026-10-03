@@ -58,6 +58,12 @@ export interface CardCraftNarration {
   name?: string;
   /** AI 写的卡面描述（2026-09-25；失败时 undefined，调用方保留玩家意图原文） */
   description?: string;
+  /** AI 写的伙伴性格一句话（伙伴实体化 B3.5；失败时 undefined，调用方回落 desc 首句） */
+  personality?: string;
+  /** AI 选的伙伴天赋 kind（B4.6；池外/失败时 undefined，调用方回落表定 kind） */
+  talentKind?: string;
+  /** AI 起的天赋名（B4.6；≤12 字，失败时 undefined，回落 `${品阶}·${kind}`） */
+  talentName?: string;
   /** 过程叙事 */
   narrative: string;
 }
@@ -85,9 +91,12 @@ export function buildCraftNarrateMessages(req: CardCraftNarrateContent): Array<{
     '2. 评级若是「失败」或「大失败」，叙事必须是**没做成**的样子（走岔了、火候过了、',
     '   材料废了），但不要写成灾难；失败品也在玩家手里。',
     '3. 必须顺着「制卡师想要的样子」来写——那是玩家亲口说的，是这次制卡的心气所在。',
-    '4. 输出格式严格如下三行开头，不要多余的标题或 JSON：',
+    '4. 输出格式严格如下四行开头，不要多余的标题或 JSON：',
     '   <name>卡名（2~6 字，有铭刻纪元的风味，不要带引号）</name>',
     '   <desc>卡面描述（40~80 字，第三人称，写这张卡的样子、手感与来路；不写数值）</desc>',
+    '   <personality>性格一句话（40 字以内，写这张卡显世后的性格与对主人的依恋倾向）</personality>',
+    '   <talent_kind>天赋种类（只许从这些里选一个：行动值加成/防御加值/体魄/威压/嗜血/暴击）</talent_kind>',
+    '   <talent_name>天赋名（12 字以内，贴合这张卡的来历与性格）</talent_name>',
     '   <narrative>过程叙事，200~350 字，第三人称，聚焦制作者的手与心</narrative>',
     '5. 用中文。',
   ].join('\n');
@@ -126,17 +135,48 @@ export function parseCraftNarration(raw: string): CardCraftNarration {
   if (!text) return { narrative: '' };
   const nameMatch = /<name>([\s\S]*?)<\/name>/i.exec(text);
   const descMatch = /<desc>([\s\S]*?)<\/desc>/i.exec(text);
+  const persMatch = /<personality>([\s\S]*?)<\/personality>/i.exec(text);
+  const talentKindMatch = /<talent_kind>([\s\S]*?)<\/talent_kind>/i.exec(text);
+  const talentNameMatch = /<talent_name>([\s\S]*?)<\/talent_name>/i.exec(text);
   const narrMatch = /<narrative>([\s\S]*?)<\/narrative>/i.exec(text);
   const name = nameMatch?.[1]
     ?.trim()
     .replace(/^["'「『]|["'」』]$/g, '')
     .trim();
   const description = descMatch?.[1]?.trim() || undefined;
+  const personality = persMatch?.[1]?.trim().slice(0, 40) || undefined;
+  const talentKind = talentKindMatch?.[1]?.trim().slice(0, 12) || undefined;
+  const talentName = talentNameMatch?.[1]?.trim().slice(0, 12) || undefined;
   if (narrMatch) {
     return {
       ...(name ? { name } : {}),
       ...(description ? { description } : {}),
+      ...(personality ? { personality } : {}),
+      ...(talentKind ? { talentKind } : {}),
+      ...(talentName ? { talentName } : {}),
       narrative: narrMatch[1].trim(),
+    };
+  }
+  // 🔴 叙事段截断兜底（2026-10-02 CRAFT-2）：`</narrative>` 未闭合（流式截断/超长
+  // 被切）时，此前整段当叙事、把**已经成形的 <name>/<desc> 一并丢弃**——AI 明明给
+  // 了名字，产物却落到兜底名。现在名字/描述只要解析成功就保留；叙事取 <narrative>
+  // 开标签之后的尾巴（未闭合场景），没有开标签则取剥掉已消费标签后的余文。
+  if (name || description) {
+    let rest = text;
+    if (nameMatch) rest = rest.replace(nameMatch[0], '');
+    if (descMatch) rest = rest.replace(descMatch[0], '');
+    if (persMatch) rest = rest.replace(persMatch[0], '');
+    const openMatch = /<narrative>/i.exec(rest);
+    const narrative = openMatch
+      ? rest.slice(openMatch.index + openMatch[0].length).trim()
+      : rest.trim();
+    return {
+      ...(name ? { name } : {}),
+      ...(description ? { description } : {}),
+      ...(personality ? { personality } : {}),
+      ...(talentKind ? { talentKind } : {}),
+      ...(talentName ? { talentName } : {}),
+      narrative: narrative || text,
     };
   }
   // 没按格式来：整段当叙事，名字与描述留空（调用方用临时名与意图原文兜底）

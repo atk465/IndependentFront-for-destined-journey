@@ -51,7 +51,7 @@ const 燎原符卡: CardItem = {
 const 苍穹之翼: CardItem = {
   ...燎原符卡,
   name: '苍穹之翼',
-  cardTier: '白铁',
+  cardTier: '黑铁',
   词条: ['风', '装备'],
   cardExp: 190,
 };
@@ -109,7 +109,7 @@ describe('buildSkirmishSettlementPatches —— 参战卡补丁', () => {
   it('消耗卡（技能）→ remove_item；永久卡（装备）→ update_item 写 cardExp', () => {
     const { session } = 胜利账本();
     const cards = [燎原符卡, 苍穹之翼];
-    // 双参战模拟：燎原符卡（技能=消耗）+ 苍穹之翼（装备=永久，白铁管容 200）
+    // 双参战模拟：燎原符卡（技能=消耗）+ 苍穹之翼（装备=永久，黑铁管容 200）
     const played = { ...session, playedCards: ['燎原符卡', '苍穹之翼'] };
     const settle2 = settleSkirmish(played, 9)!;
     const patches = buildSkirmishSettlementPatches({

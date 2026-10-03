@@ -159,6 +159,7 @@ import {
   normalizeItemType,
   normalizeRarity,
   normalizeSlot,
+  normalizeCardTier,
 } from './field-enums';
 
 // ========== Types ==========
@@ -1519,7 +1520,10 @@ export class StateManager {
         // 🆕 卡牌顶层字段直通（委托×地图闭环 2026-09-19）：此前的白名单只有 InventoryItem
         //     字段，CardItem 的档位/词条/配方落库即丢——制卡主路、购卡、委托发卡三条路
         //     全走 add_item，掉的是所有新卡的 cardTier 与词条。给值才写，非卡物品零影响。
-        ...(cardValue.cardTier !== undefined ? { cardTier: cardValue.cardTier } : {}),
+        //     cardTier 经 normalizeCardTier（伙伴实体化 D14：旧档旧称读入即映射黑铁）。
+        ...(cardValue.cardTier !== undefined
+          ? { cardTier: normalizeCardTier(cardValue.cardTier) }
+          : {}),
         ...(cardValue.词条 !== undefined ? { 词条: [...cardValue.词条] } : {}),
         ...(cardValue.recipe !== undefined ? { recipe: cardValue.recipe } : {}),
         ...(cardValue.sealed !== undefined ? { sealed: cardValue.sealed } : {}),
@@ -1594,6 +1598,10 @@ export class StateManager {
     if (changes.type !== undefined) changes.type = normalizeItemType(changes.type);
     if (changes.rarity !== undefined) changes.rarity = normalizeRarity(changes.rarity);
     if (changes.equippedSlot != null) changes.equippedSlot = normalizeSlot(changes.equippedSlot);
+    // 卡牌字段（CardItem 扩展，伙伴实体化 D14）：旧档旧称档位读入即映射
+    const cardChanges = changes as Partial<CardItem>;
+    if (cardChanges.cardTier !== undefined)
+      cardChanges.cardTier = normalizeCardTier(cardChanges.cardTier);
     Object.assign(item, changes);
     await this.persistCharacter(char);
 

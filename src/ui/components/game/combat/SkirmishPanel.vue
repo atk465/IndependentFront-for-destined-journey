@@ -669,6 +669,15 @@ function dismiss() {
         <span v-else-if="c.tags.length > 0" class="tag-hint">{{ c.tags.join('·') }}</span>
       </button>
     </div>
+
+    <!-- 战报明细（2026-10-02 批次F1）：审计链引擎逐拍已写好，这里给一个可折叠的
+         结构化视图——公式/分层Σ/暴击/共鸣/护卫逐行可查，不必翻正文流。 -->
+    <details v-if="session && session.log.length > 0" class="war-detail">
+      <summary>战报明细（{{ session.log.length }} 行）</summary>
+      <ol class="war-log">
+        <li v-for="(line, i) in session.log" :key="i">{{ line }}</li>
+      </ol>
+    </details>
   </section>
 </template>
 
@@ -930,6 +939,25 @@ function dismiss() {
 .tag-hint {
   font-size: 0.6875rem;
   color: var(--theme-text-muted, #967756);
+}
+.war-detail {
+  margin-top: var(--theme-spacing-sm);
+  font-size: 0.75rem;
+}
+.war-detail summary {
+  cursor: pointer;
+  color: var(--theme-text-muted, #967756);
+}
+.war-log {
+  max-height: 12rem;
+  overflow-y: auto;
+  margin: 6px 0 0;
+  padding-left: 1.2em;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--theme-text-secondary, #c7a77e);
+  font-variant-numeric: tabular-nums;
 }
 </style>
 .status-row { display: flex; flex-wrap: wrap; gap: 4px; margin: 2px 0 4px; } .status-badge {

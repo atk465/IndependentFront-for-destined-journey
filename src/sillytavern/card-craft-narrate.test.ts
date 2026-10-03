@@ -50,6 +50,23 @@ describe('parseCraftNarration', () => {
     expect(noDesc.description).toBeUndefined();
   });
 
+  it('🔴 叙事段截断（</narrative> 未闭合）：已成形的 <name>/<desc> 不再被丢（CRAFT-2）', () => {
+    // 2026-10-02 真机：AI 三块齐全但流式截断 → 名字落到兜底「地脉髓·卡」
+    const raw =
+      '<name>残偶怒俑</name>\n<desc>白发瓷偶般的少女蜷于地脉余烬之中。</desc>\n<narrative>她睁开猩红的独眼，';
+    const r = parseCraftNarration(raw);
+    expect(r.name).toBe('残偶怒俑');
+    expect(r.description).toBe('白发瓷偶般的少女蜷于地脉余烬之中。');
+    expect(r.narrative).toContain('猩红的独眼');
+    expect(r.narrative).not.toContain('<name>');
+  });
+
+  it('只有 <name> 成形（连 <narrative> 开标签都没有）：名字仍保留', () => {
+    const r = parseCraftNarration('<name>残偶怒俑</name>\n后面是没包标签的自由发挥');
+    expect(r.name).toBe('残偶怒俑');
+    expect(r.narrative).not.toContain('<name>');
+  });
+
   it('没按格式来 → 整段当叙事，名字留空（调用方兜底）', () => {
     const r = parseCraftNarration('AI 没守格式的自由发挥');
     expect(r.name).toBeUndefined();
@@ -80,7 +97,7 @@ describe('fallbackCraftNarration', () => {
   it('失败/成功两种口径', () => {
     const plan = {
       rating: '失败',
-      product: { name: 'x', cardTier: '白铁', 词条: [], recipe: { fusionKind: '叠加', cost: 1 } },
+      product: { name: 'x', cardTier: '黑铁', 词条: [], recipe: { fusionKind: '叠加', cost: 1 } },
       cost: 1,
       consumed: ['a'],
       notes: [],

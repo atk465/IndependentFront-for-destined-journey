@@ -80,7 +80,7 @@ function rankOf(rarity: Rarity): number {
 /**
  * 等级 → 保底稀有度（「不低于自身等级」）。
  *
- * 走**卡档**这条既有映射：等级 → `CardTier`（白铁…星辉）→ `Rarity`。
+ * 走**卡档**这条既有映射：等级 → `CardTier`（黑铁…星辉）→ `Rarity`。
  * 与 companion-capture 的 `tierForLevel`、拆解的 `TIER_TO_RARITY` 同源，
  * 不在抽奖里另起一套等级口径。
  */

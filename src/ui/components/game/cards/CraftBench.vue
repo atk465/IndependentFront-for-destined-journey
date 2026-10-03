@@ -28,7 +28,7 @@ import { planEnchant, ENCHANT_BASE_COST } from '@engine/card-workshop/card-encha
 import { insightModOf } from '@engine/card-workshop/derived-stats';
 import { REPAIR_RECIPE, isDamaged, planQuench, planRepair } from '@engine/card-workshop/repair';
 import type { RepairPlan } from '@engine/card-workshop/repair';
-import { cardKindOf } from '@engine/card-workshop/card-kind';
+import { cardKindOf, isPlayableCard } from '@engine/card-workshop/card-kind';
 import { planDevour } from '@engine/card-workshop/card-devour';
 import {
   CONTRACT_AFFECTION_THRESHOLD,
@@ -44,9 +44,17 @@ import { planCorruptCompanion, planOffspring } from '@engine/card-workshop/compa
 import { peekMaterialEntries, planStripEntry } from '@engine/card-workshop/card-strip';
 import {
   CONSORT_RANKS,
+  EVOLUTION_ROUTES,
+  evolutionRouteOf,
   planAffectionTribute,
+  planFeedCompanion,
+  planEmbedOffering,
+  planCompanionEvolution,
+  ARCHETYPE_ELEMENTS,
   type ConsortRank,
+  type EvolutionRouteId,
 } from '@engine/card-workshop/companion-growth';
+import { companionBagOf } from '@engine/card-workshop/companion';
 import { entryStrength } from '@engine/card-workshop/talent-rule-modifiers';
 import {
   TRAIN_DIRECTIONS,
@@ -55,6 +63,11 @@ import {
 } from '@engine/card-workshop/craft-flow-hooks';
 import { planFootAlchemy } from '@engine/card-workshop/partner-alchemy';
 import { planCardCraft } from '@engine/card-workshop/card-craft-plan';
+import {
+  aggregateMaterialEntries,
+  visibleMaterialEntries,
+} from '@engine/card-workshop/material-entries';
+import { cardAxisChips, cardEffectLines, cardWarSkillLine } from '../../../lib/card-display';
 import { craftTierCeilingIndex } from '@engine/card-workshop/craft-rank';
 import type { TalentEntry, TalentEntryKind } from '@engine/card-workshop/talent-entry';
 import AppButton from '../../shared/AppButton.vue';
@@ -520,6 +533,8 @@ const craftBlueprint = ref('');
 const crafting = ref(false);
 const craftMsg = ref('');
 const craftErr = ref('');
+/** 产物战斗面回执（2026-10-02 批次A：与卡册详情同源同门禁的展示口径） */
+const craftEffectsMsg = ref('');
 /**
  * 只有真正在制才禁用按钮；「没选主素材 / 副素材与主素材相同」走点击校验给提示
  * （2026-09-23 真机反馈：禁用态视觉不明显，点了没反应像坏了）。
@@ -566,6 +581,7 @@ async function doCraftCard() {
     ...(craftBlueprint.value ? { blueprintName: craftBlueprint.value } : {}),
   });
   crafting.value = false;
+  craftEffectsMsg.value = '';
   if (!r.ok) {
     craftErr.value = r.reason ?? '制卡失败';
     return;
@@ -575,12 +591,48 @@ async function doCraftCard() {
     (r.namedBy === 'fallback' && craftIntent.value.trim()
       ? `（AI 命名未生效${r.namingNote ? `：${r.namingNote}` : ''}，暂用此名）`
       : '');
+  // 回执带上产物的战斗面（效果/战技/副轴）——不翻卡册也能确认 AI 池内选了什么；
+  // 物资/素材卡不可出战、战斗面永不结算，与卡册详情同一门控
+  const product = (player.value?.inventory ?? []).find(
+    (i): i is CardItem => i.type === '卡牌' && i.name === r.productName,
+  );
+  craftEffectsMsg.value =
+    product && isPlayableCard(product)
+      ? [
+          ...cardEffectLines(product),
+          cardWarSkillLine(product),
+          ...cardAxisChips(product).map((c) => `${c.label} +${c.bonus}%`),
+        ]
+          .filter(Boolean)
+          .join('；')
+      : '';
   craftMain.value = '';
   craftSubA.value = '';
   craftSubB.value = '';
   craftIntent.value = '';
   craftBlueprint.value = '';
 }
+
+// ═══ 素材词条预览（2026-10-02 批次D：负面词条 + 主/副位差）═══
+
+/** 清单角标：素材身上的词条名（与结算同源：数据袋或内建/内容包基线，D-1 修复） */
+function entryNamesOf(m: InventoryItem): string {
+  return visibleMaterialEntries(m)
+    .map((e) => e.name)
+    .join('·');
+}
+/** 清单悬浮提示：逐条「名（位·极性）：效果」 */
+function entryTipOf(m: InventoryItem): string {
+  return visibleMaterialEntries(m)
+    .map((e) => `${e.name}（${e.slot}·${e.polarity}）：${e.text}`)
+    .join('\n');
+}
+/** 当前选槽的词条聚合预览——主/副位差在这里直接可见 */
+const craftEntryNotes = computed(() => {
+  if (!selection.main) return [] as string[];
+  const subs = [selection.sub1, selection.sub2].filter(Boolean);
+  return aggregateMaterialEntries(player.value?.inventory ?? [], selection.main, subs).notes;
+});
 
 // ═══ 附魔区（2026-09-25 效果批四：效果池追加登记）═══
 const enchantCardName = ref('');
@@ -1011,6 +1063,114 @@ async function doEnthrone() {
 }
 
 const KIND_LABEL: Record<string, string> = { 叠加: '同类叠加', 相生: '相生复合', 相克: '相克不稳' };
+
+// ═══ 投喂与倾向区（2026-10-02 批次C：素材→伙伴成长 + 进化三选一）═══
+
+const feedTarget = ref('');
+const feedMaterial = ref('');
+const feedMsg = ref('');
+const routeMsg = ref('');
+const feedErr = ref('');
+const feedables = computed(() =>
+  smeltables.value.filter((c) => cardKindOf(c.词条 ?? []) === '召唤'),
+);
+const feedMats = computed(() => (player.value?.inventory ?? []).filter((i) => i.type === '材料'));
+const feedCard = computed(() => feedables.value.find((c) => c.name === feedTarget.value));
+const feedMat = computed(() => feedMats.value.find((m) => m.name === feedMaterial.value));
+const feedPreview = computed(() =>
+  feedCard.value && feedMat.value ? planFeedCompanion(feedCard.value, feedMat.value) : undefined,
+);
+const feedRoute = computed(() => evolutionRouteOf(feedCard.value?.data));
+async function doFeed() {
+  if (!feedTarget.value || !feedMaterial.value) return;
+  feedErr.value = '';
+  feedMsg.value = '';
+  const r = await game.feedCompanion(feedTarget.value, feedMaterial.value);
+  if (!r.ok) {
+    feedErr.value = r.reason ?? '投喂失败';
+    return;
+  }
+  feedMsg.value = r.summary ?? '投喂完成';
+  feedMaterial.value = '';
+}
+async function doRoute(routeId: EvolutionRouteId) {
+  if (!feedTarget.value) return;
+  feedErr.value = '';
+  routeMsg.value = '';
+  const r = await game.setEvolutionDirection(feedTarget.value, routeId);
+  if (!r.ok) {
+    feedErr.value = r.reason ?? '操作失败';
+    return;
+  }
+  routeMsg.value = r.summary ?? '倾向已定';
+}
+
+// ═══ 进化仪式（伙伴实体化 D13，批⑤ B5.3）：祭品嵌入 + 四门槛实时显示 + 仪式 ═══
+const offeringPick = ref('');
+const offeringMsg = ref('');
+const offeringErr = ref('');
+const evolveMsg = ref('');
+const evolveErr = ref('');
+const feedCompanionEntity = computed(() =>
+  feedCard.value
+    ? (game.characters ?? []).find((c) => c.name === feedCard.value?.name && c.type === 'summon')
+    : undefined,
+);
+const feedBag = computed(() =>
+  feedCompanionEntity.value ? companionBagOf(feedCompanionEntity.value) : null,
+);
+const currentArchetype = computed(() => feedBag.value?.evolution.archetype);
+const currentOfferings = computed(() => feedBag.value?.evolution.offerings ?? []);
+const offeringCandidates = computed(() =>
+  feedCard.value
+    ? feedMats.value.filter(
+        (m) =>
+          planEmbedOffering(
+            feedCard.value!,
+            m,
+            (currentArchetype.value ?? '炽野') as '炽野' | '贯城' | '镜影',
+            currentOfferings.value,
+          ).ok,
+      )
+    : [],
+);
+const evolveGates = computed(() => {
+  if (!feedCard.value || !feedBag.value) return undefined;
+  const affection = (game.saveProfile?.affections as Record<string, number> | undefined)?.[
+    feedCard.value.name
+  ];
+  return planCompanionEvolution({
+    level: feedCompanionEntity.value?.level ?? 1,
+    cardTier: feedCard.value.cardTier,
+    archetype: feedBag.value.evolution.archetype,
+    offerings: feedBag.value.evolution.offerings,
+    affection: affection ?? 0,
+    cardName: feedCard.value.name,
+  });
+});
+async function doEmbedOffering() {
+  if (!feedCard.value || !feedMat.value || !currentArchetype.value) return;
+  offeringErr.value = '';
+  offeringMsg.value = '';
+  const r = await game.embedCompanionOffering(feedCard.value.name, feedMat.value.name);
+  if (!r.ok) {
+    offeringErr.value = r.reason ?? '嵌入失败';
+    return;
+  }
+  offeringMsg.value = r.summary ?? '祭品已嵌入';
+  offeringPick.value = '';
+}
+async function doEvolve() {
+  if (!feedTarget.value) return;
+  evolveErr.value = '';
+  evolveMsg.value = '';
+  const r = await game.evolveCompanion(feedTarget.value);
+  if (!r.ok) {
+    evolveErr.value = r.reason ?? '仪式失败';
+    return;
+  }
+  evolveMsg.value = r.summary ?? '进化完成';
+}
 const RATING_HINT: Record<string, string> = {
   大失败: '灾祸难挡',
   失败: '凶多吉少',
@@ -1109,6 +1269,9 @@ const RATING_HINT: Record<string, string> = {
             >
               <i class="fa-solid fa-cube pool-icon" />
               <span class="pool-name">{{ m.name }}</span>
+              <span v-if="entryNamesOf(m)" class="pool-qty" :title="entryTipOf(m)">{{
+                entryNamesOf(m)
+              }}</span>
               <span class="pool-qty">×{{ m.quantity ?? 1 }}</span>
               <span v-if="slotUsage(m.name) > 0" class="pool-used"
                 >已选{{ slotUsage(m.name) }}</span
@@ -1164,6 +1327,10 @@ const RATING_HINT: Record<string, string> = {
               </div>
             </div>
           </div>
+
+          <p v-if="craftEntryNotes.length" class="bench-note">
+            素材词条：{{ craftEntryNotes.join('；') }}
+          </p>
 
           <p class="bench-note">
             实际炼制经由叙事流程（制卡委托）结算；本台只做确定性预览，不作数。
@@ -1555,6 +1722,7 @@ const RATING_HINT: Record<string, string> = {
           {{ craftPreview.reason }}
         </p>
         <p v-if="craftMsg" class="bench-note">{{ craftMsg }}</p>
+        <p v-if="craftEffectsMsg" class="bench-note">产物战斗面：{{ craftEffectsMsg }}</p>
         <p v-if="craftErr" class="clash-warn" role="alert">{{ craftErr }}</p>
         <AppButton
           size="sm"
@@ -1573,8 +1741,8 @@ const RATING_HINT: Record<string, string> = {
       <h4 class="d-label">附魔</h4>
       <div class="slot-card">
         <div class="slot-price">
-          给战斗卡追加一条效果池内的效果——<b>效果从池内选，数值池内定值</b>，每卡最多 2
-          条；附魔不可逆。
+          给战斗卡追加一条效果池内的效果——<b>效果从池内选，数值池内定值</b>；槽位：主动 ≤2 / 持续
+          ≤2，合计 ≤4；附魔不可逆。
         </div>
         <div class="slot-head">
           <select v-model="enchantCardName" class="slot-select" aria-label="选择附魔目标">
@@ -1665,6 +1833,104 @@ const RATING_HINT: Record<string, string> = {
         >
           兑换装备
         </AppButton>
+      </div>
+    </section>
+
+    <!-- 投喂与倾向（2026-10-02 批次C）：素材按元素匹配换卡面成长；倾向三选一（门槛：自我进化） -->
+    <section class="repair-section" aria-label="伙伴投喂">
+      <h4 class="d-label">投喂（素材 → 伙伴成长）</h4>
+      <div v-if="feedables.length === 0" class="empty-tab small">没有伙伴卡可以投喂…</div>
+      <div v-else class="slot-card">
+        <div class="slot-price">
+          把素材喂给她——元素对上了长得快（同源 ×2 / 相生 ×1.5 / 相克 ×0.5），经验攒满一管就是
+          <b>卡面战力 +1</b>。
+        </div>
+        <div class="slot-head">
+          <select v-model="feedTarget" class="slot-select" aria-label="选择要投喂的伙伴卡">
+            <option value="" disabled>选择伙伴卡…</option>
+            <option v-for="c in feedables" :key="c.name" :value="c.name">{{ c.name }}</option>
+          </select>
+          <select v-model="feedMaterial" class="slot-select" aria-label="选择投喂素材">
+            <option value="" disabled>选素材…</option>
+            <option v-for="m in feedMats" :key="m.name" :value="m.name">
+              {{ m.name }}（{{ m.quantity ?? 1 }}）
+            </option>
+          </select>
+        </div>
+        <p v-if="feedPreview?.plan" class="bench-note">{{ feedPreview.plan.summary }}</p>
+        <p v-if="feedMsg" class="bench-note">{{ feedMsg }}</p>
+        <p v-if="feedErr" class="clash-warn" role="alert">{{ feedErr }}</p>
+        <AppButton size="sm" variant="primary" :disabled="!feedPreview?.plan" @click="doFeed">
+          投喂一份
+        </AppButton>
+      </div>
+      <div v-if="game.hasMechanicGate('自我进化') && feedCard" class="slot-card">
+        <div class="slot-price">
+          进化倾向——战斗里没有特定克制可学时，她按倾向生长（随时可转向）：
+          <b>当前{{ feedRoute ? `「${feedRoute.id}」` : '未定' }}</b
+          >。
+        </div>
+        <div class="slot-head">
+          <button
+            v-for="r in EVOLUTION_ROUTES"
+            :key="r.id"
+            type="button"
+            class="chip toggle"
+            :class="{ on: feedRoute?.id === r.id }"
+            @click="doRoute(r.id)"
+          >
+            {{ r.id }}
+          </button>
+        </div>
+        <p class="bench-note">
+          {{
+            EVOLUTION_ROUTES.find((r) => r.id === feedRoute?.id)?.desc ??
+            '三选一：炽野（群体爆裂）/ 贯城（单体破城）/ 镜影（分身共鸣）'
+          }}
+        </p>
+        <p v-if="routeMsg" class="bench-note">{{ routeMsg }}</p>
+        <!-- 进化仪式（伙伴实体化 D13，批⑤ B5.3）：祭品槽 + 四门槛 + 仪式按钮 -->
+        <div v-if="feedBag" class="slot-head">
+          <span class="chip"
+            >祭品槽 {{ currentOfferings.length }}/3（{{ currentArchetype ?? '未定倾向' }}：{{
+              ARCHETYPE_ELEMENTS[currentArchetype ?? '炽野'].join('/')
+            }}）</span
+          >
+          <span v-for="o in currentOfferings" :key="o" class="chip">{{ o }}</span>
+        </div>
+        <div v-if="feedBag && currentArchetype" class="slot-head">
+          <select v-model="offeringPick" class="slot-select" aria-label="选择祭品素材">
+            <option value="" disabled>选祭品素材…</option>
+            <option v-for="m in offeringCandidates" :key="m.name" :value="m.name">
+              {{ m.name }}（{{ m.quantity ?? 1 }}）
+            </option>
+          </select>
+          <AppButton
+            size="sm"
+            variant="primary"
+            :disabled="!offeringPick || currentOfferings.length >= 3"
+            @click="doEmbedOffering"
+            >嵌入祭品</AppButton
+          >
+        </div>
+        <p v-if="offeringMsg" class="bench-note">{{ offeringMsg }}</p>
+        <p v-if="offeringErr" class="clash-warn" role="alert">{{ offeringErr }}</p>
+        <div v-if="evolveGates" class="slot-price">
+          门槛：等级 {{ evolveGates.gates.levelOk ? '✓' : '✗' }} / 倾向
+          {{ evolveGates.gates.archetypeOk ? '✓' : '✗' }} / 祭品
+          {{ evolveGates.gates.offeringsOk ? '✓' : '✗' }} / 忠诚≥50
+          {{ evolveGates.gates.affectionOk ? '✓' : '✗' }}
+        </div>
+        <AppButton
+          v-if="evolveGates"
+          size="sm"
+          variant="primary"
+          :disabled="!evolveGates.ok"
+          @click="doEvolve"
+          >进化仪式</AppButton
+        >
+        <p v-if="evolveMsg" class="bench-note">{{ evolveMsg }}</p>
+        <p v-if="evolveErr" class="clash-warn" role="alert">{{ evolveErr }}</p>
       </div>
     </section>
 

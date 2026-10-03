@@ -116,7 +116,7 @@ export function blueprintCraftBonus(): { formEntry: string; ratingLift: number; 
 export function threatTierOf(threat: number | undefined): CardTier | undefined {
   const t = typeof threat === 'number' && Number.isFinite(threat) ? threat : 0;
   if (t <= 0) return undefined;
-  if (t <= 8) return '白铁';
+  if (t <= 8) return '黑铁';
   if (t <= 14) return '青铜';
   if (t <= 20) return '白银';
   if (t <= 30) return '鎏金';

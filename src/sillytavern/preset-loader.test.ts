@@ -650,3 +650,46 @@ describe('orderPresetPrompts —— 列表顺序真源（2026-09-17）', () => {
     expect(arr.map((x) => x.name)).toEqual(['A', 'B']);
   });
 });
+
+// ═══════════════════════════════════════════════════════════
+// 引擎占位符剥离白名单（2026-10-02 B-2 根因修复）
+// ═══════════════════════════════════════════════════════════
+
+describe('preprocessEntry —— 引擎占位符不被 ST 宏剥离吃掉（B-2）', () => {
+  it('后占位符时代的引擎占位符（TALENT/CARD_DECK/MAP_CONTEXT/RANDOM_EVENTS/QUEST_STATE）原样放行', () => {
+    const out = preprocessEntry(
+      '<天赋>{{TALENT}}</天赋>\n{{CARD_DECK}}\n{{MAP_CONTEXT}}\n{{RANDOM_EVENTS}}\n{{QUEST_STATE}}',
+      {},
+    );
+    expect(out).toContain('{{TALENT}}');
+    expect(out).toContain('{{CARD_DECK}}');
+    expect(out).toContain('{{MAP_CONTEXT}}');
+    expect(out).toContain('{{RANDOM_EVENTS}}');
+    expect(out).toContain('{{QUEST_STATE}}');
+  });
+
+  it('AGENT.* 与既有个别名（USER_NAME/CHARACTER_NAME）照旧放行；真未知宏照旧剥离', () => {
+    const out = preprocessEntry(
+      '{{AGENT.MEMORY_RECALL}} {{USER_NAME}} {{CHARACTER_NAME}} {{NOT_A_THING}}',
+      {},
+    );
+    expect(out).toContain('{{AGENT.MEMORY_RECALL}}');
+    expect(out).toContain('{{USER_NAME}}');
+    expect(out).toContain('{{CHARACTER_NAME}}');
+    expect(out).not.toContain('NOT_A_THING');
+  });
+
+  it('ST 宏语义不变：getvar/random/char/user 照常处理', () => {
+    const vars = { 预算: '4096' };
+    const out = preprocessEntry(
+      '{{char}}对{{user}}说预算{{getvar::预算}}，随机{{random::甲,乙}}',
+      vars,
+      {
+        characterName: '霜',
+        userName: '玩家',
+      },
+    );
+    expect(out).toContain('霜对玩家说预算4096');
+    expect(out).toMatch(/甲|乙/);
+  });
+});

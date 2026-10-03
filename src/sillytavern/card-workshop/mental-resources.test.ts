@@ -56,10 +56,10 @@ describe('启封双轴（意志+理解）', () => {
 
 describe('MP 硬门槛与档位扣费', () => {
   it('档位定价表；非主动形态免', () => {
-    expect(CARD_MP_COST_BY_TIER['星辉']).toBe(55);;
+    expect(CARD_MP_COST_BY_TIER['星辉']).toBe(55);
     expect(mpCostOf({ cardTier: '星辉', 词条: ['技能'] })).toBe(54); // 档位微差 −1（Q20）
     expect(mpCostOf({ cardTier: '星辉', 词条: ['装备'] })).toBe(0);
-    expect(mpCostOf({ cardTier: '白铁', 词条: ['物资'] })).toBe(0);
+    expect(mpCostOf({ cardTier: '黑铁', 词条: ['物资'] })).toBe(0);
   });
   it('MP 不足 → 禁打（带可见原因）；足够 → 正常', () => {
     const card = {
@@ -104,7 +104,7 @@ describe('SP 拍耗与力竭', () => {
     const after = playBeat(s, { label: '术', power: 20, tags: [], cardName: '烈焰术' }, 15, {
       mpCost: 55,
     });
-    expect(after.mpSpent).toBe(55);;
+    expect(after.mpSpent).toBe(55);
   });
   it('SP 归零 → 力竭败北（HP 还剩时）', () => {
     const s = mk(5);

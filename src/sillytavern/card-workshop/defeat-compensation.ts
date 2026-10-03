@@ -56,17 +56,17 @@ const IF_LINE_TEXTS: readonly string[] = [
  * 规划一次战败补偿（纯函数）。
  *
  * @param playerLevel 玩家等级（决定奖励量级）
- * @param tier 玩家当前卡组最高档（决定素材品质；缺省白铁）
+ * @param tier 玩家当前卡组最高档（决定素材品质；缺省黑铁）
  * @param rng 随机源（默认 Math.random；测试注入固定值）
  */
 export function planDefeatCompensation(
   playerLevel: number,
-  tier: CardTier = '白铁',
+  tier: CardTier = '黑铁',
   rng: () => number = Math.random,
 ): DefeatCompensationPlan {
   const lv = Math.max(1, Math.round(playerLevel) || 1);
   const rarityByTier: Record<CardTier, Rarity> = {
-    白铁: '普通',
+    黑铁: '普通',
     青铜: '优良',
     白银: '稀有',
     鎏金: '史诗',

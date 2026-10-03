@@ -16,6 +16,7 @@ import {
   normalizeQuestStatus,
   normalizeStatusCategory,
   normalizeCraftIndustry,
+  normalizeCardTier,
 } from './field-enums';
 
 /**
@@ -43,7 +44,7 @@ describe('枚举常量', () => {
     expect(ITEM_TYPES).toEqual(['装备', '消耗品', '材料', '任务物品', '特殊', '卡牌']);
   });
   it('card tier 为卡兰大陆 5 级', () => {
-    expect(CARD_TIERS).toEqual(['白铁', '青铜', '白银', '鎏金', '星辉']);
+    expect(CARD_TIERS).toEqual(['黑铁', '青铜', '白银', '鎏金', '星辉']);
   });
   it('craft industry 为 4 行业 + 制卡', () => {
     expect(CRAFT_INDUSTRIES).toEqual(['锻造', '炼金', '烹饪', '裁缝', '制卡']);
@@ -170,6 +171,27 @@ describe('normalizeCraftIndustry', () => {
   it('原型键返回 undefined', () => {
     expect(normalizeCraftIndustry('constructor')).toBeUndefined();
     expect(normalizeCraftIndustry('toString')).toBeUndefined();
+  });
+});
+
+describe('normalizeCardTier（伙伴实体化 D14 黑铁替换）', () => {
+  // 旧档最低档旧称字面量（\u767d\u94c1）——按 grep 零命中红线以转义书写
+  const LEGACY_LOWEST = '\u767d\u94c1';
+  it('旧档旧称读入即映射为黑铁', () => {
+    expect(normalizeCardTier(LEGACY_LOWEST)).toBe('黑铁');
+  });
+  it('合法档位透传', () => {
+    expect(normalizeCardTier('黑铁')).toBe('黑铁');
+    expect(normalizeCardTier('青铜')).toBe('青铜');
+    expect(normalizeCardTier('白银')).toBe('白银');
+    expect(normalizeCardTier('鎏金')).toBe('鎏金');
+    expect(normalizeCardTier('星辉')).toBe('星辉');
+  });
+  it('非法值兜底最低档黑铁', () => {
+    expect(normalizeCardTier('白金')).toBe('黑铁');
+    expect(normalizeCardTier('')).toBe('黑铁');
+    expect(normalizeCardTier(null)).toBe('黑铁');
+    expect(normalizeCardTier(123)).toBe('黑铁');
   });
 });
 

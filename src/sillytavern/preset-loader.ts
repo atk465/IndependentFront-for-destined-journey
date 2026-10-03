@@ -14,6 +14,7 @@
  */
 
 import type { AgentPreset } from './types';
+import { isEnginePlaceholder } from './placeholder-names';
 
 // 🪦 D28（波 1 T2）: `PRESET_BASE = '/data/presets/'` 常量已删（死路径，见文件尾注释）。
 
@@ -145,15 +146,18 @@ export function preprocessEntry(
   // 6. 剥离 {{roll ...}}
   result = result.replace(/\{\{roll\s+[^}]*\}\}/gi, '');
 
-  // 7. 剥离其他非系统 {{...}} 占位符
-  const SYSTEM_RE =
-    /\{\{(?:SYS_PROMPT|NARRATIVE|USER_INPUT|LORE_BOOK|LORE_BOOK_STATIC|LORE_BOOK_DYNAMIC|CHARACTER_STATE|AGENT\.\w+|INVENTORY|GAME_TIME|ACTIVE_EFFECTS|MEMORY_ENTRIES|PLOT_EVENTS|CRAFT_REQUEST|CHAR_DETECT|CHAR_GEN_RESULT|CRAFT_RESULT|ITEM_REQUEST|USER_NAME|CHARACTER_NAME)\}\}/;
-  result = result.replace(/\{\{([^}]+)\}\}/g, (match) => {
-    if (SYSTEM_RE.test(match)) return match;
+  // 7. 剥离其他非系统 {{...}} 占位符。
+  //    白名单唯一真源 = ENGINE_PLACEHOLDER_NAMES（placeholder-names.ts，2026-10-02 B-2）：
+  //    原先这份手写字面量停在旧占位符时代，{{TALENT}}/{{CARD_DECK}}/{{MAP_CONTEXT}} 等
+  //    被当未知宏静默剥掉、引擎 resolver 永远收不到（story prompt <天赋> 空壳实测）。
+  //    USER_NAME/CHARACTER_NAME 是 ST 侧名字宏（replaceCharUser 的中间形态），照旧放行。
+  const result2 = result.replace(/\{\{([^}]+)\}\}/g, (match, token: string) => {
+    if (isEnginePlaceholder(token)) return match;
+    if (token === 'USER_NAME' || token === 'CHARACTER_NAME') return match;
     return '';
   });
 
-  return result;
+  return result2;
 }
 
 /** 检查内容是否包含任何需要预处理的 ST 宏 */
@@ -373,12 +377,12 @@ export function preprocessPresetForPreview(
     content = content.replace(/\{\{roll\s+[^}]*\}\}/gi, '');
 
     // 7. 剥离未知占位符，但保留已知系统占位符 + random + char + user
-    const SYSTEM_RE =
-      /\{\{(?:SYS_PROMPT|NARRATIVE|USER_INPUT|LORE_BOOK|LORE_BOOK_STATIC|LORE_BOOK_DYNAMIC|CHARACTER_STATE|AGENT\.\w+|INVENTORY|GAME_TIME|ACTIVE_EFFECTS|MEMORY_ENTRIES|PLOT_EVENTS|CRAFT_REQUEST|CHAR_DETECT|CHAR_GEN_RESULT|CRAFT_RESULT|ITEM_REQUEST|USER_NAME|CHARACTER_NAME)\}\}/;
+    //    （白名单唯一真源 = ENGINE_PLACEHOLDER_NAMES，与 preprocessEntry 同源，B-2）
     const PRESERVE_RE = /\{\{(?:random::|char\}\}|user\}\})/i;
-    content = content.replace(/\{\{([^}]+)\}\}/g, (match: string) => {
-      if (SYSTEM_RE.test(match)) return match;
+    content = content.replace(/\{\{([^}]+)\}\}/g, (match: string, token: string) => {
+      if (isEnginePlaceholder(token)) return match;
       if (PRESERVE_RE.test(match)) return match;
+      if (token === 'USER_NAME' || token === 'CHARACTER_NAME') return match;
       return '';
     });
 

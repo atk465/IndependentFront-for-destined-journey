@@ -93,6 +93,7 @@ import {
   getDatabase,
   exportAllData,
   importAllData,
+  savePreset,
   savePresets,
   deletePreset,
   deletePresets,
@@ -988,6 +989,48 @@ export const useContentStore = defineStore('content', () => {
       }
       await deletePresets(toDelete);
       await savePresets(toUpsert);
+    }
+
+    // b2. agentDefaults 内嵌预设的**跟随升级**（2026-10-02 B-1，P0）。
+    //     顶层 presets 分节有四态（上面 b.），但 2.9.x 起出厂预设改藏在
+    //     agentDefaults.agents[*].preset——这条路径此前只在 boot 播种时落一次库，
+    //     之后 pack 升级永不跟随：2.9.8 给 story 预设加了 {{CARD_DECK}}，所有已装
+    //     旧包的设备升级后静默拿不到（B 批整批不可见的根因之一）。
+    //     三态判定：
+    //       · Dexie 无同 id 行 → 写入（首次）；
+    //       · 出厂行（updatedAt===0，boot 播种/装包都不盖时间戳）或 settings 与
+    //         **上一版 pack payload** 的同 id 预设逐字节一致（用户从未改过）→ 跟随更新；
+    //       · 其余（用户在设置页改过）→ 保留用户版，console.warn 留痕。
+    if (pack.agentDefaults?.agents) {
+      const db = getDatabase();
+      const oldAgents = existing?.payload?.agentDefaults?.agents as
+        Record<string, { preset?: ChatPreset }> | undefined;
+      for (const entry of Object.values(pack.agentDefaults.agents)) {
+        const embedded = (entry as { preset?: ChatPreset | null }).preset;
+        if (!embedded || typeof embedded.id !== 'string') continue;
+        const row = await db.presets.get(embedded.id);
+        if (!row) {
+          await savePreset(JSON.parse(JSON.stringify(embedded)) as ChatPreset);
+          continue;
+        }
+        const oldEmbedded = oldAgents
+          ? Object.values(oldAgents).find((e) => e?.preset?.id === embedded.id)?.preset
+          : undefined;
+        const untouchedByFingerprint =
+          oldEmbedded !== undefined &&
+          JSON.stringify(row.settings) === JSON.stringify(oldEmbedded.settings ?? null);
+        if (row.updatedAt === 0 || untouchedByFingerprint) {
+          await savePreset({
+            ...JSON.parse(JSON.stringify(embedded)),
+            createdAt: row.createdAt ?? 0,
+            updatedAt: Date.now(),
+          } as ChatPreset);
+        } else {
+          console.warn(
+            `[content-store] 出厂预设「${embedded.name ?? embedded.id}」已被用户修改，pack ${pack.packVersion} 的新版未覆盖（如需升级请在设置页重置该预设）`,
+          );
+        }
+      }
     }
 
     // c. beautifierRules（provider 内存层，不写用户表）—— 装包后重算 presetRules

@@ -50,6 +50,12 @@ import {
 } from '@engine/card-workshop/talent-entry';
 // 购卡池唯一口径：内容仓 cardPool + 运行时自定义卡（2026-09-18 开发者模式接线）
 import { getCustomCards, mergeCards } from '@engine/card-workshop/custom-content';
+// 获得即诞生（伙伴实体化 D3 批①）：开局召唤卡随档同事务诞生实体
+import {
+  buildSummonCompanion,
+  isSummonCard,
+  needsFirstSummon,
+} from '@engine/card-workshop/companion';
 import { useSettingsStore } from './settings-store';
 import {
   type CatalogData,
@@ -1376,7 +1382,7 @@ export const useCreateStore = defineStore('create', () => {
     //    dispatcher 必须从 {{USER_INPUT}} 的原始清单认物品，否则名字漂移、数值被 item_gen 重掷。
     // HP/MP/SP/五维等基础属性仍在此 Code 计算。
 
-    // 开局卡组（2026-09-16 卡牌化）：保底白铁卡 + 购入卡，确定性构造 CardItem 直落
+    // 开局卡组（2026-09-16 卡牌化）：保底黑铁卡 + 购入卡，确定性构造 CardItem 直落
     // inventory + cardAlbum（铁律3 数值归 Code；交锋读背包 type:'卡牌'，卡必须在背包）。
     const starterItems: CardItem[] = STARTER_CARDS.map((c) => cardCatalogToItem(c));
     const boughtItems: CardItem[] = selectedCards.value.map((c) => cardCatalogToItem(c));
@@ -1680,6 +1686,25 @@ export const useCreateStore = defineStore('create', () => {
 
     const saveId = crypto.randomUUID();
     const charState = buildCharacterState(saveId);
+    // 获得即诞生（伙伴实体化 D3 批①）：开局保底+购卡的召唤卡 → 同事务诞生伙伴实体。
+    // seed 取 catalog 条目的 companion 字段（cardCatalogToItem 不携带种子，从上游配对）；
+    // 逐张按名查重（开局卡组内部重名只诞一个实体）。
+    const companionRoster: string[] = [charState.name];
+    const openingCompanions: CharacterState[] = [];
+    for (const entry of [...STARTER_CARDS, ...selectedCards.value]) {
+      const card = cardCatalogToItem(entry);
+      if (!isSummonCard(card) || !needsFirstSummon(card.name, companionRoster)) continue;
+      openingCompanions.push(
+        buildSummonCompanion({
+          card,
+          ...(entry.companion ? { seed: entry.companion } : {}),
+          saveId,
+          playerName: charState.name,
+          location: charState.location,
+        }),
+      );
+      companionRoster.push(card.name);
+    }
     const openingPrompt = buildOpeningPrompt();
     console.log('[create-store] startJourney — openingPrompt:', openingPrompt.slice(0, 200));
     console.log('[create-store] startJourney — openingPrompt length:', openingPrompt.length);
@@ -1720,6 +1745,7 @@ export const useCreateStore = defineStore('create', () => {
       : undefined;
     const input = {
       character: charState,
+      companions: openingCompanions,
       save,
       era: era.value,
       experienceMode: experienceMode.value === 'easy' ? ('easy' as const) : ('normal' as const),

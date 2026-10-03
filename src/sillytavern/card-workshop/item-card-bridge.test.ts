@@ -6,9 +6,9 @@ import {
 } from './item-card-bridge';
 
 describe('tierFromItemQuality（7 级品质 → 5 级卡 tier）', () => {
-  it('逐档映射（普通/优良合流白铁，神话/唯一合流星辉）', () => {
-    expect(tierFromItemQuality('普通')).toBe('白铁');
-    expect(tierFromItemQuality('优良')).toBe('白铁');
+  it('逐档映射（普通/优良合流黑铁，神话/唯一合流星辉）', () => {
+    expect(tierFromItemQuality('普通')).toBe('黑铁');
+    expect(tierFromItemQuality('优良')).toBe('黑铁');
     expect(tierFromItemQuality('稀有')).toBe('青铜');
     expect(tierFromItemQuality('史诗')).toBe('白银');
     expect(tierFromItemQuality('传说')).toBe('鎏金');
@@ -17,9 +17,9 @@ describe('tierFromItemQuality（7 级品质 → 5 级卡 tier）', () => {
   });
 
   it('缺失/脏值落最低档（不抛）', () => {
-    expect(tierFromItemQuality(undefined)).toBe('白铁');
-    expect(tierFromItemQuality('传说级')).toBe('白铁');
-    expect(tierFromItemQuality('')).toBe('白铁');
+    expect(tierFromItemQuality(undefined)).toBe('黑铁');
+    expect(tierFromItemQuality('传说级')).toBe('黑铁');
+    expect(tierFromItemQuality('')).toBe('黑铁');
   });
 });
 

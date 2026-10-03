@@ -9,6 +9,7 @@ import {
   computeCost,
   expectedRating,
   deriveEntries,
+  isClashPair,
   materialTierToCardTier,
   rollCraftRating,
   CLASH_DISCOUNT,
@@ -23,12 +24,12 @@ const 玄铁: MaterialSpec = { name: '玄铁锭', price: 40, tier: 3, elements: 
 
 describe('materialTierToCardTier', () => {
   it('1-5 映射到 5 级品质', () => {
-    expect(materialTierToCardTier(1)).toBe('白铁');
+    expect(materialTierToCardTier(1)).toBe('黑铁');
     expect(materialTierToCardTier(3)).toBe('白银');
     expect(materialTierToCardTier(5)).toBe('星辉');
   });
   it('越界被夹取', () => {
-    expect(materialTierToCardTier(0)).toBe('白铁');
+    expect(materialTierToCardTier(0)).toBe('黑铁');
     expect(materialTierToCardTier(99)).toBe('星辉');
   });
 });
@@ -138,5 +139,16 @@ describe('rollCraftRating', () => {
   it('掷骰越界被夹取', () => {
     expect(rollCraftRating('成功', 0)).toBe('失败');
     expect(rollCraftRating('成功', 999)).toBe('成功');
+  });
+});
+
+describe('isClashPair（投喂等消费方用的相克对判定）', () => {
+  it('与 CLASH_TABLE 同源：水火/光暗/冰火相克，火风相生不算克，同元素不算克', () => {
+    expect(isClashPair('火', '水')).toBe(true);
+    expect(isClashPair('水', '火')).toBe(true);
+    expect(isClashPair('光', '暗')).toBe(true);
+    expect(isClashPair('冰', '火')).toBe(true);
+    expect(isClashPair('火', '风')).toBe(false);
+    expect(isClashPair('火', '火')).toBe(false);
   });
 });

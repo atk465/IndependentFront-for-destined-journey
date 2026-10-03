@@ -75,11 +75,11 @@ describe('cardCounterAction —— 出卡 = 基础攻击的增强（真机校准
     expect(cardCounterAction(卡({ 词条: ['火', '燎原'] }), stats).tags).toEqual(['强攻', '打断']);
   });
   it('出卡严格优于裸强攻（44 + 正卡力），无死卡', () => {
-    const weak = cardCounterAction(卡({ cardTier: '白铁', 词条: [] }), stats);
+    const weak = cardCounterAction(卡({ cardTier: '黑铁', 词条: [] }), stats);
     expect(weak.power).toBeGreaterThan(44);
   });
   it('cardPowerBonus 计入卡面战力（卡牌经验满管转化）', () => {
-    const got = cardCounterAction(卡({ cardTier: '白铁', 词条: [], cardPowerBonus: 3 }), stats);
+    const got = cardCounterAction(卡({ cardTier: '黑铁', 词条: [], cardPowerBonus: 3 }), stats);
     expect(got.power).toBe(44 + 2 * (1 + 3));
   });
 });
@@ -139,7 +139,7 @@ describe('cardPlayPlan —— 八类卡语义矩阵（真机裁定 2026-09-13）
     }
   });
   it('素材 → 禁打', () => {
-    const plan = cardPlayPlan(卡({ name: '巨兽骨', cardTier: '白铁', 词条: ['素材'] }), stats);
+    const plan = cardPlayPlan(卡({ name: '巨兽骨', cardTier: '黑铁', 词条: ['素材'] }), stats);
     expect(plan.mode).toBe('禁打');
   });
 });

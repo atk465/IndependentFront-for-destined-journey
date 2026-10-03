@@ -207,7 +207,7 @@ async function saveCard() {
   };
   if (cElement.value) item.element = cElement.value;
   // 效果池门禁：只收池内定值条目（UI 层已约束，此处兜底）
-  const gatedEffects = coerceCardEffects(cEffects.value);
+  const gatedEffects = coerceCardEffects(cEffects.value, cElement.value ? [cElement.value] : []);
   if (gatedEffects.length > 0) item.effects = gatedEffects;
   if (needsYield.value && cYieldName.value.trim()) {
     item.yield = {

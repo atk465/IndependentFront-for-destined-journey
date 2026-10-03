@@ -209,3 +209,71 @@ describe('叙事层 —— AI 只命名与写过程', () => {
     expect(text.length).toBeGreaterThan(0);
   });
 });
+
+// ═══ 2026-10-02 批次D：素材词条（负面词条 + 主/副位差）═══
+
+describe('素材词条 —— 制卡数值的确定性参与', () => {
+  const 背包D = [...背包, 素材('月光苔'), 素材('千年树心'), 素材('铜矿'), 素材('精灵花')];
+
+  it('灵光(+2) 在评级边界翻档：叠加基线成功、裸骰 4 → 失败，月光苔主位 4+2=6 → 成功', () => {
+    const plain = planCardCraft({
+      mainName: '火晶',
+      subNames: [],
+      intent: '',
+      inventory: 背包D,
+      d20: 4,
+    });
+    const withEntry = planCardCraft({
+      mainName: '月光苔',
+      subNames: [],
+      intent: '',
+      inventory: 背包D,
+      d20: 4,
+    });
+    expect(plain.plan!.rating).toBe('失败'); // 叠加基线=成功，roll<6 落失败
+    expect(withEntry.plan!.rating).toBe('成功'); // 灵光通用 +2 → 6 过线
+    expect(withEntry.plan!.audit.join('\n')).toContain('素材词条');
+    expect(withEntry.plan!.audit.join('\n')).toContain('+2（素材词条）');
+  });
+
+  it('残瑕(主位) → 产物卡面战力 −1（瑕疵打折，允许轻微负值）', () => {
+    const r = planCardCraft({
+      mainName: '铜矿',
+      subNames: [],
+      intent: '',
+      inventory: 背包D,
+      d20: 10,
+    });
+    expect(r.plan!.product.cardPowerBonus).toBe(-1);
+  });
+
+  it('浑成(主位) +1；同一素材换到副位不再生效（位差）', () => {
+    const asMain = planCardCraft({
+      mainName: '千年树心',
+      subNames: [],
+      intent: '',
+      inventory: 背包D,
+      d20: 10,
+    });
+    expect(asMain.plan!.product.cardPowerBonus).toBe(1);
+    const asSub = planCardCraft({
+      mainName: '火晶',
+      subNames: ['千年树心'],
+      intent: '',
+      inventory: 背包D,
+      d20: 10,
+    });
+    expect(asSub.plan!.product.cardPowerBonus ?? 0).toBe(0);
+  });
+
+  it('引韵(副位) → 产物必得素材首元素词条', () => {
+    const r = planCardCraft({
+      mainName: '赤铁矿',
+      subNames: ['精灵花'],
+      intent: '',
+      inventory: 背包D,
+      d20: 10,
+    });
+    expect(r.plan!.product.词条).toContain('光');
+  });
+});

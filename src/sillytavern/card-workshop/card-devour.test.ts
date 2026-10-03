@@ -34,20 +34,20 @@ describe('planDevour（吞噬：成长 + 词条吸收）', () => {
   });
 
   it('吞素材 → 只涨经验不吸词条（素材无词条）', () => {
-    const r = planDevour(卡('本命剑', '白铁', ['金']), 素材('铁屑'), () => 0);
+    const r = planDevour(卡('本命剑', '黑铁', ['金']), 素材('铁屑'), () => 0);
     expect(r.ok).toBe(true);
     expect(r.plan!.absorbedEntry).toBeUndefined();
     expect(r.plan!.new词条).toEqual(['金']);
   });
 
-  it('燃料档位越高经验越多（白铁 < 星辉）', () => {
+  it('燃料档位越高经验越多（黑铁 < 星辉）', () => {
     expect(devourExpGain(卡('a', '星辉'), false)).toBeGreaterThan(
-      devourExpGain(卡('b', '白铁'), false),
+      devourExpGain(卡('b', '黑铁'), false),
     );
   });
 
   it('拒绝：不能吞自己 / 非卡非素材 / 燃料超上限', () => {
-    const t = 卡('本命剑', '白铁');
+    const t = 卡('本命剑', '黑铁');
     expect(planDevour(t, t).ok).toBe(false);
     expect(planDevour(t, { name: '石头', quantity: 1, type: '装备' } as InventoryItem).ok).toBe(
       false,

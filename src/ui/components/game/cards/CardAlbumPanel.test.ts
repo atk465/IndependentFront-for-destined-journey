@@ -22,6 +22,8 @@ const mockGame: {
 });
 
 vi.mock('../../../stores/game-store', () => ({ useGameStore: () => mockGame }));
+// F-1（2026-10-02）：卡面复制补了 ui.toast —— 测试桩同步提供 ui-store
+vi.mock('../../../stores/ui-store', () => ({ useUIStore: () => ({ toast: vi.fn() }) }));
 
 import CardAlbumPanel from './CardAlbumPanel.vue';
 
@@ -115,5 +117,67 @@ describe('撤出', () => {
     const w = mount(CardAlbumPanel);
     expect(w.text()).toContain('封印 DC');
     expect(w.text()).toContain('启封槽位');
+  });
+});
+
+describe('详情战斗面（2026-10-02 批次A）', () => {
+  it('效果行可见：无登记时按元素派生打底（火→灼烧）', () => {
+    mockGame.player!.inventory = [card('燎原')];
+    const w = mount(CardAlbumPanel);
+    expect(w.text()).toContain('【灼烧】');
+  });
+  it('登记效果/战技/副轴照实渲染（读侧门禁口径）', () => {
+    mockGame.player!.inventory = [
+      card('燎原', {
+        cardTier: '白银',
+        cardEffects: [
+          {
+            trigger: '打出时',
+            target: '敌单体',
+            action: '连击',
+            value: 50,
+            duration: 0,
+            cost: { sp: 3 },
+          },
+        ],
+        战技: { status: '中毒', power: 5, beats: 2 },
+        cardSecondaryAxes: [{ axis: 'spi', bonus: 40 }],
+      }),
+    ];
+    const w = mount(CardAlbumPanel);
+    expect(w.text()).toContain('【连击】');
+    expect(w.text()).not.toContain('【灼烧】'); // 登记生效就不走元素打底
+    expect(w.text()).toContain('战技「中毒」');
+    expect(w.text()).toContain('精神 +40%');
+  });
+  it('黑铁无副轴槽：门禁外的副轴不显示，效果仍走打底', () => {
+    mockGame.player!.inventory = [
+      card('燎原', { cardTier: '黑铁', cardSecondaryAxes: [{ axis: 'spi', bonus: 40 }] }),
+    ];
+    const w = mount(CardAlbumPanel);
+    expect(w.text()).not.toContain('精神 +40%');
+    expect(w.text()).toContain('【灼烧】');
+  });
+  it('物资/素材卡不可出战：战斗面整节不显示（元素派生也不会结算）', () => {
+    mockGame.player!.inventory = [card('燎原', { 词条: ['火', '物资'] })];
+    const w = mount(CardAlbumPanel);
+    expect(w.text()).not.toContain('【灼烧】');
+    expect(w.text()).not.toContain('战技');
+  });
+});
+
+describe('复制卡面（2026-10-02 批次F4）', () => {
+  it('点「复制卡面」→ description 进剪贴板，提示可见', async () => {
+    const writeText = vi.fn(async () => undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    mockGame.player!.inventory = [
+      card('燎原', { description: '漆黑书房废墟前的白发瓷偶少女，手握滴火的狼牙刃' }),
+    ];
+    const w = mount(CardAlbumPanel);
+    const btn = w.findAll('button').find((b) => b.text().includes('复制卡面'))!;
+    await btn.trigger('click');
+    await nextTick();
+    expect(writeText).toHaveBeenCalledWith('漆黑书房废墟前的白发瓷偶少女，手握滴火的狼牙刃');
+    expect(w.text()).toContain('已复制');
   });
 });

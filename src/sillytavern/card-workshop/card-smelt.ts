@@ -98,9 +98,9 @@ export function planSmelt(
   // 产出档位：各源最高档 + tierGain（封顶星辉）
   const topTier = sources.reduce<CardTier>((best, c) => {
     const bi = CARD_TIERS.indexOf(best);
-    const ci = CARD_TIERS.indexOf(c.cardTier ?? '白铁');
-    return ci > bi ? (c.cardTier ?? '白铁') : best;
-  }, '白铁');
+    const ci = CARD_TIERS.indexOf(c.cardTier ?? '黑铁');
+    return ci > bi ? (c.cardTier ?? '黑铁') : best;
+  }, '黑铁');
   const productTier = tierUpBy(topTier, tierGain);
 
   // 词条：各源各取一个（源序确定性），去重 + 集合体标记
@@ -112,7 +112,7 @@ export function planSmelt(
   if (!entries.includes('集合体')) entries.push('集合体');
 
   // 命名：取最高档源的名字
-  const topSource = sources.find((c) => (c.cardTier ?? '白铁') === topTier) ?? sources[0];
+  const topSource = sources.find((c) => (c.cardTier ?? '黑铁') === topTier) ?? sources[0];
   const productName = `${topSource.name}·熔铸`;
   const mode: SmeltPlan['mode'] = sources.length >= 3 ? '献祭' : '融合';
 
@@ -181,7 +181,7 @@ export function planContract(
       reason: `羁绊不足（当前 ${Math.round(affection)}，需 ≥${need}）`,
     };
   }
-  const before = card.cardTier ?? '白铁';
+  const before = card.cardTier ?? '黑铁';
   const newTier = tierUpOf(before);
   if (newTier === before) {
     return { ok: false, reason: '已是星辉——契约形态封顶' };
@@ -240,7 +240,7 @@ export function planMultiFusion(
     if (isDamaged(c)) return { ok: false, reason: `【${c.name}】已损坏——先修复` };
     if (names.has(c.name)) return { ok: false, reason: `同名卡【${c.name}】不能重复投入` };
     if (maxTierIndex !== undefined) {
-      const idx = CARD_TIERS.indexOf(c.cardTier ?? '白铁');
+      const idx = CARD_TIERS.indexOf(c.cardTier ?? '黑铁');
       if (idx > maxTierIndex) {
         return {
           ok: false,
@@ -253,9 +253,9 @@ export function planMultiFusion(
 
   const topTier = sources.reduce<CardTier>((best, c) => {
     const bi = CARD_TIERS.indexOf(best);
-    const ci = CARD_TIERS.indexOf(c.cardTier ?? '白铁');
-    return ci > bi ? (c.cardTier ?? '白铁') : best;
-  }, '白铁');
+    const ci = CARD_TIERS.indexOf(c.cardTier ?? '黑铁');
+    return ci > bi ? (c.cardTier ?? '黑铁') : best;
+  }, '黑铁');
   const productTier = tierUpBy(topTier, tierGain);
 
   // 继承：各源各取一个词条（源序确定性）
@@ -356,7 +356,7 @@ export function planAbyssContract(
   if (added.length === 0) {
     return { ok: false, reason: '这份契约已经缔结过了' };
   }
-  const before = card.cardTier ?? '白铁';
+  const before = card.cardTier ?? '黑铁';
   const newTier = tierUpOf(before);
   const upgraded = newTier !== before;
   return {

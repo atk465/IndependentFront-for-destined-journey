@@ -89,7 +89,7 @@ export function shouldUpgradeSoulWeapon(
 ): boolean {
   if (!current) return false;
   const want = soulWeaponTierForLevel(level);
-  return CARD_TIERS.indexOf(want) > CARD_TIERS.indexOf(current.cardTier ?? '白铁');
+  return CARD_TIERS.indexOf(want) > CARD_TIERS.indexOf(current.cardTier ?? '黑铁');
 }
 
 /** 从背包里找本名武器（按 `data.soulBound` 或「本名」词条判定） */

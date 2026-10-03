@@ -48,14 +48,14 @@ function tierIndex(t: CardTier): number {
 
 /**
  * 燃料折算的经验增益。
- * 口径：燃料档位越高给得越多（白铁 1 管 / 青铜 1.5 管 / 白银 2 管 / 鎏金 3 管 / 星辉 4 管），
- * 素材（材料）按等价白铁一管折算——素材是可用素材，吞素材是「贱用」，但兼容。
+ * 口径：燃料档位越高给得越多（黑铁 1 管 / 青铜 1.5 管 / 白银 2 管 / 鎏金 3 管 / 星辉 4 管），
+ * 素材（材料）按等价黑铁一管折算——素材是可用素材，吞素材是「贱用」，但兼容。
  */
 export function devourExpGain(fuel: Pick<CardItem, 'cardTier'>, isMaterial: boolean): number {
-  if (isMaterial) return CARD_EXP_CAP['白铁'];
+  if (isMaterial) return CARD_EXP_CAP['黑铁'];
   const mults = [1, 1.5, 2, 3, 4];
-  const idx = tierIndex(fuel.cardTier ?? '白铁');
-  const cap = CARD_EXP_CAP[fuel.cardTier ?? '白铁'] ?? CARD_EXP_CAP['白铁'];
+  const idx = tierIndex(fuel.cardTier ?? '黑铁');
+  const cap = CARD_EXP_CAP[fuel.cardTier ?? '黑铁'] ?? CARD_EXP_CAP['黑铁'];
   return Math.round(cap * (mults[idx] ?? 1));
 }
 
@@ -85,7 +85,7 @@ export function planDevour(
     return { ok: false, reason: '损坏的卡不能作为燃料（先修复）' };
   }
   if (isCard && maxTierIndex !== undefined) {
-    const fuelIdx = tierIndex((fuel as CardItem).cardTier ?? '白铁');
+    const fuelIdx = tierIndex((fuel as CardItem).cardTier ?? '黑铁');
     if (fuelIdx > maxTierIndex) {
       return {
         ok: false,

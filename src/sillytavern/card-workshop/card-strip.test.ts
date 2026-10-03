@@ -29,10 +29,10 @@ describe('planStripEntry（词条剥离）', () => {
   });
 
   it('形态/标记词条不可剥；不存在的词条拒绝；素材卡拒绝', () => {
-    expect(planStripEntry(卡('a', '白铁', ['召唤', '火']), '召唤').ok).toBe(false);
-    expect(planStripEntry(卡('a', '白铁', ['火']), '冰').ok).toBe(false);
-    expect(planStripEntry(卡('a', '白铁', ['素材']), '素材').ok).toBe(false);
-    expect(planStripEntry(卡('a', '白铁', ['火']), '  ').ok).toBe(false);
+    expect(planStripEntry(卡('a', '黑铁', ['召唤', '火']), '召唤').ok).toBe(false);
+    expect(planStripEntry(卡('a', '黑铁', ['火']), '冰').ok).toBe(false);
+    expect(planStripEntry(卡('a', '黑铁', ['素材']), '素材').ok).toBe(false);
+    expect(planStripEntry(卡('a', '黑铁', ['火']), '  ').ok).toBe(false);
   });
 
   it('peekMaterialEntries：素材的隐藏词条 = 名字推导的元素', () => {

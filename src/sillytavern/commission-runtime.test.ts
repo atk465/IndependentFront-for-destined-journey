@@ -13,7 +13,7 @@ import type { CommissionDef } from './card-workshop/commission';
 
 const 委托 = (name: string): CommissionDef => ({
   name,
-  requireCard: { minTier: '白铁' },
+  requireCard: { minTier: '黑铁' },
   rewards: { gc: 50, reputation: 5 },
 });
 

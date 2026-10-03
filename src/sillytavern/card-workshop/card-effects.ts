@@ -16,6 +16,7 @@
  */
 
 import type { CardTier } from '../field-enums';
+import { CARD_ELEMENT_AXIS } from './derived-stats';
 
 /** 触发时机（首批三种 + 击杀时 + 效果批五：拍结束/消耗时。「拍开始」与「每拍」同源合并——见 backlog） */
 export type EffectTrigger =
@@ -143,6 +144,12 @@ export interface CardEffectDef {
   cost?: EffectCost;
   /** 条件（效果批七：单条件数组，全部满足才结算；不满足空过+战报） */
   conditions?: EffectCondition[];
+  /**
+   * 效果元素轴（伙伴实体化 D15，批⑤ B5.4/B5.5）：混合元素技能轨——
+   * 必须 ⊆ 卡词条元素集（coerceCardEffects 门禁校验，违规整条丢弃）；
+   * 结算时该效果的技能轨主轴派生 = max(各元素对应五维派生)，不叠加。
+   */
+  element?: string[];
 }
 
 /** 单卡效果集（卡定义上的新字段；派生打底与精配覆写都产出它） */
@@ -485,7 +492,10 @@ export function deriveCardEffects(
   const override = cardEffectOverrides.get(card.name);
   if (override) return override;
   // 卡面登记效果（AI 池内选）次优先——存的是原始形状，读侧再门禁一次
-  const stored = coerceCardEffects((card as { cardEffects?: unknown }).cardEffects);
+  const stored = coerceCardEffects(
+    (card as { cardEffects?: unknown }).cardEffects,
+    (card.词条 ?? []).filter((w) => CARD_ELEMENT_AXIS[w]),
+  );
   if (stored.length > 0) return stored;
   const words = Array.isArray(card.词条) ? card.词条 : [];
   const element = words.find((w) => ELEMENT_DEFAULT_EFFECT[w] !== undefined);
@@ -515,17 +525,50 @@ export interface CardItemLike {
 
 // ── 门禁（AI 池内选的越权防线） ──
 
+// ── 槽位（2026-10-02 批次E：分槽扩容）──
+
+/** 效果槽位：主动（一次性发动）与被动（持续在场） */
+export type EffectSlot = '主动' | '被动';
+
+/** 主动槽触发时机——其余（每拍/受击时）归被动槽 */
+const ACTIVE_TRIGGERS: ReadonlySet<EffectTrigger> = new Set([
+  '打出时',
+  '击杀时',
+  '拍结束',
+  '消耗时',
+  '治疗时',
+  '施法时',
+]);
+
+export function slotOfTrigger(trigger: EffectTrigger): EffectSlot {
+  return ACTIVE_TRIGGERS.has(trigger) ? '主动' : '被动';
+}
+
+/**
+ * 槽位上限（批次E：主动 ≤2 为原口径不动；被动（每拍/受击时）新增 ≤2；合计 ≤4）。
+ * 🔴 对旧门禁（合计 ≤2）是**严格超集**——旧 2 条任意组合（含双「每拍」）全部仍合法，
+ *    存档零回归。新增「常驻被动」型动作条目属 session 结算域，随 values-table 线
+ *    批次 6 验收后另批，本批只扩容量不改池。
+ */
+export const EFFECT_SLOT_CAPS: Readonly<Record<EffectSlot, number>> = Object.freeze({
+  主动: 2,
+  被动: 2,
+});
+export const EFFECT_TOTAL_CAP = EFFECT_SLOT_CAPS.主动 + EFFECT_SLOT_CAPS.被动;
+
 /**
  * AI 效果选择 → 合法效果集（门禁）：
- * - 非数组/超量（>2 条）→ 整批丢弃（返回 []，调用方回落派生打底）
+ * - 非数组/超量（合计 >4）→ 整批丢弃（返回 []，调用方回落派生打底）
+ * - 槽位超限（主动 >2 或 被动 >2）→ 整批丢弃（防滥用口径不变）
  * - 单条：动作必须在池内，且 value/duration/cost 与池内定值一致（AI 只选不改数）
  * - 触发时机/目标不在白名单 → 丢弃该条
  * 全部非法时返回 []（派生打底兜底）；部分合法保留合法条。
  */
-export function coerceCardEffects(raw: unknown): CardEffects {
+export function coerceCardEffects(raw: unknown, allowedElements?: readonly string[]): CardEffects {
   if (!Array.isArray(raw)) return [];
-  if (raw.length > 2) return []; // 超量整批丢弃（防滥用；单卡上限 2 条）
+  if (raw.length > EFFECT_TOTAL_CAP) return []; // 超量整批丢弃（防滥用；合计上限 4）
   const out: CardEffectDef[] = [];
+  const slotCount: Record<EffectSlot, number> = { 主动: 0, 被动: 0 };
   for (const item of raw) {
     if (!item || typeof item !== 'object') continue;
     const e = item as Partial<CardEffectDef>;
@@ -539,6 +582,16 @@ export function coerceCardEffects(raw: unknown): CardEffects {
     if (duration !== entry.duration) continue;
     const cost = sanitizeCost(e.cost, entry.cost);
     if (JSON.stringify(cost ?? {}) !== JSON.stringify(entry.cost ?? {})) continue;
+    // 效果元素轴（批⑤ B5.4）：带 element 必须非空数组；给了 allowedElements 还须 ⊆，
+    // 违规整条丢弃（不剪裁、不救）。无 element 字段行为与现状完全一致。
+    let element: string[] | undefined;
+    if (e.element !== undefined) {
+      const els = Array.isArray(e.element) ? e.element.filter((x) => typeof x === 'string') : [];
+      if (els.length === 0) continue;
+      if (allowedElements && !els.every((el) => allowedElements.includes(el))) continue;
+      element = els;
+    }
+    slotCount[slotOfTrigger(e.trigger)] += 1;
     out.push({
       trigger: e.trigger,
       target: e.target,
@@ -546,7 +599,11 @@ export function coerceCardEffects(raw: unknown): CardEffects {
       value,
       ...(duration > 0 ? { duration } : {}),
       ...(cost ? { cost } : {}),
+      ...(element ? { element } : {}),
     });
+  }
+  if (slotCount.主动 > EFFECT_SLOT_CAPS.主动 || slotCount.被动 > EFFECT_SLOT_CAPS.被动) {
+    return []; // 槽位超限整批丢弃（对旧 ≤2 存档是严格超集，零回归）
   }
   return out;
 }

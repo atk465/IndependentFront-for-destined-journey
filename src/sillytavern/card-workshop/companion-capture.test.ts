@@ -26,7 +26,7 @@ const 召唤 = (name: string, tier: CardItem['cardTier'], 词条: string[]): Car
 
 describe('tierForLevel（等级→卡档）', () => {
   it('按等级区间映射五档', () => {
-    expect(tierForLevel(1)).toBe('白铁');
+    expect(tierForLevel(1)).toBe('黑铁');
     expect(tierForLevel(6)).toBe('青铜');
     expect(tierForLevel(10)).toBe('白银');
     expect(tierForLevel(15)).toBe('鎏金');
@@ -96,7 +96,7 @@ describe('planCorruptCompanion（转化伙伴卡）', () => {
       planCorruptCompanion({ name: 'x', cardTier: '青铜', 词条: ['召唤'], data: { damaged: true } })
         .ok,
     ).toBe(false);
-    const r = planCorruptCompanion(召唤('空卡', '白铁', ['召唤']));
+    const r = planCorruptCompanion(召唤('空卡', '黑铁', ['召唤']));
     expect(r.ok).toBe(true);
     expect(r.plan!.materials).toHaveLength(1);
   });

@@ -76,7 +76,7 @@ export function planUnequalExchange(
   }
 
   if (item.type === '卡牌') {
-    const picked = drawFortuneCard(pool, item.cardTier ?? '白铁');
+    const picked = drawFortuneCard(pool, item.cardTier ?? '黑铁');
     if (!picked) {
       return { ok: false, reason: '命运卡堆是空的（需安装内容包）——暂无可换的卡' };
     }

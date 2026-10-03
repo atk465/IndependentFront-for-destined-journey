@@ -134,8 +134,8 @@ describe('不变价交换 —— planUnequalExchange', () => {
     },
     {
       id: 'c2',
-      name: '白铁盾',
-      cardTier: '白铁',
+      name: '黑铁盾',
+      cardTier: '黑铁',
       formEntry: '装备',
       description: '',
       cost: 10,

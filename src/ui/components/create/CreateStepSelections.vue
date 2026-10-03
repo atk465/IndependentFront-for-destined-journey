@@ -4,7 +4,7 @@
  *
  * 旧 CDN 装备/道具/技能目录退役。卡来自内容仓 catalog.cardPool，
  * 按可战斗四类（装备/技能/领域/物资）分栏选购，点数按 cardTier 计价。
- * 提交时由 store 确定性构造 CardItem 直落卡组（含白铁保底两张）。
+ * 提交时由 store 确定性构造 CardItem 直落卡组（含黑铁保底两张）。
  */
 import { computed } from 'vue';
 import { useCreateStore } from '../../stores/create-store';

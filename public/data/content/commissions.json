@@ -1,5 +1,5 @@
 {
-  "$comment": "占位内容（卡牌工坊 委托板）。真实委托定义住在私有内容仓的内容包 commissions 分节（第 15 面），公开仓只放三条**对着演示卡量身**的示例，让不装内容包也能走通「接取 → 炼卡/选卡 → 上交验收 → 奖励到账」全链。🔴 defs 逐条走 coerceCommissions 容错：name 非串 / requireCard 非对象的条目逐条丢。requireCard 组合过滤器全可选：minTier（白铁~星辉）/ formEntry（八类形态词）/ elements（元素词条全含）/ exactName（剧情委托精确卡名）。奖励 rewards: gc（赏金）/ reputation（声望 delta）/ materials（素材 add_item）。交付由引擎验收（matchesCommission / buildDeliveryPatches），AI 零写路径。",
+  "$comment": "占位内容（卡牌工坊 委托板）。真实委托定义住在私有内容仓的内容包 commissions 分节（第 15 面），公开仓只放三条**对着演示卡量身**的示例，让不装内容包也能走通「接取 → 炼卡/选卡 → 上交验收 → 奖励到账」全链。🔴 defs 逐条走 coerceCommissions 容错：name 非串 / requireCard 非对象的条目逐条丢。requireCard 组合过滤器全可选：minTier（黑铁~星辉）/ formEntry（八类形态词）/ elements（元素词条全含）/ exactName（剧情委托精确卡名）。奖励 rewards: gc（赏金）/ reputation（声望 delta）/ materials（素材 add_item）。交付由引擎验收（matchesCommission / buildDeliveryPatches），AI 零写路径。",
   "defs": [
     {
       "name": "军械库的补给单",

@@ -19,7 +19,7 @@ import { deriveElements } from './material';
 
 /** 档位 → 材料品质（与拆解/转化同口径） */
 const TIER_TO_RARITY: Record<string, Rarity> = {
-  白铁: '普通',
+  黑铁: '普通',
   青铜: '优良',
   白银: '稀有',
   鎏金: '史诗',
@@ -76,7 +76,7 @@ export function planStripEntry(
   if (STRUCTURAL_ENTRIES.has(target)) {
     return { ok: false, reason: `「${target}」是形态/标记词条——剥掉它这张卡就不成形了` };
   }
-  const rarity = TIER_TO_RARITY[(card.cardTier ?? '白铁') as string] ?? '普通';
+  const rarity = TIER_TO_RARITY[(card.cardTier ?? '黑铁') as string] ?? '普通';
   return {
     ok: true,
     plan: {

@@ -48,7 +48,7 @@ export const CARD_EXP_SHARE = 0.5;
 
 /** 卡牌经验上限（随品质翻倍）；满管 → 卡面战力 +1、清空重攒（主人裁定 A） */
 export const CARD_EXP_CAP: Record<CardTier, number> = {
-  白铁: 200,
+  黑铁: 200,
   青铜: 400,
   白银: 800,
   鎏金: 1600,
@@ -118,6 +118,11 @@ export interface BeatInput {
   guard: number;
   /** d20，调用方从骰带通道取得；越界夹逼 1..20 */
   dice: number;
+  /**
+   * 伙伴实体化 D5（批② B2.2）：基座命中的伙伴敏捷修
+   * `agilityBonus = min(3, ⌊dex/10⌋)`——反制掷骰加值；缺省 0 = 不生效（零回归）。
+   */
+  agility?: number;
   /** 2026-09-25 效果池：本拍护盾减伤（护盾/格挡；直接抵扣玩家承伤） */
   shield?: number;
   /** 2026-09-25 效果池：易伤层数值（敌方承伤 +value%） */
@@ -243,7 +248,9 @@ export function resolveBeat(input: BeatInput): BeatResult {
   const guard = Number.isFinite(input.guard) ? Math.max(0, Math.round(input.guard)) : 0;
 
   const bonus = counterBonusOf(input.intent, input.action.tags);
-  const roll = dice + power + bonus;
+  // 伙伴实体化 B2.2：敏捷修并入反制掷骰（基座未命中不传 = 0，零回归）
+  const agility = Number.isFinite(input.agility) ? Math.max(0, Math.round(input.agility!)) : 0;
+  const roll = dice + power + bonus + agility;
   const margin = roll - threat;
   const countered = margin >= 0;
 
@@ -264,7 +271,9 @@ export function resolveBeat(input: BeatInput): BeatResult {
   const afterEnemy = Math.max(0, enemyHp - enemyDamage);
 
   const audit = [
-    `▸ ${input.action.label}：d20=${dice} + 行动值${power} + 克制+${bonus} = ${roll} vs 威胁${threat}` +
+    `▸ ${input.action.label}：d20=${dice} + 行动值${power} + 克制+${bonus}${
+      agility > 0 ? ` + 敏捷${agility}` : ''
+    } = ${roll} vs 威胁${threat}` +
       (countered ? ` → 反制成功（余量${margin}）` : ` → 反制失败（差${-margin}）`),
     countered
       ? `▸ 敌方 HP ${enemyHp} → ${afterEnemy}（−${enemyDamage} = ${
@@ -380,7 +389,7 @@ export function cardExpGain(playerBattleExp: number): number {
 
 /**
  * 卡牌经验入账：溢出循环结算——每攒满一管 → 卡面战力 +1、余量进下一管
- * （一次巨量经验可以连升多次，永不丢经验）。未知品质按白铁管容兜底。
+ * （一次巨量经验可以连升多次，永不丢经验）。未知品质按黑铁管容兜底。
  */
 export function applyCardExp(spec: CardExpSpec, gain: number): CardExpResult {
   return growCardByRawExp(spec, cardExpGain(gain));
@@ -394,7 +403,7 @@ export function applyCardExp(spec: CardExpSpec, gain: number): CardExpResult {
  * 满管溢出循环（卡牌经验 → 战力）是两者的共同内核，只有这一份实现。
  */
 export function growCardByRawExp(spec: CardExpSpec, rawExp: number): CardExpResult {
-  const cap = CARD_EXP_CAP[spec.cardTier] ?? CARD_EXP_CAP['白铁'];
+  const cap = CARD_EXP_CAP[spec.cardTier] ?? CARD_EXP_CAP['黑铁'];
   let exp = Number.isFinite(spec.cardExp) ? Math.max(0, Math.round(spec.cardExp as number)) : 0;
   let bonus = Number.isFinite(spec.cardPowerBonus)
     ? Math.max(0, Math.round(spec.cardPowerBonus as number))

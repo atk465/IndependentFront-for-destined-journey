@@ -1499,7 +1499,7 @@ describe('submitSkirmishCounter —— 封印卡启封流', () => {
   it('nat20 → 必启封：效果发动 + 破封账 + 参战卡账', async () => {
     const setSkirmishSession = vi.fn();
     const pipeline = makePipeline({
-      player: 封印玩家('白铁'), // 白铁 DC8：20+0 必启封
+      player: 封印玩家('黑铁'), // 黑铁 DC8：20+0 必启封
       skirmishSession: 封印会话(),
       setSkirmishSession,
     });

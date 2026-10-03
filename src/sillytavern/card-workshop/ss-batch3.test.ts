@@ -187,7 +187,7 @@ describe('威压 / 体魄 / 判定取优 / 产出数量 —— 接线', () => {
 
 describe('制卡师等级上限 —— 先前未生效的限制现在生效', () => {
   it('吞噬：燃料档位不得超过「制卡师等级 + 档位」', () => {
-    const target = 卡('目标', '白铁');
+    const target = 卡('目标', '黑铁');
     const 高燃料 = 卡('星辉料', '星辉');
     // Lv4 制卡师（+1 → 青铜上限）吞不了星辉
     const cap = craftTierCeilingIndex(4, 1);
@@ -205,9 +205,9 @@ describe('制卡师等级上限 —— 先前未生效的限制现在生效', ()
   });
 
   it('融合：三张里有一张超档就拒（描述说「不高于你制卡师等级」）', () => {
-    const 甲 = 卡('甲', '白铁');
-    const 乙 = 卡('乙', '白铁');
-    const 丙 = 卡('丙', '白铁');
+    const 甲 = 卡('甲', '黑铁');
+    const 乙 = 卡('乙', '黑铁');
+    const 丙 = 卡('丙', '黑铁');
     const 高 = 卡('高', '星辉');
     expect(planMultiFusion([甲, 乙, 高], () => 0, 1, craftTierCeilingIndex(4, 0)).ok).toBe(false);
     expect(planMultiFusion([甲, 乙, 丙], () => 0, 1, craftTierCeilingIndex(4, 0)).ok).toBe(true);

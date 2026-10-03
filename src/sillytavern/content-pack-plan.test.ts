@@ -558,7 +558,7 @@ describe('planPackInstall — commissions 分节（三态 + 整节替换）', ()
     return {
       defs: names.map((name) => ({
         name,
-        requireCard: { minTier: '白铁' },
+        requireCard: { minTier: '黑铁' },
         rewards: { gc: 50, reputation: 5 },
       })),
     };

@@ -9,7 +9,7 @@
  * 战斗侧的「胜利额外素材」由 talent-hooks 的 victoryMaterial 钩子承担（同一天赋的另一半）。
  *
  * 确定性口径：
- * - 卡牌档位 → 材料品质（白铁→普通 / 青铜→优良 / 白银→稀有 / 鎏金→史诗 / 星辉→传说），
+ * - 卡牌档位 → 材料品质（黑铁→普通 / 青铜→优良 / 白银→稀有 / 鎏金→史诗 / 星辉→传说），
  *   产出 2 份；装备/道具按自身品质产出 1 份。
  * - 素材本身（材料）不可再拆——避免无限套娃。
  *
@@ -26,7 +26,7 @@ import { CARD_TIERS, type CardTier, type Rarity } from '../field-enums';
  * 不给同一条映射留第二份副本。
  */
 export const TIER_TO_RARITY: Record<CardTier, Rarity> = {
-  白铁: '普通',
+  黑铁: '普通',
   青铜: '优良',
   白银: '稀有',
   鎏金: '史诗',
@@ -77,7 +77,7 @@ export function planDismantle(
   let rarity: Rarity = '普通';
   let copies = 1;
   if (item.type === '卡牌') {
-    const tier = ((item as { cardTier?: CardTier }).cardTier ?? '白铁') as CardTier;
+    const tier = ((item as { cardTier?: CardTier }).cardTier ?? '黑铁') as CardTier;
     const idx = CARD_TIERS.indexOf(tier);
     if (maxTierIndex !== undefined && idx > maxTierIndex) {
       return {

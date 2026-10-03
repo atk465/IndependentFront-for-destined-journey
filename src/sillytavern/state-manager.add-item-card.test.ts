@@ -68,7 +68,7 @@ describe('add_item 卡牌字段直通', () => {
       {
         op: 'add_item',
         target: 'characters.Player',
-        value: { name: '禁忌卡·雪葬', quantity: 2, cardTier: '白铁' },
+        value: { name: '禁忌卡·雪葬', quantity: 2, cardTier: '黑铁' },
       },
     ]);
     const inv = (await getCharacters('atomic'))[0].inventory;

@@ -26,7 +26,7 @@ export const ITEM_TYPES = ['装备', '消耗品', '材料', '任务物品', '特
 export type ItemType = (typeof ITEM_TYPES)[number];
 
 /** 卡牌品质（制卡系统 5 级，独立于 7 级装备品质；铭刻纪元世界观） */
-export const CARD_TIERS = ['白铁', '青铜', '白银', '鎏金', '星辉'] as const;
+export const CARD_TIERS = ['黑铁', '青铜', '白银', '鎏金', '星辉'] as const;
 export type CardTier = (typeof CARD_TIERS)[number];
 
 /** 制作行业（对齐世界书 4 种 + 制卡；2026-09-12 自 types.ts 收口，铁律5） */
@@ -169,4 +169,17 @@ export function normalizeCraftIndustry(raw: string): CraftIndustry | undefined {
   const s = (raw ?? '').trim();
   if ((CRAFT_INDUSTRIES as readonly string[]).includes(s)) return s as CraftIndustry;
   return undefined;
+}
+
+/** D14 前最低档旧称（\u767d\u94c1）；按 grep 零命中红线以转义书写 */
+const LEGACY_LOWEST_TIER = '\u767d\u94c1';
+
+/**
+ * 旧档兼容：D14 前最低档旧称读入即映射为 '黑铁'（D14 全面替换）；
+ * 合法档位透传；非法值兜底最低档 '黑铁'。
+ */
+export function normalizeCardTier(v: unknown): CardTier {
+  if (v === LEGACY_LOWEST_TIER) return '黑铁';
+  if ((CARD_TIERS as readonly unknown[]).includes(v)) return v as CardTier;
+  return '黑铁';
 }

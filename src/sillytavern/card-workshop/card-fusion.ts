@@ -20,7 +20,7 @@ export interface MaterialSpec {
   name: string;
   /** 售价 GC */
   price: number;
-  /** 素材稀有度 1-5（白铁~星辉对齐） */
+  /** 素材稀有度 1-5（黑铁~星辉对齐） */
   tier: number;
   /** 元素标签，用于融合判定（如 ['火']） */
   elements: string[];
@@ -40,7 +40,7 @@ export interface FusionResult {
 
 /** 品质 → 造价系数 */
 export const CARD_TIER_COEFFICIENT: Record<CardTier, number> = {
-  白铁: 1.0,
+  黑铁: 1.0,
   青铜: 1.6,
   白银: 2.4,
   鎏金: 3.5,
@@ -50,7 +50,7 @@ export const CARD_TIER_COEFFICIENT: Record<CardTier, number> = {
 /** 相克造价折扣 */
 export const CLASH_DISCOUNT = 0.7;
 
-const TIER_ORDER: CardTier[] = ['白铁', '青铜', '白银', '鎏金', '星辉'];
+const TIER_ORDER: CardTier[] = ['黑铁', '青铜', '白银', '鎏金', '星辉'];
 
 /** 素材稀有度 1-5 → 卡牌品质 */
 export function materialTierToCardTier(t: number): CardTier {
@@ -88,6 +88,11 @@ export const SYNERGY_PRODUCTS: ReadonlySet<string> = new Set(Object.values(SYNER
 /** 两元素（顺序无关）的相生产物；非相生对返回 undefined（修复强化等消费方用） */
 export function synergyProduct(e1: string, e2: string): string | undefined {
   return SYNERGY_TABLE[[e1, e2].sort().join('+')];
+}
+
+/** 两元素（顺序无关）是否相克（投喂等消费方用；与 CLASH_TABLE 同源，不许手抄第二份） */
+export function isClashPair(e1: string, e2: string): boolean {
+  return CLASH_TABLE.has([e1, e2].sort().join('+'));
 }
 
 /** 相克表：冲突元素（key 按 UTF-16 code point 升序，与 pairKey 一致） */

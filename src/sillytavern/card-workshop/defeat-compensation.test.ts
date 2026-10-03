@@ -13,7 +13,7 @@ describe('planDefeatCompensation（战败补偿）', () => {
   });
 
   it('奖励量随等级增长；素材品质随卡档', () => {
-    const low = planDefeatCompensation(1, '白铁', () => 0);
+    const low = planDefeatCompensation(1, '黑铁', () => 0);
     const high = planDefeatCompensation(20, '星辉', () => 0);
     expect(high.lines[0].exp!).toBeGreaterThan(low.lines[0].exp!);
     expect(high.lines[2].material!.rarity).toBe('传说');

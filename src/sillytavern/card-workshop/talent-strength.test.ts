@@ -132,7 +132,7 @@ describe('entryStrength —— 声明优先，缺省回退基准', () => {
 
 describe('零回归 —— 不传档位就是老行为', () => {
   it('熔炼：默认跃升 1 档（= 传 1）', () => {
-    const src = [召唤('岩爪', '青铜'), 召唤('风隼', '白铁')];
+    const src = [召唤('岩爪', '青铜'), 召唤('风隼', '黑铁')];
     const 默认 = planSmelt(src);
     const 显式一档 = planSmelt(src, 1);
     expect(默认.ok).toBe(true);
@@ -183,7 +183,7 @@ describe('零回归 —— 不传档位就是老行为', () => {
 
 describe('档位生效 —— 同机制不同强度', () => {
   it('熔炼 tierGain=2 → 跃升 2 档', () => {
-    const src = [召唤('岩爪', '青铜'), 召唤('风隼', '白铁')];
+    const src = [召唤('岩爪', '青铜'), 召唤('风隼', '黑铁')];
     expect(planSmelt(src, 2).plan!.product.cardTier).toBe('鎏金');
   });
 
@@ -244,7 +244,7 @@ describe('档位生效 —— 同机制不同强度', () => {
   });
 
   it('融合 tierGain=2 → 三卡融合跃升 2 档', () => {
-    const src = [召唤('甲', '青铜'), 召唤('乙', '青铜'), 召唤('丙', '白铁')];
+    const src = [召唤('甲', '青铜'), 召唤('乙', '青铜'), 召唤('丙', '黑铁')];
     expect(planMultiFusion(src, () => 0, 1).plan!.product.cardTier).toBe('白银');
     expect(planMultiFusion(src, () => 0, 2).plan!.product.cardTier).toBe('鎏金');
   });

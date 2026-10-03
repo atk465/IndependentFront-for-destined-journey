@@ -38,11 +38,11 @@ describe('isDamaged / isRepairable', () => {
 });
 
 describe('validateRepairMaterials（模板配方）', () => {
-  it('白铁：2 份 ≥普通素材', () => {
+  it('黑铁：2 份 ≥普通素材', () => {
     expect(
-      validateRepairMaterials('白铁', [material('甲', '普通'), material('乙', '普通')]).ok,
+      validateRepairMaterials('黑铁', [material('甲', '普通'), material('乙', '普通')]).ok,
     ).toBe(true);
-    expect(validateRepairMaterials('白铁', [material('甲', '普通')]).ok).toBe(false);
+    expect(validateRepairMaterials('黑铁', [material('甲', '普通')]).ok).toBe(false);
   });
   it('白银：4 份且 ≥优良；劣质素材计入不足', () => {
     const good = [

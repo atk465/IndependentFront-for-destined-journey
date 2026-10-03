@@ -134,7 +134,7 @@ function facetOf(entry: PanelEntry): string | undefined {
  * 开局初始技能照 dispatcher 请求里的品质原样填），有就显示、没有回落中性「普通」，不再编造。
  */
 function qualityOf(entry: PanelEntry): string {
-  // 卡牌品质是五级（白铁→星辉），与七级物品品质是两套编码 —— 显示各走各的
+  // 卡牌品质是五级（黑铁→星辉），与七级物品品质是两套编码 —— 显示各走各的
   if (entry.kind === 'card') return entry.row.cardTier;
   if (entry.kind === 'skill') return entry.row.rarity || '普通';
   return entry.row.rarity || inferQuality(entry.row.stats);

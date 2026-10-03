@@ -116,7 +116,7 @@ export interface CardCatalogItem {
   /** 九元素之一（火/水/风/土/雷/光/暗/冰/金），缺省 = 无元素铭文 */
   element?: string;
   description: string;
-  /** 转生点计价：白铁 10 / 青铜 20 / 白银 40 / 鎏金 80 / 星辉 160 */
+  /** 转生点计价：黑铁 10 / 青铜 20 / 白银 40 / 鎏金 80 / 星辉 160 */
   cost: number;
   /** 召唤卡专属：首召实体化的伙伴种子（军团卡不需要——群像不个体化） */
   companion?: CompanionSeed;
@@ -158,7 +158,7 @@ import { coerceCardEffects } from './card-workshop/card-effects';
 export function cardCatalogToItem(c: CardCatalogItem): import('./types').CardItem {
   const 词条 = c.element ? [c.element, c.formEntry] : [c.formEntry];
   // 效果池登记（2026-09-25 效果批四）：门禁后随卡落库——非法条目整批丢弃，回落元素派生
-  const gatedEffects = coerceCardEffects(c.effects);
+  const gatedEffects = coerceCardEffects(c.effects, c.element ? [c.element] : []);
   return {
     name: c.name,
     quantity: 1,
@@ -180,12 +180,12 @@ export function cardCatalogToItem(c: CardCatalogItem): import('./types').CardIte
   };
 }
 
-/** 开局保底卡组（白铁×2，零点赠送；交锋开局就能玩） */
+/** 开局保底卡组（黑铁×2，零点赠送；交锋开局就能玩） */
 export const STARTER_CARDS: CardCatalogItem[] = [
   {
     id: 'starter_行旅短刃',
     name: '行旅短刃',
-    cardTier: '白铁',
+    cardTier: '黑铁',
     formEntry: '装备',
     element: '金',
     description: '制式短刃卡，铭着一行「不折」。每拍加持，最老实的一张。',
@@ -194,7 +194,7 @@ export const STARTER_CARDS: CardCatalogItem[] = [
   {
     id: 'starter_凝神一击',
     name: '凝神一击',
-    cardTier: '白铁',
+    cardTier: '黑铁',
     formEntry: '技能',
     element: '火',
     description: '把一口气钉在字上的一击。打出即生效，用完即泯。',
@@ -241,6 +241,11 @@ export interface CatalogData {
    * 档案由内容仓正典给定，运行时注册进 material.ts，未登记的名字回落推导。
    */
   materialElements: Record<string, string[]>;
+  /**
+   * 素材词条（2026-10-02 批次D）：素材名 → 素材词条名（池见 material-entries.ts）。
+   * 覆写内建基线；负面词条与主/副位差由此进制卡数值。
+   */
+  materialEntries: Record<string, string[]>;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -297,6 +302,7 @@ export const EMPTY_CATALOG: CatalogData = Object.freeze({
   startLocations: [],
   femaleOnlyIdentities: [],
   materialElements: {},
+  materialEntries: {},
 }) as CatalogData;
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -359,6 +365,7 @@ export function parseCatalogData(raw: unknown): CatalogData {
     startLocations: arrayFace<CascaderOption>(raw, 'startLocations'),
     femaleOnlyIdentities: arrayFace<string>(raw, 'femaleOnlyIdentities'),
     materialElements: recordStringArrayFace(raw, 'materialElements'),
+    materialEntries: recordStringArrayFace(raw, 'materialEntries'),
   };
 }
 

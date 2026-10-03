@@ -17,7 +17,7 @@ import type { CardTier } from '../field-enums';
 
 /** 封印 DC 表 —— 稀有度越高越危险（单一真源） */
 export const UNSEAL_DC: Record<CardTier, number> = {
-  白铁: 8,
+  黑铁: 8,
   青铜: 11,
   白银: 14,
   鎏金: 17,
@@ -29,7 +29,7 @@ export const CLASH_DC_BONUS = 3;
 
 /** 启封槽位成本（动作槽数）—— 战斗内接线走 consumeSlot（阶段 5） */
 export const UNSEAL_SLOT_COST: Record<CardTier, number> = {
-  白铁: 1,
+  黑铁: 1,
   青铜: 1,
   白银: 1,
   鎏金: 2,
@@ -42,7 +42,7 @@ export const UNSEAL_SLOT_COST: Record<CardTier, number> = {
  * applyPending 的 HP clamp 兜底。设计：phase5 设计文档 §4。
  */
 export const REBOUND_DAMAGE: Record<CardTier, number> = {
-  白铁: 5,
+  黑铁: 5,
   青铜: 8,
   白银: 12,
   鎏金: 16,

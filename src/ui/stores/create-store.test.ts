@@ -38,7 +38,7 @@ function mkCard(id: string, formEntry: CardFormEntry, cost: number): CardCatalog
   return {
     id,
     name: `占位${id}卡`,
-    cardTier: '白铁',
+    cardTier: '黑铁',
     formEntry,
     element: '金',
     description: '',

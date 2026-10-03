@@ -24,7 +24,7 @@ import type { AttributeAxis } from './derived-stats';
 
 /** 难度档（敌情评估 AI 选定，开战锁定） */
 export type Difficulty = '爽战' | '标准' | '长战';
-export const DIFFICULTIES: readonly Difficulty[] = Object.freeze(['爽战', '标准', '长战']);
+const DIFFICULTIES: readonly Difficulty[] = Object.freeze(['爽战', '标准', '长战']);
 export const DEFAULT_DIFFICULTY: Difficulty = '标准';
 
 export function coerceDifficulty(raw: unknown): Difficulty {
@@ -198,9 +198,9 @@ export function numericPctOf(action: EffectAction, difficulty: Difficulty): numb
 /** 副倍率离散池（全档通用；AI/设计者只选档不写数） */
 export const SECONDARY_POOL: readonly number[] = Object.freeze([20, 40, 60, 100]);
 
-/** 每卡副轴条数上限（白铁/青铜/白银/鎏金/星辉） */
-export const SECONDARY_SLOTS: Readonly<Record<CardTier, number>> = Object.freeze({
-  白铁: 0,
+/** 每卡副轴条数上限（黑铁/青铜/白银/鎏金/星辉）——读侧走 secondarySlotsOf */
+const SECONDARY_SLOTS: Readonly<Record<CardTier, number>> = Object.freeze({
+  黑铁: 0,
   青铜: 1,
   白银: 1,
   鎏金: 2,
@@ -223,7 +223,7 @@ const AXES: ReadonlySet<string> = new Set(['str', 'dex', 'con', 'int', 'spi']);
  * 副轴门禁（与 coerceCardEffects 同款口径）：
  * - 非数组/超条数（档位上限）→ 整批丢弃
  * - 轴必须在五轴内、≠主轴、同轴不重复、bonus 必须在离散池内——违者丢弃该条
- * 全部非法 → []（无副轴，白铁即此形态）。
+ * 全部非法 → []（无副轴，黑铁即此形态）。
  */
 export function coerceSecondaryAxes(
   raw: unknown,

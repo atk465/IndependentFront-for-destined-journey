@@ -81,8 +81,8 @@ describe('planMaterialGacha —— 十连 + 保底 + 突变', () => {
 
 describe('floorRarityForLevel —— 保底按等级换算', () => {
   it('走既有的「等级 → 卡档 → 稀有度」这条链，不另起口径', () => {
-    // tierForLevel 的分界：≤4 白铁 / ≤8 青铜 / ≤12 白银 / ≤16 鎏金 / 否则星辉
-    expect(floorRarityForLevel(1)).toBe(TIER_TO_RARITY['白铁']);
+    // tierForLevel 的分界：≤4 黑铁 / ≤8 青铜 / ≤12 白银 / ≤16 鎏金 / 否则星辉
+    expect(floorRarityForLevel(1)).toBe(TIER_TO_RARITY['黑铁']);
     expect(floorRarityForLevel(5)).toBe(TIER_TO_RARITY['青铜']);
     expect(floorRarityForLevel(9)).toBe(TIER_TO_RARITY['白银']);
     expect(floorRarityForLevel(13)).toBe(TIER_TO_RARITY['鎏金']);

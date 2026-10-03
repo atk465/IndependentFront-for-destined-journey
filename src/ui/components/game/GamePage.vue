@@ -4,6 +4,7 @@ import {
   useGameStore,
   setRewriteLoadoutImpl,
   setCraftNarrateImpl,
+  setEvolveArcImpl,
   setCommissionNarrateImpl,
 } from '../../stores/game-store';
 import { useUIStore } from '../../stores/ui-store';
@@ -25,6 +26,7 @@ import SnapshotPanel from './SnapshotPanel.vue';
 import MapPanel from './MapPanel.vue';
 import DebugPanel from './DebugPanel.vue';
 import CardAlbumPanel from './cards/CardAlbumPanel.vue';
+import RelationsPanel from './RelationsPanel.vue';
 import FortuneAltar from './cards/FortuneAltar.vue';
 import CommissionBoard from './cards/CommissionBoard.vue';
 import ExplorationPanel from './cards/ExplorationPanel.vue';
@@ -68,71 +70,112 @@ function handleStoryChunk(chunk: string, isComplete: boolean) {
   });
 }
 
-onMounted(async () => {
-  window.addEventListener('keydown', onKeyDown);
-  console.log('[GamePage] onMounted, activeSaveId:', ui.activeSaveId);
-  if (requestedSaveId) {
-    try {
-      console.log('[GamePage] loading save...');
-      await waitForGameSaveIdle(requestedSaveId);
-      if (!ownsPage()) return;
-      if (!(await game.loadSave(requestedSaveId)) || !ownsPage()) return;
-      // API endpoint construction is synchronous, so hydrate/migrate its secrets before creating it.
-      await settings.initApiSecrets();
-      if (!ownsPage()) return;
-      console.log(
-        '[GamePage] save loaded, hasOpeningPromptConsumed:',
-        game.hasOpeningPromptConsumed,
-        'openingPrompt exists:',
-        !!game.openingPrompt,
-      );
-      // 创建 pipeline 实例
-      pipeline = new GamePipeline({
-        gameStore: game,
-        settingsStore: settings,
-        saveId: requestedSaveId,
-      });
-      // 🆕 重铸（2026-08-24）：单条目重铸的注入缝 —— GamePipeline 装配
-      //     endpoint / chainData（含 worldBooks） / stateManager；store 与面板不直接碰装配。
-      setRewriteLoadoutImpl((characterId, target, userDescription) =>
-        pipeline
-          ? pipeline.rewriteLoadoutItem(characterId, target, userDescription)
-          : Promise.resolve({ ok: false, reason: '游戏管线还没就绪，稍后再试' }),
-      );
-      // 🆕 制卡主路（2026-09-17 第三档）：制卡在 store 里算完，只有命名与叙事
-      //     需要 endpoint/clientFactory —— 同样走缝注入，store 与面板不碰装配。
-      setCraftNarrateImpl((req) =>
-        pipeline ? pipeline.narrateCardCraft(req) : Promise.reject(new Error('游戏管线还没就绪')),
-      );
-      // 🆕 委托终点叙事（2026-09-19 共识稿 #13 修订）：获得瞬间的叙事拍（获得场景，
-      //     非颁授场景）——同一条缝模式，失败回退模板文案，发放永不被叙事阻塞。
-      setCommissionNarrateImpl((req) =>
-        pipeline
-          ? pipeline.narrateCommissionFinale(req)
-          : Promise.reject(new Error('游戏管线还没就绪')),
-      );
-      // 首次加载 → 自动发送开场 Prompt
-      loadingSave.value = false;
-      if (!game.hasOpeningPromptConsumed && game.openingPrompt) {
-        console.log('[GamePage] sending opening prompt...');
-        await pipeline.sendOpeningPrompt(handleStoryChunk);
-      } else {
-        console.log(
-          '[GamePage] NOT sending opening prompt. consumed:',
-          game.hasOpeningPromptConsumed,
-          'prompt empty:',
-          !game.openingPrompt,
-        );
-      }
-    } catch (err) {
-      if (ownsPage()) {
-        ui.toast(`存档加载失败：${err instanceof Error ? err.message : '请重试'}`, 'error');
-        ui.navigate('home');
-      }
-    }
-  } else {
+// 🔴 加载看门狗（NAV-1 2026-10-02）：挂载链上有三处会**静默黑屏**的点——
+// waitForGameSaveIdle 等待悬挂、loadSave 返回 false、ownsPage 翻转后裸 return。
+// 任一发生，玩家看到的就是「点了继续、画面永远停在加载」且无任何出口。
+// 看门狗不改变等待语义：超时只是把状态亮出来，给「重试 / 回首页」的可恢复出口。
+const loadStuck = ref(false);
+let loadWatchdog: ReturnType<typeof setTimeout> | null = null;
+
+async function mountLoad(): Promise<void> {
+  loadStuck.value = false;
+  loadingSave.value = true;
+  if (!requestedSaveId) {
     console.log('[GamePage] no activeSaveId, skipping');
+    loadingSave.value = false;
+    return;
   }
+  try {
+    console.log('[GamePage] loading save...');
+    await waitForGameSaveIdle(requestedSaveId);
+    if (!ownsPage()) return;
+    if (!(await game.loadSave(requestedSaveId)) || !ownsPage()) {
+      // loadSave 返回 false 多为世代号守卫拦截（并发加载/切档）——明示而非黑屏
+      if (ownsPage()) {
+        loadStuck.value = true;
+        console.warn('[GamePage] loadSave 未完成（世代号守卫或存档缺失），已亮出重试入口');
+      }
+      return;
+    }
+    // API endpoint construction is synchronous, so hydrate/migrate its secrets before creating it.
+    await settings.initApiSecrets();
+    if (!ownsPage()) return;
+    console.log(
+      '[GamePage] save loaded, hasOpeningPromptConsumed:',
+      game.hasOpeningPromptConsumed,
+      'openingPrompt exists:',
+      !!game.openingPrompt,
+    );
+    // 创建 pipeline 实例
+    pipeline = new GamePipeline({
+      gameStore: game,
+      settingsStore: settings,
+      saveId: requestedSaveId,
+    });
+    // 🆕 重铸（2026-08-24）：单条目重铸的注入缝 —— GamePipeline 装配
+    //     endpoint / chainData（含 worldBooks） / stateManager；store 与面板不直接碰装配。
+    setRewriteLoadoutImpl((characterId, target, userDescription) =>
+      pipeline
+        ? pipeline.rewriteLoadoutItem(characterId, target, userDescription)
+        : Promise.resolve({ ok: false, reason: '游戏管线还没就绪，稍后再试' }),
+    );
+    // 🆕 制卡主路（2026-09-17 第三档）：制卡在 store 里算完，只有命名与叙事
+    //     需要 endpoint/clientFactory —— 同样走缝注入，store 与面板不碰装配。
+    setCraftNarrateImpl((req) =>
+      pipeline ? pipeline.narrateCardCraft(req) : Promise.reject(new Error('游戏管线还没就绪')),
+    );
+    // 🆕 进化弧光句（伙伴实体化 B5.2b）：同款注入缝；管线不在时返回 null（跳过不阻塞）
+    setEvolveArcImpl((input) =>
+      pipeline ? pipeline.narrateEvolutionArc(input) : Promise.resolve(null),
+    );
+    // 🆕 委托终点叙事（2026-09-19 共识稿 #13 修订）：获得瞬间的叙事拍（获得场景，
+    //     非颁授场景）——同一条缝模式，失败回退模板文案，发放永不被叙事阻塞。
+    setCommissionNarrateImpl((req) =>
+      pipeline
+        ? pipeline.narrateCommissionFinale(req)
+        : Promise.reject(new Error('游戏管线还没就绪')),
+    );
+    // 首次加载 → 自动发送开场 Prompt
+    loadingSave.value = false;
+    if (!game.hasOpeningPromptConsumed && game.openingPrompt) {
+      console.log('[GamePage] sending opening prompt...');
+      await pipeline.sendOpeningPrompt(handleStoryChunk);
+    } else {
+      console.log(
+        '[GamePage] NOT sending opening prompt. consumed:',
+        game.hasOpeningPromptConsumed,
+        'prompt empty:',
+        !game.openingPrompt,
+      );
+    }
+  } catch (err) {
+    if (ownsPage()) {
+      ui.toast(`存档加载失败：${err instanceof Error ? err.message : '请重试'}`, 'error');
+      ui.navigate('home');
+    }
+  }
+}
+
+/** 重试加载（看门狗出口）：重跑整条挂载链（含 saveWork 等待与世代号守卫） */
+function retryLoad(): void {
+  void mountLoad();
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', onKeyDown);
+  // 看门狗：正常加载秒级完成；超时只亮状态不改变等待语义
+  loadWatchdog = setTimeout(() => {
+    if (loadingSave.value) {
+      loadStuck.value = true;
+      console.warn('[GamePage] 存档加载超过 15s——亮出重试入口（等待可能在 saveWork 上悬挂）');
+    }
+  }, 15000);
+  void mountLoad();
+});
+
+onBeforeUnmount(() => {
+  if (loadWatchdog !== null) clearTimeout(loadWatchdog);
+  window.removeEventListener('keydown', onKeyDown);
 });
 
 /** 🧪 开发用测试注入 — 仍限定 DEV 构建，且要求用户已开启开发者模式。 */
@@ -274,7 +317,14 @@ function onModalOpenChange(v: boolean) {
       <SideToolbar @tool-click="handleToolClick" />
       <ScenePanel />
       <div v-if="loadingSave" class="save-loading" role="status">
-        正在加载存档，等待上一回合收尾…
+        <p>正在加载存档，等待上一回合收尾…</p>
+        <div v-if="loadStuck" class="save-loading-stuck">
+          <p>加载卡住了——上一回合可能没有正常收尾。</p>
+          <div class="stuck-actions">
+            <button type="button" class="top-btn" @click="retryLoad">重试加载</button>
+            <button type="button" class="top-btn" @click="ui.navigate('home')">返回首页</button>
+          </div>
+        </div>
       </div>
       <ChatFlow
         v-else
@@ -433,6 +483,16 @@ function onModalOpenChange(v: boolean) {
     >
       <CraftBench />
     </AppModal>
+    <AppModal
+      title="关系网 · 铭刻纪元"
+      :open="game.activeModal === 'relations'"
+      size="md"
+      closable
+      @close="game.closeModal()"
+      @update:open="onModalOpenChange"
+    >
+      <RelationsPanel />
+    </AppModal>
 
     <!-- 调试面板 (Alt+Shift+D) -->
     <Teleport to="body">
@@ -475,6 +535,17 @@ function onModalOpenChange(v: boolean) {
   padding: var(--theme-spacing-lg);
   color: var(--theme-text-secondary);
   text-align: center;
+}
+.save-loading-stuck {
+  margin-top: var(--theme-spacing-md);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--theme-spacing-sm);
+}
+.stuck-actions {
+  display: flex;
+  gap: var(--theme-spacing-sm);
 }
 
 .game-page-layout {

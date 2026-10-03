@@ -22,7 +22,7 @@ describe('本名武器 —— 纯函数', () => {
   });
 
   it('档位按 tierForLevel 从等级换算', () => {
-    expect(soulWeaponTierForLevel(1)).toBe('白铁');
+    expect(soulWeaponTierForLevel(1)).toBe('黑铁');
     expect(soulWeaponTierForLevel(9)).toBe('白银');
     expect(soulWeaponTierForLevel(17)).toBe('星辉');
   });
@@ -45,9 +45,9 @@ describe('本名武器 —— 纯函数', () => {
   });
 
   it('升档判定：档位低于等级应给的 → 需要升', () => {
-    const 白铁剑 = planSoulWeapon('我', '剑', 4);
-    expect(shouldUpgradeSoulWeapon(白铁剑, 9)).toBe(true); // 白铁→白银
-    expect(shouldUpgradeSoulWeapon(白铁剑, 4)).toBe(false); // 同级不升
+    const 黑铁剑 = planSoulWeapon('我', '剑', 4);
+    expect(shouldUpgradeSoulWeapon(黑铁剑, 9)).toBe(true); // 黑铁→白银
+    expect(shouldUpgradeSoulWeapon(黑铁剑, 4)).toBe(false); // 同级不升
     expect(shouldUpgradeSoulWeapon(undefined, 9)).toBe(false); // 无卡不算升（走生成）
   });
 

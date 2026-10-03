@@ -83,8 +83,9 @@ export function recommendCards<
 
 export interface IntentResolveRequest {
   playerText: string;
-  /** 可出卡清单（已过 battleReady 过滤，未打出过） */
-  cards: ReadonlyArray<{ name: string; tags: readonly string[] }>;
+  /** 可出卡清单（已过 battleReady 过滤，未打出过）；brief = 定值简报（效果/战技/副轴，
+   *  2026-10-02 批次B）——玩家用效果名指卡（「用灼烧那招」）时靠它匹配 */
+  cards: ReadonlyArray<{ name: string; tags: readonly string[]; brief?: string }>;
   /** 当前敌方意图的反制标签 */
   intentCounters: readonly string[];
 }
@@ -101,7 +102,10 @@ export function buildIntentResolveMessages(req: IntentResolveRequest): Array<{
 }> {
   const cardLines = req.cards.length
     ? req.cards
-        .map((c) => `- ${c.name}｜反制：${c.tags.length ? c.tags.join('/') : '无'}`)
+        .map((c) => {
+          const head = c.brief ?? c.name;
+          return `- ${head}｜反制：${c.tags.length ? c.tags.join('/') : '无'}`;
+        })
         .join('\n')
     : '（无）';
   const counters = req.intentCounters.length ? req.intentCounters.join('/') : '无';
